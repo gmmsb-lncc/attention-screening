@@ -16,7 +16,7 @@ def main():
     interaction_labels = "concatenated_embeddings/interaction_labels.npy"  # saída do terceiro passo
 
     # --- Etapa 1: Embeddings ---
-    run_command(f"python buildEmbedding.py {input_tsv}", "Gerar Embeddings")
+    run_command(f"python buildEmbeddingMain.py {input_tsv}", "Gerar Embeddings")
 
     # --- Etapa 2: Matriz kinase-composto ---
     run_command(f"python buildKinaseMatrix.py {kinase_matrix}", "Gerar Matriz Kinase")
