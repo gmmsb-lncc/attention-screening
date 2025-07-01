@@ -18,10 +18,14 @@ class EmbeddingMeta:
         os.makedirs(self.output_dir, exist_ok=True)
 
     def load_model(self):
-        """Carrega o modelo ESM pré-treinado e a respectiva alphabet."""
+        """Carrega o modelo ESM pré-treinado com verificação de nome válido."""
         print(f"Carregando o modelo {self.model_name}...")
-        self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(self.model_name)
-        self.model = self.model.to(self.device).eval()  # Envia o modelo para a GPU ou CPU
+        try:
+            self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(self.model_name)
+        except Exception as e:
+            raise ValueError(f"Falha ao carregar modelo '{self.model_name}'. "
+                            f"Verifique o nome ou baixe manualmente. Erro: {e}")
+        self.model = self.model.to(self.device).eval()
         self.batch_converter = self.alphabet.get_batch_converter()
         print("Modelo carregado com sucesso.")
 
