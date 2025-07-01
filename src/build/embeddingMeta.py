@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 class EmbeddingMeta:
-    def __init__(self, model_name="esm2_t33_3B_UR50D", seq_input_dir="./seq_inputs", output_dir="./output_esm"):
+    def __init__(self, model_name="esm2_t33_650M_UR50D", seq_input_dir="./seq_inputs", output_dir="./output_esm"):
         self.model_name = model_name
         self.seq_input_dir = seq_input_dir
         self.output_dir = output_dir
@@ -24,7 +24,7 @@ class EmbeddingMeta:
             self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(self.model_name)
         except Exception as e:
             raise ValueError(f"Falha ao carregar modelo '{self.model_name}'. "
-                            f"Verifique o nome ou baixe manualmente. Erro: {e}")
+                             f"Verifique o nome ou baixe manualmente. Erro: {e}")
         self.model = self.model.to(self.device).eval()
         self.batch_converter = self.alphabet.get_batch_converter()
         print("Modelo carregado com sucesso.")
@@ -41,7 +41,7 @@ class EmbeddingMeta:
                 with open(filepath, "r") as file:
                     lines = file.readlines()
                     sequence = "".join(line.strip() for line in lines if not line.startswith(">"))
-                    sequences.append((os.path.splitext(filename)[0], sequence))  # Nome sem extensão
+                    sequences.append((os.path.splitext(filename)[0], sequence))
         if not sequences:
             raise ValueError(f"Nenhuma sequência válida encontrada na pasta '{self.seq_input_dir}'.")
         print(f"{len(sequences)} sequência(s) carregada(s) para processamento.")
@@ -50,23 +50,19 @@ class EmbeddingMeta:
     def extract_latent_embedding(self, name, sequence):
         """Extrai e salva o embedding latente para uma única sequência."""
         try:
-            # Verifica se o arquivo de saída já existe
             output_path = os.path.join(self.output_dir, f"{name}_embedding.npy")
             if os.path.exists(output_path):
                 print(f"Embedding já existe. Pulando: {output_path}")
                 return
 
-            # Converte a sequência em tokens com padding
             data = [(name, sequence)]
             _, _, batch_tokens = self.batch_converter(data)
             batch_tokens = batch_tokens.to(self.device)
 
-            # Realiza a inferência
             with torch.no_grad():
                 results = self.model(batch_tokens, repr_layers=[self.model.num_layers], return_contacts=False)
                 embedding = results["representations"][self.model.num_layers][0]
 
-            # Salva o embedding como .npy
             np.save(output_path, embedding.cpu().numpy())
             print(f"Embedding salvo com sucesso: {output_path}")
         except Exception as e:
@@ -76,10 +72,8 @@ class EmbeddingMeta:
         """Executa o pipeline completo."""
         self.load_model()
         sequences = self.read_sequences()
-
         for name, sequence in tqdm(sequences, desc="Processando sequências"):
             self.extract_latent_embedding(name, sequence)
-
         print("Processamento concluído. Todos os embeddings foram salvos.")
 
 if __name__ == "__main__":
