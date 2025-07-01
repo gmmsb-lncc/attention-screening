@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 class EmbeddingMeta:
-    def __init__(self, model_name="esm2_t36_3B_UR50D", seq_input_dir="./seq_inputs", output_dir="./output_esm"):
+    def __init__(self, model_name="esm2_t33_3B_UR50D", seq_input_dir="./seq_inputs", output_dir="./output_esm"):
         self.model_name = model_name
         self.seq_input_dir = seq_input_dir
         self.output_dir = output_dir
