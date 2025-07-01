@@ -12,23 +12,23 @@ def run_command(command, description):
 def main():
     # --- Caminhos dos arquivos ---
     input_tsv = "kinase_all_compounds.tsv"  # entrada inicial
-    kinase_matrix = "nr_kinase_all_compounds.tsv"  # saída do primeiro passo
+    embedding_matrix = "nr_kinase_all_compounds.tsv"  # saída do primeiro passo
     interaction_labels = "concatenated_embeddings/interaction_labels.npy"  # saída do terceiro passo
 
     # --- Etapa 1: Embeddings ---
     run_command(f"python buildEmbeddingMain.py {input_tsv}", "Gerar Embeddings")
 
     # --- Etapa 2: Matriz kinase-composto ---
-    run_command(f"python buildEmbeddingMatrix.py {kinase_matrix}", "Gerar Matriz Kinase")
+    run_command(f"python buildEmbeddingMatrix.py {embedding_matrix}", "Gerar Matriz de Emnbeddings")
 
     # --- Etapa 3: Labels de interação ---
-    run_command(f"python buildInteractionLabels.py {kinase_matrix}", "Gerar Labels de Interação")
+    run_command(f"python buildInteractionLabels.py {embedding_matrix}", "Gerar Labels de Interação")
 
     # --- Etapa 4: Labels binárias ---
     run_command(f"python buildBinaryLabels.py {interaction_labels}", "Gerar Labels Binárias")
 
     # --- Etapa 5: Checagem ---
-    run_command(f"python checkConcatenate.py {kinase_matrix}", "Checar Embeddings Concatenados")
+    run_command(f"python checkConcatenate.py {embedding_matrix}", "Checar Embeddings Concatenados")
 
 if __name__ == "__main__":
     main()
