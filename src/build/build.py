@@ -19,7 +19,7 @@ def main():
     run_command(f"python buildEmbeddingMain.py {input_tsv}", "Gerar Embeddings")
 
     # --- Etapa 2: Matriz kinase-composto ---
-    run_command(f"python buildKinaseMatrix.py {kinase_matrix}", "Gerar Matriz Kinase")
+    run_command(f"python buildEmbeddingMatrix.py {kinase_matrix}", "Gerar Matriz Kinase")
 
     # --- Etapa 3: Labels de interação ---
     run_command(f"python buildInteractionLabels.py {kinase_matrix}", "Gerar Labels de Interação")
