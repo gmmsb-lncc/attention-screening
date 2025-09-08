@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import subprocess
 import sys
 import os
@@ -20,9 +21,8 @@ def run_command(command, description):
     print(f"✅ Finalizado: {description}")
 
 def main():
-    # Obter o diretório do script e o diretório de execução
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
+    # Obter o diretório do projeto e o diretório de execução
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     current_dir = os.getcwd()
     
     # --- Caminhos dos arquivos ---
@@ -31,19 +31,19 @@ def main():
     interaction_labels = os.path.join(current_dir, "concatenated_embeddings", "interaction_labels_non_human.npy")  # saída do terceiro passo
 
     # --- Etapa 1: Embeddings ---
-    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMain.py')} {input_tsv}", "Gerar Embeddings")
+    run_command(f"python {os.path.join(project_root, 'src', 'build', 'buildEmbeddingMain.py')} {input_tsv}", "Gerar Embeddings")
 
     # --- Etapa 2: Matriz kinase-composto ---
-    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMatrix.py')} {embedding_matrix}", "Gerar Matriz de Emnbeddings")
+    run_command(f"python {os.path.join(project_root, 'src', 'build', 'buildEmbeddingMatrix.py')} {embedding_matrix}", "Gerar Matriz de Emnbeddings")
 
     # --- Etapa 3: Labels de interação ---
-    run_command(f"python {os.path.join(script_dir, 'buildInteractionLabels.py')} {embedding_matrix}", "Gerar Labels de Interação")
+    run_command(f"python {os.path.join(project_root, 'src', 'build', 'buildInteractionLabels.py')} {embedding_matrix}", "Gerar Labels de Interação")
 
     # --- Etapa 4: Labels binárias ---
-    run_command(f"python {os.path.join(script_dir, 'buildbinaryLabels.py')} {interaction_labels}", "Gerar Labels Binárias")
+    run_command(f"python {os.path.join(project_root, 'src', 'build', 'buildbinaryLabels.py')} {interaction_labels}", "Gerar Labels Binárias")
 
     # --- Etapa 5: Checagem ---
-    run_command(f"python {os.path.join(script_dir, 'checkConcatenate.py')} {embedding_matrix}", "Checar Embeddings Concatenados")
+    run_command(f"python {os.path.join(project_root, 'src', 'build', 'checkConcatenate.py')} {embedding_matrix}", "Checar Embeddings Concatenados")
 
 if __name__ == "__main__":
     main()

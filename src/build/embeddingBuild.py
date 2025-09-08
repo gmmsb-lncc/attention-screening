@@ -67,7 +67,9 @@ class EmbeddingBuild:
             print("Checkpoint encontrado: Protein embeddings já processados.")
             return
         from embeddingMeta import EmbeddingMeta
-        extractor = EmbeddingMeta(self.protein_dir, self.protein_output)
+        print(f"Criando EmbeddingMeta com seq_input_dir: protein e output_dir: {self.protein_output}")
+        extractor = EmbeddingMeta(seq_input_dir="protein", output_dir=self.protein_output)
+        print(f"EmbeddingMeta criado com seq_input_dir: {extractor.seq_input_dir}")
         extractor.run()
         print("Embeddings de proteínas salvos.")
         self._save_checkpoint("protein_embeddings")
