@@ -20,3 +20,6 @@ processed_files.log
 # Arquivos temporários
 *.tmp
 *.log
+*.tsv
+*.pth
+log.txt
