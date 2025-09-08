@@ -9,6 +9,7 @@ class EmbeddingMeta:
         self.model_name = model_name
         self.seq_input_dir = seq_input_dir
         self.output_dir = output_dir
+        print(f"EmbeddingMeta inicializado com seq_input_dir: {self.seq_input_dir} e output_dir: {self.output_dir}")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.alphabet = None
@@ -21,21 +22,34 @@ class EmbeddingMeta:
         """Carrega o modelo ESM pré-treinado com verificação de nome válido."""
         print(f"Carregando o modelo {self.model_name}...")
         try:
+            # Tentar carregar o modelo com o nome especificado
             self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(self.model_name)
         except Exception as e:
-            raise ValueError(f"Falha ao carregar modelo '{self.model_name}'. "
-                             f"Verifique o nome ou baixe manualmente. Erro: {e}")
+            print(f"Erro ao carregar modelo '{self.model_name}': {e}")
+            print("Tentando modelo alternativo...")
+            # Tentar modelo alternativo
+            try:
+                alternative_model = "esm2_t33_650M_UR50D"
+                print(f"Tentando carregar modelo alternativo: {alternative_model}")
+                self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(alternative_model)
+                self.model_name = alternative_model
+            except Exception as e2:
+                raise ValueError(f"Falha ao carregar modelo '{self.model_name}' e modelo alternativo. "
+                                 f"Erro: {e2}")
         self.model = self.model.to(self.device).eval()
         self.batch_converter = self.alphabet.get_batch_converter()
         print("Modelo carregado com sucesso.")
 
     def read_sequences(self):
         """Lê as sequências da pasta seq_inputs."""
+        print(f"Procurando sequências na pasta: {self.seq_input_dir}")
         if not os.path.exists(self.seq_input_dir):
             raise FileNotFoundError(f"A pasta '{self.seq_input_dir}' não foi encontrada.")
 
         sequences = []
-        for filename in os.listdir(self.seq_input_dir):
+        files = os.listdir(self.seq_input_dir)
+        print(f"Arquivos encontrados na pasta: {len(files)}")
+        for filename in files:
             if filename.endswith(".fasta") or filename.endswith(".txt"):
                 filepath = os.path.join(self.seq_input_dir, filename)
                 with open(filepath, "r") as file:
