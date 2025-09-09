@@ -1,0 +1,30 @@
+# Arquivos comprimidos
+*.tar.xz
+
+# Arquivos NumPy
+*.npy
+
+# Diretórios de embeddings
+ligand/
+protein/
+ligand_embeddings/
+protein_embeddings/
+matrix_embedding/
+
+# Checkpoints
+*_checkpoint.txt
+preparation_checkpoint.txt
+embedding_checkpoint.txt
+processed_files.log
+
+# Arquivos temporários
+*.tmp
+*.log
+*.tsv
+*.pth
+log.txt
+env/
+__pycache__/
+*.csv
+*.png
+*.pyc

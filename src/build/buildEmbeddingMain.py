@@ -6,7 +6,7 @@ from embeddingBuild import EmbeddingBuild
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Uso correto: python buildEmbeddingScratch.py <kinase_all_compounds.tsv> [--ligand_embeddings | --protein_embeddings | --matrix_embeddings]")
+        print("Uso correto: python buildEmbeddingMain.py <input_tsv_file> [--ligand_embeddings | --protein_embeddings | --matrix_embeddings]")
         sys.exit(1)
 
     input_file = sys.argv[1]

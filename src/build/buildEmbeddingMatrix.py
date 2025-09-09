@@ -5,14 +5,14 @@ import gc
 from tqdm import tqdm
 
 class EmbeddingMatrixReconstructor:
-    def __init__(self, original_tsv_path, ligand_embeddings_dir='ligand_embeddings', protein_embeddings_dir='protein_embeddings', output_dir='concatenated_embeddings', embedding_type='cls', ligand_dim=768, protein_dim=2560):
+    def __init__(self, original_tsv_path, ligand_embeddings_dir='ligand_embeddings', protein_embeddings_dir='protein_embeddings', output_dir='concatenated_embeddings', embedding_type='cls'):
         self.original_tsv_path = original_tsv_path
         self.ligand_embeddings_dir = ligand_embeddings_dir
         self.protein_embeddings_dir = protein_embeddings_dir
         self.output_dir = output_dir
         self.embedding_type = embedding_type  # 'cls' ou 'mean'
-        self.ligand_dim = ligand_dim  # Dimensão esperada dos embeddings de ligantes
-        self.protein_dim = protein_dim  # Dimensão esperada dos embeddings de proteínas
+        self.ligand_dim = None  # Será determinado dinamicamente
+        self.protein_dim = None  # Será determinado dinamicamente
         os.makedirs(self.output_dir, exist_ok=True)
         self.ligand_cache = {}
         self.protein_cache = {}
@@ -35,6 +35,9 @@ class EmbeddingMatrixReconstructor:
     def reconstruct_matrix(self):
         """Reconstrói a matriz de embeddings concatenados preservando todas as linhas do TSV original."""
         df = pd.read_csv(self.original_tsv_path, sep='\t', dtype={'molregno': str, 'seq_id': str})
+        
+        # Determinar dinamicamente as dimensões dos embeddings
+        self._determine_embedding_dimensions()
         
         concatenated_embeddings = []
         missing_entries = []
@@ -64,6 +67,34 @@ class EmbeddingMatrixReconstructor:
         matrix = np.vstack(concatenated_embeddings)
         return matrix
     
+    def _determine_embedding_dimensions(self):
+        """Determina dinamicamente as dimensões dos embeddings de ligantes e proteínas."""
+        import glob
+        
+        # Determinar dimensão dos embeddings de ligantes
+        ligand_files = glob.glob(os.path.join(self.ligand_embeddings_dir, "*_ligand.npy"))
+        if ligand_files:
+            sample_embedding = np.load(ligand_files[0], allow_pickle=True)
+            if self.embedding_type == 'cls':
+                self.ligand_dim = sample_embedding.shape[1]  # Segunda dimensão para CLS
+            else:  # mean
+                self.ligand_dim = sample_embedding.shape[1]  # Mesma lógica para mean
+        else:
+            raise ValueError(f"Nenhum arquivo de embedding de ligante encontrado em {self.ligand_embeddings_dir}")
+        
+        # Determinar dimensão dos embeddings de proteínas
+        protein_files = glob.glob(os.path.join(self.protein_embeddings_dir, "*_protein_embedding.npy"))
+        if protein_files:
+            sample_embedding = np.load(protein_files[0], allow_pickle=True)
+            if self.embedding_type == 'cls':
+                self.protein_dim = sample_embedding.shape[1]  # Segunda dimensão para CLS
+            else:  # mean
+                self.protein_dim = sample_embedding.shape[1]  # Mesma lógica para mean
+        else:
+            raise ValueError(f"Nenhum arquivo de embedding de proteína encontrado em {self.protein_embeddings_dir}")
+        
+        print(f"Dimensões determinadas automaticamente: ligand_dim={self.ligand_dim}, protein_dim={self.protein_dim}")
+    
     def normalize_matrix(self, matrix):
         """Normaliza a matriz entre 0 e 1."""
         min_val = np.min(matrix, axis=0, keepdims=True)
@@ -88,7 +119,13 @@ class EmbeddingMatrixReconstructor:
         self.save_matrix(matrix)
 
 if __name__ == "__main__":
-    input_file = "nr_kinase_all_compounds.tsv"
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Uso correto: python buildEmbeddingMatrix.py <input_tsv_file>")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
     ligand_embedding_dir = "ligand_embeddings"
     protein_embedding_dir = "protein_embeddings"
     output_dir = "concatenated_embeddings"

@@ -18,10 +18,10 @@ def save_protein_func(row, protein_dir):
             f.write(f"> {row['target_kinase']}\n{row['seq']}\n")
 
 class EmbeddingPreparation:
-    def __init__(self, input_file):
+    def __init__(self, input_file, ligand_dir='ligand', protein_dir='protein'):
         self.input_file = input_file
-        self.ligand_dir = 'ligand'
-        self.protein_dir = 'protein'
+        self.ligand_dir = ligand_dir
+        self.protein_dir = protein_dir
         os.makedirs(self.ligand_dir, exist_ok=True)
         os.makedirs(self.protein_dir, exist_ok=True)
         self.checkpoint_file = "preparation_checkpoint.txt"
@@ -50,7 +50,7 @@ class EmbeddingPreparation:
                         'molregno': row['molregno'],
                         'canonical_smiles': row['canonical_smiles']
                     }
-                prot_key = row['seq']
+                prot_key = row['seq_id']  # Usar seq_id como chave em vez de seq
                 if prot_key not in unique_proteins:
                     unique_proteins[prot_key] = {
                         'seq_id': row['seq_id'],
