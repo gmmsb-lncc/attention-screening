@@ -24,5 +24,12 @@ class BinaryLabelGenerator:
         print(f"\n✅ Arquivo de rótulos binários salvo em: {self.binary_labels_path}")
 
 if __name__ == "__main__":
-    generator = BinaryLabelGenerator("concatenated_embeddings/interaction_labels.npy")
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Uso correto: python buildbinaryLabels.py <interaction_labels_path>")
+        sys.exit(1)
+    
+    labels_path = sys.argv[1]
+    generator = BinaryLabelGenerator(labels_path)
     generator.generate_binary_labels()
