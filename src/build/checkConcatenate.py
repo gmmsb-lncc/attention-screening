@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 class EmbeddingCheck:
-    def __init__(self, matrix_dir="concatenated_embeddings", original_tsv_path="nr_kinase_all_compounds.tsv"):
+    def __init__(self, matrix_dir="concatenated_embeddings", original_tsv_path=None):
         self.matrix_dir = matrix_dir
         self.original_tsv_path = original_tsv_path
         self.concatenated_path = os.path.join(self.matrix_dir, "concatenated_embeddings_normalized.npy")
@@ -82,5 +82,12 @@ class EmbeddingCheck:
             print("\n❌ Foram encontradas inconsistências nas matrizes de embeddings e labels!")
 
 if __name__ == "__main__":
-    checker = EmbeddingCheck()
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Uso correto: python checkConcatenate.py <input_tsv_file>")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    checker = EmbeddingCheck(original_tsv_path=input_file)
     checker.run_all_checks()
