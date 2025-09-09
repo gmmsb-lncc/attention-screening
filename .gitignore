@@ -11,11 +11,6 @@ ligand_embeddings/
 protein_embeddings/
 matrix_embedding/
 
-# Ambiente virtual
-venv/
-env/*
-*.egg-info/
-
 # Checkpoints
 *_checkpoint.txt
 preparation_checkpoint.txt
@@ -29,3 +24,7 @@ processed_files.log
 *.pth
 log.txt
 env/
+__pycache__/
+*.csv
+*.png
+*.pyc
