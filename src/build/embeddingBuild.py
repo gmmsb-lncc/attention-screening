@@ -5,12 +5,12 @@ import numpy as np
 from pyspark.sql import SparkSession
 
 class EmbeddingBuild:
-    def __init__(self):
-        self.ligand_dir = 'ligand'
-        self.protein_dir = 'protein'
-        self.ligand_output = 'ligand_embeddings'
-        self.protein_output = 'protein_embeddings'
-        self.matrix_output = 'matrix_embedding'
+    def __init__(self, ligand_dir='ligand', protein_dir='protein', ligand_output='ligand_embeddings', protein_output='protein_embeddings', matrix_output='matrix_embedding'):
+        self.ligand_dir = ligand_dir
+        self.protein_dir = protein_dir
+        self.ligand_output = ligand_output
+        self.protein_output = protein_output
+        self.matrix_output = matrix_output
         self.checkpoint_file = 'embedding_checkpoint.txt'
 
         os.makedirs(self.ligand_output, exist_ok=True)
@@ -67,8 +67,8 @@ class EmbeddingBuild:
             print("Checkpoint encontrado: Protein embeddings já processados.")
             return
         from embeddingMeta import EmbeddingMeta
-        print(f"Criando EmbeddingMeta com seq_input_dir: protein e output_dir: {self.protein_output}")
-        extractor = EmbeddingMeta(seq_input_dir="protein", output_dir=self.protein_output)
+        print(f"Criando EmbeddingMeta com seq_input_dir: {self.protein_dir} e output_dir: {self.protein_output}")
+        extractor = EmbeddingMeta(seq_input_dir=self.protein_dir, output_dir=self.protein_output)
         print(f"EmbeddingMeta criado com seq_input_dir: {extractor.seq_input_dir}")
         extractor.run()
         print("Embeddings de proteínas salvos.")
