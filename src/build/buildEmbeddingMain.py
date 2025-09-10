@@ -1,23 +1,27 @@
 import sys
 import os
+import argparse
 
 from embeddingPreparation import EmbeddingPreparation
 from embeddingBuild import EmbeddingBuild
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Uso correto: python buildEmbeddingMain.py <input_tsv_file> [--ligand_embeddings | --protein_embeddings | --matrix_embeddings]")
+    parser = argparse.ArgumentParser(description="Pipeline de construção de embeddings.")
+    parser.add_argument("input_tsv_file", help="Caminho para o arquivo TSV de entrada.")
+    parser.add_argument("--output_dir", default=".", help="Diretório para salvar todos os arquivos de saída.")
+    parser.add_argument("--run_mode", choices=["ligand_embeddings", "protein_embeddings", "matrix_embeddings"], help="Executar apenas uma parte específica do pipeline.")
+    
+    args = parser.parse_args()
+
+    if not os.path.isfile(args.input_tsv_file):
+        print(f"Erro: O arquivo '{args.input_tsv_file}' não foi encontrado.")
         sys.exit(1)
 
-    input_file = sys.argv[1]
-    if not os.path.isfile(input_file):
-        print(f"Erro: O arquivo '{input_file}' não foi encontrado.")
-        sys.exit(1)
+    # Passa o diretório de saída para as classes
+    processor = EmbeddingPreparation(args.input_tsv_file, base_dir=args.output_dir)
+    builder = EmbeddingBuild(base_dir=args.output_dir)
 
-    processor = EmbeddingPreparation(input_file)
-    builder = EmbeddingBuild()
-
-    if len(sys.argv) == 2:
+    if args.run_mode is None:
         print("Iniciando o pipeline completo...")
         checkpoint = builder._load_checkpoint()
         if checkpoint is None or checkpoint == "":
@@ -34,8 +38,8 @@ if __name__ == "__main__":
             print("Processamento já concluído anteriormente. Nenhuma ação necessária.")
         print("Processo completo concluído com sucesso.")
     else:
-        argument = sys.argv[2]
-        if argument == "--ligand_embeddings":
+        argument = args.run_mode
+        if argument == "ligand_embeddings":
             if builder._load_checkpoint() == "ligand_embeddings":
                 print("Ligand embeddings já foram gerados. Pulando...")
             else:
@@ -53,6 +57,3 @@ if __name__ == "__main__":
             else:
                 print("Executando apenas a geração das matrizes de embeddings.")
                 builder.run_matrices()
-        else:
-            print("Argumento inválido. Use --ligand_embeddings, --protein_embeddings ou --matrix_embeddings.")
-            sys.exit(1)
