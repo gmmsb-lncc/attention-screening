@@ -4,8 +4,8 @@ import sys
 import os
 
 
-INPUT = "kinase_non_human_compounds.tsv"
-EMBEDDING_MATRIX = "nr_non_human.tsv"
+INPUT = "kinase_human_compounds.tsv"
+EMBEDDING_MATRIX = "nr_human.tsv"
 
 
 def run_command(command, description):
