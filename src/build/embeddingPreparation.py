@@ -18,13 +18,14 @@ def save_protein_func(row, protein_dir):
             f.write(f"> {row['target_kinase']}\n{row['seq']}\n")
 
 class EmbeddingPreparation:
-    def __init__(self, input_file, ligand_dir='ligand', protein_dir='protein'):
+    def __init__(self, input_file, base_dir='.'):
         self.input_file = input_file
-        self.ligand_dir = ligand_dir
-        self.protein_dir = protein_dir
+        self.base_dir = base_dir
+        self.ligand_dir = os.path.join(self.base_dir, 'ligand')
+        self.protein_dir = os.path.join(self.base_dir, 'protein')
         os.makedirs(self.ligand_dir, exist_ok=True)
         os.makedirs(self.protein_dir, exist_ok=True)
-        self.checkpoint_file = "preparation_checkpoint.txt"
+        self.checkpoint_file = os.path.join(self.base_dir, "preparation_checkpoint.txt")
 
     def checkpoint_exists(self, step):
         if os.path.exists(self.checkpoint_file):
@@ -59,8 +60,8 @@ class EmbeddingPreparation:
                     }
             del chunk
             gc.collect()
-        pd.DataFrame(unique_ligands.values()).to_csv('unique_ligands.csv', index=False)
-        pd.DataFrame(unique_proteins.values()).to_csv('unique_proteins.csv', index=False)
+        pd.DataFrame(unique_ligands.values()).to_csv(os.path.join(self.base_dir, 'unique_ligands.csv'), index=False)
+        pd.DataFrame(unique_proteins.values()).to_csv(os.path.join(self.base_dir, 'unique_proteins.csv'), index=False)
         self.save_checkpoint("index_files")
         print("Arquivos de índices únicos gerados com sucesso.")
 
@@ -68,7 +69,7 @@ class EmbeddingPreparation:
         if self.checkpoint_exists("ligands_saved"):
             print("Checkpoint encontrado: Ligantes já salvos.")
             return
-        unique_ligands = pd.read_csv('unique_ligands.csv')
+        unique_ligands = pd.read_csv(os.path.join(self.base_dir, 'unique_ligands.csv'))
         with ThreadPoolExecutor() as executor:
             list(tqdm(
                 executor.map(lambda row: save_ligand_func(row, self.ligand_dir),
@@ -83,7 +84,7 @@ class EmbeddingPreparation:
         if self.checkpoint_exists("proteins_saved"):
             print("Checkpoint encontrado: Proteínas já salvas.")
             return
-        unique_proteins = pd.read_csv('unique_proteins.csv')
+        unique_proteins = pd.read_csv(os.path.join(self.base_dir, 'unique_proteins.csv'))
         with ThreadPoolExecutor() as executor:
             list(tqdm(
                 executor.map(lambda row: save_protein_func(row, self.protein_dir),
@@ -98,3 +99,4 @@ class EmbeddingPreparation:
         self.generate_index_files()
         self.save_proteins_parallel()
         self.save_ligands_parallel()
+
