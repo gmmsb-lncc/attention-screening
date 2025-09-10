@@ -1,5 +1,7 @@
 import os
 import sys
+# Add materials directory to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'materials'))
 import psutil
 import numpy as np
 import pandas as pd
