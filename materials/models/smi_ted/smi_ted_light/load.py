@@ -661,19 +661,31 @@ class Smi_ted(nn.Module):
         return 'smi-ted-Light'
     
 
-def load_smi_ted(folder="./smi_ted_light", 
+def load_smi_ted(folder="./model_files", 
               ckpt_filename="smi-ted-Light_40.pt",
               vocab_filename="bert_vocab_curated.txt"
               ):
-    repo_id = "ibm/materials.smi-ted"
-    filename = "bert_vocab_curated.txt"
-    vocab_filename = hf_hub_download(repo_id=repo_id, filename=filename)
-    tokenizer = MolTranBertTokenizer(vocab_filename)
+    # Use local files instead of downloading from Hugging Face
+    import os
+    vocab_path = os.path.join(folder, vocab_filename)
+    ckpt_path = os.path.join(folder, ckpt_filename)
+    
+    # Check if files exist locally
+    if not os.path.exists(vocab_path):
+        # Fallback to downloading if local files don't exist
+        from huggingface_hub import hf_hub_download
+        repo_id = "ibm/materials.smi-ted"
+        vocab_path = hf_hub_download(repo_id=repo_id, filename=vocab_filename)
+    
+    if not os.path.exists(ckpt_path):
+        # Fallback to downloading if local files don't exist
+        from huggingface_hub import hf_hub_download
+        repo_id = "ibm/materials.smi-ted"
+        ckpt_path = hf_hub_download(repo_id=repo_id, filename=ckpt_filename)
+    
+    tokenizer = MolTranBertTokenizer(vocab_path)
     model = Smi_ted(tokenizer)
-                  
-    filename = "smi-ted-Light_40.pt"
-    file_path = hf_hub_download(repo_id=repo_id, filename=filename)
-    model.load_checkpoint(file_path)
+    model.load_checkpoint(ckpt_path)
     model.eval()
     print('Vocab size:', len(tokenizer.vocab))
     print(f'[INFERENCE MODE - {str(model)}]')
