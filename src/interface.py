@@ -16,8 +16,16 @@ def run_command(command, description, python_executable, pythonpath_extra=""):
     if pythonpath_extra:
         env['PYTHONPATH'] = pythonpath_extra + ':' + env.get('PYTHONPATH', '')
     
+    # Ensure we're using the correct Python executable
     if command.startswith('python '):
         command = command.replace('python ', python_executable + ' ', 1)
+    
+    # Also set the PATH to include the conda environment's bin directory
+    conda_bin_dir = os.path.dirname(python_executable)
+    env['PATH'] = conda_bin_dir + ':' + env.get('PATH', '')
+    
+    # Set CONDA_PREFIX to ensure the subprocess knows which conda environment is active
+    env['CONDA_PREFIX'] = os.path.dirname(os.path.dirname(python_executable))
     
     result = subprocess.run(command, shell=True, env=env)
     if result.returncode != 0:
@@ -56,12 +64,19 @@ def main(config):
     print("Iniciando o pipeline completo de embeddings...")
 
     # --- Executa o pipeline principal ---
+    # Ensure the src directory is in the Python path
+    src_path = os.path.join(project_root, 'src')
+    if pythonpath_extra:
+        full_pythonpath = f"{pythonpath_extra}:{src_path}"
+    else:
+        full_pythonpath = src_path
+        
     run_command(
         f"python {os.path.join(project_root, 'src', 'build', 'buildEmbeddingMain.py')}" + 
         f" {input_tsv} --output_dir {output_dir}",
         "Gerar Embeddings, Matrizes e Labels",
         python_executable=python_executable,
-        pythonpath_extra=pythonpath_extra
+        pythonpath_extra=full_pythonpath
     )
 
     print("\n🎉 Processo completo concluído com sucesso!")
