@@ -64,7 +64,21 @@ The pipeline expects input data in TSV format with the following columns:
 - Conda or Miniconda
 - Git
 
-### Steps
+### Automated Setup (Recommended)
+
+Run the automated setup script which will create the conda environment and download all required model files:
+
+```bash
+./setup.sh
+```
+
+This script will:
+1. Create the conda environment from `environment.yml`
+2. Activate the environment
+3. Download all required model files
+4. Verify the installation
+
+### Manual Setup
 
 1. **Clone the repository**:
    ```bash
@@ -78,7 +92,12 @@ The pipeline expects input data in TSV format with the following columns:
    conda activate docktkinase
    ```
 
-3. **Prepare input data**:
+3. **Download required model files**:
+   ```bash
+   python scripts/post_install.py
+   ```
+
+4. **Prepare input data**:
    Place your TSV file in `src/database/` with the appropriate format.
 
 ## ▶️ Usage
