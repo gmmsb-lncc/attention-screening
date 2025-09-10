@@ -5,13 +5,14 @@ import numpy as np
 from pyspark.sql import SparkSession
 
 class EmbeddingBuild:
-    def __init__(self, ligand_dir='ligand', protein_dir='protein', ligand_output='ligand_embeddings', protein_output='protein_embeddings', matrix_output='matrix_embedding'):
-        self.ligand_dir = ligand_dir
-        self.protein_dir = protein_dir
-        self.ligand_output = ligand_output
-        self.protein_output = protein_output
-        self.matrix_output = matrix_output
-        self.checkpoint_file = 'embedding_checkpoint.txt'
+    def __init__(self, base_dir='.'):
+        self.base_dir = base_dir
+        self.ligand_dir = os.path.join(self.base_dir, 'ligand')
+        self.protein_dir = os.path.join(self.base_dir, 'protein')
+        self.ligand_output = os.path.join(self.base_dir, 'ligand_embeddings')
+        self.protein_output = os.path.join(self.base_dir, 'protein_embeddings')
+        self.matrix_output = os.path.join(self.base_dir, 'matrix_embedding')
+        self.checkpoint_file = os.path.join(self.base_dir, 'embedding_checkpoint.txt')
 
         os.makedirs(self.ligand_output, exist_ok=True)
         os.makedirs(self.protein_output, exist_ok=True)
