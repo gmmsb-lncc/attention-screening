@@ -72,4 +72,3 @@ dependencies:
       - ase==3.24.0
       - torch_scatter
       - torch_nl==0.3
-.git
