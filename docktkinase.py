@@ -24,7 +24,7 @@ except ImportError:
 INPUT_TSV_FILENAME = "kinase_non_human_compounds.tsv"
 
 # Nome da pasta de saída para todos os resultados do pipeline
-OUTPUT_FOLDER_NAME = "concatenated_embeddings"
+OUTPUT_FOLDER_NAME = "non_human"
 
 # === CONFIGURAÇÕES DO AMBIENTE (geralmente não precisam ser alteradas) ===
 
@@ -32,12 +32,8 @@ OUTPUT_FOLDER_NAME = "concatenated_embeddings"
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Executável Python a ser usado nos subprocessos
-# Tenta detectar o ambiente conda, senão usa o mesmo executável que está rodando este script
-CONDA_ENV_PATH = os.environ.get('CONDA_PREFIX', None)
-if CONDA_ENV_PATH:
-    PYTHON_EXECUTABLE = os.path.join(CONDA_ENV_PATH, 'bin', 'python')
-else:
-    PYTHON_EXECUTABLE = sys.executable
+# Use the docktkinase conda environment directly
+PYTHON_EXECUTABLE = '/home/leon/miniconda3/envs/docktkinase/bin/python'
 
 # PYTHONPATH extra (se necessário)
 PYTHONPATH_EXTRA = ""
