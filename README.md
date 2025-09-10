@@ -166,6 +166,11 @@ For large datasets, adjust Spark settings in `src/build/embeddingBuild.py`:
    - Delete `embedding_checkpoint.txt` to restart the pipeline from scratch
    - Check file permissions on output directories
 
+5. **Hugging Face Rate Limiting (HTTP 429 Errors)**
+   - See [HUGGINGFACE_RATE_LIMIT.md](HUGGINGFACE_RATE_LIMIT.md) for detailed instructions
+   - Pre-download model files to avoid repeated downloads
+   - Use local model files when available
+
 ### Debugging
 
 Enable verbose logging by modifying the log level in `embeddingBuild.py`:
