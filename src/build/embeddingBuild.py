@@ -5,13 +5,14 @@ import numpy as np
 from pyspark.sql import SparkSession
 
 class EmbeddingBuild:
-    def __init__(self, ligand_dir='ligand', protein_dir='protein', ligand_output='ligand_embeddings', protein_output='protein_embeddings', matrix_output='matrix_embedding'):
-        self.ligand_dir = ligand_dir
-        self.protein_dir = protein_dir
-        self.ligand_output = ligand_output
-        self.protein_output = protein_output
-        self.matrix_output = matrix_output
-        self.checkpoint_file = 'embedding_checkpoint.txt'
+    def __init__(self, base_dir='.'):
+        self.base_dir = base_dir
+        self.ligand_dir = os.path.join(self.base_dir, 'ligand')
+        self.protein_dir = os.path.join(self.base_dir, 'protein')
+        self.ligand_output = os.path.join(self.base_dir, 'ligand_embeddings')
+        self.protein_output = os.path.join(self.base_dir, 'protein_embeddings')
+        self.matrix_output = os.path.join(self.base_dir, 'matrix_embedding')
+        self.checkpoint_file = os.path.join(self.base_dir, 'embedding_checkpoint.txt')
 
         os.makedirs(self.ligand_output, exist_ok=True)
         os.makedirs(self.protein_output, exist_ok=True)
@@ -87,6 +88,15 @@ class EmbeddingBuild:
             else:
                 return [np.load(os.path.join(directory, f), allow_pickle=True) for f in npy_files]
 
+        # Check if ligand embeddings exist
+        ligand_files = [f for f in os.listdir(self.ligand_output) if f.endswith('.npy')]
+        if len(ligand_files) == 0:
+            print("Aviso: Nenhum embedding de ligante encontrado. Regenerando embeddings de ligantes.")
+            self.run_ligand_embeddings()
+            ligand_files = [f for f in os.listdir(self.ligand_output) if f.endswith('.npy')]
+            if len(ligand_files) == 0:
+                raise ValueError("Falha ao gerar embeddings de ligantes.")
+
         ligand_embeddings = load_embeddings(self.ligand_output)
         ligand_cls = np.vstack([e[0] for e in ligand_embeddings])
         ligand_mean = np.vstack([e.mean(axis=0) for e in ligand_embeddings])
@@ -106,7 +116,25 @@ class EmbeddingBuild:
         print("Matrizes salvas.")
         self._save_checkpoint("embedding_matrix")
 
-    def run_ligand_embeddings(self): self.generate_ligand_embeddings()
+    def run_ligand_embeddings(self): 
+        print(f"Running ligand embeddings. Checking directories:")
+        print(f"  Ligand dir: {self.ligand_dir}")
+        print(f"  Ligand output dir: {self.ligand_output}")
+        ligand_files = [f for f in os.listdir(self.ligand_dir) if f.endswith('.smi')]
+        print(f"  Found {len(ligand_files)} .smi files in ligand directory")
+        output_files = os.listdir(self.ligand_output)
+        print(f"  Found {len(output_files)} files in ligand_embeddings directory")
+        
+        # Clear checkpoint if ligand embeddings directory is empty
+        if len(output_files) == 0:
+            checkpoint = self._load_checkpoint()
+            if checkpoint == "ligand_embeddings":
+                print("Ligand embeddings checkpoint found but no files. Clearing checkpoint.")
+                if os.path.exists(self.checkpoint_file):
+                    os.remove(self.checkpoint_file)
+        
+        self.generate_ligand_embeddings()
+        
     def run_protein_embeddings(self): self.generate_protein_embeddings()
     def run_matrices(self): self.generate_embedding_matrix()
     def run_all(self):
