@@ -1,11 +1,15 @@
 import os
 import sys
 # Add materials directory to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'materials'))
+materials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'materials')
+sys.path.append(materials_path)
+# Also add the models directory
+sys.path.append(os.path.join(materials_path, 'models'))
+
 import psutil
 import numpy as np
 import pandas as pd
-import models.fm4m as fm4m
+import fm4m
 from concurrent.futures import ThreadPoolExecutor
 
 class EmbeddingIBM:
