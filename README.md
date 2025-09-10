@@ -6,17 +6,18 @@
 
 ## 🧬 Overview
 
-DockTKinase is a computational pipeline for generating molecular embeddings of kinase inhibitors and their target proteins, specifically designed for non-human kinases. The pipeline leverages IBM's Foundation Models for Materials (FM4M) to create high-quality representations that can be used for various downstream tasks such as drug discovery, virtual screening, and structure-activity relationship studies.
+DockTKinase is a computational pipeline for generating molecular embeddings of kinase inhibitors and their target proteins, specifically designed for non-human kinases. The pipeline leverages state-of-the-art foundation models to create high-quality representations that can be used for various downstream tasks such as drug discovery, virtual screening, and structure-activity relationship studies.
 
 This tool is particularly valuable for researchers working on neglected tropical diseases, veterinary medicine, or comparative studies between human and non-human kinases, where traditional drug discovery approaches may be limited by data availability.
 
 ## 🚀 Key Features
 
 - **Automated Pipeline**: End-to-end processing of kinase-compound interactions
-- **Multi-Modal Embeddings**: Generates embeddings for both ligands (small molecules) and proteins (kinases)
+- **Multi-Modal Embeddings**: 
+  - **Ligand Embeddings**: Uses IBM's FM4M SMI-TED model for SMILES-based molecular representations
+  - **Protein Embeddings**: Uses Meta's ESM model for protein sequence representations
 - **Checkpoint System**: Resumable processing with automatic checkpoint management
 - **Scalable Processing**: Uses Apache Spark for efficient large-scale computations
-- **Foundation Model Integration**: Leverages IBM's FM4M models for state-of-the-art representations
 - **Specialized for Non-Human Kinases**: Focused on kinases from pathogens and model organisms
 
 ## 📁 Project Structure
@@ -24,6 +25,11 @@ This tool is particularly valuable for researchers working on neglected tropical
 ```
 docktkinase/
 ├── docktkinase.py              # Main entry point and configuration
+├── setup.sh                    # Automated setup script
+├── scripts/                    # Setup and utility scripts
+│   ├── setup.sh                # Automated environment and model setup
+│   ├── post_install.py         # Model file downloading script
+│   └── post_install.sh         # Post-installation script
 ├── src/
 │   ├── database/               # Input data (TSV files)
 │   ├── build/                  # Pipeline core implementation
@@ -34,6 +40,8 @@ docktkinase/
 │   │   ├── buildEmbeddingMain.py
 │   ├── interface.py            # Pipeline interface and execution manager
 ├── materials/                  # IBM FM4M models and dependencies
+│   ├── model_files/            # Downloaded model files (created during setup)
+│   └── models/                 # Model implementations
 ├── non_human/                  # Default output directory
 ├── environment.yml             # Conda environment specification
 ├── LICENSE
@@ -75,7 +83,7 @@ Run the automated setup script which will create the conda environment and downl
 This script will:
 1. Create the conda environment from `environment.yml`
 2. Activate the environment
-3. Download all required model files
+3. Download all required model files for both FM4M (ligands) and ESM (proteins)
 4. Verify the installation
 
 ### Manual Setup
@@ -123,7 +131,7 @@ python docktkinase.py
 
 The pipeline execution follows these stages:
 1. **Data Preparation**: Processes the input TSV file to extract unique ligands and proteins
-2. **Ligand Embedding Generation**: Creates embeddings for ligands using IBM's SMI-TED model
+2. **Ligand Embedding Generation**: Creates embeddings for ligands using IBM's FM4M SMI-TED model
 3. **Protein Embedding Generation**: Creates embeddings for proteins using Meta's ESM model
 4. **Matrix Construction**: Combines embeddings into matrices for downstream analysis
 
@@ -187,7 +195,7 @@ For large datasets, adjust Spark settings in `src/build/embeddingBuild.py`:
 
 5. **Hugging Face Rate Limiting (HTTP 429 Errors)**
    - See [HUGGINGFACE_RATE_LIMIT.md](HUGGINGFACE_RATE_LIMIT.md) for detailed instructions
-   - Pre-download model files to avoid repeated downloads
+   - Model files are downloaded during setup to avoid repeated downloads
    - Use local model files when available
 
 ### Debugging
@@ -203,6 +211,7 @@ sc.setLogLevel("INFO")  # or "DEBUG"
 This project integrates several cutting-edge technologies:
 
 - [IBM Foundation Models for Materials (FM4M)](https://github.com/IBM/materials) - State-of-the-art foundation models for molecular representations
+- [Meta ESM Models](https://github.com/facebookresearch/esm) - Protein language models for protein sequence representations
 - [ChEMBL Database](https://www.ebi.ac.uk/chembl/) - Manually curated database of bioactive molecules
 - [RDKit](https://www.rdkit.org/) - Open-source cheminformatics software
 - [PyTorch](https://pytorch.org/) - Deep learning framework
@@ -237,6 +246,7 @@ For major changes, please open an issue first to discuss what you would like to 
 ## 🙏 Acknowledgments
 
 - IBM Research for providing the Foundation Models for Materials
+- Meta Research for providing the ESM protein language models
 - The ChEMBL team for maintaining the comprehensive database of bioactive molecules
 - The open-source community for the tools and libraries that make this project possible
 - Contributors to the RDKit, PyTorch, and Apache Spark projects
