@@ -23,3 +23,8 @@ processed_files.log
 *.tsv
 *.pth
 log.txt
+env/
+__pycache__/
+*.csv
+*.png
+*.pyc
