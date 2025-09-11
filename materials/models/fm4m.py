@@ -264,7 +264,28 @@ def get_representation(train_data, test_data, model_type, return_tensor=True):
         x_batch_test = model.encode(test_data, return_tensor=return_tensor)
 
     elif model_type == "smi-ted":
-        model = load_smi_ted(folder='../models/smi_ted/smi_ted_light', ckpt_filename='smi-ted-Light_40.pt')
+        # Use local model files to avoid Hugging Face rate limiting
+        import os
+        # Try to use the local model files that were downloaded during setup
+        materials_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_files_path = os.path.join(materials_path, "model_files")
+        
+        # Always use local files - no fallback to downloading
+        print(f"Loading SMI-TED model from local files at: {model_files_path}")
+        
+        # Check if local files exist
+        vocab_file = os.path.join(model_files_path, "bert_vocab_curated.txt")
+        ckpt_file = os.path.join(model_files_path, "smi-ted-Light_40.pt")
+        
+        if not os.path.exists(vocab_file) or not os.path.exists(ckpt_file):
+            raise FileNotFoundError(
+                f"SMI-TED model files not found at {model_files_path}. "
+                f"Please run the post-install script to download model files."
+            )
+        
+        # Load the model with local files
+        model = load_smi_ted(folder=model_files_path, ckpt_filename='smi-ted-Light_40.pt')
+            
         with torch.no_grad():
             x_batch = model.encode(train_data, return_torch=return_tensor)
             x_batch_test = model.encode(test_data, return_torch=return_tensor)
