@@ -661,27 +661,34 @@ class Smi_ted(nn.Module):
         return 'smi-ted-Light'
     
 
-def load_smi_ted(folder="./model_files", 
+def load_smi_ted(folder="../model_files", 
               ckpt_filename="smi-ted-Light_40.pt",
               vocab_filename="bert_vocab_curated.txt"
               ):
     # Use local files instead of downloading from Hugging Face
     import os
-    vocab_path = os.path.join(folder, vocab_filename)
-    ckpt_path = os.path.join(folder, ckpt_filename)
+    
+    # Handle relative paths correctly
+    if folder.startswith("../"):
+        # This is a relative path from the smi_ted/smi_ted_light directory
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        vocab_path = os.path.join(base_dir, folder.replace("../", ""), vocab_filename)
+        ckpt_path = os.path.join(base_dir, folder.replace("../", ""), ckpt_filename)
+    else:
+        # This is either an absolute path or a path relative to the current working directory
+        vocab_path = os.path.join(folder, vocab_filename)
+        ckpt_path = os.path.join(folder, ckpt_filename)
+    
+    # Always use local files - no fallback to downloading
+    print(f"Loading vocab from: {vocab_path}")
+    print(f"Loading checkpoint from: {ckpt_path}")
     
     # Check if files exist locally
     if not os.path.exists(vocab_path):
-        # Fallback to downloading if local files don't exist
-        from huggingface_hub import hf_hub_download
-        repo_id = "ibm/materials.smi-ted"
-        vocab_path = hf_hub_download(repo_id=repo_id, filename=vocab_filename)
+        raise FileNotFoundError(f"Vocabulary file not found at {vocab_path}. Please run the post-install script to download model files.")
     
     if not os.path.exists(ckpt_path):
-        # Fallback to downloading if local files don't exist
-        from huggingface_hub import hf_hub_download
-        repo_id = "ibm/materials.smi-ted"
-        ckpt_path = hf_hub_download(repo_id=repo_id, filename=ckpt_filename)
+        raise FileNotFoundError(f"Checkpoint file not found at {ckpt_path}. Please run the post-install script to download model files.")
     
     tokenizer = MolTranBertTokenizer(vocab_path)
     model = Smi_ted(tokenizer)
