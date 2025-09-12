@@ -1,0 +1,101 @@
+{
+  "cross_validation": {
+    "summary_statistics": {
+      "loss": {
+        "mean": 0.9633128046989441,
+        "std": 0.1116720548713806,
+        "min": 0.8161863684654236,
+        "max": 1.0865885019302368,
+        "median": 0.9871635437011719
+      },
+      "accuracy": {
+        "mean": 0.38888888888888884,
+        "std": 0.07856742013183862,
+        "min": 0.3333333333333333,
+        "max": 0.5,
+        "median": 0.3333333333333333
+      },
+      "precision": {
+        "mean": 0.38888888888888884,
+        "std": 0.07856742013183862,
+        "min": 0.3333333333333333,
+        "max": 0.5,
+        "median": 0.3333333333333333
+      },
+      "recall": {
+        "mean": 1.0,
+        "std": 0.0,
+        "min": 1.0,
+        "max": 1.0,
+        "median": 1.0
+      },
+      "f1": {
+        "mean": 0.5555555555555555,
+        "std": 0.0785674201318386,
+        "min": 0.5,
+        "max": 0.6666666666666666,
+        "median": 0.5
+      },
+      "roc_auc": {
+        "mean": 0.5,
+        "std": 0.408248290463863,
+        "min": 0.0,
+        "max": 1.0,
+        "median": 0.5
+      },
+      "average_precision": {
+        "mean": 0.611111111111111,
+        "std": 0.28327886186626583,
+        "min": 0.3333333333333333,
+        "max": 1.0,
+        "median": 0.5
+      },
+      "brier_score": {
+        "mean": 0.3692162252168141,
+        "std": 0.047960240572606845,
+        "min": 0.30473754310959755,
+        "max": 0.4196805951856497,
+        "median": 0.3832305373551949
+      },
+      "matthews_corrcoef": {
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "median": 0.0
+      },
+      "specificity": {
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "median": 0.0
+      }
+    },
+    "best_fold": {
+      "fold_index": "0",
+      "metrics": {
+        "Loss": 0.8161863684654236,
+        "Accuracy": 0.5,
+        "Precision": 0.5,
+        "Recall": 1.0,
+        "F1": 0.6666666666666666,
+        "ROC_AUC": 1.0,
+        "Average_Precision": 1.0,
+        "Brier_Score": 0.30473754310959755,
+        "MCC": 0.0,
+        "True_Positives": 2,
+        "True_Negatives": 0,
+        "False_Positives": 2,
+        "False_Negatives": 0,
+        "Specificity": 0.0,
+        "Sensitivity": 1.0,
+        "Fbeta_0.5": 0.5555555555555556,
+        "Fbeta_2": 0.8333333333333334,
+        "Sample_Count": 4,
+        "Positive_Rate": "0.5"
+      }
+    },
+    "n_folds": 3
+  }
+}
