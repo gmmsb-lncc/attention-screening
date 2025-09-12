@@ -31,4 +31,9 @@ __pycache__/
 
 humans/
 non_humans/
-materials/
+
+# Materials - exclude large model files but keep structure
+materials/models/*/model_files/
+materials/data/
+materials/examples/*.ipynb
+materials/img/test.py
