@@ -15,7 +15,19 @@ python classifier.py \
     --amp \
     --compile \
     --num_workers 8 \
-    --early_metric auc
+         # ---------------- avaliação final no conjunto de teste ---------------- #
+        if self.test_loader is None:
+            logger.info("Modo cross-validation — não há conjunto de teste.")
+            if best_model_state:
+                torch.save(best_model_state, self.model_output)
+            self._shutdown_old_loaders()
+            # CORREÇÃO: Retorno consistente para CV
+            return best_metric
+
+        model.load_state_dict(best_model_state)  # pesos "ótimos"
+        test_metrics = self.evaluate(model, self.test_loader)
+        logger.info("✔️  Test Loss %.4f | Test AUC %.4f",
+                    test_metrics["Loss"], test_metrics["ROC_AUC"])etric auc
 
 python classifier.py \
     ../buildEmbedding/concatenated_embeddings/concatenated_embeddings.npy \
@@ -31,6 +43,7 @@ python classifier.py \
 from __future__ import annotations
 import os, json, random, logging, argparse, warnings, sys
 from typing import Any
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -55,7 +68,41 @@ import optuna
 mp.set_sharing_strategy("file_system")  # usa arquivos temporários em vez de pipes
 
 # ---------------------------------------------------------------------------
-# 1. Reprodutibilidade & pequenas otimizações CUDA
+# 1. Configuração do Experimento
+# ---------------------------------------------------------------------------
+@dataclass
+class MLPConfig:
+    """Configuração centralizada para o MLP."""
+    # Arquitetura
+    hidden_dim: int = 1024
+    dropout: float = 0.3
+    activation: str = "relu"
+    use_batch_norm: bool = True
+    n_layers: int = 3
+    
+    # Treinamento
+    lr: float = 1e-3
+    batch_size: int = 64
+    epochs: int = 50
+    early_stopping_patience: int = 5
+    early_metric: str = "loss"  # "loss" ou "auc"
+    
+    # Otimização
+    dtype: str = "float32"  # "float32", "float16", "bfloat16"
+    amp: bool = False
+    compile_model: bool = False
+    num_workers: int = 0
+    
+    # Validação
+    cv_folds: int = 5
+    test_size: float = 0.2
+    
+    # Arquivos
+    model_output: str = "mlp_model.pth"
+    metrics_output: str = "training_metrics.json"
+
+# ---------------------------------------------------------------------------
+# 2. Reprodutibilidade & pequenas otimizações CUDA
 # ---------------------------------------------------------------------------
 def set_seed(seed: int = 42) -> None:
     random.seed(seed)
@@ -80,23 +127,57 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 3. MLP Model
+# 3. MLP Model - VERSÃO MELHORADA
 # ---------------------------------------------------------------------------
 class MLPEmbeddingClassifier(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.3):
+    def __init__(
+        self, 
+        input_dim: int, 
+        hidden_dim: int, 
+        dropout: float = 0.3, 
+        activation: str = "relu",
+        use_batch_norm: bool = True,
+        n_layers: int = 3
+    ):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.BatchNorm1d(hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 1),          # logits
-        )
-
+        
+        # Ativação configurável
+        activation_map = {
+            "relu": nn.ReLU(),
+            "gelu": nn.GELU(),
+            "swish": nn.SiLU(),
+            "tanh": nn.Tanh()
+        }
+        self.activation = activation_map.get(activation, nn.ReLU())
+        
+        layers = []
+        current_dim = input_dim
+        
+        # Primeira camada
+        layers.append(nn.Linear(current_dim, hidden_dim))
+        if use_batch_norm:
+            layers.append(nn.BatchNorm1d(hidden_dim))
+        layers.append(self.activation)
+        layers.append(nn.Dropout(dropout))
+        current_dim = hidden_dim
+        
+        # Camadas intermediárias
+        for i in range(n_layers - 2):
+            next_dim = hidden_dim // (2 ** (i + 1))
+            next_dim = max(next_dim, 64)  # Dimensão mínima
+            
+            layers.append(nn.Linear(current_dim, next_dim))
+            if use_batch_norm:
+                layers.append(nn.BatchNorm1d(next_dim))
+            layers.append(self.activation)
+            layers.append(nn.Dropout(dropout))
+            current_dim = next_dim
+        
+        # Camada final
+        layers.append(nn.Linear(current_dim, 1))
+        
+        self.net = nn.Sequential(*layers)
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # logits
         return self.net(x)
 
@@ -144,6 +225,10 @@ class MLPEmbeddingPipeline:
         self.metrics_output = metrics_output
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Validação inicial dos dados
+        self.data_validation = self._validate_data()
+        
         self.input_dim = self._get_embedding_dim()
 
         # Spark session (criado sob demanda para reutilizar entre folds)
@@ -151,6 +236,71 @@ class MLPEmbeddingPipeline:
 
         # Armazena DataLoaders para encerrá-los explicitamente
         self._active_loaders: list[DataLoader] = []
+
+    # ------------------------------------------------------------------- #
+    def _validate_data(self) -> dict[str, Any]:
+        """Valida qualidade dos dados e retorna estatísticas."""
+        logger.info("🔍 Validando qualidade dos dados...")
+        
+        # Carrega dados para análise
+        embeddings_np = np.load(self.embeddings_path, mmap_mode="r", allow_pickle=False)
+        labels_np = np.load(self.labels_path, mmap_mode="r", allow_pickle=False).astype(np.float32).flatten()
+        
+        issues = []
+        stats = {}
+        
+        # Validações básicas
+        if len(embeddings_np) != len(labels_np):
+            issues.append(f"Mismatch de tamanhos: embeddings {len(embeddings_np)}, labels {len(labels_np)}")
+        
+        # Análise de balanceamento de classes
+        unique, counts = np.unique(labels_np, return_counts=True)
+        class_distribution = dict(zip(unique, counts))
+        imbalance_ratio = max(counts) / min(counts) if len(counts) > 1 else 1.0
+        
+        if imbalance_ratio > 10:
+            issues.append(f"Desbalanceamento severo de classes: {imbalance_ratio:.1f}:1")
+        
+        stats['class_distribution'] = class_distribution
+        stats['imbalance_ratio'] = float(imbalance_ratio)
+        stats['total_samples'] = len(labels_np)
+        
+        # Detectar valores NaN/infinitos
+        nan_embeddings = np.isnan(embeddings_np).sum()
+        inf_embeddings = np.isinf(embeddings_np).sum()
+        if nan_embeddings > 0:
+            issues.append(f"Embeddings com NaN: {nan_embeddings}")
+        if inf_embeddings > 0:
+            issues.append(f"Embeddings com Inf: {inf_embeddings}")
+        
+        # Detectar duplicatas (amostragem se dataset muito grande)
+        sample_size = min(10000, len(embeddings_np))
+        if len(embeddings_np) > sample_size:
+            logger.info("📊 Analisando duplicatas em amostra de %d exemplos...", sample_size)
+            idx_sample = np.random.choice(len(embeddings_np), sample_size, replace=False)
+            sample_embeddings = embeddings_np[idx_sample]
+        else:
+            sample_embeddings = embeddings_np
+        
+        unique_embeddings = np.unique(sample_embeddings, axis=0)
+        duplicate_rate = 1.0 - (len(unique_embeddings) / len(sample_embeddings))
+        if duplicate_rate > 0.05:  # >5% duplicatas
+            issues.append(f"Alta taxa de duplicatas: {duplicate_rate*100:.1f}%")
+        
+        stats['duplicate_rate'] = float(duplicate_rate)
+        
+        # Log dos resultados
+        if issues:
+            logger.warning("⚠️  Problemas encontrados nos dados:")
+            for issue in issues:
+                logger.warning(f"  - {issue}")
+        else:
+            logger.info("✅ Dados passaram na validação básica")
+        
+        logger.info(f"📊 Distribuição de classes: {class_distribution}")
+        logger.info(f"📊 Taxa de duplicatas: {duplicate_rate*100:.1f}%")
+        
+        return {'issues': issues, 'stats': stats}
 
     # ------------------------------------------------------------------- #
     def _get_embedding_dim(self) -> int:
@@ -463,23 +613,41 @@ class MLPEmbeddingPipeline:
             self.spark.stop()
             self.spark = None
 
-        # Para otimização: Loss → minimizar, AUC → maximizar (retornamos Loss mesmo se early=AUC)
-        return best_metric if self.early_metric == "loss" else -best_metric
+        # CORREÇÃO: Retorno consistente de métricas
+        if self.early_metric == "loss":
+            return test_metrics["Loss"]
+        else:
+            return test_metrics["ROC_AUC"]
 
     # ------------------------------------------------------------------- #
     def cross_validate(self, k: int = 5) -> float:
-        """Validação cruzada estratificada k-fold."""
+        """Validação cruzada estratificada k-fold CORRIGIDA."""
         labels = np.load(self.labels_path, mmap_mode="r", allow_pickle=False).astype(np.float32).flatten()
         indices = np.arange(len(labels))
         skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=42)
         results = []
-        for fold, (train_idx, val_idx) in enumerate(skf.split(indices, labels), 1):
-            logger.info("🔄 Fold %d/%d", fold, k)
-            metric = self.train(train_idx=train_idx, val_idx=val_idx, test_idx=None)
+        
+        logger.info("🔄 Iniciando %d-fold cross-validation...", k)
+        for fold, (train_val_idx, test_fold_idx) in enumerate(skf.split(indices, labels), 1):
+            # Split interno: train_val_idx -> train + validation
+            train_idx, val_idx = train_test_split(
+                train_val_idx, 
+                test_size=0.2, 
+                stratify=labels[train_val_idx], 
+                random_state=42 + fold  # Diferente para cada fold
+            )
+            
+            logger.info("🔄 Fold %d/%d - Train: %d, Val: %d, Test: %d", 
+                       fold, k, len(train_idx), len(val_idx), len(test_fold_idx))
+            
+            # CORREÇÃO: Usar test_fold_idx como conjunto de teste do fold
+            metric = self.train(train_idx=train_idx, val_idx=val_idx, test_idx=test_fold_idx)
             results.append(metric)
-            logger.info("Fold %d result: %.4f", fold, metric)
+            logger.info("✅ Fold %d result: %.4f", fold, metric)
+        
         avg = float(np.mean(results))
-        logger.info("⛳ Média dos folds: %.4f", avg)
+        std = float(np.std(results))
+        logger.info("⛳ CV Results: %.4f ± %.4f (mean ± std)", avg, std)
         return avg
 
 # ---------------------------------------------------------------------------
