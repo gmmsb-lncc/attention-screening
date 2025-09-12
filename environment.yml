@@ -19,6 +19,7 @@ dependencies:
   - scikit-learn >=1.5
   - matplotlib >=3.9
   - pyarrow >=14.0.1
+  - pyspark
 
   # Bio / MSA toolchain
   - openmm >=8.1
@@ -63,3 +64,11 @@ dependencies:
       - dm-tree ==0.1.9
       - wandb
       - git+https://github.com/NVIDIA/dllogger.git
+      # Additional packages
+      - fair-esm
+      # Packages from materials/requirements.txt
+      - aiohttp>=3.10.2
+      - triton==2.2.0
+      - ase==3.24.0
+      - torch_scatter
+      - torch_nl==0.3

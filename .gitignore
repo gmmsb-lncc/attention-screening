@@ -28,3 +28,7 @@ __pycache__/
 *.csv
 *.png
 *.pyc
+
+humans/
+non_humans/
+materials/

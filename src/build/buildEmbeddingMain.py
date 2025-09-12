@@ -1,6 +1,13 @@
 import sys
 import os
 import argparse
+<<<<<<< HEAD
+=======
+
+# Add the src directory to the Python path
+src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, src_dir)
+>>>>>>> d72654272e10825f2d0ff1db92d5721073ab9416
 
 from embeddingPreparation import EmbeddingPreparation
 from embeddingBuild import EmbeddingBuild
@@ -33,6 +40,11 @@ if __name__ == "__main__":
             builder.run_matrices()
         elif checkpoint == "protein_embeddings":
             print("Retomando a partir de embeddings de proteínas...")
+            # Check if ligand embeddings exist before running matrices
+            ligand_files = [f for f in os.listdir(builder.ligand_output) if f.endswith('.npy')]
+            if len(ligand_files) == 0:
+                print("Aviso: Nenhum embedding de ligante encontrado. Regenerando embeddings de ligantes.")
+                builder.run_ligand_embeddings()
             builder.run_matrices()
         elif checkpoint == "embedding_matrix":
             print("Processamento já concluído anteriormente. Nenhuma ação necessária.")

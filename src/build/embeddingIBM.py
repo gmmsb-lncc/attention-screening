@@ -1,10 +1,34 @@
 import os
 import sys
+import time
+import random
+# Add materials directory to Python path
+materials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'materials')
+sys.path.append(materials_path)
+# Also add the models directory
+sys.path.append(os.path.join(materials_path, 'models'))
+
 import psutil
 import numpy as np
 import pandas as pd
-import models.fm4m as fm4m
+import fm4m
 from concurrent.futures import ThreadPoolExecutor
+
+def download_with_retry(func, *args, max_retries=3, **kwargs):
+    """Execute a function with retry logic for handling rate limits."""
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    print(f"Rate limited. Waiting {wait_time:.2f} seconds before retry...")
+                    time.sleep(wait_time)
+                else:
+                    raise e
+            else:
+                raise e
 
 class EmbeddingIBM:
     def __init__(self, model_type="SMI-TED", batch_size=None, checkpoint_file="processed_files.log"):
@@ -59,12 +83,17 @@ class EmbeddingIBM:
         :param smiles_list: Lista de strings SMILES.
         :return: DataFrame contendo as representações latentes.
         """
-        representations, _ = fm4m.get_representation(
-            train_data=smiles_list,
-            test_data=smiles_list,  # Reutilizar train_data para evitar test_data vazio
-            model_type=self.model_type,
-            return_tensor=False
-        )
+        def _get_representation():
+            representations, _ = fm4m.get_representation(
+                train_data=smiles_list,
+                test_data=smiles_list,  # Reutilizar train_data para evitar test_data vazio
+                model_type=self.model_type,
+                return_tensor=False
+            )
+            return representations
+        
+        # Use retry logic to handle rate limiting
+        representations = download_with_retry(_get_representation)
         return representations
 
     def process_file(self, file_path, output_dir):
