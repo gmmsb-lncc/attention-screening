@@ -112,7 +112,7 @@ python examples/exemplo_device_management.py
 ## 🔗 Próximos Passos
 
 Após executar os exemplos:
-1. **Executar testes**: `python test/validacao_final.py`
-2. **Configurar sistema**: `python setup_completo.py`  
+1. **Executar testes**: `python tests/validacao_final.py`
+2. **Configurar sistema**: `python setup.py`  
 3. **Ler documentação**: `GUIA_USUARIO.md`
 4. **Explorar código**: `src/classifier/`

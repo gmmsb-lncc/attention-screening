@@ -20,7 +20,7 @@ git clone https://github.com/gmmsb-lncc/docktkinase.git
 cd docktkinase
 
 # Execute o setup automático
-python setup_completo.py
+python setup.py
 ```
 
 ### Instalação Manual
@@ -450,7 +450,7 @@ class MemoryManager:
 
 ## 🎯 Próximos Passos
 
-1. **Execute o setup**: `python setup_completo.py`
+1. **Execute o setup**: `python setup.py`
 2. **Teste o sistema**: `python launch_docktkinase.py`
 3. **Execute exemplos**: Use os scripts de exemplo acima
 4. **Desenvolva seu modelo**: Adapte para seus dados
