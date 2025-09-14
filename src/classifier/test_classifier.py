@@ -7,9 +7,6 @@ import tempfile
 import os
 import sys
 
-# Adiciona o diretório do classifier ao path
-sys.path.insert(0, os.path.dirname(__file__))
-
 def create_dummy_data(n_samples=1000, embedding_dim=512):
     """Cria dados dummy para teste."""
     np.random.seed(42)
