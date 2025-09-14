@@ -1,13 +1,10 @@
 import sys
 import os
 import argparse
-<<<<<<< HEAD
-=======
 
 # Add the src directory to the Python path
 src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, src_dir)
->>>>>>> d72654272e10825f2d0ff1db92d5721073ab9416
 
 from embeddingPreparation import EmbeddingPreparation
 from embeddingBuild import EmbeddingBuild

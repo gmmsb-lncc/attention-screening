@@ -23,14 +23,12 @@ import numpy as np
 import sys
 import os
 
-# Adiciona o diretório src/classifier ao path para imports absolutos
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from src.classifier.models.base_model import BaseClassifier  
-from src.classifier.core.cross_validator import CrossValidator, CrossValidationConfig
-from src.classifier.core.trainer import TrainingConfig
-from src.classifier.config.mlp_config import MLPConfig
-from src.classifier.utils.metrics import MetricsCalculator
+# Imports relativos
+from ..models.base_model import BaseClassifier  
+from .cross_validator import CrossValidator, CrossValidationConfig
+from .trainer import TrainingConfig
+from ..config.mlp_config import MLPConfig
+from ..utils.metrics import MetricsCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +277,7 @@ class HyperparameterOptimizer:
         
         try:
             # Executar cross-validation  
-            from src.classifier.models.mlp import MLPEmbeddingClassifier
+            from ..models.mlp import MLPEmbeddingClassifier
             
             def model_factory():
                 return MLPEmbeddingClassifier(model_config)

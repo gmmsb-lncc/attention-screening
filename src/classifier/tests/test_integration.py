@@ -17,18 +17,15 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-# Imports do sistema
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-
-from config.mlp_config import MLPConfig, create_default_config
-from models.mlp import MLPEmbeddingClassifier  
-from models.base_model import BaseClassifier
-from utils.data_validation import DataValidator, DataQualityReport
-from utils.metrics import MetricsCalculator, ClassificationMetrics
-from core.trainer import ModelTrainer, TrainingConfig
-from core.cross_validator import CrossValidator, CrossValidationConfig
-from main import MLPPipeline
+# Imports relativos do sistema
+from ..config.mlp_config import MLPConfig, create_default_config
+from ..models.mlp import MLPEmbeddingClassifier  
+from ..models.base_model import BaseClassifier
+from ..utils.data_validation import DataValidator, DataQualityReport
+from ..utils.metrics import MetricsCalculator, ClassificationMetrics
+from ..core.trainer import ModelTrainer, TrainingConfig
+from ..core.cross_validator import CrossValidator, CrossValidationConfig
+from ..main import MLPPipeline
 
 
 class TestMLPConfig:

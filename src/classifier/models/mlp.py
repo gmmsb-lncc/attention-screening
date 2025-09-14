@@ -7,11 +7,8 @@ import torch.nn as nn
 from typing import List
 import logging
 
-import sys
-sys.path.append('..')
-
-from models.base_model import BaseClassifier
-from config.mlp_config import MLPConfig
+from .base_model import BaseClassifier
+from ..config.mlp_config import MLPConfig
 
 logger = logging.getLogger(__name__)
 

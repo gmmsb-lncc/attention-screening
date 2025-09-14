@@ -2,11 +2,11 @@ import os
 import sys
 import time
 import random
-# Add materials directory to Python path
-materials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'materials')
-sys.path.append(materials_path)
+# Add FM4M directory to Python path
+fm4m_path = os.path.join(os.path.dirname(__file__), '..', '..', 'FM4M')
+sys.path.append(fm4m_path)
 # Also add the models directory
-sys.path.append(os.path.join(materials_path, 'models'))
+sys.path.append(os.path.join(fm4m_path, 'models'))
 
 import psutil
 import numpy as np
