@@ -14,9 +14,14 @@ import numpy as np
 import sys
 import os
 
-# Imports relativos
-from ..utils.metrics import MetricsCalculator, ClassificationMetrics
-from ..models.base_model import BaseClassifier
+# Imports relativos com fallbacks para execução direta
+try:
+    from ..utils.metrics import MetricsCalculator, ClassificationMetrics
+    from ..models.base_model import BaseClassifier
+except ImportError:
+    # Fallback para execução direta
+    from utils.metrics import MetricsCalculator, ClassificationMetrics
+    from models.base_model import BaseClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +216,9 @@ class ModelTrainer:
                 # Garante dimensões corretas para BCE loss
                 if logits.dim() > 1 and logits.size(1) == 1:
                     logits = logits.squeeze(1)
+                # CORREÇÃO: Garantir que target também tenha shape correto
+                if batch_y.dim() > 1 and batch_y.size(1) == 1:
+                    batch_y = batch_y.squeeze(1)
                 loss = self.criterion(logits, batch_y)
             
             # Backward pass com gradient scaling

@@ -8,9 +8,17 @@ CORREÇÕES IMPLEMENTADAS:
 - Logging e checkpointing de estudos
 """
 
-import optuna
-from optuna.samplers import TPESampler
-from optuna.pruners import MedianPruner
+# Imports com graceful degradation  
+try:
+    import optuna
+    from optuna.samplers import TPESampler
+    from optuna.pruners import MedianPruner
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    OPTUNA_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("⚠️ Optuna não disponível - otimização de hiperparâmetros desabilitada")
+
 import torch
 import torch.nn as nn
 from typing import Dict, List, Optional, Callable, Any, Union, Tuple
@@ -23,12 +31,27 @@ import numpy as np
 import sys
 import os
 
-# Imports relativos
-from ..models.base_model import BaseClassifier  
-from .cross_validator import CrossValidator, CrossValidationConfig
-from .trainer import TrainingConfig
-from ..config.mlp_config import MLPConfig
-from ..utils.metrics import MetricsCalculator
+# Imports relativos com fallbacks para execução direta
+try:
+    from ..models.base_model import BaseClassifier  
+    from .cross_validator import CrossValidator, CrossValidationConfig
+    from .trainer import TrainingConfig
+    from ..config.mlp_config import MLPConfig
+    from ..utils.metrics import MetricsCalculator
+except ImportError:
+    # Fallback para execução direta - ajustar sys.path se necessário
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    classifier_dir = os.path.dirname(current_dir)
+    if classifier_dir not in sys.path:
+        sys.path.insert(0, classifier_dir)
+    
+    from models.base_model import BaseClassifier
+    from core.cross_validator import CrossValidator, CrossValidationConfig
+    from core.trainer import TrainingConfig
+    from config.mlp_config import MLPConfig
+    from utils.metrics import MetricsCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +169,20 @@ class HyperparameterOptimizer:
         hyperparameter_space: Optional[HyperparameterSpace] = None,
         device: Optional[torch.device] = None
     ):
+        # Verificar se Optuna está disponível
+        if not OPTUNA_AVAILABLE:
+            raise RuntimeError(
+                "Optuna não está instalado! "
+                "Para usar otimização de hiperparâmetros, instale: pip install optuna"
+            )
+            
         self.opt_config = optimization_config
         self.cv_config = cv_config  
         self.hp_space = hyperparameter_space or HyperparameterSpace()
         self.device = device or torch.device("cpu")
         
         # Componentes Optuna
-        self.study: Optional[optuna.Study] = None
+        self.study: Optional['optuna.Study'] = None
         self.sampler = self._create_sampler()
         self.pruner = self._create_pruner()
         

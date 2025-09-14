@@ -3,7 +3,7 @@ Configurações para o MLP do DockTKinase Classifier.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, List
+from typing import Literal, List, Optional
 
 
 @dataclass
@@ -11,7 +11,7 @@ class MLPConfig:
     """Configuração centralizada e validada para o MLP."""
     
     # === Arquitetura do Modelo ===
-    input_size: int = 1024
+    input_size: Optional[int] = None  # None = auto-detectar dos dados
     hidden_layers: List[int] = field(default_factory=lambda: [512, 256])
     output_size: int = 1
     activation: Literal["ReLU", "GELU", "LeakyReLU", "ELU", "Tanh"] = "ReLU"
@@ -32,7 +32,7 @@ class MLPConfig:
     
     def _validate_architecture(self):
         """Valida parâmetros da arquitetura."""
-        if self.input_size <= 0:
+        if self.input_size is not None and self.input_size <= 0:
             raise ValueError(f"input_size deve ser positivo, recebido: {self.input_size}")
         
         if self.output_size <= 0:
@@ -58,8 +58,9 @@ class MLPConfig:
     
     def get_architecture_summary(self) -> str:
         """Retorna resumo da arquitetura."""
-        layers = [self.input_size] + self.hidden_layers + [self.output_size]
-        return " -> ".join(str(size) for size in layers)
+        input_str = "auto" if self.input_size is None else str(self.input_size)
+        layers = [input_str] + [str(size) for size in self.hidden_layers] + [str(self.output_size)]
+        return " -> ".join(layers)
     
     def to_dict(self) -> dict:
         """Converte configuração para dicionário."""
@@ -81,10 +82,15 @@ class MLPConfig:
         return cls(**config_dict)
 
 
-def create_default_config(input_size: int = 1024) -> MLPConfig:
-    """Cria configuração padrão otimizada."""
+def create_default_config(input_size: Optional[int] = None) -> MLPConfig:
+    """
+    Cria configuração padrão otimizada.
+    
+    Args:
+        input_size: Tamanho da entrada. None = auto-detectar dos dados.
+    """
     return MLPConfig(
-        input_size=input_size,
+        input_size=input_size,  # None = auto-detectar
         hidden_layers=[512, 256, 128],
         output_size=1,
         activation="ReLU",
