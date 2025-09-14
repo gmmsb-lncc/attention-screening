@@ -34,6 +34,7 @@ from .core.cross_validator import CrossValidator, CrossValidationConfig, quick_c
 from .core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
 from .utils.data_validation import DataValidator
 from .utils.metrics import MetricsCalculator
+from .utils.data_manager import DataManager, ScalableDataset
 
 # Configuração de logging
 logging.basicConfig(
@@ -56,10 +57,17 @@ class MLPPipeline:
         self.data_validator = DataValidator()
         self.metrics_calculator = MetricsCalculator(device=self.device)
         
-        # Dados
+        # 🚀 NOVO: Gerenciador de dados escalável 
+        self.data_manager = DataManager(device=self.device)
+        
+        # Dados - agora usando sistema escalável
+        self.dataset: Optional[ScalableDataset] = None
+        self.dataloader: Optional[torch.utils.data.DataLoader] = None
+        self.feature_names: Optional[list] = None
+        
+        # Para compatibilidade (deprecated - usar dataset)
         self.X: Optional[torch.Tensor] = None
         self.y: Optional[torch.Tensor] = None
-        self.feature_names: Optional[list] = None
         
         # Configurações
         self.model_config: Optional[MLPConfig] = None
@@ -71,20 +79,22 @@ class MLPPipeline:
         logger.info(f"MLPPipeline inicializado - Device: {self.device}")
     
     def load_data(self, data_path: Path, target_column: str = "target", 
-                  feature_columns: Optional[list] = None) -> None:
+                  feature_columns: Optional[list] = None, 
+                  batch_size: Optional[int] = None) -> None:
         """
-        Carrega e valida dados do arquivo CSV.
+        Carrega e valida dados usando sistema escalável (evita OOM).
         
         Args:
             data_path: Caminho para arquivo CSV
             target_column: Nome da coluna target
             feature_columns: Lista de colunas de features (None = todas exceto target)
+            batch_size: Tamanho do batch (None = automático)
         """
-        logger.info(f"Carregando dados de: {data_path}")
+        logger.info(f"🔄 Carregando dados de: {data_path}")
         
         # Carregar CSV
         df = pd.read_csv(data_path)
-        logger.info(f"Dados carregados: {df.shape}")
+        logger.info(f"📊 Dados carregados: {df.shape}")
         
         # Validar colunas
         if target_column not in df.columns:
@@ -107,20 +117,40 @@ class MLPPipeline:
         # Validar dados
         validation_report = self.data_validator.validate_arrays(X, y)
         if not validation_report.is_valid:
-            logger.warning("Problemas encontrados nos dados:")
+            logger.warning("⚠️  Problemas encontrados nos dados:")
             for issue in validation_report.issues:
-                logger.warning(f"  - {issue}")
+                logger.warning(f"    - {issue}")
         
-        # Converter para tensores
-        self.X = torch.from_numpy(X).to(self.device)
-        self.y = torch.from_numpy(y).to(self.device)
+        # 🚀 NOVO: Usar sistema escalável ao invés de carregar tudo na GPU
+        self.dataset, self.dataloader = self.data_manager.load_from_arrays(
+            X, y, batch_size=batch_size, shuffle=True
+        )
         
-        logger.info(f"Dados preparados: {self.X.shape[0]} samples, {self.X.shape[1]} features")
+        # Para compatibilidade com código existente (deprecated)
+        # ⚠️  AVISO: Pode causar OOM em datasets grandes
+        if len(X) <= 10000:  # Limite de segurança
+            self.X = torch.from_numpy(X).to(self.device)
+            self.y = torch.from_numpy(y).to(self.device)
+            logger.info("✅ Dados também disponíveis em formato legacy (X, y)")
+        else:
+            logger.warning("⚠️  Dataset grande - apenas formato escalável disponível")
+            self.X = None
+            self.y = None
+        
+        logger.info(f"✅ Dados preparados: {self.dataset.n_samples} samples, {self.dataset.n_features} features")
         
         # Estatísticas básicas
-        unique_labels, label_counts = torch.unique(self.y, return_counts=True)
-        for label, count in zip(unique_labels, label_counts):
-            logger.info(f"  Classe {label}: {count} samples ({count/len(self.y)*100:.1f}%)")
+        if self.y is not None:
+            unique_labels, label_counts = torch.unique(self.y, return_counts=True)
+            for label, count in zip(unique_labels, label_counts):
+                logger.info(f"    Classe {label}: {count} samples ({count/len(self.y)*100:.1f}%)")
+        else:
+            # Para datasets grandes, fazer amostragem para estatísticas
+            y_sample = torch.from_numpy(y[:1000])  # Amostra de 1000
+            unique_labels, label_counts = torch.unique(y_sample, return_counts=True)
+            logger.info("📈 Distribuição (amostra de 1000):")
+            for label, count in zip(unique_labels, label_counts):
+                logger.info(f"    Classe {label}: ~{count/10:.0f}% das amostras")
     
     def load_config(self, config_path: Optional[Path] = None) -> None:
         """
@@ -146,7 +176,10 @@ class MLPPipeline:
             
         else:
             logger.info("Usando configuração padrão")
-            input_size = self.X.shape[1] if self.X is not None else 100
+            # 🚀 NOVO: Usar dataset escalável para obter input_size
+            input_size = self.dataset.n_features if self.dataset is not None else (
+                self.X.shape[1] if self.X is not None else 100
+            )
             self.model_config = create_default_config(input_size)
             self.training_config = TrainingConfig()
         
@@ -154,20 +187,34 @@ class MLPPipeline:
                    f"Hidden: {self.model_config.hidden_layers}")
     
     def run_cross_validation(self, n_folds: int = 5) -> Dict[str, Any]:
-        """Executa cross-validation."""
-        if self.X is None or self.y is None:
+        """Executa cross-validation com sistema escalável."""
+        if self.dataset is None:
             raise ValueError("Dados não carregados. Use load_data() primeiro.")
         
-        logger.info(f"Executando cross-validation com {n_folds} folds")
+        logger.info(f"🔄 Executando cross-validation com {n_folds} folds")
         
-        # Usar função de conveniência
-        cv_results = quick_cross_validate(
-            model_config=self.model_config,
-            X=self.X,
-            y=self.y,
-            n_splits=n_folds,
-            device=self.device
-        )
+        # Para cross-validation, precisamos dos dados completos
+        # Se dataset for pequeno, usar dados na GPU
+        if self.X is not None and self.y is not None:
+            logger.info("📊 Usando dados em GPU para cross-validation")
+            cv_results = quick_cross_validate(
+                model_config=self.model_config,
+                X=self.X,
+                y=self.y,
+                n_splits=n_folds,
+                device=self.device
+            )
+        else:
+            # Dataset grande - usar amostragem para cross-validation
+            logger.info("📊 Dataset grande - usando dados completos (CPU → GPU sob demanda)")
+            X_full, y_full = self.dataset.get_full_data()
+            cv_results = quick_cross_validate(
+                model_config=self.model_config,
+                X=X_full,
+                y=y_full,
+                n_splits=n_folds,
+                device=self.device
+            )
         
         self.results["cross_validation"] = cv_results
         
@@ -213,52 +260,79 @@ class MLPPipeline:
         return best_model_config, best_training_config
     
     def train_final_model(self, train_ratio: float = 0.8, use_robust_split: bool = True) -> Dict[str, Any]:
-        """Treina modelo final usando divisão train/test robusta."""
-        if self.X is None or self.y is None:
+        """Treina modelo final usando sistema escalável de dados."""
+        if self.dataset is None:
             raise ValueError("Dados não carregados. Use load_data() primeiro.")
         
-        logger.info(f"Treinando modelo final - {train_ratio*100:.0f}% treino, "
+        logger.info(f"🚀 Treinando modelo final - {train_ratio*100:.0f}% treino, "
                    f"{(1-train_ratio)*100:.0f}% teste")
         
+        # 🚀 NOVO SISTEMA: Divisão escalável sem carregar tudo na GPU
         if use_robust_split:
-            # 🎯 DIVISÃO COM ESTRATIFICAÇÃO
             from .utils.train_test_split import TrainTestSplitter
             
-            splitter = TrainTestSplitter(random_state=42)
-            X_train, X_test, y_train, y_test = splitter.split(
-                self.X, self.y,
-                test_size=1-train_ratio,
-                stratify=True,
-                verbose=True
-            )
-            
-            logger.info(f"✅ Divisão realizada: {len(y_train)} treino, {len(y_test)} teste")
-            logger.info(f"📊 Classes treino: {torch.bincount(y_train)}")
-            logger.info(f"📊 Classes teste: {torch.bincount(y_test)}")
-            
+            # Se temos dados pequenos na GPU, usar método antigo
+            if self.X is not None and self.y is not None:
+                logger.info("📊 Usando divisão tradicional (dados pequenos)")
+                splitter = TrainTestSplitter(random_state=42)
+                X_train, X_test, y_train, y_test = splitter.split(
+                    self.X, self.y,
+                    test_size=1-train_ratio,
+                    stratify=True,
+                    verbose=True
+                )
+                
+                # Criar datasets tradicionais
+                from torch.utils.data import DataLoader, TensorDataset
+                train_dataset = TensorDataset(X_train, y_train)
+                test_dataset = TensorDataset(X_test, y_test)
+                
+            else:
+                # 🚀 DATASET GRANDE: Divisão por índices (escalável)
+                logger.info("📊 Usando divisão escalável (dataset grande)")
+                
+                # Obter índices de divisão
+                from sklearn.model_selection import train_test_split
+                n_samples = self.dataset.n_samples
+                indices = np.arange(n_samples)
+                
+                # Fazer split dos índices apenas
+                train_indices, test_indices = train_test_split(
+                    indices, 
+                    test_size=1-train_ratio, 
+                    random_state=42,
+                    shuffle=True
+                )
+                
+                logger.info(f"✅ Divisão por índices: {len(train_indices)} treino, {len(test_indices)} teste")
+                
+                # Criar subsets escaláveis
+                train_dataset = self.dataset.get_subset(train_indices)
+                test_dataset = self.dataset.get_subset(test_indices)
+        
         else:
-            # Divisão simples original (menos robusta)
-            n_samples = len(self.X)
-            n_train = int(n_samples * train_ratio)
-            
-            # Shuffle indices
-            indices = torch.randperm(n_samples)
-            train_indices = indices[:n_train]
-            test_indices = indices[n_train:]
-            
-            X_train = self.X[train_indices]
-            X_test = self.X[test_indices]
-            y_train = self.y[train_indices]
-            y_test = self.y[test_indices]
+            logger.warning("⚠️  Divisão simples não recomendada para datasets grandes")
+            # Para compatibilidade, mas pode causar OOM
+            if self.X is not None:
+                n_samples = len(self.X)
+                n_train = int(n_samples * train_ratio)
+                indices = torch.randperm(n_samples)
+                train_indices = indices[:n_train]
+                test_indices = indices[n_train:]
+                
+                from torch.utils.data import DataLoader, TensorDataset
+                train_dataset = TensorDataset(self.X[train_indices], self.y[train_indices])
+                test_dataset = TensorDataset(self.X[test_indices], self.y[test_indices])
+            else:
+                raise ValueError("Dados grandes requerem use_robust_split=True")
         
-        # Criar datasets com os dados já splitados
-        from torch.utils.data import DataLoader, TensorDataset
-        
-        train_dataset = TensorDataset(X_train, y_train)
-        test_dataset = TensorDataset(X_test, y_test)
-        
-        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+        # 🚀 CRIAR DATALOADERS ESCALÁVEIS
+        train_loader = self.data_manager.create_dataloader(
+            train_dataset, shuffle=True, batch_size=None  # batch_size automático
+        )
+        test_loader = self.data_manager.create_dataloader(
+            test_dataset, shuffle=False, batch_size=None
+        )
         
         # Criar e treinar modelo
         model = MLPEmbeddingClassifier(self.model_config)
@@ -278,10 +352,11 @@ class MLPPipeline:
         )
         trainer.setup_training(optimizer)
         
-        # Treinamento
+        # 🚀 TREINAMENTO ESCALÁVEL
+        logger.info("🔥 Iniciando treinamento escalável...")
         training_history = trainer.train(train_loader, test_loader)
         
-        # Avaliação final
+        # 🚀 AVALIAÇÃO FINAL ESCALÁVEL
         final_metrics = self.metrics_calculator.evaluate_model(
             model, test_loader, 
             amp_enabled=self.training_config.amp_enabled
@@ -292,8 +367,9 @@ class MLPPipeline:
             "model": model,
             "training_history": training_history,
             "test_metrics": final_metrics,
-            "train_size": len(train_indices),
-            "test_size": len(test_indices)
+            "train_size": len(train_dataset) if hasattr(train_dataset, '__len__') else "unknown",
+            "test_size": len(test_dataset) if hasattr(test_dataset, '__len__') else "unknown",
+            "memory_efficient": True  # Flag indicando uso de sistema escalável
         }
         
         self.results["final_model"] = final_results
