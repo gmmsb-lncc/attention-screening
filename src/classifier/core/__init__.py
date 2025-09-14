@@ -2,28 +2,32 @@
 
 from .trainer import ModelTrainer, TrainingConfig
 from .cross_validator import CrossValidator, CrossValidationConfig
-from .hyperopt import HyperparameterOptimizer, OptimizationConfig
+
+# Hyperopt movido para optional/
+try:
+    from ..optional.hyperopt import HyperparameterOptimizer, OptimizationConfig
+    HYPEROPT_AVAILABLE = True
+except ImportError:
+    HYPEROPT_AVAILABLE = False
 
 # Módulos opcionais com dependências externas
 try:
-    from .data_manager import DataManager, ScalableDataset, DatasetInfo
+    from .data_manager import DataManager, SimpleDataset, SimpleDataManager
     DATA_MANAGER_AVAILABLE = True
 except ImportError:
     DATA_MANAGER_AVAILABLE = False
 
-try:
-    from .memory_manager import MemoryManager, MemoryTracker, MemorySnapshot
-    MEMORY_MANAGER_AVAILABLE = True
-except ImportError:
-    MEMORY_MANAGER_AVAILABLE = False
+# Memory manager removido
+MEMORY_MANAGER_AVAILABLE = False
 
 __all__ = [
     'ModelTrainer', 'TrainingConfig',
-    'CrossValidator', 'CrossValidationConfig',
-    'HyperparameterOptimizer', 'OptimizationConfig'
+    'CrossValidator', 'CrossValidationConfig'
 ]
 
-# Adicionar módulos opcionais se disponíveis
+# Adicionar hyperopt se disponível
+if HYPEROPT_AVAILABLE:
+    __all__.extend(['HyperparameterOptimizer', 'OptimizationConfig'])
 if DATA_MANAGER_AVAILABLE:
     __all__.extend(['DataManager', 'ScalableDataset', 'DatasetInfo'])
 
