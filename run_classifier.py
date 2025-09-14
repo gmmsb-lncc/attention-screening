@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 # Configuração do path
-project_root = Path(__file__).parent.parent.absolute()
+project_root = Path(__file__).parent.absolute()  # Este script está na raiz do projeto
 classifier_path = project_root / "src" / "classifier"
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(classifier_path))
