@@ -17,8 +17,8 @@ import os
 # Adiciona o diretório src/classifier ao path para imports absolutos
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from src.classifier.utils.metrics import MetricsCalculator, ClassificationMetrics
-from src.classifier.models.base_model import BaseClassifier
+from utils.metrics import MetricsCalculator, ClassificationMetrics
+from models.base_model import BaseClassifier
 
 logger = logging.getLogger(__name__)
 
