@@ -29,9 +29,44 @@ from datetime import datetime
 import warnings
 
 # Imports locais
-from ..config.mlp_config import MLPConfig
-from ..core.trainer import TrainingConfig
-from .device_manager import SmartDeviceManager
+try:
+    from ..config.mlp_config import MLPConfig
+    from ..core.trainer import TrainingConfig
+    from .device_manager import SmartDeviceManager
+except ImportError:
+    # Fallback para execução direta - usar only the essentials
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent))
+    from config.mlp_config import MLPConfig
+    from dataclasses import dataclass
+    from typing import Optional
+    
+    # Definir TrainingConfig localmente se não conseguir importar
+    @dataclass
+    class TrainingConfig:
+        max_epochs: int = 100
+        patience: int = 10
+        min_delta: float = 1e-4
+        use_scheduler: bool = True
+        scheduler_factor: float = 0.5
+        scheduler_patience: int = 5
+        scheduler_min_lr: float = 1e-6
+        amp_enabled: bool = False
+        amp_dtype: Optional[Any] = None
+        gradient_clip_value: Optional[float] = None
+        gradient_clip_norm: Optional[float] = None
+        log_interval: int = 10
+        save_best_model: bool = True
+        save_checkpoint_interval: Optional[int] = None
+        monitor_metric: str = "roc_auc"
+        monitor_mode: str = "max"
+        validate_every: int = 1
+    
+    try:
+        from device_manager import SmartDeviceManager
+    except ImportError:
+        SmartDeviceManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +194,62 @@ class UnifiedConfig:
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.now()
+    
+    def to_dict(self) -> dict:
+        """Converte configuração unificada para dicionário."""
+        from dataclasses import asdict
+        
+        # Usar asdict para conversão automática
+        result = asdict(self)
+        
+        # Converter datetime para string
+        if result.get('created_at'):
+            result['created_at'] = self.created_at.isoformat()
+        
+        return result
+    
+    @classmethod
+    def from_dict(cls, config_dict: dict) -> 'UnifiedConfig':
+        """Cria configuração unificada a partir de dicionário."""
+        from datetime import datetime
+        
+        # Processar model
+        model_config = MLPConfig.from_dict(config_dict.get('model', {}))
+        
+        # Processar training
+        training_data = config_dict.get('training', {})
+        training_config = TrainingConfig(**training_data)
+        
+        # Processar data
+        data_data = config_dict.get('data', {})
+        data_config = DataConfig(**data_data)
+        
+        # Processar device
+        device_data = config_dict.get('device', {})
+        device_config = DeviceConfig(**device_data)
+        
+        # Processar logging
+        logging_data = config_dict.get('logging', {})
+        logging_config = LoggingConfig(**logging_data)
+        
+        # Processar datetime
+        created_at = None
+        if config_dict.get('created_at'):
+            created_at = datetime.fromisoformat(config_dict['created_at'])
+        
+        return cls(
+            model=model_config,
+            training=training_config,
+            data=data_config,
+            device=device_config,
+            logging=logging_config,
+            name=config_dict.get('name', 'default'),
+            description=config_dict.get('description', ''),
+            version=config_dict.get('version', '1.0.0'),
+            created_at=created_at,
+            tags=config_dict.get('tags', []),
+            profile=config_dict.get('profile', 'development')
+        )
 
 
 class ConfigValidator:
@@ -419,7 +510,7 @@ class ConfigTemplateManager:
 class AutoConfigurator:
     """Sistema de auto-configuração baseado em dados e recursos."""
     
-    def __init__(self, device_manager: Optional[SmartDeviceManager] = None):
+    def __init__(self, device_manager: Optional[Any] = None):
         self.device_manager = device_manager or SmartDeviceManager()
     
     def auto_configure(self, 
@@ -612,7 +703,7 @@ class ConfigManager:
     """Gerenciador centralizado de configurações."""
     
     def __init__(self, 
-                 device_manager: Optional[SmartDeviceManager] = None,
+                 device_manager: Optional[Any] = None,
                  auto_validate: bool = True):
         self.validator = ConfigValidator()
         self.template_manager = ConfigTemplateManager()
