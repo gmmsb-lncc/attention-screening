@@ -26,17 +26,14 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-# Adiciona o diretório correto ao path
-sys.path.insert(0, os.path.dirname(__file__))
-
-# Imports locais
-from config.mlp_config import MLPConfig, create_default_config
-from models.mlp import MLPEmbeddingClassifier
-from core.trainer import ModelTrainer, TrainingConfig
-from core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
-from core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
-from utils.data_validation import DataValidator
-from utils.metrics import MetricsCalculator
+# Imports locais com imports relativos
+from .config.mlp_config import MLPConfig, create_default_config
+from .models.mlp import MLPEmbeddingClassifier
+from .core.trainer import ModelTrainer, TrainingConfig
+from .core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
+from .core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
+from .utils.data_validation import DataValidator
+from .utils.metrics import MetricsCalculator
 
 # Configuração de logging
 logging.basicConfig(
@@ -215,29 +212,50 @@ class MLPPipeline:
         
         return best_model_config, best_training_config
     
-    def train_final_model(self, train_ratio: float = 0.8) -> Dict[str, Any]:
-        """Treina modelo final usando toda a base de dados."""
+    def train_final_model(self, train_ratio: float = 0.8, use_robust_split: bool = True) -> Dict[str, Any]:
+        """Treina modelo final usando divisão train/test robusta."""
         if self.X is None or self.y is None:
             raise ValueError("Dados não carregados. Use load_data() primeiro.")
         
         logger.info(f"Treinando modelo final - {train_ratio*100:.0f}% treino, "
                    f"{(1-train_ratio)*100:.0f}% teste")
         
-        # Divisão treino/teste
-        n_samples = len(self.X)
-        n_train = int(n_samples * train_ratio)
+        if use_robust_split:
+            # 🎯 DIVISÃO COM ESTRATIFICAÇÃO
+            from .utils.train_test_split import TrainTestSplitter
+            
+            splitter = TrainTestSplitter(random_state=42)
+            X_train, X_test, y_train, y_test = splitter.split(
+                self.X, self.y,
+                test_size=1-train_ratio,
+                stratify=True,
+                verbose=True
+            )
+            
+            logger.info(f"✅ Divisão realizada: {len(y_train)} treino, {len(y_test)} teste")
+            logger.info(f"📊 Classes treino: {torch.bincount(y_train)}")
+            logger.info(f"📊 Classes teste: {torch.bincount(y_test)}")
+            
+        else:
+            # Divisão simples original (menos robusta)
+            n_samples = len(self.X)
+            n_train = int(n_samples * train_ratio)
+            
+            # Shuffle indices
+            indices = torch.randperm(n_samples)
+            train_indices = indices[:n_train]
+            test_indices = indices[n_train:]
+            
+            X_train = self.X[train_indices]
+            X_test = self.X[test_indices]
+            y_train = self.y[train_indices]
+            y_test = self.y[test_indices]
         
-        # Shuffle indices
-        indices = torch.randperm(n_samples)
-        train_indices = indices[:n_train]
-        test_indices = indices[n_train:]
+        # Criar datasets com os dados já splitados
+        from torch.utils.data import DataLoader, TensorDataset
         
-        # Criar datasets
-        from torch.utils.data import DataLoader, TensorDataset, Subset
-        
-        full_dataset = TensorDataset(self.X, self.y)
-        train_dataset = Subset(full_dataset, train_indices.tolist())
-        test_dataset = Subset(full_dataset, test_indices.tolist())
+        train_dataset = TensorDataset(X_train, y_train)
+        test_dataset = TensorDataset(X_test, y_test)
         
         train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
