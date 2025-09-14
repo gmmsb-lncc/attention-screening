@@ -170,7 +170,7 @@
 ✅ Sistema está pronto para uso por outros usuários
 ✅ Documentação completa disponível em GUIA_USUARIO.md
 ✅ Setup automático disponível via setup_completo.py
-✅ Validação final pode ser executada via validacao_final.py
+✅ Validação final pode ser executada via test/validacao_final.py
 
 =============================================================================
 🏆 CONCLUSÃO
