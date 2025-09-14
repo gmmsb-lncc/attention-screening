@@ -1,52 +1,56 @@
 """
-Data Manager Simplificado - REPLICANDO EXATAMENTE O ORIGINAL classifier.py
+Data Manager Simplificado - Apenas o essencial para MLP
 """
 import torch
 import numpy as np
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import Dataset, DataLoader
 from typing import Optional, Tuple
 from sklearn.model_selection import train_test_split
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Definir exportações explicitamente
+__all__ = ['Dataset', 'SimpleDataManager', 'DataManager', 'ScalableDataset', 'SimpleDataset']
+
+
+class Dataset(torch.utils.data.Dataset):
+    """Dataset PyTorch simples para dados de classificação."""
+    
+    def __init__(self, X: np.ndarray, y: np.ndarray):
+        """
+        Args:
+            X: Features (N, D)
+            y: Labels (N,)
+        """
+        self.X = torch.FloatTensor(X)
+        self.y = torch.LongTensor(y)
+        self.n_samples, self.n_features = X.shape
+        
+        logger.info(f"Dataset criado: {self.n_samples} amostras, {self.n_features} features")
+    
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
 
 class SimpleDataManager:
-    """Data manager replicando exatamente o comportamento do classifier.py original."""
+    """Data manager minimalista - foco apenas na funcionalidade essencial."""
     
     def __init__(self):
-        logger.info("DataManager simplificado inicializado (modo compatibilidade classifier.py)")
+        logger.info("DataManager simplificado inicializado")
     
-    def create_dataset_from_arrays(self, X, y) -> TensorDataset:
-        """Cria TensorDataset exatamente como no classifier.py original."""
-        # REPLICAR EXATAMENTE O COMPORTAMENTO ORIGINAL:
-        # Aceitar tanto numpy arrays quanto tensors
-        if isinstance(X, torch.Tensor):
-            X_tensor = X.to(torch.float32)
-        else:
-            X_tensor = torch.from_numpy(X.copy()).to(torch.float32)
-            
-        if isinstance(y, torch.Tensor):
-            y_tensor = y.to(torch.float32)
-            if len(y_tensor.shape) == 1:
-                y_tensor = y_tensor.unsqueeze(1)
-        else:
-            y_tensor = torch.as_tensor(y, dtype=torch.float32).unsqueeze(1)  # ← CHAVE: (N,1)
-        
-        logger.info(f"TensorDataset criado: X={X_tensor.shape}, y={y_tensor.shape}")
-        return TensorDataset(X_tensor, y_tensor)
+    def create_dataset(self, X: np.ndarray, y: np.ndarray) -> Dataset:
+        """Cria dataset a partir de arrays numpy."""
+        return Dataset(X, y)
     
-    def create_dataloader(self, dataset: TensorDataset, 
+    def create_dataloader(self, dataset: Dataset, 
                          batch_size: int = 32, 
                          shuffle: bool = True) -> DataLoader:
-        """Cria DataLoader exatamente como no original."""
-        return DataLoader(
-            dataset, 
-            batch_size=batch_size, 
-            shuffle=shuffle,
-            pin_memory=False,  # Simplificado
-            num_workers=0,     # Sem workers para evitar problemas
-        )
+        """Cria DataLoader para treinamento."""
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     
     def train_test_split(self, X: np.ndarray, y: np.ndarray, 
                         test_size: float = 0.2, 
@@ -54,16 +58,9 @@ class SimpleDataManager:
         """Divide dados em treino e teste."""
         return train_test_split(X, y, test_size=test_size, 
                                random_state=random_state, stratify=y)
-    
-    def load_from_arrays(self, X: np.ndarray, y: np.ndarray, 
-                        batch_size: int = 32, 
-                        shuffle: bool = True) -> Tuple[TensorDataset, DataLoader]:
-        """Carrega dados de arrays e cria dataset + dataloader compatível."""
-        dataset = self.create_dataset_from_arrays(X, y)
-        dataloader = self.create_dataloader(dataset, batch_size, shuffle)
-        return dataset, dataloader
 
 
-# Manter aliases para compatibilidade
+# Para compatibilidade com código existente
 DataManager = SimpleDataManager
-ScalableDataset = TensorDataset  # Usar TensorDataset nativo
+ScalableDataset = Dataset
+SimpleDataset = Dataset  # Alias para compatibilidade

@@ -12,10 +12,16 @@ except ImportError:
 
 # Módulos opcionais com dependências externas
 try:
-    from .data_manager import DataManager, SimpleDataset, SimpleDataManager
+    from .data_manager import DataManager, SimpleDataManager, Dataset
     DATA_MANAGER_AVAILABLE = True
 except ImportError:
-    DATA_MANAGER_AVAILABLE = False
+    try:
+        from .data_manager import DataManager, SimpleDataManager
+        # Dataset pode não estar disponível em versões antigas
+        from .data_manager import ScalableDataset as Dataset
+        DATA_MANAGER_AVAILABLE = True
+    except ImportError:
+        DATA_MANAGER_AVAILABLE = False
 
 # Memory manager removido
 MEMORY_MANAGER_AVAILABLE = False
