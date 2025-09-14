@@ -34,7 +34,7 @@ echo "Environment activated successfully!"
 
 # Run the post-install script
 echo "Downloading required model files..."
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."  # Go to project root
 python scripts/post_install.py
 
 if [ $? -ne 0 ]; then
