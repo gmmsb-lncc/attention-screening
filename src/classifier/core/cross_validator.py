@@ -20,14 +20,12 @@ from pathlib import Path
 import sys
 import os
 
-# Adiciona o diretório src/classifier ao path para imports absolutos
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from models.base_model import BaseClassifier
-from core.trainer import ModelTrainer, TrainingConfig
-from utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
-from utils.data_validation import DataValidator
-from config.mlp_config import MLPConfig
+# Imports relativos
+from ..models.base_model import BaseClassifier
+from .trainer import ModelTrainer, TrainingConfig
+from ..utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
+from ..utils.data_validation import DataValidator
+from ..config.mlp_config import MLPConfig
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +424,7 @@ def quick_cross_validate(
     """
     Função de conveniência para CV rápido com configurações padrão.
     """
-    from models.mlp import MLPEmbeddingClassifier
+    from ..models.mlp import MLPEmbeddingClassifier
     
     # Configurações padrão
     cv_config = CrossValidationConfig(n_splits=n_splits)
