@@ -60,6 +60,25 @@ class MLPConfig:
         """Retorna resumo da arquitetura."""
         layers = [self.input_size] + self.hidden_layers + [self.output_size]
         return " -> ".join(str(size) for size in layers)
+    
+    def to_dict(self) -> dict:
+        """Converte configuração para dicionário."""
+        return {
+            'input_size': self.input_size,
+            'hidden_layers': self.hidden_layers,
+            'output_size': self.output_size,
+            'activation': self.activation,
+            'dropout_rate': self.dropout_rate,
+            'use_batch_norm': self.use_batch_norm,
+            'learning_rate': self.learning_rate,
+            'weight_decay': self.weight_decay,
+            'amp_enabled': self.amp_enabled
+        }
+    
+    @classmethod
+    def from_dict(cls, config_dict: dict) -> 'MLPConfig':
+        """Cria configuração a partir de dicionário."""
+        return cls(**config_dict)
 
 
 def create_default_config(input_size: int = 1024) -> MLPConfig:

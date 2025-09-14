@@ -2,7 +2,7 @@
 torchrun \
     --standalone \
     --nnodes=1 \
-    --nproc-per-node=1 \
+    --nproc_per_node=1 \
     train_model_ED.py \
         --device cuda \
         --n_batch 128 \

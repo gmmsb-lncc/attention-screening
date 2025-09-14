@@ -30,7 +30,7 @@ If you prefer to set up manually:
    python scripts/post_install.py
    ```
 
-This script downloads the necessary files to `./materials/model_files/` directory:
+This script downloads the necessary files to `./FM4M/model_files/` directory:
 - `bert_vocab_curated.txt` - Vocabulary file for tokenization
 - `smi-ted-Light_40.pt` - Pre-trained SMI-TED model weights
 
@@ -39,7 +39,7 @@ This script downloads the necessary files to `./materials/model_files/` director
 The model loading functions have been modified to use local files when available:
 
 ```python
-def load_smi_ted(folder="./materials/model_files", ...):
+def load_smi_ted(folder="./FM4M/model_files", ...):
     # Use local files instead of downloading from Hugging Face
     vocab_path = os.path.join(folder, vocab_filename)
     ckpt_path = os.path.join(folder, ckpt_filename)
@@ -91,6 +91,6 @@ This should output "All tests passed! Models are working correctly."
 
 ## Additional Notes
 
-- The downloaded files are stored in `/home/leon/docktkinase/materials/model_files/`
+- The downloaded files are stored in `/home/leon/docktkinase/FM4M/model_files/`
 - If you need to update the models, simply delete the files in the `model_files` directory and run the post-install script again
 - The retry logic will automatically handle temporary rate limiting issues if they occur

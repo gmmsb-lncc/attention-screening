@@ -1,0 +1,236 @@
+INFO:src.classifier.utils.device_manager:🔍 DeviceValidator inicializado
+INFO:src.classifier.utils.device_manager:   • Memória GPU mínima: 1.0GB
+INFO:src.classifier.utils.device_manager:   • Benchmark ativo: False
+INFO:src.classifier.utils.config_manager:🔧 ConfigManager inicializado
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.device_manager:🔍 DeviceValidator inicializado
+INFO:src.classifier.utils.device_manager:   • Memória GPU mínima: 1.0GB
+INFO:src.classifier.utils.device_manager:   • Benchmark ativo: False
+INFO:src.classifier.utils.config_manager:🔧 ConfigManager inicializado
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'production'
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'research'
+INFO:src.classifier.utils.device_manager:🔍 DeviceValidator inicializado
+INFO:src.classifier.utils.device_manager:   • Memória GPU mínima: 1.0GB
+INFO:src.classifier.utils.device_manager:   • Benchmark ativo: False
+INFO:src.classifier.utils.config_manager:🔧 ConfigManager inicializado
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.device_manager:🔍 DeviceValidator inicializado
+INFO:src.classifier.utils.device_manager:   • Memória GPU mínima: 1.0GB
+INFO:src.classifier.utils.device_manager:   • Benchmark ativo: False
+INFO:src.classifier.utils.config_manager:🔧 ConfigManager inicializado
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.config_manager:🔧 Iniciando auto-configuração...
+INFO:src.classifier.utils.device_manager:🔍 Detectando devices disponíveis...
+INFO:src.classifier.utils.device_manager:🔍 CUDA não disponível
+INFO:src.classifier.utils.device_manager:🔍 Resumo de devices (2 encontrados):
+INFO:src.classifier.utils.device_manager:   1. Apple Metal Performance Shaders (mps) - ✅ RECOMENDADO
+WARNING:src.classifier.utils.device_manager:      ⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.device_manager:   2. CPU (arm) (cpu) | 16.0GB - 💡 disponível
+INFO:src.classifier.utils.device_manager:✅ Device selecionado: Apple Metal Performance Shaders (mps)
+WARNING:src.classifier.utils.device_manager:⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.config_manager:   🔧 Device auto-configurado para: Apple Metal Performance Shaders
+INFO:src.classifier.utils.config_manager:   📊 Dados auto-configurados: 500 samples → batch_size=32
+INFO:src.classifier.utils.config_manager:   🧠 Modelo auto-configurado: 20 features → [64, 32]
+INFO:src.classifier.utils.config_manager:   🎯 Treinamento auto-configurado: lr=5.00e-04
+INFO:src.classifier.utils.config_manager:   💾 Memória auto-configurada: 2.0GB → batch_size=32
+INFO:src.classifier.utils.config_manager:✅ Auto-configuração concluída
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.config_manager:🔧 Iniciando auto-configuração...
+INFO:src.classifier.utils.device_manager:🔍 Detectando devices disponíveis...
+INFO:src.classifier.utils.device_manager:🔍 CUDA não disponível
+INFO:src.classifier.utils.device_manager:🔍 Resumo de devices (2 encontrados):
+INFO:src.classifier.utils.device_manager:   1. Apple Metal Performance Shaders (mps) - ✅ RECOMENDADO
+WARNING:src.classifier.utils.device_manager:      ⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.device_manager:   2. CPU (arm) (cpu) | 16.0GB - 💡 disponível
+INFO:src.classifier.utils.device_manager:✅ Device selecionado: Apple Metal Performance Shaders (mps)
+WARNING:src.classifier.utils.device_manager:⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.config_manager:   🔧 Device auto-configurado para: Apple Metal Performance Shaders
+INFO:src.classifier.utils.config_manager:   📊 Dados auto-configurados: 10000 samples → batch_size=32
+INFO:src.classifier.utils.config_manager:   🧠 Modelo auto-configurado: 100 features → [128, 64, 32]
+INFO:src.classifier.utils.config_manager:   🎯 Treinamento auto-configurado: lr=1.00e-03
+INFO:src.classifier.utils.config_manager:   💾 Memória auto-configurada: 8.0GB → batch_size=32
+INFO:src.classifier.utils.config_manager:✅ Auto-configuração concluída
+INFO:src.classifier.utils.config_manager:✅ Configuração criada baseada no template 'development'
+INFO:src.classifier.utils.config_manager:🔧 Iniciando auto-configuração...
+INFO:src.classifier.utils.device_manager:🔍 Detectando devices disponíveis...
+INFO:src.classifier.utils.device_manager:🔍 CUDA não disponível
+INFO:src.classifier.utils.device_manager:🔍 Resumo de devices (2 encontrados):
+INFO:src.classifier.utils.device_manager:   1. Apple Metal Performance Shaders (mps) - ✅ RECOMENDADO
+WARNING:src.classifier.utils.device_manager:      ⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.device_manager:   2. CPU (arm) (cpu) | 16.0GB - 💡 disponível
+INFO:src.classifier.utils.device_manager:✅ Device selecionado: Apple Metal Performance Shaders (mps)
+WARNING:src.classifier.utils.device_manager:⚠️  MPS é experimental - pode haver incompatibilidades
+INFO:src.classifier.utils.config_manager:   🔧 Device auto-configurado para: Apple Metal Performance Shaders
+INFO:src.classifier.utils.config_manager:   📊 Dados auto-configurados: 100000 samples → batch_size=32
+INFO:src.classifier.utils.config_manager:   🧠 Modelo auto-configurado: 500 features → [256, 128, 64]
+INFO:src.classifier.utils.config_manager:   🎯 Treinamento auto-configurado: lr=1.00e-03
+INFO:src.classifier.utils.config_manager:   💾 Memória auto-configurada: 16.0GB → batch_size=32
+INFO:src.classifier.utils.config_manager:✅ Auto-configuração concluída
+INFO:src.classifier.utils.device_manager:🔍 DeviceValidator inicializado
+INFO:src.classifier.utils.device_manager:   • Memória GPU mínima: 1.0GB
+INFO:src.classifier.utils.device_manager:   • Benchmark ativo: False
+INFO:src.classifier.utils.config_manager:🔧 ConfigManager inicializado
+Traceback (most recent call last):
+  File "/Users/sulfierry/docktkinase/exemplo_config_management.py", line 444, in main
+    exemplo_serializacao()
+  File "/Users/sulfierry/docktkinase/exemplo_config_management.py", line 184, in exemplo_serializacao
+    config = config_manager.create_config(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sulfierry/docktkinase/src/classifier/utils/config_manager.py", line 647, in create_config
+    config = self._apply_overrides(base_config, overrides)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sulfierry/docktkinase/src/classifier/utils/config_manager.py", line 825, in _apply_overrides
+    return self._dict_to_config(config_dict)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sulfierry/docktkinase/src/classifier/utils/config_manager.py", line 849, in _dict_to_config
+    components['model'] = MLPConfig.from_dict(data['model'])
+                          ^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'MLPConfig' has no attribute 'from_dict'
+🚀 SISTEMA DE CONFIGURAÇÃO CENTRALIZADA - PONTO 3
+Demonstrações das funcionalidades implementadas
+============================================================
+
+============================================================
+📋 RELATÓRIO DO SISTEMA DE CONFIGURAÇÃO
+============================================================
+🔧 ConfigManager:
+   • Templates disponíveis: 3
+   • Auto-validação: True
+
+📋 Templates predefinidos:
+   • development:
+     - Profile: development
+     - Descrição: Configuração para desenvolvimento e debug
+     - Tags: ['dev', 'debug']
+     - Modelo: [128, 64, 32]
+     - Batch: 32
+   • production:
+     - Profile: production
+     - Descrição: Configuração otimizada para produção
+     - Tags: ['prod', 'optimized']
+     - Modelo: [256, 128, 64]
+     - Batch: 64
+   • research:
+     - Profile: research
+     - Descrição: Configuração para experimentos de pesquisa
+     - Tags: ['research', 'experiments']
+     - Modelo: [512, 256, 128, 64]
+     - Batch: 128
+
+🔍 Componentes de configuração:
+   • MLPConfig: 9 campos
+   • TrainingConfig: 17 campos
+   • DataConfig: 19 campos
+   • DeviceConfig: 12 campos
+   • LoggingConfig: 17 campos
+
+🚀 Funcionalidades:
+   ✅ Templates predefinidos (development/production/research)
+   ✅ Validação robusta com errors e warnings
+   ✅ Auto-configuração baseada em dados e recursos
+   ✅ Serialização JSON/YAML/TOML
+   ✅ Overrides com dot notation
+   ✅ Integração completa com MLPPipeline
+   ✅ Interface CLI atualizada
+   ✅ Logging configurável
+   ✅ Versionamento e metadata
+
+============================================================
+📋 EXEMPLO 1: Templates Predefinidos
+============================================================
+📋 Templates disponíveis: ['development', 'production', 'research']
+
+🔧 Template: development
+   • Profile: development
+   • Descrição: Configuração para desenvolvimento e debug
+   • Tags: ['dev', 'debug']
+   • Modelo: [128, 64, 32]
+   • Batch size: 32
+   • Learning rate: 1.00e-03
+   • Max epochs: 50
+   • Device: auto
+   • Logging level: DEBUG
+
+🔧 Template: production
+   • Profile: production
+   • Descrição: Configuração otimizada para produção
+   • Tags: ['prod', 'optimized']
+   • Modelo: [256, 128, 64]
+   • Batch size: 64
+   • Learning rate: 1.00e-03
+   • Max epochs: 200
+   • Device: auto
+   • Logging level: INFO
+
+🔧 Template: research
+   • Profile: research
+   • Descrição: Configuração para experimentos de pesquisa
+   • Tags: ['research', 'experiments']
+   • Modelo: [512, 256, 128, 64]
+   • Batch size: 128
+   • Learning rate: 1.00e-03
+   • Max epochs: 500
+   • Device: fastest
+   • Logging level: INFO
+
+============================================================
+🔍 EXEMPLO 2: Validação de Configurações
+============================================================
+
+✅ Testando configuração válida:
+   Válida: True
+   Errors: 0
+   Warnings: 0
+
+❌ Testando configuração inválida:
+   Válida: False
+   Errors: 2
+      - dropout_rate deve estar em [0, 1)
+      - max_nan_ratio deve estar em [0, 1]
+   Warnings: 0
+
+============================================================
+🔧 EXEMPLO 3: Auto-Configuração
+============================================================
+
+📊 Dataset Pequeno:
+   • Samples: 500
+   • Features: 20
+   • Classes: 2
+   • Memory: 2.0GB
+   🔧 Auto-configurado:
+      • Modelo: [64, 32]
+      • Dropout: 0.40
+      • Batch size: 32
+      • LR: 5.00e-04
+      • Lazy loading: True
+
+📊 Dataset Médio:
+   • Samples: 10,000
+   • Features: 100
+   • Classes: 5
+   • Memory: 8.0GB
+   🔧 Auto-configurado:
+      • Modelo: [128, 64, 32]
+      • Dropout: 0.30
+      • Batch size: 32
+      • LR: 1.00e-03
+      • Lazy loading: False
+
+📊 Dataset Grande:
+   • Samples: 100,000
+   • Features: 500
+   • Classes: 10
+   • Memory: 16.0GB
+   🔧 Auto-configurado:
+      • Modelo: [256, 128, 64]
+      • Dropout: 0.30
+      • Batch size: 32
+      • LR: 1.00e-03
+      • Lazy loading: False
+
+============================================================
+💾 EXEMPLO 4: Serialização e Load/Save
+============================================================
+❌ Erro na execução dos exemplos: type object 'MLPConfig' has no attribute 'from_dict'

@@ -32,8 +32,8 @@ OUTPUT_FOLDER_NAME = "non_human"
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Executável Python a ser usado nos subprocessos
-# Use the docktkinase conda environment directly
-PYTHON_EXECUTABLE = '/home/leon/miniconda3/envs/docktkinase/bin/python'
+# Detecta automaticamente o executável Python do ambiente atual
+PYTHON_EXECUTABLE = sys.executable
 
 # PYTHONPATH extra (se necessário)
 PYTHONPATH_EXTRA = ""

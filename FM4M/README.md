@@ -23,7 +23,7 @@ Some of these uni-modal models can be "late-fused" using fusion algorithms, crea
 The structure of IBM's materials family of foundation models is organized as follows:
 
 ```
-materials/
+FM4M/
 ├── models/
     ├── smi_ted/
     ├── smi_ssed/

@@ -32,8 +32,8 @@ __pycache__/
 humans/
 non_humans/
 
-# Materials - exclude large model files but keep structure
-materials/models/*/model_files/
-materials/data/
-materials/examples/*.ipynb
-materials/img/test.py
+# FM4M - exclude large model files but keep structure
+FM4M/models/*/model_files/
+FM4M/data/
+FM4M/examples/*.ipynb
+FM4M/img/test.py
