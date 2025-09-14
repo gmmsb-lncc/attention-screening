@@ -13,11 +13,11 @@ from pathlib import Path
 
 def download_fm4m_model_files():
     """Download required FM4M model files with retry logic."""
-    # Get the materials directory
+    # Get the FM4M directory
     script_dir = Path(__file__).parent.absolute()
     project_dir = script_dir.parent
-    materials_dir = project_dir / "materials"
-    model_files_dir = materials_dir / "model_files"
+    fm4m_dir = project_dir / "FM4M"
+    model_files_dir = fm4m_dir / "model_files"
     
     # Create model_files directory if it doesn't exist
     model_files_dir.mkdir(parents=True, exist_ok=True)
@@ -110,11 +110,11 @@ def verify_downloads():
     try:
         print("\nVerifying downloaded model files...")
         
-        # Get the materials directory
+        # Get the FM4M directory
         script_dir = Path(__file__).parent.absolute()
         project_dir = script_dir.parent
-        materials_dir = project_dir / "materials"
-        model_files_dir = materials_dir / "model_files"
+        fm4m_dir = project_dir / "FM4M"
+        model_files_dir = fm4m_dir / "model_files"
         
         # Check if required FM4M files exist
         required_fm4m_files = [

@@ -6,10 +6,10 @@ Test script to verify that the SMI-TED model is working correctly with local fil
 import os
 import sys
 
-# Add materials directory to Python path
-materials_path = os.path.join(os.path.dirname(__file__), 'materials')
-sys.path.append(materials_path)
-sys.path.append(os.path.join(materials_path, 'models'))
+# Add FM4M directory to Python path
+fm4m_path = os.path.join(os.path.dirname(__file__), 'FM4M')
+sys.path.append(fm4m_path)
+sys.path.append(os.path.join(fm4m_path, 'models'))
 
 def test_smi_ted_model():
     """Test the SMI-TED model loading and inference."""
