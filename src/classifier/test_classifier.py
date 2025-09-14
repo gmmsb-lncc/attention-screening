@@ -40,11 +40,10 @@ def test_data_validation():
         from classifier import MLPEmbeddingPipeline, MLPConfig
         
         config = MLPConfig(
-            hidden_dim=128,
-            epochs=5,
-            batch_size=32,
-            cv_folds=3,
-            num_workers=0  # Para evitar problemas em testes
+            hidden_layers=[128],
+            max_epochs=5,
+            learning_rate=1e-3,
+            dropout_rate=0.3
         )
         
         pipeline = MLPEmbeddingPipeline(
@@ -96,12 +95,10 @@ def test_cross_validation():
         from classifier import MLPEmbeddingPipeline, MLPConfig
         
         config = MLPConfig(
-            hidden_dim=32,
-            epochs=2,  # Muito rápido para teste
-            batch_size=16,
-            cv_folds=3,
-            early_stopping_patience=1,
-            num_workers=0
+            hidden_layers=[32],
+            max_epochs=2,
+            learning_rate=1e-3,
+            dropout_rate=0.2
         )
         
         pipeline = MLPEmbeddingPipeline(
