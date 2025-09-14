@@ -52,7 +52,7 @@ docktkinase/
 │   │   ├── main.py             # Classifier entry point
 │   │   └── README.md           # Detailed classifier documentation
 │   ├── interface.py            # Pipeline interface and execution manager
-├── materials/                  # IBM FM4M models and dependencies
+├── FM4M/                       # IBM FM4M models and dependencies
 │   ├── model_files/            # Downloaded model files (created during setup)
 │   └── models/                 # Model implementations
 ├── non_human/                  # Default output directory
@@ -442,7 +442,7 @@ For major changes, please open an issue first to discuss what you would like to 
 **Setup Issues:**
 - Verify CUDA installation if using GPU
 - Ensure all conda dependencies are properly installed
-- Check model file downloads in `materials/model_files/`
+- Check model file downloads in `FM4M/model_files/`
 
 ### Performance Tips
 
