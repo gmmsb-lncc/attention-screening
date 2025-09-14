@@ -31,9 +31,9 @@ This tool is particularly valuable for researchers working on neglected tropical
 ```
 docktkinase/
 ├── docktkinase.py              # Main entry point and configuration
-├── setup.py                    # 🚀 Universal automated setup script (RECOMMENDED)
-├── setup_conda.sh              # Conda-specific setup script
+├── setup.sh                    # Automated setup script
 ├── scripts/                    # Setup and utility scripts
+│   ├── setup.sh                # Automated environment and model setup
 │   ├── post_install.py         # Model file downloading script
 │   └── post_install.sh         # Post-installation script
 ├── src/
@@ -100,42 +100,17 @@ The system integrates multiple components:
 
 ### Automated Setup (Recommended)
 
-#### Universal Setup (All Systems)
-Run the comprehensive Python setup script that works on any system:
+Run the automated setup script which will create the conda environment and download all required model files:
 
 ```bash
-python setup.py
+./setup.sh
 ```
 
 This script will:
-1. **Check system requirements** and Python version
-2. **Create virtual environment** (venv/virtualenv) or detect conda
-3. **Install all dependencies** with fallbacks for different systems
-4. **Download required model files** for both FM4M (ligands) and ESM (proteins)
-5. **Validate complete installation** including classifier dependencies
-6. **Create launcher scripts** for easy future use
-
-#### Conda-Specific Setup
-If you prefer conda and have it installed:
-
-```bash
-./setup_conda.sh
-```
-
-This conda-specific script will:
-1. Create the conda environment from `environment.yml`
+1. Create the conda environment from `environment.yml` (includes all ML dependencies)
 2. Activate the environment
-3. Download all required model files
-4. Basic installation verification
-
-### Which Setup Method to Choose?
-
-| Method | Best For | Advantages |
-|--------|----------|-----------|
-| **`python setup.py`** | **Most users, all systems** | ✅ Universal compatibility<br>✅ Robust error handling<br>✅ Complete validation<br>✅ Works on Windows/macOS/Linux |
-| **`./setup_conda.sh`** | Users with conda already installed | ✅ Fast and simple<br>✅ Uses existing conda environment<br>❌ Requires conda pre-installed |
-
-**💡 Recommendation:** Use `python setup.py` unless you specifically want conda management.
+3. Download all required model files for both FM4M (ligands) and ESM (proteins)
+4. Verify the installation (including classifier dependencies)
 
 ### Manual Setup
 

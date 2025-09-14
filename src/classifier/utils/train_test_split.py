@@ -146,8 +146,8 @@ class TrainTestSplitter:
             logger.info(f"  📈 Treino: {len(X_train)} amostras")
             logger.info(f"  📊 Teste: {len(X_test)} amostras")  
             logger.info(f"  📉 Proporção real: {len(X_test)/(len(X_train)+len(X_test))*100:.1f}% teste")
-            logger.info(f"  🎯 Classes treino: {torch.bincount(y_train)}")
-            logger.info(f"  🎯 Classes teste: {torch.bincount(y_test)}")
+            logger.info(f"  🎯 Classes treino: {torch.bincount(y_train.long())}")
+            logger.info(f"  🎯 Classes teste: {torch.bincount(y_test.long())}")
         
         return X_train, X_test, y_train, y_test
     
