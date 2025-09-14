@@ -10,9 +10,9 @@ Módulos:
 - tests: Testes unitários e de integração
 
 Uso:
-    from classifier.config import MLPConfig
-    from classifier.models import MLPEmbeddingClassifier
-    from classifier.core import Trainer, CrossValidator
+    from .config.mlp_config import MLPConfig
+    from .models.mlp import MLPEmbeddingClassifier
+    from .core.trainer import ModelTrainer, CrossValidator
 """
 
 __version__ = "2.0.0"

@@ -26,17 +26,30 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-# Imports locais com imports relativos
-from .config.mlp_config import MLPConfig, create_default_config
-from .models.mlp import MLPEmbeddingClassifier
-from .core.trainer import ModelTrainer, TrainingConfig
-from .core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
-from .core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
-from .utils.data_validation import DataValidator
-from .utils.metrics import MetricsCalculator
-from .utils.data_manager import DataManager, ScalableDataset
-from .utils.device_manager import SmartDeviceManager
-from .utils.config_manager import ConfigManager, UnifiedConfig
+# Imports locais - compatível com execução direta e como módulo
+try:
+    from .config.mlp_config import MLPConfig, create_default_config
+    from .models.mlp import MLPEmbeddingClassifier
+    from .core.trainer import ModelTrainer, TrainingConfig
+    from .core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
+    from .core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
+    from .utils.data_validation import DataValidator
+    from .utils.metrics import MetricsCalculator
+    from .utils.data_manager import DataManager, ScalableDataset
+    from .utils.device_manager import SmartDeviceManager
+    from .utils.config_manager import ConfigManager, UnifiedConfig
+except ImportError:
+    # Fallback para execução direta
+    from config.mlp_config import MLPConfig, create_default_config
+    from models.mlp import MLPEmbeddingClassifier
+    from core.trainer import ModelTrainer, TrainingConfig
+    from core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
+    from core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
+    from utils.data_validation import DataValidator
+    from utils.metrics import MetricsCalculator
+    from utils.data_manager import DataManager, ScalableDataset
+    from utils.device_manager import SmartDeviceManager
+    from utils.config_manager import ConfigManager, UnifiedConfig
 
 # Configuração de logging
 logging.basicConfig(
