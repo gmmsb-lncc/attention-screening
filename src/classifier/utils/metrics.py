@@ -125,13 +125,18 @@ class MetricsCalculator:
                     # Garante dimensões corretas para BCE loss
                     if logits.dim() > 1 and logits.size(1) == 1:
                         logits = logits.squeeze(1)
-                    loss = criterion(logits, batch_y)
+                    # CORREÇÃO: Garantir que target também tenha shape correto
+                    if batch_y.dim() > 1 and batch_y.size(1) == 1:
+                        batch_y_squeezed = batch_y.squeeze(1)
+                    else:
+                        batch_y_squeezed = batch_y
+                    loss = criterion(logits, batch_y_squeezed)
                 
                 # Conversões para CPU
                 logits_cpu = logits.float().cpu()
                 probs_cpu = torch.sigmoid(logits_cpu)
                 preds_cpu = (probs_cpu >= 0.5).float()
-                labels_cpu = batch_y.float().cpu()
+                labels_cpu = batch_y_squeezed.float().cpu()
                 
                 # Coleta resultados
                 all_losses.append(loss.item())

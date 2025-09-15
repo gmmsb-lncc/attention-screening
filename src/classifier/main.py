@@ -32,22 +32,24 @@ try:
     from .models.mlp import MLPEmbeddingClassifier
     from .core.trainer import ModelTrainer, TrainingConfig
     from .core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
-    from .core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
+    from .optional.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
     from .utils.data_validation import DataValidator
     from .utils.metrics import MetricsCalculator
-    from .utils.data_manager import DataManager, ScalableDataset
+    from .core.data_manager import DataManager, ScalableDataset
     from .utils.device_manager import SmartDeviceManager
-    from .utils.config_manager import ConfigManager, UnifiedConfig
+    from .utils.config_manager import SimpleConfig, create_default_config as create_simple_config
 except ImportError:
     # Fallback para execução direta
     from config.mlp_config import MLPConfig, create_default_config
     from models.mlp import MLPEmbeddingClassifier
     from core.trainer import ModelTrainer, TrainingConfig
     from core.cross_validator import CrossValidator, CrossValidationConfig, quick_cross_validate
-    from core.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
+    from optional.hyperopt import HyperparameterOptimizer, OptimizationConfig, quick_hyperparameter_search
     from utils.data_validation import DataValidator
     from utils.metrics import MetricsCalculator
-    from utils.data_manager import DataManager, ScalableDataset
+    from core.data_manager import DataManager, ScalableDataset
+    from utils.device_manager import SmartDeviceManager
+    from utils.config_manager import SimpleConfig, create_default_config as create_simple_config
     from utils.device_manager import SmartDeviceManager
     from utils.config_manager import ConfigManager, UnifiedConfig
 
@@ -68,71 +70,56 @@ class MLPPipeline:
     """Pipeline completo para classificação MLP com gerenciamento centralizado de configurações."""
     
     def __init__(self, 
-                 config: Optional[UnifiedConfig] = None,
-                 config_template: str = "development",
                  # Manter compatibilidade com interface antiga
+                 config_template: Optional[str] = None,
                  device_requirement: Optional[str] = None,
                  enable_benchmarking: Optional[bool] = None,
                  min_gpu_memory_gb: Optional[float] = None,
                  **config_overrides):
         """
-        Inicializa pipeline com sistema de configuração centralizada.
+        Inicializa pipeline MLP simplificado.
         
         Args:
-            config: Configuração completa (opcional)
-            config_template: Template de configuração se config=None
+            config_template: Template de configuração
             device_requirement: [COMPATIBILIDADE] Requisito de device
             enable_benchmarking: [COMPATIBILIDADE] Benchmarking
             min_gpu_memory_gb: [COMPATIBILIDADE] Memória mínima GPU
             **config_overrides: Sobrescritas de configuração
         """
-        # 🚀 NOVO: Gerenciador centralizado de configurações
-        self.config_manager = ConfigManager()
+        # Armazenar configurações
+        self.config = type('Config', (), config_overrides)()  # Objeto dinâmico com os overrides
+        self.config_template = config_template
         
-        # Compatibilidade: converter parâmetros antigos em overrides
-        if device_requirement is not None:
-            config_overrides.setdefault('device.requirement', device_requirement)
-        if enable_benchmarking is not None:
-            config_overrides.setdefault('device.enable_benchmarking', enable_benchmarking)
-        if min_gpu_memory_gb is not None:
-            config_overrides.setdefault('device.min_gpu_memory_gb', min_gpu_memory_gb)
+        # Configurações serão criadas conforme necessário
+        self.model_config = None
+        self.training_config = None
         
-        # Criar ou usar configuração fornecida
-        if config is not None:
-            self.config = config
-            self.config_manager._current_config = config
-        else:
-            self.config = self.config_manager.create_config(
-                template=config_template,
-                **config_overrides
-            )
-        
-        # 🚀 NOVO: Gerenciador inteligente de device (usando config)
-        self.device_manager = SmartDeviceManager(
-            enable_benchmarking=self.config.device.enable_benchmarking,
-            min_gpu_memory_gb=self.config.device.min_gpu_memory_gb,
-            prefer_gpu=self.config.device.prefer_gpu
-        )
+        # 🚀 Gerenciador inteligente de device
+        self.device_manager = SmartDeviceManager()
         
         # Obter device otimizado
-        self.device = self.device_manager.get_device(self.config.device.requirement)
+        self.device = self.device_manager.get_device()
         
         # Log device selecionado
         device_info = self.device_manager.get_device_info()
         if device_info:
-            logger.info(f"🔧 Pipeline usando: {device_info.name} ({device_info.type})")
-            if device_info.warnings:
+            # Log reduzido")
+            if hasattr(device_info, 'warnings') and device_info.warnings:
                 for warning in device_info.warnings[:2]:
                     logger.warning(f"   ⚠️  {warning}")
         else:
-            logger.info(f"🔧 Pipeline usando: {self.device}")
+            # Device management simplificado
+            pass
         
         # Componentes do pipeline (usando configurações)
         self.data_validator = DataValidator()
         self.metrics_calculator = MetricsCalculator(device=self.device)
         
-        # 🚀 NOVO: Gerenciador de dados escalável (usando config)
-        self.data_manager = DataManager(device=self.device)
+        # 🚀 Gerenciador de configuração
+        self.config_manager = create_simple_config()
+        
+        # 🚀 Gerenciador de dados escalável
+        self.data_manager = DataManager()
         
         # Dados - agora usando sistema escalável
         self.dataset: Optional[ScalableDataset] = None
@@ -143,45 +130,18 @@ class MLPPipeline:
         self.X: Optional[torch.Tensor] = None
         self.y: Optional[torch.Tensor] = None
         
-        # Configurações individuais (extraídas da config unificada)
-        self.model_config: Optional[MLPConfig] = self.config.model
-        self.training_config: Optional[TrainingConfig] = self.config.training
+        # Configurações individuais (serão criadas conforme necessário)
+        # self.model_config e self.training_config já inicializados como None
         
         # Resultados
         self.results: Dict[str, Any] = {}
         
         logger.info(f"MLPPipeline inicializado - Device: {self.device}")
-        logger.info(f"   📋 Template: {self.config.name} ({self.config.profile})")
-        logger.info(f"   🔧 Modelo: {self.config.model.hidden_layers}")
-        logger.info(f"   🎯 Batch size: {self.config.data.batch_size}")
+        # Log detalhado reduzido
+        # Log detalhado reduzido
         
-        # Configurar logging baseado na config
-        self._configure_logging()
-    
-    def _configure_logging(self):
-        """Configura logging baseado na configuração."""
-        log_config = self.config.logging
-        
-        # Configurar level
-        numeric_level = getattr(logging, log_config.level.upper(), logging.INFO)
-        logger.setLevel(numeric_level)
-        
-        # Configurar handlers se necessário
-        if log_config.log_to_file:
-            # Verificar se já existe handler de arquivo
-            file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
-            if not file_handlers:
-                file_handler = logging.FileHandler(log_config.log_file)
-                file_handler.setLevel(getattr(logging, log_config.file_level.upper(), logging.DEBUG))
-                file_handler.setFormatter(logging.Formatter(
-                    fmt=log_config.format,
-                    datefmt=log_config.date_format
-                ))
-                logger.addHandler(file_handler)
-        
-        # Capturar warnings se necessário
-        if log_config.capture_warnings:
-            logging.captureWarnings(True)
+        # Logging simplificado sem config complexa
+        logger.setLevel(logging.INFO)
     
     def auto_configure_for_data(self, 
                                n_samples: int, 
@@ -195,21 +155,24 @@ class MLPPipeline:
             n_features: Número de features
             n_classes: Número de classes (opcional)
         """
-        logger.info("🔧 Iniciando auto-configuração baseada nos dados...")
+        # Log reduzido
         
         # Obter memória disponível
         device_info = self.device_manager.get_device_info()
         available_memory = None
-        if device_info and device_info.available_memory:
+        if device_info and isinstance(device_info, dict):
+            available_memory = device_info.get('available_memory')
+        elif device_info and hasattr(device_info, 'available_memory'):
             available_memory = device_info.available_memory
         
         # Auto-configurar
+        template = getattr(self.config, 'profile', None) or self.config_template or 'development'
         optimized_config = self.config_manager.auto_configure(
-            template=self.config.profile,
+            template=template,
             n_samples=n_samples,
             n_features=n_features, 
             n_classes=n_classes,
-            available_memory_gb=available_memory
+            available_memory=available_memory
         )
         
         # Atualizar configuração atual
@@ -217,23 +180,8 @@ class MLPPipeline:
         self.model_config = self.config.model
         self.training_config = self.config.training
         
-        # Recriar device manager se necessário
-        if (self.config.device.requirement != 
-            self.device_manager.validator.prefer_gpu or
-            self.config.device.min_gpu_memory_gb != 
-            self.device_manager.validator.min_gpu_memory_gb):
-            
-            self.device_manager = SmartDeviceManager(
-                enable_benchmarking=self.config.device.enable_benchmarking,
-                min_gpu_memory_gb=self.config.device.min_gpu_memory_gb,
-                prefer_gpu=self.config.device.prefer_gpu
-            )
-            self.device = self.device_manager.get_device(self.config.device.requirement)
-        
-        logger.info("✅ Auto-configuração concluída")
-        logger.info(f"   🧠 Modelo: {self.config.model.hidden_layers}")
-        logger.info(f"   🎯 Batch size: {self.config.data.batch_size}")
-        logger.info(f"   📈 LR: {self.config.training.learning_rate:.2e}")
+        # Log da auto-configuração concluída
+        logger.info(f"✅ Auto-configuração concluída: {template} template aplicado")
     
     def save_config(self, path: Union[str, Path], format: str = "json"):
         """
@@ -244,7 +192,7 @@ class MLPPipeline:
             format: Formato ("json", "yaml", "toml")
         """
         self.config_manager.save_config(self.config, path, format)
-        logger.info(f"📋 Configuração salva em: {path}")
+        # Log reduzido
     
     def load_config_file(self, path: Union[str, Path]):
         """
@@ -258,7 +206,7 @@ class MLPPipeline:
         # Reconfigurar componentes
         self._reconfigure_components()
         
-        logger.info(f"📋 Configuração carregada de: {path}")
+        # Log reduzido
     
     def _reconfigure_components(self):
         """Reconfigura componentes baseado na nova configuração."""
@@ -321,7 +269,7 @@ class MLPPipeline:
         
         # Carregar CSV
         df = pd.read_csv(data_path)
-        logger.info(f"📊 Dados carregados: {df.shape}")
+        # Log reduzido
         
         # Validar colunas
         if target_column not in df.columns:
@@ -350,7 +298,7 @@ class MLPPipeline:
         
         # 🚀 NOVO: Usar sistema escalável ao invés de carregar tudo na GPU
         self.dataset, self.dataloader = self.data_manager.load_from_arrays(
-            X, y, batch_size=batch_size, shuffle=True
+            X, y, batch_size=64, shuffle=True
         )
         
         # Para compatibilidade com código existente (deprecated)
@@ -364,11 +312,11 @@ class MLPPipeline:
             self.X = None
             self.y = None
         
-        logger.info(f"✅ Dados preparados: {self.dataset.n_samples} samples, {self.dataset.n_features} features")
+        logger.info(f"✅ Dados preparados: {len(self.dataset)} samples, {X.shape[1]} features")
         
         # 🚀 NOVO: Auto-configuração baseada nos dados carregados
-        n_samples = self.dataset.n_samples
-        n_features = self.dataset.n_features
+        n_samples = len(self.dataset)
+        n_features = X.shape[1]
         
         # Detectar número de classes
         n_classes = None
@@ -381,21 +329,18 @@ class MLPPipeline:
         
         # Executar auto-configuração se habilitada
         if hasattr(self.config, 'auto_configure') and getattr(self.config, 'auto_configure', True):
-            logger.info("🔧 Executando auto-configuração baseada nos dados...")
+            # Auto-configuração baseada nos dados
             self.auto_configure_for_data(n_samples, n_features, n_classes)
         
-        # Estatísticas básicas
+        # Estatísticas básicas (simplificadas)
         if self.y is not None:
             unique_labels, label_counts = torch.unique(self.y, return_counts=True)
-            for label, count in zip(unique_labels, label_counts):
-                logger.info(f"    Classe {label}: {count} samples ({count/len(self.y)*100:.1f}%)")
+            logger.info(f"Classes encontradas: {len(unique_labels)}")
         else:
             # Para datasets grandes, fazer amostragem para estatísticas
             y_sample = torch.from_numpy(y[:1000])  # Amostra de 1000
             unique_labels, label_counts = torch.unique(y_sample, return_counts=True)
-            logger.info("📈 Distribuição (amostra de 1000):")
-            for label, count in zip(unique_labels, label_counts):
-                logger.info(f"    Classe {label}: ~{count/10:.0f}% das amostras")
+            logger.info(f"Classes na amostra: {len(unique_labels)}")
     
     def load_config(self, config_path: Optional[Path] = None) -> None:
         """
@@ -420,12 +365,9 @@ class MLPPipeline:
             self.training_config = TrainingConfig(**training_config)
             
         else:
-            logger.info("Usando configuração padrão")
-            # 🚀 NOVO: Usar dataset escalável para obter input_size
-            input_size = self.dataset.n_features if self.dataset is not None else (
-                self.X.shape[1] if self.X is not None else 100
-            )
-            self.model_config = create_default_config(input_size)
+            logger.info("Usando configuração padrão com auto-detecção de dimensões")
+            # Usar auto-detecção sem especificar input_size
+            self.model_config = create_default_config()  # input_size=None por padrão
             self.training_config = TrainingConfig()
         
         logger.info(f"Configuração carregada - Input: {self.model_config.input_size}, "
@@ -441,7 +383,7 @@ class MLPPipeline:
         # Para cross-validation, precisamos dos dados completos
         # Se dataset for pequeno, usar dados na GPU
         if self.X is not None and self.y is not None:
-            logger.info("📊 Usando dados em GPU para cross-validation")
+            # Log reduzido
             cv_results = quick_cross_validate(
                 model_config=self.model_config,
                 X=self.X,
@@ -451,7 +393,7 @@ class MLPPipeline:
             )
         else:
             # Dataset grande - usar amostragem para cross-validation
-            logger.info("📊 Dataset grande - usando dados completos (CPU → GPU sob demanda)")
+            # Log reduzido")
             X_full, y_full = self.dataset.get_full_data()
             cv_results = quick_cross_validate(
                 model_config=self.model_config,
@@ -514,11 +456,14 @@ class MLPPipeline:
         
         # 🚀 NOVO SISTEMA: Divisão escalável sem carregar tudo na GPU
         if use_robust_split:
-            from .utils.train_test_split import TrainTestSplitter
+            try:
+                from .utils.train_test_split import TrainTestSplitter
+            except ImportError:
+                from utils.train_test_split import TrainTestSplitter
             
             # Se temos dados pequenos na GPU, usar método antigo
             if self.X is not None and self.y is not None:
-                logger.info("📊 Usando divisão tradicional (dados pequenos)")
+                # Log reduzido")
                 splitter = TrainTestSplitter(random_state=42)
                 X_train, X_test, y_train, y_test = splitter.split(
                     self.X, self.y,
@@ -534,7 +479,7 @@ class MLPPipeline:
                 
             else:
                 # 🚀 DATASET GRANDE: Divisão por índices (escalável)
-                logger.info("📊 Usando divisão escalável (dataset grande)")
+                # Log reduzido")
                 
                 # Obter índices de divisão
                 from sklearn.model_selection import train_test_split
@@ -571,16 +516,24 @@ class MLPPipeline:
             else:
                 raise ValueError("Dados grandes requerem use_robust_split=True")
         
+        # 🚀 CRIAR DATASETS USANDO O NOVO SISTEMA
+        train_dataset = self.data_manager.create_dataset_from_arrays(X_train, y_train)
+        test_dataset = self.data_manager.create_dataset_from_arrays(X_test, y_test)
+        
         # 🚀 CRIAR DATALOADERS ESCALÁVEIS
         train_loader = self.data_manager.create_dataloader(
-            train_dataset, shuffle=True, batch_size=None  # batch_size automático
+            train_dataset, shuffle=True, batch_size=64  # batch_size explícito
         )
         test_loader = self.data_manager.create_dataloader(
-            test_dataset, shuffle=False, batch_size=None
+            test_dataset, shuffle=False, batch_size=64
         )
         
         # Criar e treinar modelo
-        model = MLPEmbeddingClassifier(self.model_config)
+        # Detectar input_size dos dados
+        input_size = X_train.shape[1] if len(X_train.shape) > 1 else X_train.shape[0]
+        logger.info(f"🧠 Criando modelo MLP com input_size={input_size}")
+        
+        model = MLPEmbeddingClassifier(self.model_config, input_size=input_size)
         model.to(self.device)
         
         optimizer = torch.optim.Adam(
@@ -776,13 +729,13 @@ def main():
         
         # Carregar configuração externa se especificada
         if args.config_path and Path(args.config_path).exists():
-            logger.info(f"📋 Carregando configuração de: {args.config_path}")
+            # Log reduzido
             pipeline.load_config_file(Path(args.config_path))
         
         # Salvar configuração se solicitado
         if args.save_config:
             pipeline.save_config(Path(args.save_config))
-            logger.info(f"📋 Configuração salva em: {args.save_config}")
+            # Log reduzido
         
         # Validar device antes de executar
         if not pipeline.validate_device_status():

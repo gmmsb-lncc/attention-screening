@@ -169,8 +169,8 @@
 🔍 PRÓXIMOS PASSOS RECOMENDADOS:
 ✅ Sistema está pronto para uso por outros usuários
 ✅ Documentação completa disponível em GUIA_USUARIO.md
-✅ Setup automático disponível via setup.py
-✅ Validação final pode ser executada via tests/validacao_final.py
+✅ Setup automático disponível via setup_completo.py
+✅ Validação final pode ser executada via test/validacao_final.py
 
 =============================================================================
 🏆 CONCLUSÃO
