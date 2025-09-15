@@ -1,0 +1,58 @@
+{
+  "final_model": {
+    "test_metrics": {
+      "Loss": 0.37193213403224945,
+      "Accuracy": 0.895,
+      "Precision": 0.92,
+      "Recall": 0.8761904761904762,
+      "F1": 0.8975609756097561,
+      "ROC_AUC": 0.9619047619047618,
+      "Average_Precision": 0.9642682858475989,
+      "Brier_Score": 0.09788908963967771,
+      "MCC": 0.790989355428379,
+      "True_Positives": 92,
+      "True_Negatives": 87,
+      "False_Positives": 8,
+      "False_Negatives": 13,
+      "Specificity": 0.9157894736842105,
+      "Sensitivity": 0.8761904761904762,
+      "Fbeta_0.5": 0.9108910891089109,
+      "Fbeta_2": 0.8846153846153846,
+      "Sample_Count": 200,
+      "Positive_Rate": "0.525"
+    },
+    "train_size": 800,
+    "test_size": 200,
+    "training_summary": {
+      "total_epochs": 50,
+      "best_epoch": 47,
+      "best_metric_value": 0.9627067669172933,
+      "early_stopped": false,
+      "final_train_loss": 0.2836223519765414,
+      "final_val_loss": 0.37193213403224945,
+      "best_val_metrics": {
+        "Loss": 0.3703954517841339,
+        "Accuracy": 0.905,
+        "Precision": 0.9215686274509803,
+        "Recall": 0.8952380952380953,
+        "F1": 0.9082125603864734,
+        "ROC_AUC": 0.9618045112781956,
+        "Average_Precision": 0.963982310493855,
+        "Brier_Score": 0.09753417296925374,
+        "MCC": 0.8101752012996113,
+        "True_Positives": 94,
+        "True_Negatives": 87,
+        "False_Positives": 8,
+        "False_Negatives": 11,
+        "Specificity": 0.9157894736842105,
+        "Sensitivity": 0.8952380952380953,
+        "Fbeta_0.5": 0.9161793372319688,
+        "Fbeta_2": 0.900383141762452,
+        "Sample_Count": 200,
+        "Positive_Rate": "0.525"
+      },
+      "total_training_time": 17.510842084884644,
+      "avg_epoch_time": 0.35021684169769285
+    }
+  }
+}
