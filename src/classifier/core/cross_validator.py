@@ -20,12 +20,27 @@ from pathlib import Path
 import sys
 import os
 
-# Imports relativos
-from ..models.base_model import BaseClassifier
-from .trainer import ModelTrainer, TrainingConfig
-from ..utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
-from ..utils.data_validation import DataValidator
-from ..config.mlp_config import MLPConfig
+# Imports relativos com fallbacks para execução direta
+try:
+    from ..models.base_model import BaseClassifier
+    from .trainer import ModelTrainer, TrainingConfig
+    from ..utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
+    from ..utils.data_validation import DataValidator
+    from ..config.mlp_config import MLPConfig
+except ImportError:
+    # Fallback para execução direta - ajustar sys.path se necessário
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    classifier_dir = os.path.dirname(current_dir)
+    if classifier_dir not in sys.path:
+        sys.path.insert(0, classifier_dir)
+    
+    from models.base_model import BaseClassifier
+    from core.trainer import ModelTrainer, TrainingConfig
+    from utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
+    from utils.data_validation import DataValidator
+    from config.mlp_config import MLPConfig
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +439,10 @@ def quick_cross_validate(
     """
     Função de conveniência para CV rápido com configurações padrão.
     """
-    from ..models.mlp import MLPEmbeddingClassifier
+    try:
+        from ..models.mlp import MLPEmbeddingClassifier
+    except ImportError:
+        from models.mlp import MLPEmbeddingClassifier
     
     # Configurações padrão
     cv_config = CrossValidationConfig(n_splits=n_splits)

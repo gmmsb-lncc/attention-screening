@@ -1,17 +1,19 @@
 """
-Sistema robusto de validação e seleção de device (GPU/CPU).
-Resolve problemas de falhas silenciosas e uso ineficiente de recursos.
+Sistema Consolidado de Gerenciamento de Devices para DockTKinase.
+
+Combina funcionalidades dos sistemas simples e complexo em uma interface unificada.
+Oferece detecção automática, validação robusta e fallback inteligente.
 """
 
 import torch
 import subprocess
 import platform
 import logging
-from typing import Optional, Dict, Any, List, Tuple
+import psutil
+import time
+from typing import Optional, Dict, Any, List, Tuple, Union
 from dataclasses import dataclass
 from pathlib import Path
-import time
-import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -49,189 +51,304 @@ class DeviceInfo:
         """Retorna memória formatada."""
         if self.total_memory:
             return f"{self.total_memory:.1f}GB"
-        return "Unknown"
+        return "N/A"
     
     def get_capability_str(self) -> str:
         """Retorna compute capability formatada."""
         if self.compute_capability:
             return f"{self.compute_capability[0]}.{self.compute_capability[1]}"
-        return "Unknown"
+        return "N/A"
+    
+    def get_summary(self) -> str:
+        """Retorna resumo formatado do device."""
+        summary = f"{self.name} ({self.type})"
+        if self.total_memory:
+            summary += f" | {self.get_memory_gb()}"
+        if self.is_recommended:
+            summary += " - ✅ RECOMENDADO"
+        elif self.is_available:
+            summary += " - 💡 disponível"
+        else:
+            summary += " - ❌ indisponível"
+        return summary
 
 
-class DeviceValidator:
+class DeviceManager:
     """
-    Validador robusto de devices com fallback inteligente.
+    Gerenciador consolidado de devices com múltiplos modos de operação.
     
-    Resolve problemas:
-    - Falhas silenciosas quando GPU não funciona adequadamente
-    - Uso de GPU inadequada (memória insuficiente)
-    - Lack de verificação de drivers/CUDA
-    - Seleção não otimizada de device
+    Modos:
+    - simple: Detecção rápida, mínima validação
+    - smart: Detecção com validação e ranking
+    - complex: Detecção completa, benchmark e otimização
     """
     
-    def __init__(self, min_gpu_memory_gb: float = 1.0, 
+    def __init__(self, 
+                 mode: str = "smart",
+                 min_gpu_memory_gb: float = 1.0,
                  enable_benchmarking: bool = False,
                  prefer_gpu: bool = True):
+        """
+        Inicializa o gerenciador de devices.
+        
+        Args:
+            mode: "simple", "smart", "complex"
+            min_gpu_memory_gb: Memória GPU mínima
+            enable_benchmarking: Ativar benchmark de performance
+            prefer_gpu: Preferir GPU quando disponível
+        """
+        self.mode = mode
         self.min_gpu_memory_gb = min_gpu_memory_gb
         self.enable_benchmarking = enable_benchmarking
         self.prefer_gpu = prefer_gpu
         
-        # Cache para evitar recálculos
+        # Cache
         self._device_cache: Dict[str, DeviceInfo] = {}
         self._validation_cache: Dict[str, bool] = {}
+        self._selected_device: Optional[DeviceInfo] = None
         
-        logger.info(f"🔍 DeviceValidator inicializado")
-        logger.info(f"   • Memória GPU mínima: {min_gpu_memory_gb:.1f}GB")
-        logger.info(f"   • Benchmark ativo: {enable_benchmarking}")
+        logger.info(f"🔧 DeviceManager inicializado (modo: {mode})")
+        if mode != "simple":
+            logger.info(f"   • Memória GPU mínima: {min_gpu_memory_gb:.1f}GB")
+            logger.info(f"   • Benchmark ativo: {enable_benchmarking}")
     
-    def detect_available_devices(self) -> List[DeviceInfo]:
+    def get_device(self, requirement: str = "auto") -> torch.device:
         """
-        Detecta todos os devices disponíveis com informações detalhadas.
-        
-        Returns:
-            Lista de DeviceInfo ordenada por recomendação
-        """
-        logger.info("🔍 Detectando devices disponíveis...")
-        
-        devices = []
-        
-        # 1. CPU (sempre disponível)
-        cpu_info = self._get_cpu_info()
-        devices.append(cpu_info)
-        
-        # 2. CUDA GPUs
-        cuda_devices = self._get_cuda_devices()
-        devices.extend(cuda_devices)
-        
-        # 3. Apple Metal (MPS) 
-        mps_device = self._get_mps_device()
-        if mps_device:
-            devices.append(mps_device)
-        
-        # 4. Validar e rankear devices
-        validated_devices = []
-        for device_info in devices:
-            if self._validate_device(device_info):
-                if self.enable_benchmarking:
-                    device_info.benchmark_score = self._benchmark_device(device_info)
-                validated_devices.append(device_info)
-        
-        # 5. Ordenar por recomendação
-        validated_devices = self._rank_devices(validated_devices)
-        
-        # 6. Log resumo
-        self._log_device_summary(validated_devices)
-        
-        return validated_devices
-    
-    def select_best_device(self, requirement: str = "auto") -> DeviceInfo:
-        """
-        Seleciona o melhor device baseado nos requisitos.
+        Obtém o melhor device baseado no modo e requisitos.
         
         Args:
             requirement: "auto", "gpu_only", "cpu_only", "fastest"
             
         Returns:
-            DeviceInfo do melhor device
+            torch.device otimizado
         """
-        devices = self.detect_available_devices()
-        
-        if not devices:
-            raise RuntimeError("❌ Nenhum device válido encontrado")
-        
-        if requirement == "cpu_only":
-            cpu_devices = [d for d in devices if d.type == "cpu"]
-            if not cpu_devices:
-                raise RuntimeError("❌ CPU não disponível")
-            selected = cpu_devices[0]
-            
-        elif requirement == "gpu_only":
-            gpu_devices = [d for d in devices if d.type in ["cuda", "mps"]]
-            if not gpu_devices:
-                raise RuntimeError("❌ GPU não disponível ou adequada")
-            selected = gpu_devices[0]
-            
-        elif requirement == "fastest":
-            # Device com maior benchmark score
-            benchmark_devices = [d for d in devices if d.benchmark_score is not None]
-            if benchmark_devices:
-                selected = max(benchmark_devices, key=lambda x: x.benchmark_score or 0)
-            else:
-                selected = devices[0]
-                
-        else:  # "auto"
-            # Primeiro device recomendado
-            recommended = [d for d in devices if d.is_recommended]
-            selected = recommended[0] if recommended else devices[0]
-        
-        logger.info(f"✅ Device selecionado: {selected.name} ({selected.type})")
-        if selected.warnings:
-            for warning in selected.warnings:
-                logger.warning(f"⚠️  {warning}")
-        
-        return selected
+        if self.mode == "simple":
+            return self._get_device_simple(requirement)
+        elif self.mode == "smart":
+            return self._get_device_smart(requirement)
+        else:  # complex
+            return self._get_device_complex(requirement)
     
-    def validate_device_compatibility(self, device: torch.device) -> Dict[str, Any]:
-        """
-        Valida compatibilidade de um device específico.
-        
-        Args:
-            device: Device para validar
-            
-        Returns:
-            Dict com resultado da validação
-        """
-        result = {
-            "is_compatible": False,
-            "device": device,
-            "issues": [],
-            "recommendations": []
-        }
+    def get_device_info(self) -> Optional[DeviceInfo]:
+        """Retorna informações do device selecionado."""
+        return self._selected_device
+    
+    def get_available_devices(self) -> List[DeviceInfo]:
+        """Retorna lista de todos os devices disponíveis."""
+        if self.mode == "simple":
+            return self._detect_devices_simple()
+        else:
+            return self._detect_devices_detailed()
+    
+    def validate_device_status(self) -> bool:
+        """Valida se o device atual está funcionando."""
+        if not self._selected_device:
+            return False
         
         try:
-            if device.type == "cuda":
-                result.update(self._validate_cuda_device(device))
-            elif device.type == "cpu":
-                result.update(self._validate_cpu_device(device))
-            elif device.type == "mps":
-                result.update(self._validate_mps_device(device))
-            else:
-                result["issues"].append(f"Tipo de device não suportado: {device.type}")
-                
+            test_tensor = torch.randn(10, 10).to(self._selected_device.device)
+            result = test_tensor @ test_tensor
+            del test_tensor, result
+            return True
         except Exception as e:
-            result["issues"].append(f"Erro na validação: {e}")
-            
-        result["is_compatible"] = len(result["issues"]) == 0
-        return result
+            logger.warning(f"Device validation failed: {e}")
+            return False
     
-    def _get_cpu_info(self) -> DeviceInfo:
-        """Obtém informações da CPU."""
-        import psutil
+    def to_device(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Move tensor para o device selecionado."""
+        if self._selected_device:
+            return tensor.to(self._selected_device.device)
+        return tensor.to(self._get_fallback_device())
+    
+    # ==================== MODO SIMPLE ====================
+    
+    def _get_device_simple(self, requirement: str) -> torch.device:
+        """Modo simples: detecção rápida sem validação extensiva."""
+        if requirement == "cpu_only":
+            device = torch.device("cpu")
+        elif requirement == "gpu_only":
+            device = self._get_best_gpu_simple()
+            if device is None:
+                raise RuntimeError("GPU não disponível")
+        else:  # auto, fastest
+            device = self._get_best_gpu_simple()
+            if device is None:
+                device = torch.device("cpu")
         
-        device = torch.device("cpu")
-        
-        # Informações básicas
-        cpu_count = torch.get_num_threads()
-        memory_gb = psutil.virtual_memory().total / 1024**3
-        
-        info = DeviceInfo(
+        # Criar DeviceInfo simples
+        self._selected_device = DeviceInfo(
             device=device,
-            name=f"CPU ({platform.processor() or 'Unknown'})",
-            type="cpu",
-            total_memory=memory_gb,
-            available_memory=psutil.virtual_memory().available / 1024**3
+            name=self._get_device_name_simple(device),
+            type=device.type,
+            is_available=True
         )
         
-        # CPU é sempre compatível, mas pode ter limitações
-        if cpu_count < 4:
-            info.warnings.append("Poucos threads disponíveis para CPU")
-        if memory_gb < 8:
-            info.warnings.append("Pouca memória RAM disponível")
+        logger.info(f"Device selecionado: {device}")
+        return device
+    
+    def _get_best_gpu_simple(self) -> Optional[torch.device]:
+        """Seleciona melhor GPU disponível (modo simples)."""
+        # CUDA
+        if torch.cuda.is_available():
+            return torch.device('cuda')
         
-        return info
+        # Apple MPS
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return torch.device('mps')
+        
+        return None
+    
+    def _get_device_name_simple(self, device: torch.device) -> str:
+        """Obtém nome do device (modo simples)."""
+        if device.type == "cuda":
+            try:
+                props = torch.cuda.get_device_properties(device.index or 0)
+                return props.name
+            except:
+                return "CUDA GPU"
+        elif device.type == "mps":
+            return "Apple Metal Performance Shaders"
+        else:
+            return f"CPU ({platform.processor() or 'Unknown'})"
+    
+    def _detect_devices_simple(self) -> List[DeviceInfo]:
+        """Detecta devices no modo simples."""
+        devices = []
+        
+        # CPU
+        devices.append(DeviceInfo(
+            device=torch.device("cpu"),
+            name=f"CPU ({platform.processor() or 'Unknown'})",
+            type="cpu",
+            is_available=True
+        ))
+        
+        # GPU
+        gpu_device = self._get_best_gpu_simple()
+        if gpu_device:
+            devices.append(DeviceInfo(
+                device=gpu_device,
+                name=self._get_device_name_simple(gpu_device),
+                type=gpu_device.type,
+                is_available=True,
+                is_recommended=True
+            ))
+        
+        return devices
+    
+    # ==================== MODO SMART/COMPLEX ====================
+    
+    def _get_device_smart(self, requirement: str) -> torch.device:
+        """Modo smart: detecção com validação e ranking."""
+        devices = self._detect_devices_detailed()
+        
+        if not devices:
+            raise RuntimeError("Nenhum device válido encontrado")
+        
+        selected = self._select_device_by_requirement(devices, requirement)
+        self._selected_device = selected
+        
+        logger.info(f"✅ Device selecionado: {selected.get_summary()}")
+        self._log_device_warnings(selected)
+        
+        return selected.device
+    
+    def _get_device_complex(self, requirement: str) -> torch.device:
+        """Modo complex: detecção completa com benchmark."""
+        devices = self._detect_devices_detailed()
+        
+        # Benchmark se habilitado
+        if self.enable_benchmarking:
+            devices = self._benchmark_devices(devices)
+        
+        if not devices:
+            # Fallback para CPU
+            logger.warning("🔄 Fallback para CPU...")
+            cpu_device = torch.device("cpu")
+            self._selected_device = DeviceInfo(
+                device=cpu_device,
+                name=f"CPU ({platform.processor() or 'Unknown'})",
+                type="cpu",
+                is_available=True
+            )
+            return cpu_device
+        
+        selected = self._select_device_by_requirement(devices, requirement)
+        self._selected_device = selected
+        
+        logger.info(f"✅ Device selecionado: {selected.get_summary()}")
+        if selected.benchmark_score:
+            logger.info(f"   📊 Score de benchmark: {selected.benchmark_score:.2f}")
+        self._log_device_warnings(selected)
+        
+        return selected.device
+    
+    def _detect_devices_detailed(self) -> List[DeviceInfo]:
+        """Detecta devices com informações detalhadas."""
+        logger.info("🔍 Detectando devices disponíveis...")
+        
+        devices = []
+        
+        # 1. CPU
+        cpu_info = self._get_cpu_info()
+        if self._validate_device(cpu_info):
+            devices.append(cpu_info)
+        
+        # 2. CUDA GPUs
+        cuda_devices = self._get_cuda_devices()
+        for device in cuda_devices:
+            if self._validate_device(device):
+                devices.append(device)
+        
+        # 3. Apple MPS
+        mps_device = self._get_mps_device()
+        if mps_device and self._validate_device(mps_device):
+            devices.append(mps_device)
+        
+        # 4. Ranking
+        devices = self._rank_devices(devices)
+        
+        # 5. Log resumo
+        self._log_devices_summary(devices)
+        
+        return devices
+    
+    def _get_cpu_info(self) -> DeviceInfo:
+        """Obtém informações detalhadas da CPU."""
+        device = torch.device("cpu")
+        
+        try:
+            cpu_count = torch.get_num_threads()
+            memory_gb = psutil.virtual_memory().total / 1024**3
+            available_memory = psutil.virtual_memory().available / 1024**3
+            
+            info = DeviceInfo(
+                device=device,
+                name=f"CPU ({platform.machine()})",
+                type="cpu",
+                total_memory=memory_gb,
+                available_memory=available_memory
+            )
+            
+            # Validações
+            if cpu_count < 4:
+                info.warnings.append("Poucos threads disponíveis")
+            if memory_gb < 8:
+                info.warnings.append("Pouca memória RAM")
+                
+            return info
+            
+        except Exception as e:
+            logger.warning(f"Erro ao obter info CPU: {e}")
+            return DeviceInfo(
+                device=device,
+                name="CPU (Unknown)",
+                type="cpu",
+                is_available=True
+            )
     
     def _get_cuda_devices(self) -> List[DeviceInfo]:
-        """Obtém informações de todos os devices CUDA."""
+        """Obtém informações de devices CUDA."""
         devices = []
         
         if not torch.cuda.is_available():
@@ -246,10 +363,12 @@ class DeviceValidator:
                 device = torch.device(f"cuda:{i}")
                 props = torch.cuda.get_device_properties(i)
                 
-                # Memória
                 total_memory = props.total_memory / 1024**3
-                allocated = torch.cuda.memory_allocated(i) / 1024**3  
-                available = total_memory - allocated
+                try:
+                    allocated = torch.cuda.memory_allocated(i) / 1024**3
+                    available = total_memory - allocated
+                except:
+                    available = total_memory  # Fallback
                 
                 info = DeviceInfo(
                     device=device,
@@ -261,18 +380,21 @@ class DeviceValidator:
                     compute_capability=(props.major, props.minor)
                 )
                 
-                # Validações específicas CUDA
-                self._validate_cuda_capabilities(info, props)
+                # Validações CUDA
+                if total_memory < self.min_gpu_memory_gb:
+                    info.warnings.append(f"Pouca memória: {total_memory:.1f}GB")
+                if props.major < 3:
+                    info.limitations.append("Compute capability antiga")
                 
                 devices.append(info)
                 
         except Exception as e:
-            logger.warning(f"⚠️  Erro ao detectar CUDA devices: {e}")
+            logger.warning(f"Erro ao detectar CUDA: {e}")
         
         return devices
     
     def _get_mps_device(self) -> Optional[DeviceInfo]:
-        """Obtém informações do Metal Performance Shaders (Apple Silicon)."""
+        """Obtém informações do Metal Performance Shaders."""
         if not hasattr(torch.backends, 'mps') or not torch.backends.mps.is_available():
             return None
         
@@ -285,273 +407,182 @@ class DeviceValidator:
                 type="mps"
             )
             
-            # MPS é relativamente novo, adicionar avisos
             info.warnings.append("MPS é experimental - pode haver incompatibilidades")
             
             return info
             
         except Exception as e:
-            logger.warning(f"⚠️  Erro ao detectar MPS: {e}")
+            logger.warning(f"Erro ao detectar MPS: {e}")
             return None
     
     def _validate_device(self, device_info: DeviceInfo) -> bool:
-        """Valida se device é adequado."""
-        cache_key = f"{device_info.type}_{device_info.index}"
+        """Valida se device funciona adequadamente."""
+        cache_key = f"{device_info.type}_{device_info.index or 0}"
         
         if cache_key in self._validation_cache:
             return self._validation_cache[cache_key]
         
-        is_valid = True
-        
         try:
-            # Teste básico: criar tensor pequeno
-            test_tensor = torch.randn(10, 10).to(device_info.device)
+            # Teste básico
+            test_tensor = torch.randn(100, 100).to(device_info.device)
             result = test_tensor @ test_tensor
             del test_tensor, result
             
-            # Validações específicas por tipo
-            if device_info.type == "cuda":
-                is_valid = self._validate_cuda_specific(device_info)
-            elif device_info.type == "mps":
-                is_valid = self._validate_mps_specific(device_info)
-                
-        except Exception as e:
-            is_valid = False
-            device_info.warnings.append(f"Falha no teste básico: {e}")
-            logger.warning(f"⚠️  Device {device_info.name} falhou teste básico: {e}")
-        
-        # Cache resultado
-        self._validation_cache[cache_key] = is_valid
-        device_info.is_available = is_valid
-        
-        return is_valid
-    
-    def _validate_cuda_capabilities(self, info: DeviceInfo, props):
-        """Valida capacidades específicas CUDA."""
-        # Memória mínima
-        if info.total_memory and info.total_memory < self.min_gpu_memory_gb:
-            info.warnings.append(f"Pouca memória GPU: {info.total_memory:.1f}GB < {self.min_gpu_memory_gb:.1f}GB")
-        
-        # Compute capability mínima (3.5 para funcionalidades modernas)
-        if info.compute_capability and info.compute_capability[0] < 3:
-            info.limitations.append("Compute capability antiga - algumas funcionalidades podem não funcionar")
-        
-        # Verificar driver
-        try:
-            driver_version = torch.version.cuda
-            if driver_version is None:
-                info.warnings.append("Versão do driver CUDA não detectada")
-        except:
-            info.warnings.append("Problema na detecção do driver CUDA")
-    
-    def _validate_cuda_specific(self, device_info: DeviceInfo) -> bool:
-        """Validações específicas para CUDA."""
-        try:
-            # Teste de alocação de memória
-            if device_info.available_memory and device_info.available_memory < 0.5:
-                device_info.warnings.append("Pouca memória GPU disponível")
-                return False
-            
-            # Teste operações básicas
-            device = device_info.device
-            a = torch.randn(1000, 1000).to(device)
-            b = torch.randn(1000, 1000).to(device) 
-            c = torch.mm(a, b)  # Matrix multiplication
-            del a, b, c
-            
+            # Cache resultado
+            self._validation_cache[cache_key] = True
+            device_info.is_available = True
             return True
             
         except Exception as e:
-            device_info.warnings.append(f"Falha em teste CUDA: {e}")
+            device_info.warnings.append(f"Falha no teste: {str(e)[:50]}")
+            device_info.is_available = False
+            self._validation_cache[cache_key] = False
             return False
     
-    def _validate_mps_specific(self, device_info: DeviceInfo) -> bool:
-        """Validações específicas para MPS."""
-        try:
-            # MPS tem limitações conhecidas
-            device_info.limitations.append("Algumas operações podem não ser suportadas")
-            return True
-        except Exception as e:
-            device_info.warnings.append(f"Falha em teste MPS: {e}")
-            return False
-    
-    def _validate_cuda_device(self, device: torch.device) -> Dict[str, Any]:
-        """Validação detalhada de device CUDA."""
-        result = {"issues": [], "recommendations": []}
+    def _benchmark_devices(self, devices: List[DeviceInfo]) -> List[DeviceInfo]:
+        """Executa benchmark de performance nos devices."""
+        logger.info("📊 Executando benchmarks...")
         
-        try:
-            # Verificar se CUDA está disponível
-            if not torch.cuda.is_available():
-                result["issues"].append("CUDA não está disponível no sistema")
-                return result
-            
-            # Verificar device específico
-            if device.index >= torch.cuda.device_count():
-                result["issues"].append(f"Device CUDA {device.index} não existe")
-                return result
-            
-            # Teste de memória
-            props = torch.cuda.get_device_properties(device.index)
-            total_memory_gb = props.total_memory / 1024**3
-            
-            if total_memory_gb < self.min_gpu_memory_gb:
-                result["issues"].append(f"Memória insuficiente: {total_memory_gb:.1f}GB < {self.min_gpu_memory_gb:.1f}GB")
-            
-            # Compute capability
-            if props.major < 3:
-                result["issues"].append(f"Compute capability muito antiga: {props.major}.{props.minor}")
-            
-        except Exception as e:
-            result["issues"].append(f"Erro na validação CUDA: {e}")
-        
-        return result
-    
-    def _validate_cpu_device(self, device: torch.device) -> Dict[str, Any]:
-        """Validação de device CPU."""
-        return {"issues": [], "recommendations": ["CPU é sempre compatível"]}
-    
-    def _validate_mps_device(self, device: torch.device) -> Dict[str, Any]:
-        """Validação de device MPS."""
-        result = {"issues": [], "recommendations": []}
-        
-        if not hasattr(torch.backends, 'mps') or not torch.backends.mps.is_available():
-            result["issues"].append("MPS não está disponível")
-        
-        return result
-    
-    def _benchmark_device(self, device_info: DeviceInfo) -> float:
-        """Faz benchmark simples do device."""
-        if not device_info.is_available:
-            return 0.0
-        
-        try:
-            device = device_info.device
-            
-            # Benchmark: multiplicação de matrizes
-            size = 1000
-            iterations = 5
-            
-            times = []
-            for _ in range(iterations):
-                a = torch.randn(size, size).to(device)
-                b = torch.randn(size, size).to(device)
+        for device_info in devices:
+            if not device_info.is_available:
+                continue
                 
+            try:
                 start_time = time.time()
-                c = torch.mm(a, b)
-                if device.type == "cuda":
-                    torch.cuda.synchronize()  # Aguardar conclusão
-                end_time = time.time()
                 
-                times.append(end_time - start_time)
+                # Benchmark: multiplicação de matrizes
+                device = device_info.device
+                a = torch.randn(1000, 1000).to(device)
+                b = torch.randn(1000, 1000).to(device)
+                
+                # Múltiplas operações para média
+                for _ in range(10):
+                    c = torch.mm(a, b)
+                    if device.type == "cuda":
+                        torch.cuda.synchronize()
+                
+                elapsed = time.time() - start_time
+                device_info.benchmark_score = 1.0 / elapsed  # Higher is better
+                
+                logger.info(f"   {device_info.name}: {elapsed:.3f}s")
+                
                 del a, b, c
-            
-            # Score = 1 / tempo médio (maior = melhor)
-            avg_time = sum(times) / len(times)
-            score = 1.0 / avg_time if avg_time > 0 else 0.0
-            
-            logger.debug(f"⚡ Benchmark {device_info.name}: {avg_time:.3f}s → score {score:.1f}")
-            return score
-            
-        except Exception as e:
-            logger.warning(f"⚠️  Erro no benchmark de {device_info.name}: {e}")
-            return 0.0
-    
-    def _rank_devices(self, devices: List[DeviceInfo]) -> List[DeviceInfo]:
-        """Ordena devices por recomendação."""
-        def device_score(device: DeviceInfo) -> Tuple[int, float, float]:
-            # Prioridade: (is_gpu, benchmark_score, memory)
-            is_gpu = 1 if device.type in ["cuda", "mps"] else 0
-            benchmark = device.benchmark_score or 0.0
-            memory = device.total_memory or 0.0
-            return (is_gpu, benchmark, memory)
-        
-        # Ordenar por score decrescente  
-        devices.sort(key=device_score, reverse=True)
-        
-        # Marcar device recomendado
-        if devices and self.prefer_gpu:
-            # Primeiro GPU válido ou primeiro device
-            for device in devices:
-                if device.type in ["cuda", "mps"] and device.is_available:
-                    device.is_recommended = True
-                    break
-            else:
-                # Nenhum GPU, usar primeiro device
-                devices[0].is_recommended = True
-        elif devices:
-            devices[0].is_recommended = True
+                
+            except Exception as e:
+                device_info.warnings.append(f"Benchmark falhou: {str(e)[:50]}")
+                device_info.benchmark_score = 0.0
         
         return devices
     
-    def _log_device_summary(self, devices: List[DeviceInfo]):
+    def _rank_devices(self, devices: List[DeviceInfo]) -> List[DeviceInfo]:
+        """Rankeia devices por prioridade."""
+        def device_score(device: DeviceInfo) -> tuple:
+            # Prioridade: (is_available, prefer_gpu, benchmark_score, memory)
+            gpu_bonus = 1.0 if device.type in ["cuda", "mps"] and self.prefer_gpu else 0.5
+            benchmark = device.benchmark_score or 0.0
+            memory = device.total_memory or 0.0
+            available = 1.0 if device.is_available else 0.0
+            
+            return (available, gpu_bonus, benchmark, memory)
+        
+        sorted_devices = sorted(devices, key=device_score, reverse=True)
+        
+        # Marcar primeiro como recomendado se disponível
+        if sorted_devices and sorted_devices[0].is_available:
+            sorted_devices[0].is_recommended = True
+        
+        return sorted_devices
+    
+    def _select_device_by_requirement(self, devices: List[DeviceInfo], requirement: str) -> DeviceInfo:
+        """Seleciona device baseado no requisito."""
+        available_devices = [d for d in devices if d.is_available]
+        
+        if not available_devices:
+            raise RuntimeError("Nenhum device válido disponível")
+        
+        if requirement == "cpu_only":
+            cpu_devices = [d for d in available_devices if d.type == "cpu"]
+            if not cpu_devices:
+                raise RuntimeError("CPU não disponível")
+            return cpu_devices[0]
+        
+        elif requirement == "gpu_only":
+            gpu_devices = [d for d in available_devices if d.type in ["cuda", "mps"]]
+            if not gpu_devices:
+                raise RuntimeError("GPU não disponível")
+            return gpu_devices[0]
+        
+        elif requirement == "fastest":
+            if self.enable_benchmarking:
+                benchmark_devices = [d for d in available_devices if d.benchmark_score]
+                if benchmark_devices:
+                    return max(benchmark_devices, key=lambda x: x.benchmark_score)
+            return available_devices[0]
+        
+        else:  # auto
+            recommended = [d for d in available_devices if d.is_recommended]
+            return recommended[0] if recommended else available_devices[0]
+    
+    def _log_devices_summary(self, devices: List[DeviceInfo]):
         """Log resumo dos devices detectados."""
-        logger.info(f"🔍 Resumo de devices ({len(devices)} encontrados):")
+        available_count = sum(1 for d in devices if d.is_available)
+        logger.info(f"🔍 Resumo de devices ({available_count} encontrados):")
         
-        for i, device in enumerate(devices):
-            status = "✅ RECOMENDADO" if device.is_recommended else "💡 disponível"
-            memory_str = f" | {device.get_memory_gb()}" if device.total_memory else ""
-            
-            logger.info(f"   {i+1}. {device.name} ({device.type}){memory_str} - {status}")
-            
-            for warning in device.warnings[:2]:  # Mostrar apenas 2 primeiros
-                logger.warning(f"      ⚠️  {warning}")
+        for i, device in enumerate(devices, 1):
+            if device.is_available:
+                logger.info(f"   {i}. {device.get_summary()}")
+                for warning in device.warnings[:1]:  # Máximo 1 warning por device
+                    logger.warning(f"      ⚠️  {warning}")
+    
+    def _log_device_warnings(self, device: DeviceInfo):
+        """Log warnings do device selecionado."""
+        for warning in device.warnings:
+            logger.warning(f"⚠️  {warning}")
+        for limitation in device.limitations:
+            logger.info(f"💡 {limitation}")
+    
+    def _get_fallback_device(self) -> torch.device:
+        """Retorna device de fallback (CPU)."""
+        return torch.device("cpu")
 
 
-class SmartDeviceManager:
+# ==================== ALIASES PARA COMPATIBILIDADE ====================
+
+class SimpleDeviceManager(DeviceManager):
+    """Alias para modo simples."""
+    def __init__(self, **kwargs):
+        super().__init__(mode="simple", **kwargs)
+
+class SmartDeviceManager(DeviceManager):
+    """Alias para modo smart."""
+    def __init__(self, **kwargs):
+        super().__init__(mode="smart", **kwargs)
+
+class ComplexDeviceManager(DeviceManager):
+    """Alias para modo complex."""
+    def __init__(self, **kwargs):
+        super().__init__(mode="complex", enable_benchmarking=True, **kwargs)
+
+
+# ==================== FUNÇÃO DE CONVENIÊNCIA ====================
+
+def get_best_device(requirement: str = "auto", 
+                   mode: str = "smart",
+                   **kwargs) -> torch.device:
     """
-    Gerenciador inteligente de devices com fallback automático.
+    Função de conveniência para obter o melhor device disponível.
     
-    Uso simplificado do DeviceValidator com fallback inteligente.
+    Args:
+        requirement: "auto", "gpu_only", "cpu_only", "fastest"
+        mode: "simple", "smart", "complex"
+        **kwargs: Argumentos para DeviceManager
+        
+    Returns:
+        torch.device otimizado
+        
+    Example:
+        device = get_best_device("auto", "smart")
+        model = model.to(device)
     """
-    
-    def __init__(self, **validator_kwargs):
-        self.validator = DeviceValidator(**validator_kwargs)
-        self._selected_device: Optional[DeviceInfo] = None
-    
-    def get_device(self, requirement: str = "auto") -> torch.device:
-        """
-        Obtém o melhor device disponível com fallback inteligente.
-        
-        Args:
-            requirement: "auto", "gpu_only", "cpu_only", "fastest"
-            
-        Returns:
-            torch.device otimizado
-        """
-        try:
-            self._selected_device = self.validator.select_best_device(requirement)
-            return self._selected_device.device
-            
-        except RuntimeError as e:
-            logger.error(f"❌ {e}")
-            
-            # Fallback: tentar CPU
-            if requirement != "cpu_only":
-                logger.warning("🔄 Fallback para CPU...")
-                try:
-                    self._selected_device = self.validator.select_best_device("cpu_only")
-                    return self._selected_device.device
-                except:
-                    pass
-            
-            # Último recurso
-            logger.error("💀 Usando CPU como último recurso")
-            return torch.device("cpu")
-    
-    def get_device_info(self) -> Optional[DeviceInfo]:
-        """Retorna informações do device selecionado."""
-        return self._selected_device
-    
-    def validate_current_device(self) -> bool:
-        """Valida se o device atual ainda está funcionando."""
-        if not self._selected_device:
-            return False
-        
-        try:
-            # Teste rápido
-            test_tensor = torch.randn(10, 10).to(self._selected_device.device)
-            result = test_tensor @ test_tensor
-            del test_tensor, result
-            return True
-        except:
-            return False
+    manager = DeviceManager(mode=mode, **kwargs)
+    return manager.get_device(requirement)
