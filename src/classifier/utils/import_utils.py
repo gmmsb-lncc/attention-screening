@@ -169,3 +169,28 @@ if __name__ == "__main__":
         print(f"❌ Import de teste falhou: {e}")
     
     print("🏁 Teste de imports concluído")
+
+
+def safe_import_optional(module_name: str, purpose: str = "") -> Optional[Any]:
+    """
+    Tenta importar um módulo opcional de forma segura.
+    
+    Args:
+        module_name: Nome do módulo para importar
+        purpose: Descrição do propósito (para logs)
+        
+    Returns:
+        O módulo importado ou None se falhar
+    """
+    try:
+        module = importlib.import_module(module_name)
+        return module
+    except ImportError:
+        if purpose:
+            print(f"⚠️  Módulo opcional '{module_name}' não disponível para {purpose}")
+        else:
+            print(f"⚠️  Módulo opcional '{module_name}' não disponível")
+        return None
+    except Exception as e:
+        print(f"❌ Erro ao importar '{module_name}': {e}")
+        return None
