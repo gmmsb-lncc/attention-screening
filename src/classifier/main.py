@@ -27,7 +27,21 @@ import numpy as np
 from datetime import datetime
 
 # Imports locais - compatível com execução direta e como módulo
+# Sistema robusto de imports
 try:
+    from utils.import_utils import safe_import_from, setup_classifier_imports
+    setup_classifier_imports()
+except ImportError:
+    # Fallback básico se import_utils não estiver disponível
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+
+# Imports usando sistema robusto
+try:
+    # Tentativa com imports relativos
     from .config.mlp_config import MLPConfig, create_default_config
     from .models.mlp import MLPEmbeddingClassifier
     from .core.trainer import ModelTrainer, TrainingConfig
