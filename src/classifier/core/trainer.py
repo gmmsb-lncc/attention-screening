@@ -184,8 +184,7 @@ class ModelTrainer:
                 mode=self.config.monitor_mode,
                 factor=self.config.scheduler_factor,
                 patience=self.config.scheduler_patience,
-                min_lr=self.config.scheduler_min_lr,
-                verbose=True
+                min_lr=self.config.scheduler_min_lr
             )
         
         return self
