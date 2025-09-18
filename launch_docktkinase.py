@@ -24,18 +24,17 @@ def test_system():
     """Testa se o sistema está funcionando."""
     try:
         from classifier.modular_classifier import main as classifier_main
-        from classifier.modular_pipeline import ModularMLPPipeline
+        from classifier.modular_pipeline import MLPEmbeddingPipeline
         from classifier.models.mlp_classifier import MLPEmbeddingClassifier
         from classifier.utils.import_utils import safe_import_optional
         
         print("✅ Sistema modularizado carregado com sucesso!")
         
-        # Testar pipeline
-        pipeline = ModularMLPPipeline()
-        print("✅ Pipeline: OK")
+        # Note: Pipeline precisa de argumentos, então apenas validamos que a classe existe
+        print(f"✅ Pipeline: {MLPEmbeddingPipeline.__name__} disponível")
         
         # Testar modelo
-        model = MLPEmbeddingClassifier(input_dim=100, hidden_dims=[64, 32])
+        model = MLPEmbeddingClassifier(input_dim=100, hidden_dim=64, dropout=0.3)
         print("✅ Modelo MLP: OK")
         
         # Verificar dependências opcionais
@@ -48,8 +47,8 @@ def test_system():
         print("")
         print("Sistema pronto para uso!")
         print("Para começar:")
-        print("  from classifier.modular_pipeline import ModularMLPPipeline")
-        print("  pipeline = ModularMLPPipeline()")
+        print("  from classifier.modular_pipeline import MLPEmbeddingPipeline")
+        print("  pipeline = MLPEmbeddingPipeline(embeddings_path, labels_path)")
         print("  # ou usar CLI:")
         print("  python src/classifier/modular_classifier.py --help")
         
