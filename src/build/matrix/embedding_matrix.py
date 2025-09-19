@@ -3,46 +3,43 @@ Construção de matriz de embeddings concatenados (ligantes + proteínas).
 """
 
 import os
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from build.core import BuildConfig
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-from .base_matrix import BaseMatrix
-from ..core.exceptions import MatrixError
-from ..utils import ProgressLogger, memory_monitor
+from build.matrix.base_matrix import BaseMatrix
+from build.core.exceptions import MatrixError
+from build.utils import ProgressLogger, memory_monitor
 
 class EmbeddingMatrix(BaseMatrix):
     """Construtor de matriz de embeddings concatenados."""
     
     def __init__(self,
-                 config_or_path=None,
+                 config: Optional['BuildConfig'] = None,
                  ligand_embeddings_dir: str = 'ligand_embeddings',
                  protein_embeddings_dir: str = 'protein_embeddings',
                  embedding_type: str = 'cls',
                  ligand_dim: int = 768,
                  protein_dim: int = 2560,
+                 original_tsv_path: str = '/dev/null',
                  **kwargs):
         """
         Inicializa construtor de matriz de embeddings.
         
         Args:
-            config_or_path: BuildConfig ou caminho TSV
+            config: Configuração do sistema build
             ligand_embeddings_dir: Diretório com embeddings de ligantes
             protein_embeddings_dir: Diretório com embeddings de proteínas
             embedding_type: Tipo de embedding ('cls' ou 'mean')
             ligand_dim: Dimensão dos embeddings de ligantes
             protein_dim: Dimensão dos embeddings de proteínas
+            original_tsv_path: Caminho do arquivo TSV original
             **kwargs: Argumentos adicionais
         """
-        # Tratamento flexível de argumentos
-        if hasattr(config_or_path, 'get'):  # É um BuildConfig
-            config = config_or_path
-            original_tsv_path = config.get('original_tsv_path', '/dev/null')
-        else:  # É um caminho de arquivo ou None
-            config = None
-            original_tsv_path = config_or_path or '/dev/null'
-        
         # Definir atributos ANTES de chamar super
         self.ligand_embeddings_dir = Path(ligand_embeddings_dir)
         self.protein_embeddings_dir = Path(protein_embeddings_dir)

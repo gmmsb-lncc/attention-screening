@@ -8,48 +8,37 @@ import numpy as np
 from pathlib import Path
 
 if TYPE_CHECKING:
-    from ..core import BuildConfig
+    from build.core import BuildConfig
 
-from .base_embedding import BaseEmbedding
-from ..core.constants import ESM_MODELS
-from ..core.exceptions import DependencyError, EmbeddingError, ModelLoadError
-from ..utils import ProgressLogger, ensure_directory
+from build.embeddings.base_embedding import BaseEmbedding
+from build.core.constants import ESM_MODELS, DEFAULT_ESM_MODEL
+from build.core.exceptions import DependencyError, EmbeddingError, ModelLoadError
+from build.utils import ProgressLogger, ensure_directory
 
 class ProteinEmbedding(BaseEmbedding):
     """Gerador de embeddings de proteínas usando ESM."""
     
     def __init__(self, 
-                 config_or_model: Optional[Union['BuildConfig', str]] = None,
-                 model_name: str = "esm2_t36_3B_UR50D",
-                 use_gpu: bool = True,
+                 config: Optional['BuildConfig'] = None,
+                 model_name: str = DEFAULT_ESM_MODEL,
+                 use_gpu: bool = False,
                  **kwargs):
         """
         Inicializa gerador de embeddings de proteínas.
         
         Args:
-            config_or_model: BuildConfig ou nome do modelo
-            model_name: Nome do modelo ESM (usado se config_or_model for string)
+            config: Configuração do sistema build
+            model_name: Nome do modelo ESM
             use_gpu: Se deve usar GPU quando disponível
-            **kwargs: Argumentos de configuração
+            **kwargs: Argumentos adicionais
         """
-        # Tratamento flexível de argumentos
-        if hasattr(config_or_model, 'get'):  # É um BuildConfig
-            config = config_or_model
-            model_name = model_name  # usar padrão
-        elif isinstance(config_or_model, str):  # É um nome de modelo
-            config = None
-            model_name = config_or_model
-        else:  # None ou outro
-            config = config_or_model
-            model_name = model_name  # usar padrão
-            
-        super().__init__(model_name=model_name, config=config, **kwargs)
+        # Definir atributos antes da inicialização do pai
         self.use_gpu = use_gpu
         self.device = None
         self.alphabet = None
         self.batch_converter = None
-        
-        # Verificar dependências
+            
+        super().__init__(model_name=model_name, config=config, **kwargs)        # Verificar dependências
         self._check_dependencies()
     
     def _check_dependencies(self) -> None:
@@ -71,6 +60,20 @@ class ProteinEmbedding(BaseEmbedding):
             raise DependencyError(
                 "ESM não está disponível. Instale com: pip install fair-esm"
             )
+    
+    def _validate_config(self) -> None:
+        """Valida configuração específica para embeddings de proteínas."""
+        super()._validate_config()
+        
+        # Validar modelo
+        if self.model_name not in ESM_MODELS:
+            raise EmbeddingError(f"Modelo ESM inválido: {self.model_name}. Modelos disponíveis: {list(ESM_MODELS.keys())}")
+        
+        # Verificar configuração de GPU
+        if self.use_gpu:
+            if not hasattr(self, 'torch') or not self.torch.cuda.is_available():
+                self.logger.warning("GPU solicitada mas não disponível. Usando CPU.")
+                self.use_gpu = False
     
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
         """Retorna modelos ESM suportados."""

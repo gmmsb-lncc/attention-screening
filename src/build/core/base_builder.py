@@ -7,8 +7,8 @@ from typing import Dict, Any, Optional
 import logging
 import os
 
-from .config import BuildConfig
-from .exceptions import BuildException, ConfigurationError
+from build.core.config import BuildConfig
+from build.core.exceptions import BuildException, ConfigurationError
 
 class BaseBuilder(ABC):
     """Classe base abstrata para todos os construtores."""

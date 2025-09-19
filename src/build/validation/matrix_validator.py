@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from ..core import BuildConfig
-from .base_validator import BaseValidator
+from build.core import BuildConfig
+from build.validation.base_validator import BaseValidator
 
 
 class MatrixValidator(BaseValidator):
