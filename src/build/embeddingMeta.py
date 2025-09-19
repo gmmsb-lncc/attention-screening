@@ -1,8 +1,23 @@
 import os
-import torch
-import esm
 import numpy as np
 from tqdm import tqdm
+
+# Import opcional do PyTorch e ESM
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    print("⚠️ Aviso: PyTorch não está disponível")
+    torch = None
+    TORCH_AVAILABLE = False
+
+try:
+    import esm
+    ESM_AVAILABLE = True
+except ImportError:
+    print("⚠️ Aviso: ESM não está disponível")
+    esm = None
+    ESM_AVAILABLE = False
 
 class EmbeddingMeta:
     def __init__(self, model_name=None, seq_input_dir="./seq_inputs", output_dir="./output_esm"):
@@ -10,16 +25,27 @@ class EmbeddingMeta:
         self.seq_input_dir = seq_input_dir
         self.output_dir = output_dir
         print(f"EmbeddingMeta inicializado com seq_input_dir: {self.seq_input_dir} e output_dir: {self.output_dir}")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.alphabet = None
-        self.batch_converter = None
+        
+        if not TORCH_AVAILABLE or not ESM_AVAILABLE:
+            print("⚠️ Aviso: PyTorch ou ESM não estão disponíveis. Funcionalidade limitada.")
+            self.device = None
+            self.model = None
+            self.alphabet = None
+            self.batch_converter = None
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.model = None
+            self.alphabet = None
+            self.batch_converter = None
 
         # Cria o diretório de saída, se necessário
         os.makedirs(self.output_dir, exist_ok=True)
 
     def load_model(self):
         """Carrega o modelo ESM pré-treinado com verificação de nome válido."""
+        if not TORCH_AVAILABLE or not ESM_AVAILABLE:
+            raise ImportError("PyTorch ou ESM não estão disponíveis. Instale as dependências necessárias.")
+            
         print(f"Carregando o modelo {self.model_name}...")
         try:
             # Tentar carregar o modelo com o nome especificado
