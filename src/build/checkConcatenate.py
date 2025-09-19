@@ -82,12 +82,5 @@ class EmbeddingCheck:
             print("\n❌ Foram encontradas inconsistências nas matrizes de embeddings e labels!")
 
 if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Uso correto: python checkConcatenate.py <input_tsv_file>")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
-    checker = EmbeddingCheck(original_tsv_path=input_file)
+    checker = EmbeddingCheck(original_tsv_path="nr_kinase_all_compounds.tsv")
     checker.run_all_checks()
