@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from ..core import BaseBuilder, BuildConfig
+from build.core import BaseBuilder, BuildConfig
 
 
 class BaseLabels(BaseBuilder):
@@ -23,6 +23,21 @@ class BaseLabels(BaseBuilder):
         self.labels: Optional[np.ndarray] = None
         self.label_mapping: Dict[str, int] = {}
         self.statistics: Dict[str, Any] = {}
+    
+    def _validate_config(self) -> None:
+        """Valida configuração base para geração de labels."""
+        super()._validate_config()
+        # Validações específicas para labels podem ser adicionadas aqui
+    
+    def build(self, **kwargs) -> Dict[str, Any]:
+        """Build method that delegates to generate_labels."""
+        labels = self.generate_labels(**kwargs)
+        self.labels = labels
+        return {
+            'labels': labels,
+            'statistics': self.get_label_statistics(),
+            'label_mapping': self.label_mapping
+        }
     
     @abstractmethod
     def generate_labels(self, **kwargs) -> np.ndarray:

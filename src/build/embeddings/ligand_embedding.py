@@ -12,18 +12,18 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 if TYPE_CHECKING:
-    from ..core import BuildConfig
+    from build.core import BuildConfig
 
-from .base_embedding import BaseEmbedding
-from ..core.constants import FM4M_MODELS
-from ..core.exceptions import DependencyError, EmbeddingError
-from ..utils import ProgressLogger, ensure_directory, optimize_batch_size, memory_monitor
+from build.embeddings.base_embedding import BaseEmbedding
+from build.core.constants import FM4M_MODELS
+from build.core.exceptions import DependencyError, EmbeddingError
+from build.utils import ProgressLogger, ensure_directory, optimize_batch_size, memory_monitor
 
 class LigandEmbedding(BaseEmbedding):
     """Gerador de embeddings de ligantes usando FM4M."""
     
     def __init__(self, 
-                 config_or_model: Optional[Union['BuildConfig', str]] = None,
+                 config: Optional['BuildConfig'] = None,
                  model_name: str = "SMI-TED",
                  use_parallel: bool = True,
                  checkpoint_enabled: bool = True,
@@ -32,28 +32,19 @@ class LigandEmbedding(BaseEmbedding):
         Inicializa gerador de embeddings de ligantes.
         
         Args:
-            config_or_model: BuildConfig ou nome do modelo
+            config: Configuração do sistema build
             model_name: Nome do modelo FM4M
             use_parallel: Se deve usar processamento paralelo
             checkpoint_enabled: Se deve usar sistema de checkpoint
-            **kwargs: Argumentos de configuração
+            **kwargs: Argumentos adicionais
         """
-        # Tratamento flexível de argumentos
-        if hasattr(config_or_model, 'get'):  # É um BuildConfig
-            config = config_or_model
-            model_name = model_name  # usar padrão
-        elif isinstance(config_or_model, str):  # É um nome de modelo
-            config = None
-            model_name = config_or_model
-        else:  # None ou outro
-            config = config_or_model
-            model_name = model_name  # usar padrão
-            
-        super().__init__(model_name=model_name, config=config, **kwargs)
+        # Definir atributos antes da inicialização do pai
         self.use_parallel = use_parallel
         self.checkpoint_enabled = checkpoint_enabled
         self.processed_files = set()
         self.checkpoint_file = None
+            
+        super().__init__(model_name=model_name, config=config, **kwargs)
         
         # Verificar dependências
         self._check_dependencies()
@@ -70,6 +61,26 @@ class LigandEmbedding(BaseEmbedding):
         # FM4M será verificado durante inicialização
         self.fm4m = None
         self.fm4m_available = False
+    
+    def _validate_config(self) -> None:
+        """Valida configuração específica para embeddings de ligantes."""
+        super()._validate_config()
+        
+        # Validar modelo FM4M
+        if self.model_name not in FM4M_MODELS:
+            raise EmbeddingError(f"Modelo FM4M inválido: {self.model_name}. Modelos disponíveis: {list(FM4M_MODELS.keys())}")
+        
+        # Verificar configuração de processamento paralelo
+        if self.use_parallel:
+            try:
+                import multiprocessing
+                cpu_count = multiprocessing.cpu_count()
+                if cpu_count < 2:
+                    self.logger.warning("Processamento paralelo solicitado mas apenas 1 CPU disponível")
+                    self.use_parallel = False
+            except Exception:
+                self.logger.warning("Não foi possível verificar CPUs disponíveis. Desabilitando processamento paralelo.")
+                self.use_parallel = False
     
     def _setup_fm4m_path(self) -> None:
         """Configura caminho para FM4M."""

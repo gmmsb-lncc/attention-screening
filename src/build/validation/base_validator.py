@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from pathlib import Path
 
-from ..core import BaseBuilder, BuildConfig
+from build.core import BaseBuilder, BuildConfig
 
 
 class BaseValidator(BaseBuilder):
@@ -22,6 +22,21 @@ class BaseValidator(BaseBuilder):
         self.validation_results: Dict[str, Any] = {}
         self.errors: List[str] = []
         self.warnings: List[str] = []
+    
+    def _validate_config(self) -> None:
+        """Valida configuração base para validação."""
+        super()._validate_config()
+        # Validações específicas para validação podem ser adicionadas aqui
+    
+    def build(self, *args, **kwargs) -> Dict[str, Any]:
+        """Build method that delegates to validate."""
+        validation_success = self.validate(*args, **kwargs)
+        return {
+            'validation_passed': validation_success,
+            'errors': self.errors,
+            'warnings': self.warnings,
+            'results': self.validation_results
+        }
     
     @abstractmethod
     def validate(self, *args, **kwargs) -> bool:

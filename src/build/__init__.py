@@ -4,14 +4,20 @@ Main build module exports.
 Provides convenient imports for the modular build system components.
 """
 
+"""
+Main build module exports.
+
+Provides convenient imports for the modular build system components.
+"""
+
 # Core components
-from .core import BuildConfig, BaseBuilder, BuildException
+from build.core import BuildConfig, BaseBuilder, BuildException
 
 # Pipeline orchestrator  
-from .pipeline import BuildPipeline
+from build.pipeline import BuildPipeline
 
 # Matrix components - for backward compatibility
-from .matrix import EmbeddingMatrix
+from build.matrix import EmbeddingMatrix
 
 # Backward compatibility aliases
 EmbeddingMatrixReconstructor = EmbeddingMatrix

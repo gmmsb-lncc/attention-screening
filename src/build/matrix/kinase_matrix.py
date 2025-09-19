@@ -6,8 +6,8 @@ from typing import Dict, Any, Tuple
 import numpy as np
 from pathlib import Path
 
-from .embedding_matrix import EmbeddingMatrix
-from ..utils import ProgressLogger
+from build.matrix.embedding_matrix import EmbeddingMatrix
+from build.utils import ProgressLogger
 
 class KinaseMatrix(EmbeddingMatrix):
     """Construtor de matriz específico para dados de kinase."""

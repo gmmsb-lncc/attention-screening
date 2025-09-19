@@ -7,9 +7,9 @@ from typing import List, Dict, Any, Union, Optional, Tuple
 import numpy as np
 from pathlib import Path
 
-from ..core.base_builder import BaseBuilder
-from ..core.exceptions import EmbeddingError, ModelLoadError, DependencyError
-from ..utils import ProgressLogger, memory_monitor
+from build.core.base_builder import BaseBuilder
+from build.core.exceptions import EmbeddingError, ModelLoadError, DependencyError
+from build.utils import ProgressLogger, memory_monitor
 
 class BaseEmbedding(BaseBuilder):
     """Classe base abstrata para geração de embeddings."""
@@ -177,7 +177,7 @@ class BaseEmbedding(BaseBuilder):
             batch_size = self.get_config('batch_size', 32)
         
         # Otimizar batch size baseado na memória disponível
-        from ..utils import optimize_batch_size
+        from build.utils import optimize_batch_size
         batch_size = optimize_batch_size(batch_size)
         
         embeddings = []
@@ -246,7 +246,7 @@ class BaseEmbedding(BaseBuilder):
         Returns:
             Tupla (sucessos, falhas)
         """
-        from ..utils import load_tsv, ensure_directory, save_numpy
+        from build.utils import load_tsv, ensure_directory, save_numpy
         
         # Carregar dados
         try:
