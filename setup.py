@@ -146,15 +146,46 @@ def install_dependencies() -> bool:
         "seaborn",
         "jupyter",
         "pytest",
-        "optuna",
-        "pyspark"
+        # Dependências necessárias para src/build
+        "tqdm>=4.66.4",           # Barras de progresso (todos os scripts)
+        "psutil",                 # System utilities (embeddingIBM.py, embeddingBuild.py)  
+        "pyspark>=3.0.0",        # Apache Spark (buildInteractionLabels.py, embeddingBuild.py)
+        "optuna",                 # Hyperparameter optimization (já adicionado anteriormente)
+    ]
+    
+    # Dependências opcionais (instaladas com tratamento de erro)
+    optional_deps = [
+        "fair-esm",               # ESM models para embeddings de proteínas
+        "umap-learn",             # Required by FM4M
+        "rdkit",                  # Chemistry toolkit  
+        "transformers>=4.38",     # HuggingFace models
+        "torch-geometric>=2.3.1", # Graph neural networks
+        "datasets>=2.13.1",       # HuggingFace datasets
+        "requests>=2.32.2",       # HTTP requests
+        "networkx>=2.8",          # Graph processing
     ]
     
     print("📦 Instalando dependências básicas...")
     for dep in basic_deps:
         success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
         if not success:
-            print(f"⚠️  Falha ao instalar {dep}")
+            print(f"❌ Falha ao instalar {dep} (CRÍTICO)")
+            return False  # Dependências básicas são obrigatórias
+    
+    print("🔧 Instalando dependências opcionais...")
+    failed_optional = []
+    for dep in optional_deps:
+        success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
+        if not success:
+            failed_optional.append(dep)
+            print(f"⚠️  Falha ao instalar {dep} (opcional)")
+    
+    if failed_optional:
+        print(f"\n⚠️  Dependências opcionais não instaladas: {', '.join(failed_optional)}")
+        print("   - Funcionalidade pode estar limitada (ex: sem ESM para proteínas)")
+        print("   - Para instalar manualmente: pip install <nome_da_dependencia>")
+    else:
+        print("✅ Todas as dependências opcionais instaladas com sucesso!")
     
     # Verificar se requirements.txt existe
     req_file = Path("requirements.txt")
@@ -183,15 +214,53 @@ def verify_installation() -> bool:
         "import numpy; print(f'NumPy: {numpy.__version__}')",
         "import pandas; print(f'Pandas: {pandas.__version__}')",
         "import sklearn; print(f'Scikit-learn: {sklearn.__version__}')",
-        "import optuna; print(f'Optuna: {optuna.__version__}')",
-        "import pyspark; print(f'PySpark: {pyspark.__version__}')"
+        # Dependências específicas dos scripts de build
+        "import tqdm; print(f'tqdm: {tqdm.__version__}')",
+        "import psutil; print(f'psutil: {psutil.__version__}')",
+        "import pyspark; print(f'PySpark: {pyspark.__version__}')",
+        "import optuna; print(f'Optuna: {optuna.__version__}')"
+    ]
+    
+    # Testar imports opcionais
+    optional_imports = [
+        "import esm; print(f'ESM: disponível')",
+        "import umap; print(f'UMAP: disponível')",
+        "import rdkit; print(f'RDKit: {rdkit.__version__}')",
+        "import transformers; print(f'Transformers: {transformers.__version__}')",
     ]
     
     for test_import in test_imports:
         success, output = run_command([python_exe, "-c", test_import], 
                                     f"Testando: {test_import.split(';')[0]}")
         if success:
+            print(f"   ✅ {output.strip()}")
+        else:
+            print(f"   ❌ Falhou: {test_import.split(';')[0]}")
+    
+    print("\n🔍 Testando imports opcionais...")
+    for test_import in optional_imports:
+        success, output = run_command([python_exe, "-c", test_import], 
+                                    f"Testando: {test_import.split(';')[0]}")
+        if success:
+            print(f"   ✅ {output.strip()}")
+        else:
+            print(f"   ⚠️  Não disponível: {test_import.split(';')[0]}")
+    
+    # Testar scripts específicos dos build
+    print("\n🔧 Testando scripts de build...")
+    build_tests = [
+        "import sys; sys.path.insert(0, 'src/build'); from buildbinaryLabels import BinaryLabelGenerator; print('✅ buildbinaryLabels: OK')",
+        "import sys; sys.path.insert(0, 'src/build'); from checkEmbedding import EmbeddingCheck; print('✅ checkEmbedding: OK')",
+        "import sys; sys.path.insert(0, 'src/build'); from buildEmbeddingMatrix import EmbeddingMatrixReconstructor; print('✅ buildEmbeddingMatrix: OK')",
+    ]
+    
+    for test_script in build_tests:
+        success, output = run_command([python_exe, "-c", test_script], 
+                                    "Testando script de build")
+        if success:
             print(f"   {output.strip()}")
+        else:
+            print("   ❌ Erro ao testar script de build")
     
     # Testar sistema DockTKinase
     print("\n🧪 Testando sistema DockTKinase...")
@@ -369,6 +438,84 @@ if __name__ == "__main__":
     
     print("✅ launch_docktkinase.py criado")
 
+def validate_build_dependencies() -> bool:
+    """Valida dependências específicas dos scripts de build."""
+    print_section("VALIDAÇÃO DE DEPENDÊNCIAS DOS SCRIPTS DE BUILD")
+    
+    # Executável Python do ambiente virtual
+    if platform.system() == "Windows":
+        python_exe = "env/Scripts/python.exe"
+    else:
+        python_exe = "env/bin/python"
+    
+    if not Path(python_exe).exists():
+        print(f"❌ Ambiente virtual não encontrado em {python_exe}")
+        return False
+    
+    # Dependências essenciais para os scripts de build
+    essential_build_deps = [
+        ("numpy", "import numpy"),
+        ("pandas", "import pandas"), 
+        ("tqdm", "import tqdm"),
+        ("psutil", "import psutil"),
+        ("pyspark", "import pyspark"),
+    ]
+    
+    # Dependências opcionais para funcionalidade completa
+    optional_build_deps = [
+        ("esm", "import esm"),
+        ("umap", "import umap"), 
+        ("rdkit", "import rdkit"),
+        ("transformers", "import transformers"),
+        ("torch_geometric", "import torch_geometric"),
+    ]
+    
+    print("🔍 Verificando dependências essenciais...")
+    essential_failed = []
+    for dep_name, import_cmd in essential_build_deps:
+        success, _ = run_command([python_exe, "-c", import_cmd], 
+                               f"Testando {dep_name}")
+        if success:
+            print(f"   ✅ {dep_name}: OK")
+        else:
+            print(f"   ❌ {dep_name}: FALHOU")
+            essential_failed.append(dep_name)
+    
+    print("\n🔧 Verificando dependências opcionais...")
+    optional_failed = []
+    for dep_name, import_cmd in optional_build_deps:
+        success, _ = run_command([python_exe, "-c", import_cmd], 
+                               f"Testando {dep_name}")
+        if success:
+            print(f"   ✅ {dep_name}: OK")
+        else:
+            print(f"   ⚠️  {dep_name}: Não disponível")
+            optional_failed.append(dep_name)
+    
+    # Resumo da validação
+    print("\n📋 RESUMO DA VALIDAÇÃO:")
+    print(f"   ✅ Essenciais: {len(essential_build_deps) - len(essential_failed)}/{len(essential_build_deps)}")
+    print(f"   🔧 Opcionais: {len(optional_build_deps) - len(optional_failed)}/{len(optional_build_deps)}")
+    
+    if essential_failed:
+        print(f"\n❌ DEPENDÊNCIAS CRÍTICAS AUSENTES: {', '.join(essential_failed)}")
+        print("   Execute novamente o setup ou instale manualmente:")
+        for dep in essential_failed:
+            print(f"     pip install {dep}")
+        return False
+    
+    if optional_failed:
+        print(f"\n⚠️  DEPENDÊNCIAS OPCIONAIS AUSENTES: {', '.join(optional_failed)}")
+        print("   Funcionalidade limitada para:")
+        if 'esm' in optional_failed:
+            print("     - Embeddings de proteínas (embeddingMeta.py)")
+        if 'umap' in optional_failed or 'rdkit' in optional_failed:
+            print("     - Embeddings de ligantes (embeddingIBM.py via FM4M)")
+        if 'transformers' in optional_failed:
+            print("     - Modelos de linguagem avançados")
+    
+    return True
+
 def main() -> int:
     """Função principal do setup."""
     print_header("SETUP AUTOMATIZADO DOCKTKINASE")
@@ -385,6 +532,7 @@ def main() -> int:
         ("Verificar requisitos do sistema", check_system_requirements),
         ("Configurar ambiente virtual", setup_virtual_environment),
         ("Instalar dependências", install_dependencies),
+        ("Validar dependências de build", validate_build_dependencies),
         ("Verificar instalação", verify_installation),
         ("Criar scripts de inicialização", lambda: (create_startup_scripts(), True)[1])
     ]

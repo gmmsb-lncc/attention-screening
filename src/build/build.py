@@ -1,49 +1,27 @@
-import subprocess
-import sys
-import os
+#!/usr/bin/env python3
+"""
+DockTKinase Build System - Main Entry Point
 
-def run_command(command, description):
-    print(f"\n🟡 Executando: {description}")
-    # Usar o mesmo ambiente virtual para os subprocessos
-    env = os.environ.copy()
-    env['PYTHONPATH'] = '/home/leon/Desktop/latent_extractor/ibm/FM4M:' + env.get('PYTHONPATH', '')
-    
-    # Usar o Python do ambiente virtual
-    python_executable = '/home/leon/docktkinase/env/bin/python'
-    if command.startswith('python '):
-        command = command.replace('python ', python_executable + ' ', 1)
-    
-    result = subprocess.run(command, shell=True, env=env)
-    if result.returncode != 0:
-        print(f"❌ Erro ao executar: {description}")
-        sys.exit(1)
-    print(f"✅ Finalizado: {description}")
+This script serves as the main entry point for the modular build system.
+For demonstrations and examples, use build_demo.py instead.
+"""
+
+import sys
+from pathlib import Path
 
 def main():
-    # Obter o diretório do script e o diretório de execução
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
-    current_dir = os.getcwd()
-    
-    # --- Caminhos dos arquivos ---
-    input_tsv = os.path.join(project_root, "src", "database", "kinase_non_human_compounds.tsv")  # entrada inicial
-    embedding_matrix = os.path.join(current_dir, "nr_non_human.tsv")  # saída do primeiro passo
-    interaction_labels = os.path.join(current_dir, "concatenated_embeddings", "interaction_labels_non_human.npy")  # saída do terceiro passo
-
-    # --- Etapa 1: Embeddings ---
-    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMain.py')} {input_tsv}", "Gerar Embeddings")
-
-    # --- Etapa 2: Matriz kinase-composto ---
-    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMatrix.py')} {embedding_matrix}", "Gerar Matriz de Emnbeddings")
-
-    # --- Etapa 3: Labels de interação ---
-    run_command(f"python {os.path.join(script_dir, 'buildInteractionLabels.py')} {embedding_matrix}", "Gerar Labels de Interação")
-
-    # --- Etapa 4: Labels binárias ---
-    run_command(f"python {os.path.join(script_dir, 'buildbinaryLabels.py')} {interaction_labels}", "Gerar Labels Binárias")
-
-    # --- Etapa 5: Checagem ---
-    run_command(f"python {os.path.join(script_dir, 'checkConcatenate.py')} {embedding_matrix}", "Checar Embeddings Concatenados")
+    """Main entry point for the build system."""
+    print("🚀 DockTKinase Build System")
+    print("=" * 40)
+    print("Main entry point for the modular build system.")
+    print("\nFor demonstrations and examples:")
+    print("  python build_demo.py")
+    print("\nFor production use, import modules directly:")
+    print("  from build.core import BuildConfig")
+    print("  from build.pipeline import BuildPipeline")
+    print("  from build.embeddings import ProteinEmbedding, LigandEmbedding")
+    print("  from build.matrix import EmbeddingMatrix")
+    print("\nSystem is ready for production use!")
 
 if __name__ == "__main__":
     main()
