@@ -27,23 +27,26 @@ def main():
     
     # --- Caminhos dos arquivos ---
     input_tsv = os.path.join(project_root, "src", "database", "kinase_non_human_compounds.tsv")  # entrada inicial
-    embedding_matrix = os.path.join(current_dir, "nr_non_human.tsv")  # saída do primeiro passo
-    interaction_labels = os.path.join(current_dir, "concatenated_embeddings", "interaction_labels_non_human.npy")  # saída do terceiro passo
+    embedding_matrix = os.path.join(current_dir, "nr_kinase_all_compounds.tsv")  # saída do primeiro passo
+    interaction_labels = os.path.join(current_dir, "concatenated_embeddings", "interaction_labels.npy")  # saída do terceiro passo
 
     # --- Etapa 1: Embeddings ---
     run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMain.py')} {input_tsv}", "Gerar Embeddings")
 
     # --- Etapa 2: Matriz kinase-composto ---
-    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMatrix.py')} {embedding_matrix}", "Gerar Matriz de Emnbeddings")
+    run_command(f"python {os.path.join(script_dir, 'buildEmbeddingMatrix.py')}", "Gerar Matriz de Embeddings")
 
     # --- Etapa 3: Labels de interação ---
-    run_command(f"python {os.path.join(script_dir, 'buildInteractionLabels.py')} {embedding_matrix}", "Gerar Labels de Interação")
+    run_command(f"python {os.path.join(script_dir, 'buildInteractionLabels.py')}", "Gerar Labels de Interação")
 
     # --- Etapa 4: Labels binárias ---
-    run_command(f"python {os.path.join(script_dir, 'buildbinaryLabels.py')} {interaction_labels}", "Gerar Labels Binárias")
+    run_command(f"python {os.path.join(script_dir, 'buildbinaryLabels.py')}", "Gerar Labels Binárias")
 
     # --- Etapa 5: Checagem ---
-    run_command(f"python {os.path.join(script_dir, 'checkConcatenate.py')} {embedding_matrix}", "Checar Embeddings Concatenados")
+    run_command(f"python {os.path.join(script_dir, 'checkConcatenate.py')}", "Checar Embeddings Concatenados")
+    
+    # --- Etapa 6: Checagem de Embeddings ---
+    run_command(f"python {os.path.join(script_dir, 'checkEmbedding.py')}", "Checar Matrizes de Embeddings")
 
 if __name__ == "__main__":
     main()

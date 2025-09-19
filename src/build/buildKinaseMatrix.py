@@ -64,34 +64,6 @@ class EmbeddingMatrixReconstructor:
         matrix = np.vstack(concatenated_embeddings)
         return matrix
     
-    def _determine_embedding_dimensions(self):
-        """Determina dinamicamente as dimensões dos embeddings de ligantes e proteínas."""
-        import glob
-        
-        # Determinar dimensão dos embeddings de ligantes
-        ligand_files = glob.glob(os.path.join(self.ligand_embeddings_dir, "*_ligand.npy"))
-        if ligand_files:
-            sample_embedding = np.load(ligand_files[0], allow_pickle=True)
-            if self.embedding_type == 'cls':
-                self.ligand_dim = sample_embedding.shape[1]  # Segunda dimensão para CLS
-            else:  # mean
-                self.ligand_dim = sample_embedding.shape[1]  # Mesma lógica para mean
-        else:
-            raise ValueError(f"Nenhum arquivo de embedding de ligante encontrado em {self.ligand_embeddings_dir}")
-        
-        # Determinar dimensão dos embeddings de proteínas
-        protein_files = glob.glob(os.path.join(self.protein_embeddings_dir, "*_protein_embedding.npy"))
-        if protein_files:
-            sample_embedding = np.load(protein_files[0], allow_pickle=True)
-            if self.embedding_type == 'cls':
-                self.protein_dim = sample_embedding.shape[1]  # Segunda dimensão para CLS
-            else:  # mean
-                self.protein_dim = sample_embedding.shape[1]  # Mesma lógica para mean
-        else:
-            raise ValueError(f"Nenhum arquivo de embedding de proteína encontrado em {self.protein_embeddings_dir}")
-        
-        print(f"Dimensões determinadas automaticamente: ligand_dim={self.ligand_dim}, protein_dim={self.protein_dim}")
-    
     def normalize_matrix(self, matrix):
         """Normaliza a matriz entre 0 e 1."""
         min_val = np.min(matrix, axis=0, keepdims=True)
@@ -116,13 +88,7 @@ class EmbeddingMatrixReconstructor:
         self.save_matrix(matrix)
 
 if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Uso correto: python buildEmbeddingMatrix.py <input_tsv_file>")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
+    input_file = "nr_kinase_all_compounds.tsv"
     ligand_embedding_dir = "ligand_embeddings"
     protein_embedding_dir = "protein_embeddings"
     output_dir = "concatenated_embeddings"
