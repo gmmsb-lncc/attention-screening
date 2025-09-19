@@ -16,9 +16,18 @@ class EmbeddingCheck:
         self.expected_ligand_dim = 768
         self.expected_protein_dim = 2560
 
-        # Contagem esperada de arquivos
-        self.num_ligands = len([f for f in os.listdir(self.ligand_emb_dir) if f.endswith(".npy")])
-        self.num_proteins = len([f for f in os.listdir(self.protein_emb_dir) if f.endswith(".npy")])
+        # Contagem esperada de arquivos - com verificação de existência
+        if os.path.exists(self.ligand_emb_dir):
+            self.num_ligands = len([f for f in os.listdir(self.ligand_emb_dir) if f.endswith(".npy")])
+        else:
+            self.num_ligands = 0
+            print(f"⚠️ Diretório {self.ligand_emb_dir} não encontrado")
+            
+        if os.path.exists(self.protein_emb_dir):
+            self.num_proteins = len([f for f in os.listdir(self.protein_emb_dir) if f.endswith(".npy")])
+        else:
+            self.num_proteins = 0
+            print(f"⚠️ Diretório {self.protein_emb_dir} não encontrado")
 
     def load_matrix(self, path):
         """Carrega a matriz de embeddings e retorna seu conteúdo."""

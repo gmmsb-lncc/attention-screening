@@ -11,8 +11,16 @@ sys.path.append(os.path.join(fm4m_path, 'models'))
 import psutil
 import numpy as np
 import pandas as pd
-import models.fm4m as fm4m
 from concurrent.futures import ThreadPoolExecutor
+
+# Import FM4M com tratamento de erro
+try:
+    import models.fm4m as fm4m
+    FM4M_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Aviso: FM4M não está disponível: {e}")
+    fm4m = None
+    FM4M_AVAILABLE = False
 
 def download_with_retry(func, *args, max_retries=3, **kwargs):
     """Execute a function with retry logic for handling rate limits."""
@@ -83,6 +91,9 @@ class EmbeddingIBM:
         :param smiles_list: Lista de strings SMILES.
         :return: DataFrame contendo as representações latentes.
         """
+        if not FM4M_AVAILABLE:
+            raise ImportError("FM4M não está disponível. Instale as dependências necessárias.")
+            
         def _get_representation():
             representations, _ = fm4m.get_representation(
                 train_data=smiles_list,
