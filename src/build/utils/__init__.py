@@ -6,7 +6,7 @@ Provides basic utilities with fallback for missing functions.
 
 # Import what we can from memory_utils
 try:
-    from .memory_utils import *
+    from build.utils.memory_utils import *
 except ImportError as e:
     print(f"Warning: Could not import memory_utils: {e}")
     MemoryContext = None
@@ -14,7 +14,7 @@ except ImportError as e:
 
 # Import what we can from file_utils
 try:
-    from .file_utils import *
+    from build.utils.file_utils import *
 except ImportError as e:
     print(f"Warning: Could not import file_utils: {e}")
     ensure_directory = lambda path: None
@@ -24,14 +24,14 @@ except ImportError as e:
 
 # Import what we can from spark_utils
 try:
-    from .spark_utils import SparkManager
+    from build.utils.spark_utils import SparkManager
 except ImportError as e:
     print(f"Warning: Could not import spark_utils: {e}")
     SparkManager = None
 
 # Import what we can from logging_utils
 try:
-    from .logging_utils import ProgressLogger
+    from build.utils.logging_utils import ProgressLogger
 except ImportError as e:
     print(f"Warning: Could not import logging_utils: {e}")
     ProgressLogger = None

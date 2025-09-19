@@ -10,11 +10,11 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
-from ..core import BaseBuilder, BuildConfig
-from ..embeddings import ProteinEmbedding, LigandEmbedding
-from ..matrix import EmbeddingMatrix, KinaseMatrix  
-from ..labels import InteractionLabels, BinaryLabels
-from ..validation import MatrixValidator
+from build.core import BaseBuilder, BuildConfig
+from build.embeddings import ProteinEmbedding, LigandEmbedding
+from build.matrix import EmbeddingMatrix, KinaseMatrix  
+from build.labels import InteractionLabels, BinaryLabels
+from build.validation import MatrixValidator
 
 
 class BuildPipeline(BaseBuilder):

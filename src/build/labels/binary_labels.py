@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from pathlib import Path
 
-from ..core import BuildConfig
-from .base_labels import BaseLabels
+from build.core import BuildConfig
+from build.labels.base_labels import BaseLabels
 
 
 class BinaryLabels(BaseLabels):
@@ -31,6 +31,38 @@ class BinaryLabels(BaseLabels):
         self.interaction_labels_path = interaction_labels_path
         self.interaction_data: Optional[np.ndarray] = None
         self.threshold: float = config.get('binary_threshold', 1000.0)  # 1000 nM default
+    
+    def _validate_config(self) -> None:
+        """Valida configuração específica para labels binários."""
+        super()._validate_config()
+        
+        # Validar threshold
+        if self.threshold <= 0:
+            raise ValueError("Threshold deve ser um valor positivo")
+        
+        # Verificar se arquivo de labels de interação existe
+        if self.interaction_labels_path and not Path(self.interaction_labels_path).exists():
+            self.logger.warning(f"Arquivo de labels de interação não encontrado: {self.interaction_labels_path}")
+    
+    def build(self) -> Dict[str, Any]:
+        """Constrói labels binários."""
+        self.logger.info("Construindo labels binários...")
+        
+        binary_labels = self.generate_labels()
+        
+        # Salvar se output_dir especificado
+        if hasattr(self, 'output_dir') and self.output_dir:
+            output_file = Path(self.output_dir) / "binary_labels.npy"
+            np.save(output_file, binary_labels)
+            self.logger.info(f"Labels binários salvos em: {output_file}")
+        
+        return {
+            'binary_labels': binary_labels,
+            'threshold': self.threshold,
+            'total_pairs': len(binary_labels),
+            'active_pairs': np.sum(binary_labels == 1),
+            'inactive_pairs': np.sum(binary_labels == 0)
+        }
         
     def generate_labels(self, 
                        interaction_data: Optional[np.ndarray] = None,

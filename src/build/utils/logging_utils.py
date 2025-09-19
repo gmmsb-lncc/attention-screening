@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import json
 
-from ..core.constants import LOG_FORMAT, LOG_LEVEL
+from build.core.constants import LOG_FORMAT, LOG_LEVEL
 
 class BuildLogger:
     """Logger personalizado para o sistema build."""
