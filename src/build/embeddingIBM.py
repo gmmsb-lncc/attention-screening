@@ -11,7 +11,7 @@ sys.path.append(os.path.join(fm4m_path, 'models'))
 import psutil
 import numpy as np
 import pandas as pd
-import fm4m
+import models.fm4m as fm4m
 from concurrent.futures import ThreadPoolExecutor
 
 def download_with_retry(func, *args, max_retries=3, **kwargs):

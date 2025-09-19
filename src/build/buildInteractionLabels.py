@@ -31,13 +31,6 @@ class InteractionLabels:
         self.spark.stop()
 
 if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Uso correto: python buildInteractionLabels.py <input_tsv_file>")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
-    label_extractor = InteractionLabels(input_file)
+    label_extractor = InteractionLabels("nr_kinase_all_compounds.tsv")
     label_extractor.extract_labels()
     label_extractor.stop_spark()
