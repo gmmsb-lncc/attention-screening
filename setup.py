@@ -90,8 +90,19 @@ def setup_virtual_environment() -> bool:
             import shutil
             shutil.rmtree(env_path)
     
-    # Criar novo ambiente
-    success, _ = run_command([sys.executable, "-m", "venv", "env"], "Criando ambiente virtual")
+    # Criar novo ambiente com Python 3.12
+    python_cmd = "python3.12"
+    
+    # Verificar se Python 3.12 está disponível
+    try:
+        subprocess.run([python_cmd, "--version"], capture_output=True, check=True)
+        print(f"🐍 Usando {python_cmd}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Fallback para python3 ou sys.executable
+        python_cmd = "python3" if subprocess.run(["python3", "--version"], capture_output=True).returncode == 0 else sys.executable
+        print(f"🐍 Usando {python_cmd}")
+    
+    success, _ = run_command([python_cmd, "-m", "venv", "env"], "Criando ambiente virtual")
     
     if success:
         print("✅ Ambiente virtual criado")
@@ -185,17 +196,6 @@ def install_dependencies() -> bool:
         if not success:
             print("⚠️  Algumas dependências podem ter falhado")
     
-    # Verificar se environment.yml existe (conda)
-    conda_file = Path("environment.yml")
-    if conda_file.exists():
-        print("🐍 Arquivo conda detectado")
-        # Tentar instalar com conda se disponível
-        try:
-            success, _ = run_command(["conda", "env", "update", "-f", "environment.yml"], 
-                                   "Atualizando ambiente conda")
-        except:
-            print("ℹ️  Conda não disponível, usando pip")
-    
     return True
 
 def verify_installation() -> bool:
@@ -218,6 +218,7 @@ def verify_installation() -> bool:
         "import tqdm; print(f'tqdm: {tqdm.__version__}')",
         "import psutil; print(f'psutil: {psutil.__version__}')",
         "import pyspark; print(f'PySpark: {pyspark.__version__}')",
+        "import optuna; print(f'Optuna: {optuna.__version__}')"
     ]
     
     # Testar imports opcionais
@@ -273,29 +274,46 @@ src_path = Path.cwd() / "src"
 sys.path.insert(0, str(src_path))
 
 try:
-    from classifier.config.mlp_config import MLPConfig
-    from classifier.utils.config_manager import ConfigManager
-    from classifier.utils.device_manager import SmartDeviceManager
+    # Testar imports do sistema modularizado
+    from classifier.modular_classifier import main as classifier_main
+    from classifier.modular_pipeline import MLPEmbeddingPipeline
+    from classifier.models.mlp_classifier import MLPEmbeddingClassifier
+    from classifier.core.data_loader import DataManager
+    from classifier.core.evaluator import ModelEvaluator
+    from classifier.utils.import_utils import safe_import_optional
     
-    print("✅ Imports principais: OK")
+    print("✅ Imports do sistema modularizado: OK")
     
-    # Testar instanciação
-    config = MLPConfig()
-    config_mgr = ConfigManager()
-    device_mgr = SmartDeviceManager()
+    # Testar imports opcionais (Optuna e PySpark)
+    optuna_module = safe_import_optional("optuna", "otimização")
+    pyspark_module = safe_import_optional("pyspark", "processamento distribuído")
     
-    print("✅ Instanciação: OK")
+    if optuna_module:
+        print("✅ Optuna disponível: OK")
+    else:
+        print("⚠️  Optuna não disponível")
     
-    # Testar funcionalidade básica
-    device = device_mgr.get_device()
-    template_config = config_mgr.create_config("development")
+    if pyspark_module:
+        print("✅ PySpark disponível: OK")  
+    else:
+        print("⚠️  PySpark não disponível")
     
-    print(f"✅ Device detectado: {device}")
-    print(f"✅ Template criado: {template_config.model.hidden_layers}")
-    print("🎉 SISTEMA DOCKTKINASE FUNCIONAL!")
+    # Testar instanciação do pipeline (apenas classe, sem argumentos)
+    print("✅ Pipeline modular: Classe disponível")
+    
+    # Testar instanciação do modelo  
+    model = MLPEmbeddingClassifier(input_dim=100, hidden_dim=64, dropout=0.3)
+    print("✅ Modelo MLP: OK")
+    
+    # Testar componentes core (apenas classes, sem argumentos)
+    print("✅ Componentes core: Classes disponíveis")
+    
+    print("🎉 SISTEMA DOCKTKINASE MODULARIZADO FUNCIONAL!")
     
 except Exception as e:
     print(f"❌ Erro no teste: {e}")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 '''
     
@@ -330,7 +348,8 @@ echo "✅ Ambiente ativado!"
 echo "📁 PYTHONPATH: $PYTHONPATH"
 echo ""
 echo "Para usar DockTKinase:"
-echo "  python -c 'from classifier.main import MLPPipeline; print(\"Sistema pronto!\")'"
+echo "  python src/classifier/modular_classifier.py --help  # CLI interface"
+echo "  python -c 'from classifier.modular_pipeline import ModularMLPPipeline; print(\"Sistema pronto!\")'"
 echo "  jupyter lab  # Para notebooks"
 echo ""
 '''
@@ -367,27 +386,42 @@ def setup_environment():
 def test_system():
     """Testa se o sistema está funcionando."""
     try:
-        from classifier.config.mlp_config import MLPConfig
-        from classifier.utils.config_manager import ConfigManager
-        from classifier.utils.device_manager import SmartDeviceManager
+        from classifier.modular_classifier import main as classifier_main
+        from classifier.modular_pipeline import ModularMLPPipeline
+        from classifier.models.mlp_classifier import MLPEmbeddingClassifier
+        from classifier.utils.import_utils import safe_import_optional
         
-        print("✅ Sistema carregado com sucesso!")
+        print("✅ Sistema modularizado carregado com sucesso!")
         
-        # Informações do sistema
-        device_mgr = SmartDeviceManager()
-        device = device_mgr.get_device()
+        # Testar pipeline
+        pipeline = ModularMLPPipeline()
+        print("✅ Pipeline: OK")
         
-        print(f"🖥️  Device: {device}")
+        # Testar modelo
+        model = MLPEmbeddingClassifier(input_dim=100, hidden_dims=[64, 32])
+        print("✅ Modelo MLP: OK")
+        
+        # Verificar dependências opcionais
+        optuna_available = safe_import_optional("optuna", "otimização")
+        pyspark_available = safe_import_optional("pyspark", "processamento distribuído")
+        
+        print(f"� Optuna: {'✅ Disponível' if optuna_available else '⚠️  Não disponível'}")
+        print(f"🔧 PySpark: {'✅ Disponível' if pyspark_available else '⚠️  Não disponível'}")
+        
         print("")
         print("Sistema pronto para uso!")
         print("Para começar:")
-        print("  from classifier.main import MLPPipeline")
-        print("  pipeline = MLPPipeline()")
+        print("  from classifier.modular_pipeline import ModularMLPPipeline")
+        print("  pipeline = ModularMLPPipeline()")
+        print("  # ou usar CLI:")
+        print("  python src/classifier/modular_classifier.py --help")
         
         return True
         
     except Exception as e:
         print(f"❌ Erro ao carregar sistema: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":
@@ -531,8 +565,10 @@ def main() -> int:
     print("   3. jupyter lab (para notebooks)")
     
     print("\n📖 Para usar o sistema:")
-    print("   from classifier.main import MLPPipeline")
-    print("   pipeline = MLPPipeline()")
+    print("   from classifier.modular_pipeline import ModularMLPPipeline")
+    print("   pipeline = ModularMLPPipeline()")
+    print("   # ou usar interface CLI:")
+    print("   python src/classifier/modular_classifier.py --help")
     
     return 0
 
