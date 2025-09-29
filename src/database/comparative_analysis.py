@@ -36,8 +36,8 @@ def load_data(human_file, non_human_file):
         raise FileNotFoundError(f"Arquivo não encontrado: {non_human_file}")
     
     # Carregar os dados
-    df_human = pd.read_csv(human_file, sep='\\t')
-    df_non_human = pd.read_csv(non_human_file, sep='\\t')
+    df_human = pd.read_csv(human_file, sep='\t')
+    df_non_human = pd.read_csv(non_human_file, sep='\t')
     
     print(f"Quinases humanas: {len(df_human)} registros")
     print(f"Quinases não humanas: {len(df_non_human)} registros")
