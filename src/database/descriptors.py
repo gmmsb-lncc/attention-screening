@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+"""
+Compatibility wrapper for original descriptors.py functionality.
+
+This maintains 100% backward compatibility with the original descriptors.py script.
+"""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from rdkit import Chem
@@ -9,6 +16,7 @@ import seaborn as sns
 
 
 class MolecularDescriptors:
+    """Original MolecularDescriptors class - 100% compatible with original implementation."""
 
     def __init__(self, data_path, batch_size=1024):
         self.data_path = data_path
@@ -72,7 +80,6 @@ class MolecularDescriptors:
             plt.savefig(output_path)
         plt.show()
 
-
     def violin_plot(self):
         columns = ['MW', 'LogP', 'HBD', 'HBA', 'TPSA', 'NRB']
         fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(15, 10))
@@ -108,6 +115,7 @@ def main():
 
     descriptors = MolecularDescriptors(output_file_path)
     descriptors.violin_plot()
+
 
 if __name__ == '__main__':
     main()
