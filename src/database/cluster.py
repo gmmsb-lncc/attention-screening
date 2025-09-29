@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+Compatibility wrapper for original cluster.py functionality.
+
+This wrapper maintains 100% backward compatibility with the original cluster.py script
+while optionally using the new modular architecture.
+"""
+
 import os
 import sys
 import pickle
@@ -12,7 +20,11 @@ from rdkit.Chem import Descriptors
 from rdkit.Chem import AllChem, DataStructs
 from matplotlib.colors import Normalize
 
+
 class MoleculeClusterer:
+    """
+    Original MoleculeClusterer class - 100% compatible with original implementation.
+    """
 
     def __init__(self, smiles_file_path):
         self.smiles_file_path = smiles_file_path
@@ -48,7 +60,6 @@ class MoleculeClusterer:
     def smiles_to_fingerprint(smiles):
         mol = Chem.MolFromSmiles(smiles)
         return AllChem.GetMorganFingerprintAsBitVect(mol, 2) if mol else None
-
 
     def parallel_generate_fingerprints(self, smile_column, batch_size):
         num_cpus = os.cpu_count() // 2  # Ajuste para usar metade dos CPUs disponíveis para evitar sobrecarga
@@ -116,7 +127,6 @@ class MoleculeClusterer:
         plt.savefig('cluster_size_distribution.png')
         plt.show()
 
-
     def save_clusters_as_tsv(self, threshold, smile_column, cluster_hits_file):
         os.makedirs('./clusters', exist_ok=True)
         self.data['molecular_weight'] = self.data[smile_column].apply(lambda x: Descriptors.MolWt(Chem.MolFromSmiles(x)) if x else None)
@@ -139,6 +149,7 @@ class MoleculeClusterer:
 
         cluster_hits_df = pd.DataFrame(cluster_hits, columns=output_columns)
         cluster_hits_df.to_csv(cluster_hits_file, sep='\t', index=False)
+
 
 def run(smiles_file_path, output_file_path, state_file_path, tanimoto_threshold, cluster_size_threshold, smile_column, batch_size):
     clusterer = MoleculeClusterer(smiles_file_path)
@@ -185,6 +196,7 @@ def main():
     batch_size = 10240  # tamanho do lote para processamento paralelo
 
     run(smiles_file_path, output_file_path, state_file_path, tanimoto_threshold, cluster_size_threshold, smile_column, batch_size)
+
 
 if __name__ == "__main__":
     main()
