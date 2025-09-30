@@ -198,6 +198,14 @@ This script will:
 
 ## 🚀 Quick Start
 
+### **⚡ Super Quick (4 steps)**
+1. **Setup**: `./setup_conda.sh`
+2. **Configure**: Edit `docktkinase.py` with your TSV file
+3. **Embeddings**: `python docktkinase.py`
+4. **ML Training**: `python run_classifier.py`
+
+📚 **Detailed guides**: [QUICK_START.md](QUICK_START.md) | [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)
+
 ### **Complete Pipeline (5 minutes)**
 ```bash
 # 1. Setup environment
