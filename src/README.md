@@ -95,12 +95,12 @@ graph LR
 ```python
 # Complete pipeline execution
 from src.build import BuildPipeline
-from src.classifier import MLPClassifier
-from src.database import DatabaseAnalyzer
+from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+from src.database import ComparativeAnalyzer
 
 # 1. Analyze and prepare data
-analyzer = DatabaseAnalyzer()
-data_stats = analyzer.analyze_dataset("data/kinase_data.tsv")
+analyzer = ComparativeAnalyzer()
+data_stats = analyzer.compare_datasets("data/kinase_data.tsv")
 
 # 2. Generate embeddings
 pipeline = BuildPipeline()
@@ -110,7 +110,7 @@ embeddings = pipeline.run_complete_pipeline(
 )
 
 # 3. Train classifier
-classifier = MLPClassifier()
+classifier = MLPEmbeddingPipeline()
 model = classifier.train_with_optimization(
     features_path="embeddings/concatenated_matrix.npy",
     labels_path="embeddings/labels.npy"
@@ -129,13 +129,13 @@ balance_checker = BalanceChecker()
 balance_report = balance_checker.analyze_balance("data.tsv")
 
 # Embedding generation only  
-from src.build import LigandEmbedding, ProteinEmbedding
+from src.build.embeddings import LigandEmbedding, ProteinEmbedding
 
 ligand_emb = LigandEmbedding(model_name="smi-ted")
 protein_emb = ProteinEmbedding(model_name="esm2")
 
 # Classification only
-from src.classifier import ModularClassifier
+from src.classifier.modular_classifier import ModularClassifier
 
 classifier = ModularClassifier()
 results = classifier.train_and_evaluate("features.npy", "labels.npy")
@@ -180,7 +180,7 @@ class CustomLigandEmbedding(BaseEmbedding):
 ### **Adding New Classifiers**
 ```python
 # Extend base classifier
-from src.classifier.core import BaseClassifier
+from src.classifier.core.base_classifier import BaseClassifier
 
 class CustomClassifier(BaseClassifier):
     def train(self, X, y):
