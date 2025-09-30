@@ -1,31 +1,31 @@
-# 🚀 **GUIA DE USO - Scripts Database**
+# 🚀 **USAGE GUIDE - Database Scripts**
 
-**Como usar cada script da pasta `src/database/` de forma prática**
+**How to use each script in the `src/database/` folder in a practical way**
 
 ---
 
-## 📋 **SCRIPTS EXECUTÁVEIS DIRETAMENTE**
+## 📋 **DIRECTLY EXECUTABLE SCRIPTS**
 
-### 1️⃣ **Análise Comparativa** - `comparative_analysis.py`
+### 1️⃣ **Comparative Analysis** - `comparative_analysis.py`
 
 ```bash
-# Execute diretamente:
+# Execute directly:
 cd src/database/
 python3 comparative_analysis.py
 ```
 
-**Pré-requisitos:**
-- `kinase_human_compounds.tsv` (dados de quinases humanas)
-- `kinase_non_human_compounds.tsv` (dados de quinases não humanas)
+**Prerequisites:**
+- `kinase_human_compounds.tsv` (human kinase data)
+- `kinase_non_human_compounds.tsv` (non-human kinase data)
 
-**O que faz:**
-- Compara dados entre quinases humanas e não humanas
-- Gera estatísticas e visualizações
-- Cria gráficos no diretório `analysis_output/`
+**What it does:**
+- Compares data between human and non-human kinases
+- Generates statistics and visualizations
+- Creates graphs in the `analysis_output/` directory
 
 ---
 
-### 2️⃣ **Remoção de Redundância** - `remove_redundance.py`
+### 2️⃣ **Redundancy Removal** - `remove_redundance.py`
 
 ```bash
 # Execute diretamente:
