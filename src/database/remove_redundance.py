@@ -19,7 +19,7 @@ class RemoveRedundance:
         return smiles
 
     def process_data(self):
-        data = pd.read_csv(self.input_file_path, sep='\t')
+        data = pd.read_csv(self.input_file_path, sep='	')
         tqdm.pandas(desc="Removing salts and canonizing SMILES")
         data['canonical_smiles'] = data['canonical_smiles'].progress_apply(self.remove_salts_and_canonize)
         return data
@@ -39,7 +39,7 @@ class RemoveRedundance:
         return data
 
     def save_data(self, data, filename):
-        data.to_csv(f"{self.output_directory}/{filename}", sep='\t', index=False)
+        data.to_csv(f"{self.output_directory}/{filename}", sep='	', index=False)
 
     def execute(self):
         print("Processing data...")
