@@ -79,7 +79,18 @@ class BuildConfig:
             # Validação
             'validation_enabled': True,
             'min_embedding_size': MIN_EMBEDDING_SIZE,
-            'max_embedding_size': MAX_EMBEDDING_SIZE
+            'max_embedding_size': MAX_EMBEDDING_SIZE,
+            
+            # Estratificação
+            'stratification_enabled': False,
+            'stratification_params': {
+                'clustering_algorithm': 'dbscan',
+                'similarity_threshold': 0.8,
+                'cluster_min_size': 5,
+                'stratify_by': 'both',
+                'protein_weight': 0.6,
+                'ligand_weight': 0.4
+            }
         }
     
     def _load_from_file(self, config_file: str) -> None:
