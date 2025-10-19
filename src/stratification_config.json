@@ -1,0 +1,70 @@
+{
+  "base_dir": ".",
+  "ligand_dir": "ligand",
+  "protein_dir": "protein",
+  "ligand_output_dir": "ligand_embeddings",
+  "protein_output_dir": "protein_embeddings",
+  "matrix_output_dir": "matrix_embedding",
+  "concatenated_output_dir": "concatenated_embeddings",
+  "embedding_type": "cls",
+  "ligand_dim": 768,
+  "protein_dim": 2560,
+  "batch_size": 32,
+  "esm_model": "esm2_t36_3B_UR50D",
+  "fm4m_model": "SMI-TED",
+  "use_gpu": true,
+  "use_parallel": true,
+  "spark_config": {
+    "app_name": "DocktKinaseEmbeddings",
+    "master": "local[*]",
+    "memory": "8g",
+    "max_result_size": "2g"
+  },
+  "memory_config": {
+    "low_memory_threshold": 4,
+    "high_memory_threshold": 16,
+    "batch_size_factor": 2
+  },
+  "log_level": "INFO",
+  "log_format": "[%(asctime)s] %(levelname)s - %(name)s - %(message)s",
+  "checkpoint_enabled": true,
+  "checkpoint_file": "build_checkpoint.txt",
+  "processed_files_log": "processed_files.log",
+  "validation_enabled": true,
+  "min_embedding_size": 100,
+  "max_embedding_size": 10000,
+  "stratification_enabled": false,
+  "stratification_params": {
+    "clustering_algorithm": "dbscan",
+    "similarity_threshold": 0.8,
+    "cluster_min_size": 5,
+    "stratify_by": "both",
+    "protein_weight": 0.6,
+    "ligand_weight": 0.4
+  },
+  "project_name": "docktkinase_embeddings",
+  "output_directory": "concatenated_embeddings",
+  "esm_config": {
+    "model_name": "esm2_t33_650M_UR50D",
+    "batch_size": 16,
+    "device": "auto",
+    "max_sequence_length": 1024
+  },
+  "fm4m_config": {
+    "model_path": "/home/leon/Desktop/latent_extractor/ibm/FM4M",
+    "batch_size": 32,
+    "device": "auto"
+  },
+  "matrix_config": {
+    "normalize": true,
+    "cache_embeddings": true,
+    "chunk_size": 1000
+  },
+  "binary_threshold": 1000.0,
+  "validation": {
+    "check_nan": true,
+    "check_inf": true,
+    "check_alignment": true,
+    "save_reports": true
+  }
+}

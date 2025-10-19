@@ -15,6 +15,7 @@ from build.embeddings import ProteinEmbedding, LigandEmbedding
 from build.matrix import EmbeddingMatrix, KinaseMatrix  
 from build.labels import InteractionLabels, BinaryLabels
 from build.validation import MatrixValidator
+from build.stratification import Stratifier, SplitValidator
 
 
 class BuildPipeline(BaseBuilder):
@@ -68,7 +69,9 @@ class BuildPipeline(BaseBuilder):
                 'ligand_embedding': LigandEmbedding(self.config),
                 'embedding_matrix': EmbeddingMatrix(self.config),
                 'kinase_matrix': KinaseMatrix(self.config),
-                'matrix_validator': MatrixValidator(self.config)
+                'matrix_validator': MatrixValidator(self.config),
+                'stratifier': Stratifier(self.config),
+                'split_validator': SplitValidator(self.config)
             }
             self.logger.info("Initialized all pipeline components")
             
@@ -303,7 +306,7 @@ class BuildPipeline(BaseBuilder):
                 concatenated_path = self.results['matrix_construction']['output_path']
             
             if labels_path is None and 'label_generation' in self.results:
-                labels_path = self.results['label_generation']['interaction_labels']['path'] + '.npy'
+                labels_path = str(Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy'))
             
             if not concatenated_path or not labels_path:
                 self.logger.error("Required paths for validation not available")
@@ -394,6 +397,199 @@ class BuildPipeline(BaseBuilder):
             self.logger.error(f"Error in complete pipeline: {e}")
             return False
     
+    def run_stratification(self,
+                          protein_embeddings_path: Optional[Union[str, Path]] = None,
+                          ligand_embeddings_path: Optional[Union[str, Path]] = None,
+                          concatenated_matrix_path: Optional[Union[str, Path]] = None,
+                          labels_path: Optional[Union[str, Path]] = None,
+                          test_size: float = 0.2,
+                          val_size: float = 0.1,
+                          clustering_algorithm: Optional[str] = None,
+                          similarity_threshold: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Run stratification to create train/test/validation splits.
+        
+        Args:
+            protein_embeddings_path: Path to protein embeddings (optional if using concatenated)
+            ligand_embeddings_path: Path to ligand embeddings (optional if using concatenated)
+            concatenated_matrix_path: Path to concatenated embeddings matrix
+            labels_path: Path to labels file
+            test_size: Proportion of test set
+            val_size: Proportion of validation set
+            clustering_algorithm: Algorithm for clustering ('dbscan', 'hierarchical', 'kmeans', 'random')
+            similarity_threshold: Similarity threshold for clustering
+            
+        Returns:
+            Dictionary with split information and validation results
+        """
+        try:
+            self.logger.info("🟡 Starting stratification process")
+            
+            # Load concatenated embeddings matrix
+            if concatenated_matrix_path:
+                import numpy as np
+                concatenated_embeddings = np.load(concatenated_matrix_path)
+            elif protein_embeddings_path and ligand_embeddings_path:
+                # Load separate embeddings and combine
+                import numpy as np
+                protein_embeddings = np.load(protein_embeddings_path)
+                ligand_embeddings = np.load(ligand_embeddings_path)
+                # Assuming they need to be concatenated row-wise for the same samples
+                concatenated_embeddings = np.concatenate([protein_embeddings, ligand_embeddings], axis=1)
+            else:
+                raise ValueError("Either concatenated_matrix_path or both protein_embeddings_path and ligand_embeddings_path must be provided")
+            
+            # Load labels
+            if labels_path:
+                import numpy as np
+                labels = np.load(labels_path)
+            else:
+                # Generate dummy labels if not available (for testing)
+                labels = np.random.randint(0, 2, size=(concatenated_embeddings.shape[0],))
+            
+            # Initialize and configure stratifier
+            stratifier = self.components['stratifier']
+            
+            # Use provided parameters or fall back to config values
+            if clustering_algorithm is not None:
+                stratifier.clustering_algorithm = clustering_algorithm
+            if similarity_threshold is not None:
+                stratifier.similarity_threshold = similarity_threshold
+            
+            # Perform stratified split
+            train_idx, val_idx, test_idx = stratifier.stratified_split(
+                embeddings=concatenated_embeddings,
+                labels=labels,
+                test_size=test_size,
+                val_size=val_size
+            )
+            
+            # Validate splits
+            split_validator = self.components['split_validator']
+            validation_report = split_validator.validate_splits_comprehensively(
+                embeddings=concatenated_embeddings,
+                labels=labels,
+                train_idx=train_idx,
+                val_idx=val_idx,
+                test_idx=test_idx
+            )
+            
+            # Store results
+            stratification_results = {
+                'train_indices': train_idx.tolist(),
+                'val_indices': val_idx.tolist(),
+                'test_indices': test_idx.tolist(),
+                'split_sizes': {
+                    'train': len(train_idx),
+                    'validation': len(val_idx),
+                    'test': len(test_idx)
+                },
+                'validation_report': validation_report
+            }
+            
+            self.results['stratification'] = stratification_results
+            self.logger.info(f"✅ Stratification completed: {len(train_idx)} train, {len(val_idx)} val, {len(test_idx)} test samples")
+            
+            return stratification_results
+            
+        except Exception as e:
+            self.logger.error(f"Error in stratification: {e}")
+            raise
+    
+    def run_complete_pipeline(self,
+                            input_tsv_path: Union[str, Path],
+                            output_dir: Union[str, Path],
+                            matrix_type: str = 'embedding',
+                            binary_threshold: float = 1000.0,
+                            run_validation: bool = True,
+                            stratify_splits: bool = False,
+                            test_size: float = 0.2,
+                            val_size: float = 0.1) -> bool:
+        """
+        Run the complete build pipeline.
+        
+        Args:
+            input_tsv_path: Path to input TSV file
+            output_dir: Output directory
+            matrix_type: Type of matrix to build ('embedding' or 'kinase')
+            binary_threshold: Threshold for binary labels (nM)
+            run_validation: Whether to run validation step
+            stratify_splits: Whether to perform stratified splits
+            test_size: Proportion of test set (if stratifying)
+            val_size: Proportion of validation set (if stratifying)
+            
+        Returns:
+            True if entire pipeline succeeds, False otherwise
+        """
+        try:
+            self.logger.info("🚀 Starting complete build pipeline")
+            
+            # Ensure output directory exists
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Step 1: Generate embeddings
+            if not self.run_embedding_generation(input_tsv_path, output_dir):
+                return False
+            
+            # Step 2: Build matrix
+            if not self.run_matrix_construction(output_dir, matrix_type):
+                return False
+            
+            # Step 3: Generate labels
+            if not self.run_label_generation(input_tsv_path, output_dir, binary_threshold):
+                return False
+            
+            # Step 4: Optional stratification
+            # Use parameter value if provided, otherwise check config
+            perform_stratification = stratify_splits or self.config.get('stratification_enabled', False)
+            if perform_stratification:
+                self.logger.info("🟡 Starting stratification phase")
+                
+                # Get paths from previous steps
+                matrix_path = self.results['matrix_construction']['output_path']
+                labels_path = str(Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy'))
+                
+                # Perform stratified splits
+                stratification_results = self.run_stratification(
+                    concatenated_matrix_path=matrix_path,
+                    labels_path=labels_path,
+                    test_size=test_size,
+                    val_size=val_size
+                )
+                
+                # Save split indices
+                splits_output_dir = output_dir / "splits"
+                splits_output_dir.mkdir(exist_ok=True)
+                
+                import numpy as np
+                np.save(splits_output_dir / "train_indices.npy", 
+                        np.array(stratification_results['train_indices']))
+                np.save(splits_output_dir / "val_indices.npy", 
+                        np.array(stratification_results['val_indices']))
+                np.save(splits_output_dir / "test_indices.npy", 
+                        np.array(stratification_results['test_indices']))
+                
+                self.logger.info(f"✅ Splits saved to: {splits_output_dir}")
+            
+            # Step 5: Optional validation
+            if run_validation:
+                if not self.run_validation(original_tsv_path=input_tsv_path):
+                    self.logger.warning("Validation failed, but pipeline completed")
+            
+            # Save pipeline results
+            results_path = output_dir / "pipeline_results.json"
+            self.save_json(self.results, results_path)
+            
+            self.logger.info("🎉 Complete pipeline executed successfully!")
+            self.logger.info(f"Results saved to: {results_path}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error in complete pipeline: {e}")
+            return False
+
     def get_pipeline_summary(self) -> Dict[str, Any]:
         """
         Get summary of pipeline execution.
