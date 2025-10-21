@@ -80,7 +80,7 @@ class ProteinEmbedding(BaseEmbedding):
         return ESM_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega modelo ESM."""
+        """Carrega modelo ESM com cache local."""
         self.logger.info(f"Configurando dispositivo...")
         
         # Configurar dispositivo
@@ -91,9 +91,17 @@ class ProteinEmbedding(BaseEmbedding):
             self.device = self.torch.device("cpu")
             self.logger.info("Usando CPU")
         
+        # Configurar cache local para modelos ESM
+        import os
+        cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        os.environ['TORCH_HOME'] = str(cache_dir)
+        
         # Carregar modelo
         try:
             self.logger.info(f"Carregando modelo ESM: {self.model_name}")
+            self.logger.info(f"Cache de modelos: {cache_dir}")
+            
             model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
             
             # Mover para dispositivo e configurar para avaliação
@@ -107,12 +115,12 @@ class ProteinEmbedding(BaseEmbedding):
             return model
             
         except Exception as e:
-            # Tentar modelo alternativo se falhar
-            if self.model_name != "esm2_t33_650M_UR50D":
-                self.logger.warning(f"Falha ao carregar {self.model_name}, tentando modelo alternativo...")
+            # Tentar modelo menor como fallback para testes
+            if self.model_name != "esm2_t6_8M_UR50D":
+                self.logger.warning(f"Falha ao carregar {self.model_name}, tentando modelo menor...")
                 
                 try:
-                    alternative_model = "esm2_t33_650M_UR50D"
+                    alternative_model = "esm2_t6_8M_UR50D"  # Modelo PEQUENO para testes
                     model, alphabet = self.esm.pretrained.load_model_and_alphabet(alternative_model)
                     model = model.to(self.device).eval()
                     
@@ -373,6 +381,118 @@ class ProteinEmbedding(BaseEmbedding):
         sequence_memory = sequence_length * 0.001  # Aproximação
         
         return base_model_memory + sequence_memory
+    
+    def generate_embeddings(self, 
+                          tsv_path: Path, 
+                          output_dir: Optional[Path] = None) -> bool:
+        """
+        Gera embeddings a partir de arquivo TSV (interface para pipeline).
+        
+        Args:
+            tsv_path: Arquivo TSV com dados
+            output_dir: Diretório de saída (usa config se None)
+            
+        Returns:
+            True se sucesso
+        """
+        import pandas as pd
+        from build.utils import ensure_directory
+        
+        try:
+            # Garantir que modelo está inicializado
+            if not self._model_loaded:
+                self.logger.info("Inicializando modelo ESM...")
+                self._do_initialize()
+            
+            # Determinar diretório de saída
+            if output_dir is None:
+                output_dir = Path(self.get_config('protein_output_dir', 'protein_embeddings'))
+            
+            output_dir = Path(output_dir)
+            output_dir = ensure_directory(output_dir)
+            
+            # Carregar TSV
+            self.logger.info(f"Carregando dados de {tsv_path}")
+            df = pd.read_csv(tsv_path, sep='\t')
+            
+            # Verificar colunas obrigatórias
+            if 'seq_id' not in df.columns or 'seq' not in df.columns:
+                raise EmbeddingError("TSV deve conter colunas 'seq_id' e 'seq'")
+            
+            # Obter sequências únicas
+            unique_seqs = df.groupby('seq_id')['seq'].first()
+            self.logger.info(f"Processando {len(unique_seqs)} sequências únicas")
+            
+            # Processar cada sequência
+            sucessos = 0
+            falhas = 0
+            
+            progress_logger = ProgressLogger(
+                self.logger,
+                len(unique_seqs),
+                "Gerando embeddings de proteínas"
+            )
+            
+            for seq_id, sequence in unique_seqs.items():
+                try:
+                    # Verificar se já existe
+                    output_file = output_dir / f"{seq_id}_embedding.npy"
+                    if output_file.exists():
+                        self.logger.debug(f"Embedding já existe: {seq_id}")
+                        sucessos += 1
+                        progress_logger.update()
+                        continue
+                    
+                    # Gerar embedding
+                    embedding = self.generate_embedding(sequence)
+                    
+                    # Salvar
+                    np.save(output_file, embedding)
+                    sucessos += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Erro ao processar {seq_id}: {e}")
+                    falhas += 1
+                
+                progress_logger.update()
+            
+            progress_logger.finish()
+            
+            # Salvar path de saída
+            self._output_path = output_dir
+            
+            self.logger.info(f"Embeddings de proteínas: {sucessos} sucessos, {falhas} falhas")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao gerar embeddings: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False
+    
+    def get_output_path(self) -> Optional[Path]:
+        """Retorna path de saída dos embeddings."""
+        return getattr(self, '_output_path', None)
+    
+    def get_embeddings_info(self) -> Dict[str, Any]:
+        """Retorna informações sobre embeddings gerados."""
+        output_path = self.get_output_path()
+        
+        if output_path and output_path.exists():
+            embedding_files = list(output_path.glob("*_embedding.npy"))
+            return {
+                'output_path': str(output_path),
+                'count': len(embedding_files),
+                'model': self.model_name,
+                'dimension': self.embedding_dim
+            }
+        
+        return {
+            'output_path': None,
+            'count': 0,
+            'model': self.model_name,
+            'dimension': self.embedding_dim
+        }
     
     def build(self) -> Dict[str, Any]:
         """Constrói resumo do processamento."""
