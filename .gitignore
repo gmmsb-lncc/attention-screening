@@ -13,9 +13,10 @@ protein_embeddings/
 matrix_embedding/
 test_output*/
 
-# Result directories
-humans/
-non_humans/
+# Result directories (now in tests/)
+tests/humans/
+tests/non_humans/
+tests/test_output*/
 results/
 output/
 
