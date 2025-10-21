@@ -1,39 +1,139 @@
-# Arquivos comprimidos
-*.tar.xz
+# ============================================
+# DockTKinase - Git Ignore Configuration
+# ============================================
 
-# Arquivos NumPy
-*.npy
-
-# Diretórios de embeddings
+# ============================================
+# Generated Output Directories
+# ============================================
+# Embedding outputs
 ligand/
 protein/
 ligand_embeddings/
 protein_embeddings/
 matrix_embedding/
+test_output*/
 
+# Result directories
+humans/
+non_humans/
+results/
+output/
+
+# ============================================
+# Logs and Temporary Files
+# ============================================
+logs/
+tmp/
+*.log
+*.tmp
+log.txt
+processed_files.log
+
+# ============================================
 # Checkpoints
+# ============================================
 *_checkpoint.txt
 preparation_checkpoint.txt
 embedding_checkpoint.txt
-processed_files.log
 
-# Arquivos temporários
-*.tmp
-*.log
-*.tsv
-*.pth
-log.txt
-env/
+# ============================================
+# Python
+# ============================================
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================================
+# Data Files
+# ============================================
+# NumPy arrays
+*.npy
+
+# Data formats
+*.tsv
 *.csv
-*.png
-*.pyc
+*.json
+*.parquet
 
-humans/
-non_humans/
+# Model weights
+*.pth
+*.pt
+*.ckpt
 
-# FM4M - exclude large model files but keep structure
+# Archives
+*.tar.xz
+*.tar.gz
+*.zip
+
+# ============================================
+# Model Caches
+# ============================================
+models_cache/
+.cache/
 FM4M/models/*/model_files/
 FM4M/data/
+FM4M/model_files/
+
+# ============================================
+# IDE and Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================================
+# Testing
+# ============================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# ============================================
+# Documentation
+# ============================================
+# Keep docs/ in version control
+# Only ignore generated docs
+docs/_build/
+site/
+
+# ============================================
+# Notebooks
+# ============================================
+.ipynb_checkpoints/
+*.ipynb
 FM4M/examples/*.ipynb
+
+# ============================================
+# Images and Media
+# ============================================
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
 FM4M/img/test.py
