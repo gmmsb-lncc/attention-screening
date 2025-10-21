@@ -66,8 +66,9 @@ class InteractionLabels(BaseLabels):
         try:
             self.logger.info(f"Generating interaction labels from {self.tsv_path}")
             
-            # Initialize Spark
-            spark = self.spark_manager.get_session("InteractionLabelsProcessing")
+            # Initialize Spark session
+            self.spark_manager.start()
+            spark = self.spark_manager.get_session()
             
             # Read TSV file
             df = spark.read.csv(

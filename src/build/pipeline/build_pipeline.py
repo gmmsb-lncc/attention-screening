@@ -64,9 +64,20 @@ class BuildPipeline(BaseBuilder):
     def _initialize_components(self) -> None:
         """Initialize all pipeline components."""
         try:
+            # Obter configuração de modelos
+            protein_model = self.config.get('protein_model', 'esm2_t36_3B_UR50D')
+            ligand_model = self.config.get('ligand_model', 'fm4m')
+            
             self.components = {
-                'protein_embedding': ProteinEmbedding(self.config),
-                'ligand_embedding': LigandEmbedding(self.config),
+                'protein_embedding': ProteinEmbedding(
+                    self.config, 
+                    model_name=protein_model,
+                    use_gpu=self.config.use_gpu
+                ),
+                'ligand_embedding': LigandEmbedding(
+                    self.config,
+                    model_name=ligand_model
+                ),
                 'embedding_matrix': EmbeddingMatrix(self.config),
                 'kinase_matrix': KinaseMatrix(self.config),
                 'matrix_validator': MatrixValidator(self.config),
@@ -141,13 +152,15 @@ class BuildPipeline(BaseBuilder):
     
     def run_matrix_construction(self,
                               output_dir: Optional[Union[str, Path]] = None,
-                              matrix_type: str = 'embedding') -> bool:
+                              matrix_type: str = 'embedding',
+                              data_path: Optional[Union[str, Path]] = None) -> bool:
         """
         Run matrix construction phase.
         
         Args:
             output_dir: Output directory (optional)
             matrix_type: Type of matrix ('embedding' or 'kinase')
+            data_path: Path to original TSV file (required for matrix construction)
             
         Returns:
             True if successful, False otherwise
@@ -181,7 +194,8 @@ class BuildPipeline(BaseBuilder):
             matrix_success = matrix_builder.build_matrix(
                 protein_embeddings_path=protein_path,
                 ligand_embeddings_path=ligand_path,
-                output_dir=output_dir
+                output_dir=output_dir,
+                data_path=data_path
             )
             
             if not matrix_success:
@@ -372,7 +386,7 @@ class BuildPipeline(BaseBuilder):
                 return False
             
             # Step 2: Build matrix
-            if not self.run_matrix_construction(output_dir, matrix_type):
+            if not self.run_matrix_construction(output_dir, matrix_type, data_path=input_tsv_path):
                 return False
             
             # Step 3: Generate labels
@@ -533,7 +547,7 @@ class BuildPipeline(BaseBuilder):
                 return False
             
             # Step 2: Build matrix
-            if not self.run_matrix_construction(output_dir, matrix_type):
+            if not self.run_matrix_construction(output_dir, matrix_type, data_path=input_tsv_path):
                 return False
             
             # Step 3: Generate labels
@@ -547,7 +561,8 @@ class BuildPipeline(BaseBuilder):
                 self.logger.info("🟡 Starting stratification phase")
                 
                 # Get paths from previous steps
-                matrix_path = self.results['matrix_construction']['output_path']
+                matrix_output_dir = Path(self.results['matrix_construction']['output_path'])
+                matrix_path = str(matrix_output_dir / "embedding_matrix.npy")
                 labels_path = str(Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy'))
                 
                 # Perform stratified splits

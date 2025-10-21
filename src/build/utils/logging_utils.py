@@ -6,7 +6,7 @@ import logging
 import logging.handlers
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import json
@@ -164,7 +164,7 @@ class ProgressLogger:
             rate = self.processed / elapsed.total_seconds()
             remaining = (self.total - self.processed) / rate if rate > 0 else 0
             eta = current_time.replace(microsecond=0) + \
-                  datetime.timedelta(seconds=remaining)
+                  timedelta(seconds=remaining)
         else:
             rate = 0
             eta = "N/A"
