@@ -1,0 +1,107 @@
+# DockTKinase - Requirements
+# Dependências para o projeto completo incluindo módulo build
+
+# ==============================================================================
+# CORE DEPENDENCIES (Obrigatórias)
+# ==============================================================================
+
+# Deep Learning
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Data Science
+numpy>=1.26.1,<2.0.0
+pandas>=1.5.3
+scipy>=1.12.0
+scikit-learn>=1.5.0
+
+# Visualization
+matplotlib>=3.9.2
+seaborn>=0.12.0
+
+# Utilities
+tqdm>=4.66.4
+psutil
+pyarrow>=14.0.1
+
+# Big Data Processing
+pyspark>=3.0.0
+
+# Hyperparameter Optimization
+optuna
+
+# Development & Testing
+pytest
+jupyter
+ipykernel
+
+# ==============================================================================
+# EMBEDDINGS - Proteínas e Ligantes
+# ==============================================================================
+
+# Protein Embeddings (ESM)
+fair-esm
+transformers>=4.38
+sentencepiece
+
+# Molecular Chemistry
+rdkit>=2024.3.5
+selfies>=2.1.0
+mordred
+
+# Dimensionality Reduction
+umap-learn
+
+# ==============================================================================
+# GRAPH NEURAL NETWORKS (Para modelos baseados em grafos)
+# ==============================================================================
+
+torch-geometric>=2.3.1
+torch-scatter
+torch-sparse
+torch-cluster
+networkx>=2.8
+
+# ==============================================================================
+# MACHINE LEARNING EXTRAS
+# ==============================================================================
+
+xgboost==1.6.2
+torch-optimizer
+datasets>=2.13.1
+evaluate>=0.4.0
+torchinfo>=1.8.0
+
+# ==============================================================================
+# UTILITIES & HTTP
+# ==============================================================================
+
+requests>=2.32.2
+urllib3>=2.2.2
+aiohttp>=3.10.2
+zipp>=3.19.1
+
+# ==============================================================================
+# SCIENTIFIC COMPUTING
+# ==============================================================================
+
+ase==3.24.0
+
+# ==============================================================================
+# NOTAS DE INSTALAÇÃO
+# ==============================================================================
+# 
+# Para Mac M1/M2 (ARM):
+#   - PyTorch: Usar versão específica para Apple Silicon
+#   - Algumas bibliotecas podem precisar de instalação via conda
+#
+# Para Linux com CUDA (RTX 4090):
+#   - PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   - PyTorch Geometric: pip install torch-geometric torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+#
+# Instalação rápida:
+#   pip install -r requirements.txt
+#
+# Instalação seletiva (apenas core):
+#   pip install torch numpy pandas scikit-learn matplotlib tqdm
+#

@@ -19,6 +19,9 @@ from build.pipeline import BuildPipeline
 # Matrix components - for backward compatibility
 from build.matrix import EmbeddingMatrix
 
+# Stratification components
+from build.stratification import Stratifier, SplitValidator, CosineSimilarityCalculator, ClusterAnalyzer
+
 # Backward compatibility aliases
 EmbeddingMatrixReconstructor = EmbeddingMatrix
 
@@ -28,6 +31,10 @@ __all__ = [
     'BuildException',
     'BuildPipeline',
     'EmbeddingMatrix',
+    'Stratifier',
+    'SplitValidator', 
+    'CosineSimilarityCalculator',
+    'ClusterAnalyzer',
     'EmbeddingMatrixReconstructor'
 ]
 

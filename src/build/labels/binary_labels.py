@@ -27,10 +27,13 @@ class BinaryLabels(BaseLabels):
             config: Build configuration
             interaction_labels_path: Path to interaction labels file
         """
-        super().__init__(config)
+        # Definir atributos ANTES de chamar super().__init__()
+        # para garantir que estejam disponíveis em _validate_config()
+        self.threshold: float = config.get('binary_threshold', 1000.0)  # 1000 nM default
         self.interaction_labels_path = interaction_labels_path
         self.interaction_data: Optional[np.ndarray] = None
-        self.threshold: float = config.get('binary_threshold', 1000.0)  # 1000 nM default
+        
+        super().__init__(config)
     
     def _validate_config(self) -> None:
         """Valida configuração específica para labels binários."""
