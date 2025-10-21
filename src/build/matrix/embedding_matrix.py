@@ -91,13 +91,19 @@ class EmbeddingMatrix(BaseMatrix):
         if self.ligand_dim <= 0 or self.protein_dim <= 0:
             self._determine_embedding_dimensions()
     
-    def _determine_embedding_dimensions(self) -> None:
-        """Determina dimensões dos embeddings automaticamente."""
+    def _determine_embedding_dimensions(self, force: bool = False) -> None:
+        """
+        Determina dimensões dos embeddings automaticamente.
+        
+        Args:
+            force: Se True, força re-detecção mesmo se dimensões já definidas
+        """
         self.logger.info("Determinando dimensões dos embeddings automaticamente...")
         
         # Verificar embeddings de ligantes
-        if self.ligand_dim <= 0:
-            ligand_files = list(self.ligand_embeddings_dir.glob("*.npy"))
+        if self.ligand_dim <= 0 or force:
+            # Ligantes começam com CHEMBL
+            ligand_files = list(self.ligand_embeddings_dir.glob("CHEMBL*.npy"))
             if ligand_files:
                 sample_ligand = self.load_embedding(ligand_files[0], is_protein=False)
                 if sample_ligand is not None:
@@ -105,8 +111,11 @@ class EmbeddingMatrix(BaseMatrix):
                     self.logger.info(f"Dimensão de ligantes determinada: {self.ligand_dim}")
         
         # Verificar embeddings de proteínas
-        if self.protein_dim <= 0:
-            protein_files = list(self.protein_embeddings_dir.glob("*.npy"))
+        if self.protein_dim <= 0 or force:
+            # Proteínas são arquivos numéricos (seq_id_embedding.npy)
+            # Excluir arquivos que começam com CHEMBL
+            all_files = list(self.protein_embeddings_dir.glob("*.npy"))
+            protein_files = [f for f in all_files if not f.name.startswith("CHEMBL")]
             if protein_files:
                 sample_protein = self.load_embedding(protein_files[0], is_protein=True)
                 if sample_protein is not None:
@@ -344,6 +353,42 @@ class EmbeddingMatrix(BaseMatrix):
         
         self.logger.info("Caches de embeddings limpos")
     
+    def get_matrix_info(self) -> Dict[str, Any]:
+        """
+        Retorna informações sobre a matriz construída.
+        
+        Returns:
+            Dict com informações da matriz
+        """
+        matrix_file = self.output_dir / "embedding_matrix.npy"
+        matrix_shape = (0, 0)
+        
+        if matrix_file.exists():
+            try:
+                matrix = np.load(matrix_file)
+                matrix_shape = matrix.shape
+            except Exception as e:
+                self.logger.warning(f"Erro ao carregar matriz para info: {e}")
+        
+        return {
+            'ligand_dim': self.ligand_dim,
+            'protein_dim': self.protein_dim,
+            'total_dim': self.ligand_dim + self.protein_dim,
+            'matrix_shape': matrix_shape,
+            'num_samples': matrix_shape[0] if matrix_shape[0] > 0 else 0,
+            'matrix_file': str(matrix_file)
+        }
+    
+    def get_output_path(self) -> Path:
+        """
+        Retorna o caminho do diretório de saída.
+        
+        Returns:
+            Path do diretório de saída
+        """
+        return self.output_dir
+
+    
     def build(self) -> Dict[str, Any]:
         """Constrói resultado com informações da matriz."""
         matrix = super().build()
@@ -359,6 +404,61 @@ class EmbeddingMatrix(BaseMatrix):
         
         return result
     
+    def build_matrix(self, 
+                    protein_embeddings_path: Path,
+                    ligand_embeddings_path: Path,
+                    output_dir: Optional[Path] = None,
+                    data_path: Optional[Path] = None) -> bool:
+        """
+        Constrói matriz de embeddings concatenados (interface do pipeline).
+        
+        Args:
+            protein_embeddings_path: Diretório com embeddings de proteínas
+            ligand_embeddings_path: Diretório com embeddings de ligantes
+            output_dir: Diretório de saída
+            data_path: Caminho para arquivo TSV original (necessário para carregar dados)
+            
+        Returns:
+            True se sucesso
+        """
+        try:
+            # Atualizar caminhos
+            self.protein_embeddings_dir = Path(protein_embeddings_path)
+            self.ligand_embeddings_dir = Path(ligand_embeddings_path)
+            
+            if output_dir:
+                self.output_dir = Path(output_dir)
+            
+            # Atualizar data path se fornecido
+            if data_path:
+                self.original_tsv_path = Path(data_path)
+            
+            # Garantir inicialização
+            if not self._initialized:
+                self.initialize()
+            
+            # Forçar re-detecção de dimensões com os novos caminhos
+            self.logger.info("Re-detectando dimensões com caminhos atualizados...")
+            self._determine_embedding_dimensions(force=True)
+            
+            # Construir matriz
+            self.logger.info("Construindo matriz de embeddings concatenados...")
+            matrix = self._build_matrix()
+            
+            # Salvar matriz
+            matrix_file = self.output_dir / "embedding_matrix.npy"
+            np.save(matrix_file, matrix)
+            self.logger.info(f"Matriz salva: {matrix_file} - Shape: {matrix.shape}")
+            
+            # Atualizar output path
+            self._output_path = self.output_dir
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao construir matriz: {e}")
+            return False
+    
     def reconstruct_matrix(self) -> np.ndarray:
         """
         Método de compatibilidade com scripts originais.
@@ -367,3 +467,4 @@ class EmbeddingMatrix(BaseMatrix):
             Matriz concatenada de embeddings
         """
         return self._build_matrix()
+

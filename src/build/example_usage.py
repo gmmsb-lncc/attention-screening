@@ -12,7 +12,8 @@ from pathlib import Path
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.build import BuildConfig, BuildPipeline
+from build.core import BuildConfig
+from build.pipeline import BuildPipeline
 
 
 def create_example_config(config_path: str = "build_config.json") -> BuildConfig:
@@ -140,11 +141,51 @@ def run_individual_components():
     print("Component examples initialized (see code for usage)")
 
 
+def run_stratification_example():
+    """Example of using the new stratification functionality."""
+    
+    print("🎯 Running Stratification Example")
+    
+    # Create config with stratification enabled
+    config = create_example_config("stratification_config.json")
+    
+    # Enable stratification in config
+    config.update({
+        'stratification_enabled': True,
+        'stratification_params': {
+            'clustering_algorithm': 'dbscan',
+            'similarity_threshold': 0.75,
+            'cluster_min_size': 3,
+            'stratify_by': 'both'
+        }
+    })
+    
+    # Example: Initialize and use stratifier directly
+    from build.stratification import Stratifier, SplitValidator
+    
+    stratifier = Stratifier(config)
+    print(f"Stratifier initialized with algorithm: {stratifier.clustering_algorithm}")
+    print(f"Similarity threshold: {stratifier.similarity_threshold}")
+    
+    # Example: Validate existing pipeline integration
+    pipeline = BuildPipeline(config)
+    print(f"Pipeline includes stratifier: {'stratifier' in pipeline.components}")
+    print(f"Pipeline includes split validator: {'split_validator' in pipeline.components}")
+    
+    print("Stratification example completed (see code for full usage)")
+
+
 def main():
     """Main entry point."""
     
-    if len(sys.argv) > 1 and sys.argv[1] == "components":
-        run_individual_components()
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "components":
+            run_individual_components()
+        elif sys.argv[1] == "stratification":
+            run_stratification_example()
+        else:
+            print(f"Unknown command: {sys.argv[1]}")
+            print("Available commands: components, stratification")
     else:
         run_modular_pipeline()
 

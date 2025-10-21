@@ -151,3 +151,23 @@ class BaseBuilder(ABC):
         
         status_str = ", ".join(status) if status else "not ready"
         return f"{self.__class__.__name__}({status_str})"
+    
+    def save_json(self, data: Dict[str, Any], output_path) -> None:
+        """
+        Salva dados em formato JSON.
+        
+        Args:
+            data: Dados a serem salvos
+            output_path: Caminho do arquivo de saída
+        """
+        import json
+        from pathlib import Path
+        
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+        
+        self.logger.info(f"JSON saved to {output_path}")
+
