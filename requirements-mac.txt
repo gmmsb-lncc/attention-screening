@@ -1,0 +1,82 @@
+# Requirements para Mac M1/M2/M3 (Apple Silicon)
+# Use este arquivo para desenvolvimento local no Mac
+
+# ==============================================================================
+# CORE - Mac ARM
+# ==============================================================================
+
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.26.1,<2.0.0
+pandas>=1.5.3
+scipy>=1.12.0
+scikit-learn>=1.5.0
+matplotlib>=3.9.2
+seaborn>=0.12.0
+tqdm>=4.66.4
+psutil
+pyarrow>=14.0.1
+
+# ==============================================================================
+# EMBEDDINGS
+# ==============================================================================
+
+fair-esm
+transformers>=4.38
+sentencepiece
+
+# ==============================================================================
+# CHEMISTRY (Pode precisar conda no Mac)
+# ==============================================================================
+
+# rdkit>=2024.3.5  # Instale via: conda install -c conda-forge rdkit
+selfies>=2.1.0
+umap-learn
+
+# ==============================================================================
+# MACHINE LEARNING
+# ==============================================================================
+
+optuna
+xgboost==1.6.2
+datasets>=2.13.1
+evaluate>=0.4.0
+torchinfo>=1.8.0
+
+# ==============================================================================
+# GRAPH NEURAL NETWORKS (Limitado no Mac)
+# ==============================================================================
+
+networkx>=2.8
+# torch-geometric  # Pode ter problemas no Mac, teste antes
+
+# ==============================================================================
+# UTILITIES
+# ==============================================================================
+
+requests>=2.32.2
+urllib3>=2.2.2
+aiohttp>=3.10.2
+jupyter
+pytest
+
+# ==============================================================================
+# NOTAS ESPECÍFICAS PARA MAC M1
+# ==============================================================================
+#
+# 1. RDKit: Recomendado instalar via conda
+#    conda install -c conda-forge rdkit
+#
+# 2. PyTorch Geometric: Pode ter problemas de compatibilidade
+#    Teste primeiro: pip install torch-geometric
+#    Se falhar, não é crítico para o pipeline básico
+#
+# 3. PySpark: Funciona, mas pode ser lento
+#    Para datasets pequenos, desabilite PySpark no config
+#
+# 4. Instalação recomendada:
+#    conda create -n docktkinase python=3.11
+#    conda activate docktkinase
+#    conda install -c conda-forge rdkit
+#    pip install -r requirements-mac.txt
+#
