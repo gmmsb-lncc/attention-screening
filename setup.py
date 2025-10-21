@@ -112,8 +112,39 @@ def setup_virtual_environment() -> bool:
         success, _ = run_command(["virtualenv", "env"], "Criando com virtualenv")
         return success
 
+def check_package_installed(python_exe: str, package_name: str) -> bool:
+    """Verifica se um pacote está instalado."""
+    # Mapear nomes de pacotes para módulos de import
+    import_map = {
+        "fair-esm": "esm",
+        "scikit-learn": "sklearn",
+        "torch-geometric": "torch_geometric",
+        "torch-scatter": "torch_scatter",
+        "torch-sparse": "torch_sparse",
+        "torch-cluster": "torch_cluster",
+        "torch-optimizer": "torch_optimizer",
+        "umap-learn": "umap",
+        "rdkit": "rdkit",
+    }
+    
+    # Extrair nome base do pacote (remover versões)
+    base_name = package_name.split(">=")[0].split("==")[0].split("<")[0]
+    
+    # Obter nome do módulo de import
+    import_name = import_map.get(base_name, base_name.replace("-", "_"))
+    
+    try:
+        result = subprocess.run(
+            [python_exe, "-c", f"import {import_name}"],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except:
+        return False
+
 def install_dependencies() -> bool:
-    """Instala dependências do projeto."""
+    """Instala dependências do projeto (apenas as que não estão instaladas)."""
     print_section("INSTALAÇÃO DE DEPENDÊNCIAS")
     
     # Determinar executável Python do ambiente virtual
@@ -130,6 +161,7 @@ def install_dependencies() -> bool:
         return False
     
     # Atualizar pip
+    print("🔄 Verificando pip...")
     success, _ = run_command([python_exe, "-m", "pip", "install", "--upgrade", "pip"], 
                            "Atualizando pip")
     if not success:
@@ -139,10 +171,10 @@ def install_dependencies() -> bool:
     basic_deps = [
         "torch",
         "torchvision", 
-        "numpy",
-        "pandas",
-        "scikit-learn",
-        "matplotlib",
+        "numpy>=1.26.1",
+        "pandas>=1.5.3",
+        "scikit-learn>=1.5.0",
+        "matplotlib>=3.9.2",
         "seaborn",
         "jupyter",
         "pytest",
@@ -150,51 +182,110 @@ def install_dependencies() -> bool:
         "tqdm>=4.66.4",           # Barras de progresso (todos os scripts)
         "psutil",                 # System utilities (embeddingIBM.py, embeddingBuild.py)  
         "pyspark>=3.0.0",        # Apache Spark (buildInteractionLabels.py, embeddingBuild.py)
-        "optuna",                 # Hyperparameter optimization (já adicionado anteriormente)
+        "optuna",                 # Hyperparameter optimization
+        "scipy>=1.12.0",         # Scientific computing
+        "pyarrow>=14.0.1",       # Apache Arrow (para Spark e pandas)
     ]
     
     # Dependências opcionais (instaladas com tratamento de erro)
     optional_deps = [
+        # Embeddings de Proteínas e Ligantes
         "fair-esm",               # ESM models para embeddings de proteínas
-        "umap-learn",             # Required by FM4M
-        "rdkit",                  # Chemistry toolkit  
-        "transformers>=4.38",     # HuggingFace models
+        "transformers>=4.38",     # HuggingFace models (necessário para ESM)
+        "sentencepiece",          # Tokenizer (usado por alguns modelos)
+        
+        # Química e Moléculas
+        "rdkit",                  # Chemistry toolkit (instalar via pip no env)
+        "umap-learn",             # Dimensionality reduction (FM4M)
+        "selfies>=2.1.0",         # SELFIES molecular representation
+        "mordred",                # Molecular descriptors
+        "numba",                  # JIT compiler (necessário para umap)
+        
+        # Graph Neural Networks
         "torch-geometric>=2.3.1", # Graph neural networks
-        "datasets>=2.13.1",       # HuggingFace datasets
-        "requests>=2.32.2",       # HTTP requests
+        "torch-scatter",          # Scatter operations for PyG
+        "torch-sparse",           # Sparse operations for PyG
+        "torch-cluster",          # Clustering for PyG
         "networkx>=2.8",          # Graph processing
+        
+        # Machine Learning e Otimização  
+        "xgboost",                # Gradient boosting (necessário para FM4M)
+        "torch-optimizer",        # Additional optimizers
+        "datasets>=2.13.1",       # HuggingFace datasets
+        "evaluate>=0.4.0",        # Model evaluation metrics
+        
+        # Utilitários
+        "requests>=2.32.2",       # HTTP requests
+        "urllib3>=2.2.2",         # HTTP client
+        "aiohttp>=3.10.2",        # Async HTTP
+        "zipp>=3.19.1",           # ZIP utilities
+        "torchinfo>=1.8.0",       # Model summary
+        "ase",                    # Atomic simulation environment
     ]
     
-    print("📦 Instalando dependências básicas...")
+    print("📦 Verificando e instalando dependências básicas...")
+    to_install_basic = []
     for dep in basic_deps:
-        success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
-        if not success:
-            print(f"❌ Falha ao instalar {dep} (CRÍTICO)")
-            return False  # Dependências básicas são obrigatórias
+        if check_package_installed(python_exe, dep):
+            print(f"✅ {dep}: Já instalado")
+        else:
+            print(f"📥 {dep}: Será instalado")
+            to_install_basic.append(dep)
     
-    print("🔧 Instalando dependências opcionais...")
-    failed_optional = []
+    if to_install_basic:
+        print(f"\n🔨 Instalando {len(to_install_basic)} dependências básicas...")
+        for dep in to_install_basic:
+            success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
+            if not success:
+                print(f"❌ Falha ao instalar {dep} (CRÍTICO)")
+                return False  # Dependências básicas são obrigatórias
+    else:
+        print("✅ Todas as dependências básicas já estão instaladas!")
+    
+    print("\n🔧 Verificando e instalando dependências opcionais...")
+    to_install_optional = []
+    already_installed_optional = []
+    
     for dep in optional_deps:
-        success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
-        if not success:
-            failed_optional.append(dep)
-            print(f"⚠️  Falha ao instalar {dep} (opcional)")
+        if check_package_installed(python_exe, dep):
+            already_installed_optional.append(dep)
+            print(f"✅ {dep}: Já instalado")
+        else:
+            print(f"📥 {dep}: Será instalado")
+            to_install_optional.append(dep)
+    
+    failed_optional = []
+    if to_install_optional:
+        print(f"\n🔨 Instalando {len(to_install_optional)} dependências opcionais...")
+        for dep in to_install_optional:
+            success, _ = run_command([pip_exe, "install", dep], f"Instalando {dep}")
+            if not success:
+                failed_optional.append(dep)
+                print(f"⚠️  Falha ao instalar {dep} (opcional)")
+    else:
+        print("✅ Todas as dependências opcionais já estão instaladas!")
+    
+    # Resumo da instalação
+    print("\n" + "=" * 60)
+    print("📊 RESUMO DA INSTALAÇÃO")
+    print("=" * 60)
+    print(f"✅ Básicas instaladas: {len(to_install_basic)}/{len(basic_deps)}")
+    print(f"🔧 Opcionais instaladas: {len(to_install_optional) - len(failed_optional)}/{len(optional_deps)}")
+    print(f"♻️  Já presentes: {len(basic_deps) - len(to_install_basic) + len(already_installed_optional)}")
     
     if failed_optional:
-        print(f"\n⚠️  Dependências opcionais não instaladas: {', '.join(failed_optional)}")
-        print("   - Funcionalidade pode estar limitada (ex: sem ESM para proteínas)")
-        print("   - Para instalar manualmente: pip install <nome_da_dependencia>")
+        print(f"\n⚠️  Dependências opcionais não instaladas ({len(failed_optional)}):")
+        for dep in failed_optional:
+            print(f"   - {dep}")
+        print("\n� Para instalar manualmente:")
+        print("   source env/bin/activate")
+        for dep in failed_optional:
+            print(f"   pip install {dep}")
+        print("\n📝 NOTA sobre rdkit:")
+        print("   Se rdkit falhar via pip, você pode tentar:")
+        print("   pip install rdkit-pypi")
     else:
-        print("✅ Todas as dependências opcionais instaladas com sucesso!")
-    
-    # Verificar se requirements.txt existe
-    req_file = Path("requirements.txt")
-    if req_file.exists():
-        print("📋 Instalando dependências do requirements.txt...")
-        success, _ = run_command([pip_exe, "install", "-r", "requirements.txt"], 
-                               "Instalando requirements.txt")
-        if not success:
-            print("⚠️  Algumas dependências podem ter falhado")
+        print("\n🎉 Todas as dependências foram instaladas com sucesso!")
     
     return True
 
@@ -214,19 +305,22 @@ def verify_installation() -> bool:
         "import numpy; print(f'NumPy: {numpy.__version__}')",
         "import pandas; print(f'Pandas: {pandas.__version__}')",
         "import sklearn; print(f'Scikit-learn: {sklearn.__version__}')",
+        "import matplotlib; print(f'Matplotlib: {matplotlib.__version__}')",
         # Dependências específicas dos scripts de build
         "import tqdm; print(f'tqdm: {tqdm.__version__}')",
         "import psutil; print(f'psutil: {psutil.__version__}')",
         "import pyspark; print(f'PySpark: {pyspark.__version__}')",
-        "import optuna; print(f'Optuna: {optuna.__version__}')"
+        "import optuna; print(f'Optuna: {optuna.__version__}')",
+        "import scipy; print(f'SciPy: {scipy.__version__}')",
     ]
     
     # Testar imports opcionais
     optional_imports = [
-        "import esm; print(f'ESM: disponível')",
+        "import esm; print(f'ESM: {esm.__version__}')",
+        "import transformers; print(f'Transformers: {transformers.__version__}')",
         "import umap; print(f'UMAP: disponível')",
         "import rdkit; print(f'RDKit: {rdkit.__version__}')",
-        "import transformers; print(f'Transformers: {transformers.__version__}')",
+        "import torch_geometric; print(f'PyTorch Geometric: {torch_geometric.__version__}')",
     ]
     
     for test_import in test_imports:

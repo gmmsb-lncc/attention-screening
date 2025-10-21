@@ -43,6 +43,10 @@ class LigandEmbedding(BaseEmbedding):
         self.checkpoint_enabled = checkpoint_enabled
         self.processed_files = set()
         self.checkpoint_file = None
+        
+        # Cache do modelo SMI-TED
+        self._smited_model = None
+        self._smited_model_loaded = False
             
         super().__init__(model_name=model_name, config=config, **kwargs)
         
@@ -102,13 +106,44 @@ class LigandEmbedding(BaseEmbedding):
         return FM4M_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega módulo FM4M."""
+        """Carrega módulo FM4M e pré-carrega o modelo SMI-TED."""
         try:
             import models.fm4m as fm4m
             self.fm4m = fm4m
             self.fm4m_available = True
             
             self.logger.info(f"Módulo FM4M carregado para modelo: {self.model_name}")
+            
+            # Pré-carregar modelo SMI-TED se for o modelo escolhido
+            if self.model_name == "SMI-TED":
+                import os
+                import torch
+                from models.smi_ted.smi_ted_light.load import load_smi_ted
+                
+                # Localizar arquivos do modelo
+                materials_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                model_files_path = os.path.join(materials_path, "FM4M", "model_files")
+                
+                self.logger.info(f"Pré-carregando modelo SMI-TED de: {model_files_path}")
+                
+                # Verificar se arquivos existem
+                vocab_file = os.path.join(model_files_path, "bert_vocab_curated.txt")
+                ckpt_file = os.path.join(model_files_path, "smi-ted-Light_40.pt")
+                
+                if not os.path.exists(vocab_file) or not os.path.exists(ckpt_file):
+                    raise DependencyError(
+                        f"SMI-TED model files not found at {model_files_path}. "
+                        f"Please run: cd FM4M && python download_model_files.py"
+                    )
+                
+                # Carregar modelo UMA VEZ e cachear
+                self._smited_model = load_smi_ted(folder=model_files_path, ckpt_filename='smi-ted-Light_40.pt')
+                self._smited_model_loaded = True
+                self.logger.info("✅ Modelo SMI-TED pré-carregado e cacheado!")
+            else:
+                self._smited_model = None
+                self._smited_model_loaded = False
+            
             return fm4m
             
         except ImportError as e:
@@ -178,16 +213,31 @@ class LigandEmbedding(BaseEmbedding):
             raise EmbeddingError("Nenhum SMILES válido fornecido")
         
         try:
-            # Usar retry logic para lidar com rate limiting
-            representations = self._get_representation_with_retry(valid_smiles)
-            
-            # Converter para lista de arrays numpy
-            if hasattr(representations, 'values'):
-                embeddings = [representations.values[i] for i in range(len(representations.values))]
+            # Se modelo está cacheado (SMI-TED), usar diretamente
+            if self._smited_model_loaded and self.model_name == "SMI-TED":
+                import torch
+                with torch.no_grad():
+                    # Usar modelo cacheado ao invés de recarregar
+                    representations = self._smited_model.encode(valid_smiles, return_torch=False)
+                    
+                    # Converter para lista de arrays numpy
+                    if hasattr(representations, 'values'):
+                        embeddings = [representations.values[i] for i in range(len(representations.values))]
+                    else:
+                        embeddings = [np.array(row) for row in representations]
+                    
+                    return embeddings
             else:
-                embeddings = [np.array(row) for row in representations]
-            
-            return embeddings
+                # Fallback: usar método original (para outros modelos)
+                representations = self._get_representation_with_retry(valid_smiles)
+                
+                # Converter para lista de arrays numpy
+                if hasattr(representations, 'values'):
+                    embeddings = [representations.values[i] for i in range(len(representations.values))]
+                else:
+                    embeddings = [np.array(row) for row in representations]
+                
+                return embeddings
             
         except Exception as e:
             raise EmbeddingError(f"Erro ao gerar embeddings FM4M: {e}")
@@ -406,6 +456,118 @@ class LigandEmbedding(BaseEmbedding):
         
         self.logger.info(f"Processamento de diretório concluído: {total_sucessos} sucessos, {total_falhas} falhas")
         return total_sucessos, total_falhas
+    
+    def generate_embeddings(self, 
+                          tsv_path: Path, 
+                          output_dir: Optional[Path] = None) -> bool:
+        """
+        Gera embeddings a partir de arquivo TSV (interface para pipeline).
+        
+        Args:
+            tsv_path: Arquivo TSV com dados
+            output_dir: Diretório de saída (usa config se None)
+            
+        Returns:
+            True se sucesso
+        """
+        import pandas as pd
+        from build.utils import ensure_directory
+        
+        try:
+            # Garantir que modelo está inicializado
+            if not self._model_loaded:
+                self.logger.info("Inicializando modelo FM4M...")
+                self._do_initialize()
+            
+            # Determinar diretório de saída
+            if output_dir is None:
+                output_dir = Path(self.get_config('ligand_output_dir', 'ligand_embeddings'))
+            
+            output_dir = Path(output_dir)
+            output_dir = ensure_directory(output_dir)
+            
+            # Carregar TSV
+            self.logger.info(f"Carregando dados de {tsv_path}")
+            df = pd.read_csv(tsv_path, sep='\t')
+            
+            # Verificar colunas obrigatórias
+            if 'chembl_id' not in df.columns or 'canonical_smiles' not in df.columns:
+                raise EmbeddingError("TSV deve conter colunas 'chembl_id' e 'canonical_smiles'")
+            
+            # Obter SMILES únicos
+            unique_smiles = df.groupby('chembl_id')['canonical_smiles'].first()
+            self.logger.info(f"Processando {len(unique_smiles)} ligantes únicos")
+            
+            # Processar cada ligante
+            sucessos = 0
+            falhas = 0
+            
+            progress_logger = ProgressLogger(
+                self.logger,
+                len(unique_smiles),
+                "Gerando embeddings de ligantes"
+            )
+            
+            for chembl_id, smiles in unique_smiles.items():
+                try:
+                    # Verificar se já existe
+                    output_file = output_dir / f"{chembl_id}_embedding.npy"
+                    if output_file.exists():
+                        self.logger.debug(f"Embedding já existe: {chembl_id}")
+                        sucessos += 1
+                        progress_logger.update()
+                        continue
+                    
+                    # Gerar embedding
+                    embedding = self.generate_embedding(smiles)
+                    
+                    # Salvar
+                    np.save(output_file, embedding)
+                    sucessos += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Erro ao processar {chembl_id}: {e}")
+                    falhas += 1
+                
+                progress_logger.update()
+            
+            progress_logger.finish()
+            
+            # Salvar path de saída
+            self._output_path = output_dir
+            
+            self.logger.info(f"Embeddings de ligantes: {sucessos} sucessos, {falhas} falhas")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao gerar embeddings: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False
+    
+    def get_output_path(self) -> Optional[Path]:
+        """Retorna path de saída dos embeddings."""
+        return getattr(self, '_output_path', None)
+    
+    def get_embeddings_info(self) -> Dict[str, Any]:
+        """Retorna informações sobre embeddings gerados."""
+        output_path = self.get_output_path()
+        
+        if output_path and output_path.exists():
+            embedding_files = list(output_path.glob("*_embedding.npy"))
+            return {
+                'output_path': str(output_path),
+                'count': len(embedding_files),
+                'model': self.model_name,
+                'dimension': self.embedding_dim
+            }
+        
+        return {
+            'output_path': None,
+            'count': 0,
+            'model': self.model_name,
+            'dimension': self.embedding_dim
+        }
     
     def build(self) -> Dict[str, Any]:
         """Constrói resumo do processamento."""

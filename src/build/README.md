@@ -192,6 +192,55 @@ matrix = EmbeddingMatrixReconstructor('/path/to/data.tsv')
 result = matrix.reconstruct_matrix()
 ```
 
+## 🎯 Enhanced Train/Validation/Test Splitting
+
+### Cosine Similarity-Based Stratification
+
+The system now includes advanced stratification methods using cosine similarity to create more balanced and representative train/validation/test splits:
+
+```python
+from build.core import BuildConfig
+from build.pipeline import BuildPipeline
+
+# Enable stratification with custom parameters
+config = BuildConfig({
+    'stratification_enabled': True,
+    'stratification_params': {
+        'clustering_algorithm': 'dbscan',  # 'dbscan', 'hierarchical', 'kmeans', 'random'
+        'similarity_threshold': 0.8,
+        'cluster_min_size': 5,
+        'stratify_by': 'both',  # 'ligand', 'protein', 'both', 'combined'
+        'protein_weight': 0.6,
+        'ligand_weight': 0.4
+    }
+})
+
+# Run pipeline with stratified splits
+pipeline = BuildPipeline(config)
+success = pipeline.run_complete_pipeline(
+    input_tsv_path='input.tsv',
+    output_dir='output/',
+    stratify_splits=True,  # Enable stratified splitting
+    test_size=0.2,
+    val_size=0.1
+)
+```
+
+### Multi-View Stratification
+
+The system supports stratification based on:
+- **Ligand similarity**: Groups compounds by structural/chemical similarity
+- **Protein similarity**: Groups proteins by sequence/structural similarity  
+- **Combined similarity**: Uses weighted combination of both views
+
+### Split Validation
+
+Comprehensive validation ensures high-quality splits:
+- Label distribution balance across splits
+- Similarity preservation assessment
+- Novelty validation for test set
+- Diversity metrics for each split
+
 ## 📊 Performance Features
 
 ### Intelligent Caching
