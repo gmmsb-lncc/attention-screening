@@ -79,9 +79,9 @@ docktkinase/
 ├── 📄 Core Files
 │   ├── README.md                   # This file
 │   ├── LICENSE                     # MIT License
-│   ├── setup.py                    # Package setup
+│   ├── setup.py                    # Automated setup script
 │   ├── requirements*.txt           # Dependencies
-│   ├── environment.yml             # Conda environment
+│   ├── environment.yml             # Legacy conda environment (optional)
 │   └── .gitignore                  # Git ignore rules
 │
 ├── 📚 Documentation (docs/)
@@ -131,10 +131,11 @@ docktkinase/
 │   ├── non_humans/                 # Non-human kinase data
 │   └── examples/                   # Example scripts
 │
-└── 🔧 Scripts
-    ├── setup_conda.sh              # Conda setup
-    ├── activate_env.sh             # Environment activation
-    └── install_dependencies.sh     # Dependency installer
+└── 🔧 Scripts (scripts/)
+    ├── setup_conda.sh              # Legacy conda setup (optional)
+    ├── activate_env.sh             # Environment activation helper
+    ├── install_dependencies.sh     # Dependency installer
+    └── post_install.py             # Model downloader
 ```
 
 > **📚 For detailed documentation, see [docs/](docs/) directory**
@@ -199,11 +200,13 @@ The pipeline expects input data in TSV format with the following columns:
 git clone https://github.com/gmmsb-lncc/docktkinase.git
 cd docktkinase
 
-# 2. Automated setup (creates env + downloads models)
-./setup_conda.sh
+# 2. Run automated setup (creates venv + installs dependencies)
+python setup.py
 
 # 3. Activate environment
-conda activate docktkinase
+source env/bin/activate  # Linux/Mac
+# OR
+env\Scripts\activate     # Windows
 
 # Done! Ready to use 🎉
 ```
@@ -212,7 +215,7 @@ conda activate docktkinase
 
 - **Python 3.12+** (3.11 also supported)
 - **PyTorch 2.8+** with CUDA 12.4 (optional, for GPU)
-- **Conda or Miniconda**
+- **pip** and **venv** (included with Python)
 - **16GB+ RAM** recommended (8GB minimum)
 - **10GB+ disk space** for models
 
@@ -221,22 +224,26 @@ conda activate docktkinase
 If automated setup fails, follow these steps:
 
 ```bash
-# 1. Create conda environment
-conda env create -f environment.yml
-conda activate docktkinase
+# 1. Create Python virtual environment
+python3 -m venv env
 
-# 2. Install dependencies manually
+# 2. Activate environment
+source env/bin/activate  # Linux/Mac
+# OR
+env\Scripts\activate     # Windows
+
+# 3. Install dependencies manually
 pip install -r requirements.txt  # CPU/Mac
 # OR
 pip install -r requirements-cuda.txt  # NVIDIA GPU
 # OR  
 pip install -r requirements-mac.txt  # Mac with MPS
 
-# 3. Download model files
+# 4. Download model files
 python scripts/post_install.py
 
-# 4. Verify installation
-python test_pipeline_setup.py
+# 5. Verify installation
+python tests/test_pipeline_setup.py
 ```
 
 ### Troubleshooting
@@ -251,13 +258,13 @@ python test_pipeline_setup.py
 
 ```bash
 # 1. Setup everything
-./setup_conda.sh && conda activate docktkinase
+python setup.py && source env/bin/activate
 
 # 2. Run pipeline test (1000 samples, ~71 seconds)
 python tests/test_pipeline_small.py
 
 # 3. Check results
-ls test_output_small/
+ls tests/test_output_small/
 # ✅ embedding_matrix.npy (1000, 1088)
 # ✅ binary_labels.npy (1000,)
 # ✅ train/val/test splits (799/97/104)
@@ -359,7 +366,7 @@ results = classifier.train_and_evaluate("features.npy", "labels.npy")
 
 ### Legacy Configuration
 
-Edit `docktkinase.py` to set your input file and output directory:
+Edit `legacy/docktkinase.py` to set your input file and output directory:
 
 ```python
 # Input TSV filename (must be in src/database/)
@@ -374,7 +381,7 @@ OUTPUT_FOLDER_NAME = "non_human"
 For backward compatibility, you can still use the original interface:
 
 ```bash
-python docktkinase.py
+python legacy/docktkinase.py
 ```
 
 The pipeline execution follows these stages:
@@ -389,7 +396,7 @@ The system includes a comprehensive quality assurance system:
 
 ```bash
 # Run complete system validation
-python comprehensive_deep_review.py
+python legacy/comprehensive_deep_review.py
 ```
 
 This performs:
@@ -431,7 +438,7 @@ Here's how to run the complete pipeline from embeddings to classification using 
 from src.build import BuildConfig, BuildPipeline
 
 # Activate environment
-# conda activate docktkinase
+# source env/bin/activate
 
 # Initialize pipeline with configuration
 config = BuildConfig({
@@ -456,10 +463,10 @@ print(f"Generated embeddings for {results['proteins_processed']} proteins")
 ### Step 1 (Alternative): Legacy Method
 ```bash
 # Activate environment
-conda activate docktkinase
+source env/bin/activate
 
 # Run embedding pipeline
-python docktkinase.py
+python legacy/docktkinase.py
 ```
 
 ### Step 2: Prepare Classification Data
@@ -628,10 +635,10 @@ For detailed classifier documentation, see [src/classifier/README.md](src/classi
 
 ### Environment Settings
 
-Key configuration options in `docktkinase.py`:
+Key configuration options in `legacy/docktkinase.py`:
 - `INPUT_TSV_FILENAME`: Input TSV file name (must be in `src/database/`)
 - `OUTPUT_FOLDER_NAME`: Output directory name
-- The pipeline automatically uses the docktkinase conda environment
+- The pipeline automatically uses the Python virtual environment
 
 ### Spark Configuration
 
@@ -689,8 +696,8 @@ config = BuildConfig({
 ### Common Issues
 
 1. **Module Not Found Errors**
-   - Ensure you're using the correct conda environment: `conda activate docktkinase`
-   - Verify all dependencies are installed: `conda list`
+   - Ensure you're using the virtual environment: `source env/bin/activate`
+   - Verify all dependencies are installed: `pip list`
 
 2. **Empty Embedding Directories**
    - Check that input data contains valid SMILES and protein sequences
@@ -707,7 +714,7 @@ config = BuildConfig({
    - Check file permissions on output directories
 
 5. **Hugging Face Rate Limiting (HTTP 429 Errors)**
-   - See [HUGGINGFACE_RATE_LIMIT.md](HUGGINGFACE_RATE_LIMIT.md) for detailed instructions
+   - See [docs/HUGGINGFACE_RATE_LIMIT.md](docs/HUGGINGFACE_RATE_LIMIT.md) for detailed instructions
    - Model files are downloaded during setup to avoid repeated downloads
    - Use local model files when available
 
