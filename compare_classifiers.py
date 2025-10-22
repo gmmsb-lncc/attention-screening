@@ -24,6 +24,12 @@ import json
 import warnings
 from datetime import datetime
 
+# Visualização
+import matplotlib
+matplotlib.use('Agg')  # Backend não-interativo
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 # Suprimir warnings
 warnings.filterwarnings('ignore')
 
@@ -586,10 +592,175 @@ class ClassifierComparison:
                         f'{best["test"]["roc_auc"]:>8.4f}\n')
                 f.write('='*100 + '\n')
         
+        # Gerar visualizações
+        self.plot_comparison(results, output_dir)
+        
         if self.verbose:
             print(f'\n💾 Resultados salvos em: {output_dir}')
             print(f'   📄 JSON detalhado: classifier_comparison.json')
             print(f'   📊 Tabela resumo:  comparison_table.txt')
+            print(f'   📈 Visualizações:  comparison_*.png')
+    
+    def plot_comparison(self, results, output_dir):
+        """
+        Criar visualizações da comparação de modelos
+        
+        Args:
+            results: Lista de resultados dos modelos
+            output_dir: Diretório para salvar as visualizações
+        """
+        try:
+            output_dir = Path(output_dir)
+            
+            # Filtrar apenas modelos bem-sucedidos
+            successful = [r for r in results if r['status'] == 'success']
+            if not successful:
+                return
+            
+            # Ordenar por F1 de validação
+            successful = sorted(successful, key=lambda r: r['validation']['f1'], reverse=True)
+            
+            # Configurar estilo
+            sns.set_style("whitegrid")
+            plt.rcParams['figure.facecolor'] = 'white'
+            
+            # ===== FIGURA 1: Comparação de Métricas =====
+            fig1 = plt.figure(figsize=(16, 10))
+            
+            model_names = [r['name'] for r in successful]
+            
+            metrics = ['f1', 'accuracy', 'precision', 'recall', 'roc_auc']
+            metric_labels = ['F1-Score', 'Acurácia', 'Precisão', 'Recall', 'ROC-AUC']
+            
+            for idx, (metric, label) in enumerate(zip(metrics, metric_labels), 1):
+                ax = plt.subplot(2, 3, idx)
+                
+                train_vals = [r['train'][metric] for r in successful]
+                val_vals = [r['validation'][metric] for r in successful]
+                test_vals = [r['test'][metric] for r in successful]
+                
+                x = np.arange(len(model_names))
+                width = 0.25
+                
+                ax.bar(x - width, train_vals, width, label='Train', color='#3498db', alpha=0.8)
+                ax.bar(x, val_vals, width, label='Validation', color='#f39c12', alpha=0.8)
+                ax.bar(x + width, test_vals, width, label='Test', color='#e74c3c', alpha=0.8)
+                
+                ax.set_ylabel(label, fontsize=11, fontweight='bold')
+                ax.set_title(f'Comparação: {label}', fontsize=12, fontweight='bold')
+                ax.set_xticks(x)
+                ax.set_xticklabels(model_names, rotation=45, ha='right', fontsize=9)
+                ax.legend(loc='lower right', fontsize=9)
+                ax.set_ylim([0, 1.0])
+                ax.grid(axis='y', alpha=0.3)
+            
+            # Subplot 6: Tempo de Treinamento
+            ax = plt.subplot(2, 3, 6)
+            times = [r['train_time'] for r in successful]
+            bars = ax.barh(model_names, times, color='#9b59b6', alpha=0.8)
+            ax.set_xlabel('Tempo (segundos)', fontsize=11, fontweight='bold')
+            ax.set_title('Tempo de Treinamento', fontsize=12, fontweight='bold')
+            ax.grid(axis='x', alpha=0.3)
+            
+            # Adicionar valores nas barras
+            for bar, time_val in zip(bars, times):
+                ax.text(bar.get_width(), bar.get_y() + bar.get_height()/2,
+                       f' {time_val:.2f}s',
+                       ha='left', va='center', fontsize=9, fontweight='bold')
+            
+            plt.tight_layout()
+            plt.savefig(output_dir / 'comparison_metrics.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # ===== FIGURA 2: Ranking =====
+            fig2 = plt.figure(figsize=(12, 8))
+            
+            # Comparação F1-Score (principal métrica)
+            val_f1 = [r['validation']['f1'] for r in successful]
+            test_f1 = [r['test']['f1'] for r in successful]
+            
+            y_pos = np.arange(len(model_names))
+            
+            plt.barh(y_pos - 0.2, val_f1, 0.4, label='Validation F1', 
+                    color='#f39c12', alpha=0.8)
+            plt.barh(y_pos + 0.2, test_f1, 0.4, label='Test F1', 
+                    color='#e74c3c', alpha=0.8)
+            
+            plt.xlabel('F1-Score', fontsize=12, fontweight='bold')
+            plt.ylabel('Modelo', fontsize=12, fontweight='bold')
+            plt.title('Ranking de Modelos por F1-Score', fontsize=14, fontweight='bold')
+            plt.yticks(y_pos, model_names)
+            plt.legend(loc='lower right', fontsize=10)
+            plt.xlim([0, 1.0])
+            plt.grid(axis='x', alpha=0.3)
+            
+            # Adicionar medalhas para top 3
+            for i in range(min(3, len(model_names))):
+                medal = '🥇' if i == 0 else '🥈' if i == 1 else '🥉'
+                plt.text(-0.05, i, medal, fontsize=20, ha='right', va='center')
+            
+            plt.tight_layout()
+            plt.savefig(output_dir / 'comparison_ranking.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # ===== FIGURA 3: Overfitting Analysis =====
+            fig3 = plt.figure(figsize=(14, 6))
+            
+            # Subplot 1: Train vs Validation
+            ax1 = plt.subplot(1, 2, 1)
+            train_f1 = [r['train']['f1'] for r in successful]
+            val_f1 = [r['validation']['f1'] for r in successful]
+            
+            ax1.scatter(train_f1, val_f1, s=100, alpha=0.6, c=range(len(successful)), 
+                       cmap='viridis')
+            ax1.plot([0, 1], [0, 1], 'r--', lw=2, alpha=0.5, label='Ideal (sem overfitting)')
+            
+            for i, name in enumerate(model_names):
+                ax1.annotate(name, (train_f1[i], val_f1[i]), fontsize=8, 
+                           xytext=(5, 5), textcoords='offset points')
+            
+            ax1.set_xlabel('F1-Score Train', fontsize=11, fontweight='bold')
+            ax1.set_ylabel('F1-Score Validation', fontsize=11, fontweight='bold')
+            ax1.set_title('Análise de Overfitting (Train vs Validation)', 
+                         fontsize=12, fontweight='bold')
+            ax1.legend()
+            ax1.grid(alpha=0.3)
+            ax1.set_xlim([0, 1])
+            ax1.set_ylim([0, 1])
+            
+            # Subplot 2: Validation vs Test
+            ax2 = plt.subplot(1, 2, 2)
+            test_f1 = [r['test']['f1'] for r in successful]
+            
+            ax2.scatter(val_f1, test_f1, s=100, alpha=0.6, c=range(len(successful)), 
+                       cmap='viridis')
+            ax2.plot([0, 1], [0, 1], 'r--', lw=2, alpha=0.5, label='Ideal (boa generalização)')
+            
+            for i, name in enumerate(model_names):
+                ax2.annotate(name, (val_f1[i], test_f1[i]), fontsize=8,
+                           xytext=(5, 5), textcoords='offset points')
+            
+            ax2.set_xlabel('F1-Score Validation', fontsize=11, fontweight='bold')
+            ax2.set_ylabel('F1-Score Test', fontsize=11, fontweight='bold')
+            ax2.set_title('Análise de Generalização (Validation vs Test)', 
+                         fontsize=12, fontweight='bold')
+            ax2.legend()
+            ax2.grid(alpha=0.3)
+            ax2.set_xlim([0, 1])
+            ax2.set_ylim([0, 1])
+            
+            plt.tight_layout()
+            plt.savefig(output_dir / 'comparison_overfitting.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            if self.verbose:
+                print(f'   📊 Visualizações geradas com sucesso!')
+        
+        except Exception as e:
+            if self.verbose:
+                print(f'   ⚠️  Erro ao gerar visualizações: {e}')
+                import traceback
+                traceback.print_exc()
 
 
 def main():
