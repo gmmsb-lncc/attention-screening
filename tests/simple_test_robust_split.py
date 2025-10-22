@@ -5,7 +5,11 @@ Teste simples e independente do sistema de divisão robusta
 
 import sys
 import os
-sys.path.append('/Users/sulfierry/docktkinase')
+from pathlib import Path
+
+# Adicionar o diretório raiz do projeto ao path (caminho relativo)
+repo_root = Path(__file__).parent.parent  # tests/ -> docktkinase/
+sys.path.insert(0, str(repo_root))
 
 import torch
 import numpy as np
