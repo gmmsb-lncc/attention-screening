@@ -36,7 +36,7 @@ def create_example_config(config_path: str = "build_config.json") -> BuildConfig
             "max_sequence_length": 1024
         },
         "fm4m_config": {
-            "model_path": "/home/leon/Desktop/latent_extractor/ibm/FM4M",
+            "model_path": "../FM4M",
             "batch_size": 32,
             "device": "auto"
         },
