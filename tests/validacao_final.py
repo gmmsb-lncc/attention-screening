@@ -9,9 +9,9 @@ import traceback
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
 
-# Adicionar src ao path
-project_root = Path(__file__).parent
-src_path = project_root / "src"
+# Adicionar src ao path (caminho relativo ao repositório)
+repo_root = Path(__file__).parent.parent  # tests/ -> docktkinase/
+src_path = repo_root / "src"
 sys.path.insert(0, str(src_path))
 
 class FinalValidator:
