@@ -43,9 +43,9 @@ class BuildConstants:
     # Model configurations
     DEFAULT_EMBEDDING_TYPE = 'cls'
     DEFAULT_LIGAND_DIM = 768
-    DEFAULT_PROTEIN_DIM = 2560
+    DEFAULT_PROTEIN_DIM = 2560  # ESM-2 t36 3B (modelo mais recente e robusto)
     DEFAULT_BATCH_SIZE = 32
-    DEFAULT_ESM_MODEL = 'esm2_t33_650M_UR50D'
+    DEFAULT_ESM_MODEL = 'esm2_t36_3B_UR50D'  # ESM-2 com 3 bilhões de parâmetros
     DEFAULT_FM4M_MODEL = 'SMILES-TED'
 
 # Legacy constants for backward compatibility
