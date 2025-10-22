@@ -30,7 +30,7 @@ pyspark>=3.0.0
 # EMBEDDINGS - GPU Acelerado
 # ==============================================================================
 
-fair-esm
+# fair-esm - REMOVIDO (ESM incluído localmente em ESM/)
 transformers>=4.38
 sentencepiece
 accelerate  # Para acelerar transformers com GPU

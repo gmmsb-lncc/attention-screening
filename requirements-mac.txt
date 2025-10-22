@@ -21,7 +21,7 @@ pyarrow>=14.0.1
 # EMBEDDINGS
 # ==============================================================================
 
-fair-esm
+# fair-esm - REMOVIDO (ESM incluído localmente em ESM/)
 transformers>=4.38
 sentencepiece
 

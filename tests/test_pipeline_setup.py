@@ -7,8 +7,9 @@ Valida que todas as dependências estão instaladas e o sistema funciona.
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+# Add src to path (caminho relativo ao repositório)
+repo_root = Path(__file__).parent.parent  # tests/ -> docktkinase/
+sys.path.insert(0, str(repo_root / 'src'))
 
 print("=" * 80)
 print("🧪 TESTE DO PIPELINE BUILD - DOCKTKINASE")

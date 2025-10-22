@@ -48,7 +48,7 @@ __pycache__/
 env/
 venv/
 ENV/
-build/
+/build/               # Apenas /build/ na raiz (não src/build/)
 develop-eggs/
 dist/
 downloads/
@@ -89,11 +89,23 @@ wheels/
 # ============================================
 # Model Caches
 # ============================================
-models_cache/
+models_cache/*               # Ignorar todo o conteúdo
+!models_cache/README.md      # Exceto README
+!models_cache/ESM/           # Permitir pasta ESM (para README futuro)
+
 .cache/
 FM4M/models/*/model_files/
 FM4M/data/
 FM4M/model_files/
+
+# ESM model weights (downloaded via torch.hub)
+# Código fonte em ESM/ é versionado, mas modelos baixados não
+models_cache/ESM/*.pt
+models_cache/ESM/*.bin
+models_cache/ESM/checkpoints/
+models_cache/ESM/hub/
+*.pt  # PyTorch model weights
+*.bin  # Binary model files
 
 # ============================================
 # IDE and Editor
