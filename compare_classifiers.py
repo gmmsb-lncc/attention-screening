@@ -275,6 +275,10 @@ class ClassifierComparison:
                 print(f'   ✅ Treinado em {train_time:.2f}s')
                 print(f'   📊 Acurácia Treino: {result["train_accuracy"]:.4f}')
             
+            # Avaliar em TREINO (para ver se está aprendendo)
+            train_metrics = self._evaluate(clf, X_train, y_train, 'Train')
+            result['train'] = train_metrics
+            
             # Avaliar em VALIDAÇÃO
             val_metrics = self._evaluate(clf, X_val, y_val, 'Validation')
             result['validation'] = val_metrics
@@ -288,10 +292,9 @@ class ClassifierComparison:
             
             if self.verbose:
                 print(f'\n   📊 RESUMO {clf_name}:')
-                print(f'      Val Acc:  {val_metrics["accuracy"]:.4f}')
-                print(f'      Val F1:   {val_metrics["f1"]:.4f}')
-                print(f'      Test Acc: {test_metrics["accuracy"]:.4f}')
-                print(f'      Test F1:  {test_metrics["f1"]:.4f}')
+                print(f'      Treino:    F1={train_metrics["f1"]:.4f}, Acc={train_metrics["accuracy"]:.4f}, Prec={train_metrics["precision"]:.4f}')
+                print(f'      Validação: F1={val_metrics["f1"]:.4f}, Acc={val_metrics["accuracy"]:.4f}, Prec={val_metrics["precision"]:.4f}')
+                print(f'      Teste:     F1={test_metrics["f1"]:.4f}, Acc={test_metrics["accuracy"]:.4f}, Prec={test_metrics["precision"]:.4f}')
         
         except Exception as e:
             result['status'] = 'failed'
@@ -388,9 +391,9 @@ class ClassifierComparison:
         best_model = max(successful_results, key=lambda r: r['validation']['f1'])
         
         if self.verbose:
-            print('\n' + '='*60)
-            print('🏆 RANKING DOS MODELOS (por F1-Score Validação)')
-            print('='*60)
+            print('\n' + '='*100)
+            print('🏆 RANKING DOS MODELOS (ordenado por F1-Score Validação)')
+            print('='*100)
             
             # Ordenar por F1 de validação
             sorted_results = sorted(
@@ -399,29 +402,71 @@ class ClassifierComparison:
                 reverse=True
             )
             
+            # Cabeçalho da tabela
+            print(f'\n{"#":<3} {"Modelo":<20} {"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8} {"Tempo":>8}')
+            print('-'*100)
+            
             for i, result in enumerate(sorted_results, 1):
                 name = result['name']
-                val_f1 = result['validation']['f1']
-                test_f1 = result['test']['f1']
-                val_acc = result['validation']['accuracy']
-                test_acc = result['test']['accuracy']
                 train_time = result['train_time']
                 
                 medal = '🥇' if i == 1 else '🥈' if i == 2 else '🥉' if i == 3 else f'{i}.'
                 
-                print(f'\n{medal} {name}')
-                print(f'   Val:  F1={val_f1:.4f}, Acc={val_acc:.4f}')
-                print(f'   Test: F1={test_f1:.4f}, Acc={test_acc:.4f}')
-                print(f'   Time: {train_time:.2f}s')
+                # Treino
+                print(f'{medal:<3} {name:<20} {"Treino":<12} '
+                      f'{result["train"]["f1"]:>7.4f} '
+                      f'{result["train"]["accuracy"]:>9.4f} '
+                      f'{result["train"]["precision"]:>9.4f} '
+                      f'{result["train"]["recall"]:>7.4f} '
+                      f'{result["train"]["roc_auc"]:>8.4f} '
+                      f'{train_time:>7.2f}s')
+                
+                # Validação
+                print(f'{"":3} {"":20} {"Validação":<12} '
+                      f'{result["validation"]["f1"]:>7.4f} '
+                      f'{result["validation"]["accuracy"]:>9.4f} '
+                      f'{result["validation"]["precision"]:>9.4f} '
+                      f'{result["validation"]["recall"]:>7.4f} '
+                      f'{result["validation"]["roc_auc"]:>8.4f}')
+                
+                # Teste
+                print(f'{"":3} {"":20} {"Teste":<12} '
+                      f'{result["test"]["f1"]:>7.4f} '
+                      f'{result["test"]["accuracy"]:>9.4f} '
+                      f'{result["test"]["precision"]:>9.4f} '
+                      f'{result["test"]["recall"]:>7.4f} '
+                      f'{result["test"]["roc_auc"]:>8.4f}')
+                
+                if i < len(sorted_results):  # Não adicionar linha após o último
+                    print()
             
-            print('\n' + '='*60)
-            print(f'🏆 MELHOR MODELO: {best_model["name"]}')
-            print('='*60)
-            print(f'   Val F1:   {best_model["validation"]["f1"]:.4f}')
-            print(f'   Val Acc:  {best_model["validation"]["accuracy"]:.4f}')
-            print(f'   Test F1:  {best_model["test"]["f1"]:.4f}')
-            print(f'   Test Acc: {best_model["test"]["accuracy"]:.4f}')
-            print('='*60)
+            print('-'*100)
+            print(f'\n{"🏆 MELHOR MODELO":^100}')
+            print('='*100)
+            print(f'Modelo: {best_model["name"]}')
+            print(f'Tempo de Treinamento: {best_model["train_time"]:.2f}s')
+            print()
+            print(f'{"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8}')
+            print('-'*100)
+            print(f'{"Treino":<12} '
+                  f'{best_model["train"]["f1"]:>7.4f} '
+                  f'{best_model["train"]["accuracy"]:>9.4f} '
+                  f'{best_model["train"]["precision"]:>9.4f} '
+                  f'{best_model["train"]["recall"]:>7.4f} '
+                  f'{best_model["train"]["roc_auc"]:>8.4f}')
+            print(f'{"Validação":<12} '
+                  f'{best_model["validation"]["f1"]:>7.4f} '
+                  f'{best_model["validation"]["accuracy"]:>9.4f} '
+                  f'{best_model["validation"]["precision"]:>9.4f} '
+                  f'{best_model["validation"]["recall"]:>7.4f} '
+                  f'{best_model["validation"]["roc_auc"]:>8.4f}')
+            print(f'{"Teste":<12} '
+                  f'{best_model["test"]["f1"]:>7.4f} '
+                  f'{best_model["test"]["accuracy"]:>9.4f} '
+                  f'{best_model["test"]["precision"]:>9.4f} '
+                  f'{best_model["test"]["recall"]:>7.4f} '
+                  f'{best_model["test"]["roc_auc"]:>8.4f}')
+            print('='*100)
         
         self.results = results
         return results, best_model['name']
@@ -433,41 +478,118 @@ class ClassifierComparison:
         
         # Salvar JSON completo
         results_file = output_dir / 'classifier_comparison.json'
-        with open(results_file, 'w') as f:
+        with open(results_file, 'w', encoding='utf-8') as f:
             json.dump({
                 'timestamp': datetime.now().isoformat(),
                 'random_state': self.random_state,
-                'results': results
-            }, f, indent=2)
+                'results': results,
+                'summary': {
+                    'total_models': len(results),
+                    'successful': len([r for r in results if r['status'] == 'success']),
+                    'failed': len([r for r in results if r['status'] == 'failed'])
+                }
+            }, f, indent=2, ensure_ascii=False)
         
-        # Criar tabela comparativa
+        # Criar tabela comparativa detalhada
         comparison_file = output_dir / 'comparison_table.txt'
-        with open(comparison_file, 'w') as f:
-            f.write('COMPARAÇÃO DE CLASSIFICADORES\n')
-            f.write('='*80 + '\n\n')
-            
-            # Cabeçalho
-            f.write(f'{"Modelo":<20} {"Val F1":>8} {"Val Acc":>8} {"Test F1":>8} {"Test Acc":>8} {"Tempo":>8}\n')
-            f.write('-'*80 + '\n')
+        with open(comparison_file, 'w', encoding='utf-8') as f:
+            f.write('='*100 + '\n')
+            f.write(' '*35 + 'COMPARAÇÃO DE CLASSIFICADORES\n')
+            f.write('='*100 + '\n\n')
+            f.write(f'Data: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'Random State: {self.random_state}\n\n')
             
             # Dados
             successful = [r for r in results if r['status'] == 'success']
+            failed = [r for r in results if r['status'] == 'failed']
             sorted_results = sorted(successful, key=lambda r: r['validation']['f1'], reverse=True)
             
-            for result in sorted_results:
+            f.write(f'Total de modelos: {len(results)}\n')
+            f.write(f'  ✓ Bem-sucedidos: {len(successful)}\n')
+            f.write(f'  ✗ Falharam: {len(failed)}\n\n')
+            
+            if failed:
+                f.write('Modelos que falharam:\n')
+                for r in failed:
+                    f.write(f'  • {r["name"]}: {r.get("error_type", "Unknown error")}\n')
+                f.write('\n')
+            
+            # Tabela de resultados
+            f.write('='*100 + '\n')
+            f.write('RANKING POR F1-SCORE (VALIDAÇÃO)\n')
+            f.write('='*100 + '\n\n')
+            
+            # Cabeçalho
+            f.write(f'{"#":<3} {"Modelo":<20} {"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8} {"Tempo":>8}\n')
+            f.write('-'*100 + '\n')
+            
+            for i, result in enumerate(sorted_results, 1):
                 name = result['name'][:19]
-                val_f1 = result['validation']['f1']
-                val_acc = result['validation']['accuracy']
-                test_f1 = result['test']['f1']
-                test_acc = result['test']['accuracy']
                 train_time = result['train_time']
                 
-                f.write(f'{name:<20} {val_f1:>8.4f} {val_acc:>8.4f} {test_f1:>8.4f} {test_acc:>8.4f} {train_time:>7.2f}s\n')
+                # Treino
+                f.write(f'{i:<3} {name:<20} {"Treino":<12} '
+                        f'{result["train"]["f1"]:>7.4f} '
+                        f'{result["train"]["accuracy"]:>9.4f} '
+                        f'{result["train"]["precision"]:>9.4f} '
+                        f'{result["train"]["recall"]:>7.4f} '
+                        f'{result["train"]["roc_auc"]:>8.4f} '
+                        f'{train_time:>7.2f}s\n')
+                
+                # Validação
+                f.write(f'{"":3} {"":20} {"Validação":<12} '
+                        f'{result["validation"]["f1"]:>7.4f} '
+                        f'{result["validation"]["accuracy"]:>9.4f} '
+                        f'{result["validation"]["precision"]:>9.4f} '
+                        f'{result["validation"]["recall"]:>7.4f} '
+                        f'{result["validation"]["roc_auc"]:>8.4f}\n')
+                
+                # Teste
+                f.write(f'{"":3} {"":20} {"Teste":<12} '
+                        f'{result["test"]["f1"]:>7.4f} '
+                        f'{result["test"]["accuracy"]:>9.4f} '
+                        f'{result["test"]["precision"]:>9.4f} '
+                        f'{result["test"]["recall"]:>7.4f} '
+                        f'{result["test"]["roc_auc"]:>8.4f}\n')
+                
+                if i < len(sorted_results):
+                    f.write('\n')
+            
+            # Melhor modelo
+            if sorted_results:
+                f.write('\n' + '='*100 + '\n')
+                f.write(f'{"🏆 MELHOR MODELO":^100}\n')
+                f.write('='*100 + '\n')
+                best = sorted_results[0]
+                f.write(f'Modelo: {best["name"]}\n')
+                f.write(f'Tempo de Treinamento: {best["train_time"]:.2f}s\n\n')
+                
+                f.write(f'{"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8}\n')
+                f.write('-'*100 + '\n')
+                f.write(f'{"Treino":<12} '
+                        f'{best["train"]["f1"]:>7.4f} '
+                        f'{best["train"]["accuracy"]:>9.4f} '
+                        f'{best["train"]["precision"]:>9.4f} '
+                        f'{best["train"]["recall"]:>7.4f} '
+                        f'{best["train"]["roc_auc"]:>8.4f}\n')
+                f.write(f'{"Validação":<12} '
+                        f'{best["validation"]["f1"]:>7.4f} '
+                        f'{best["validation"]["accuracy"]:>9.4f} '
+                        f'{best["validation"]["precision"]:>9.4f} '
+                        f'{best["validation"]["recall"]:>7.4f} '
+                        f'{best["validation"]["roc_auc"]:>8.4f}\n')
+                f.write(f'{"Teste":<12} '
+                        f'{best["test"]["f1"]:>7.4f} '
+                        f'{best["test"]["accuracy"]:>9.4f} '
+                        f'{best["test"]["precision"]:>9.4f} '
+                        f'{best["test"]["recall"]:>7.4f} '
+                        f'{best["test"]["roc_auc"]:>8.4f}\n')
+                f.write('='*100 + '\n')
         
         if self.verbose:
-            print(f'\n💾 Resultados salvos:')
-            print(f'   • {results_file}')
-            print(f'   • {comparison_file}')
+            print(f'\n💾 Resultados salvos em: {output_dir}')
+            print(f'   📄 JSON detalhado: classifier_comparison.json')
+            print(f'   📊 Tabela resumo:  comparison_table.txt')
 
 
 def main():
