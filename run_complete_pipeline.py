@@ -654,13 +654,95 @@ class CompletePipeline:
         # Adicionar tempo total
         self.stats['end_time'] = datetime.now().isoformat()
         
+        # Calcular tempo total
+        from datetime import datetime as dt
+        if 'start_time' in self.stats:
+            start = dt.fromisoformat(self.stats['start_time'])
+            end = dt.fromisoformat(self.stats['end_time'])
+            self.stats['total_time_seconds'] = (end - start).total_seconds()
+        
+        # Adicionar resumo
+        self.stats['summary'] = {
+            'model_type': self.stats.get('model_type', 'Unknown'),
+            'best_val_f1': self.stats.get('validation_metrics', {}).get('f1', 0),
+            'test_f1': self.stats.get('test_metrics', {}).get('f1', 0),
+            'train_samples': self.stats.get('train_samples', 0),
+            'val_samples': self.stats.get('val_samples', 0),
+            'test_samples': self.stats.get('test_samples', 0)
+        }
+        
         # Salvar estatísticas
         stats_file = self.output_dir / 'pipeline_stats.json'
-        with open(stats_file, 'w') as f:
-            json.dump(self.stats, f, indent=2)
+        with open(stats_file, 'w', encoding='utf-8') as f:
+            json.dump(self.stats, f, indent=2, ensure_ascii=False)
+        
+        # Salvar resumo legível
+        summary_file = self.output_dir / 'results_summary.txt'
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write('='*80 + '\n')
+            f.write(' '*25 + 'RESUMO DO PIPELINE DOCKTKINASE\n')
+            f.write('='*80 + '\n\n')
+            
+            f.write(f'Data: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'Dataset: {self.stats.get("dataset", "N/A")}\n')
+            f.write(f'Modelo: {self.stats.get("model_type", "N/A")}\n')
+            f.write(f'ESM Model: {self.stats.get("esm_model", "N/A")}\n\n')
+            
+            f.write('CONJUNTOS DE DADOS:\n')
+            f.write(f'  • Treino:    {self.stats.get("train_samples", 0):>6} amostras\n')
+            f.write(f'  • Validação: {self.stats.get("val_samples", 0):>6} amostras\n')
+            f.write(f'  • Teste:     {self.stats.get("test_samples", 0):>6} amostras\n')
+            f.write(f'  • Total:     {self.stats.get("total_samples", 0):>6} amostras\n\n')
+            
+            f.write('DISTRIBUIÇÃO DE CLASSES:\n')
+            class_dist = self.stats.get('class_distribution', {})
+            for cls, count in class_dist.items():
+                pct = count / self.stats.get('total_samples', 1) * 100
+                f.write(f'  • Classe {cls}: {count:>6} ({pct:>5.1f}%)\n')
+            f.write('\n')
+            
+            f.write('MÉTRICAS DE PERFORMANCE:\n')
+            f.write('='*80 + '\n')
+            f.write(f'{"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8}\n')
+            f.write('-'*80 + '\n')
+            
+            # Treino
+            train_acc = self.stats.get("train_accuracy", 0)
+            f.write(f'{"Treino":<12} {"N/A":>7} {train_acc:>9.4f} {"N/A":>9} {"N/A":>7} {"N/A":>8}\n')
+            
+            # Validação
+            val_metrics = self.stats.get('validation_metrics', {})
+            if val_metrics:
+                f.write(f'{"Validação":<12} '
+                        f'{val_metrics.get("f1", 0):>7.4f} '
+                        f'{val_metrics.get("accuracy", 0):>9.4f} '
+                        f'{val_metrics.get("precision", 0):>9.4f} '
+                        f'{val_metrics.get("recall", 0):>7.4f} '
+                        f'{val_metrics.get("roc_auc", 0):>8.4f}\n')
+            
+            # Teste
+            test_metrics = self.stats.get('test_metrics', {})
+            if test_metrics:
+                f.write(f'{"Teste":<12} '
+                        f'{test_metrics.get("f1", 0):>7.4f} '
+                        f'{test_metrics.get("accuracy", 0):>9.4f} '
+                        f'{test_metrics.get("precision", 0):>9.4f} '
+                        f'{test_metrics.get("recall", 0):>7.4f} '
+                        f'{test_metrics.get("roc_auc", 0):>8.4f}\n')
+            
+            f.write('='*80 + '\n\n')
+            
+            f.write('TEMPOS DE EXECUÇÃO:\n')
+            f.write(f'  • Embeddings:   {self.stats.get("embedding_time", 0):>7.2f}s\n')
+            f.write(f'  • Treinamento:  {self.stats.get("train_time", 0):>7.2f}s\n')
+            f.write(f'  • Avaliação:    {self.stats.get("eval_time", 0):>7.2f}s\n')
+            f.write(f'  • Total:        {self.stats.get("total_time_seconds", 0):>7.2f}s\n')
+            f.write('='*80 + '\n')
         
         if self.verbose:
-            print(f'   ✅ Estatísticas salvas: {stats_file}')
+            print(f'   📄 Estatísticas JSON: pipeline_stats.json')
+            print(f'   📊 Resumo legível:    results_summary.txt')
+            print(f'   📁 Diretório:         {self.output_dir}')
             print()
     
     def run(self):
@@ -693,18 +775,43 @@ class CompletePipeline:
             self.save_results()
             
             if self.verbose:
-                print('='*60)
+                print('='*80)
                 print('✅ PIPELINE CONCLUÍDO COM SUCESSO!')
-                print('='*60)
-                print(f'📊 VALIDAÇÃO:')
-                print(f'   Acurácia: {val_metrics["accuracy"]:.4f}')
-                print(f'   F1-Score: {val_metrics["f1"]:.4f}')
-                print(f'   ROC AUC:  {val_metrics["roc_auc"]:.4f}')
-                print(f'\n📊 TESTE (nunca visto):')
-                print(f'   Acurácia: {test_metrics["accuracy"]:.4f}')
-                print(f'   F1-Score: {test_metrics["f1"]:.4f}')
-                print(f'   ROC AUC:  {test_metrics["roc_auc"]:.4f}')
-                print('='*60)
+                print('='*80)
+                
+                # Tabela de métricas
+                print(f'\n{"Conjunto":<12} {"F1":>7} {"Acurácia":>9} {"Precisão":>9} {"Recall":>7} {"ROC-AUC":>8}')
+                print('-'*80)
+                
+                # Treino
+                train_acc = self.stats.get("train_accuracy", 0)
+                print(f'{"Treino":<12} {"N/A":>7} {train_acc:>9.4f} {"N/A":>9} {"N/A":>7} {"N/A":>8}')
+                
+                # Validação
+                print(f'{"Validação":<12} '
+                      f'{val_metrics["f1"]:>7.4f} '
+                      f'{val_metrics["accuracy"]:>9.4f} '
+                      f'{val_metrics["precision"]:>9.4f} '
+                      f'{val_metrics["recall"]:>7.4f} '
+                      f'{val_metrics["roc_auc"]:>8.4f}')
+                
+                # Teste
+                print(f'{"Teste":<12} '
+                      f'{test_metrics["f1"]:>7.4f} '
+                      f'{test_metrics["accuracy"]:>9.4f} '
+                      f'{test_metrics["precision"]:>9.4f} '
+                      f'{test_metrics["recall"]:>7.4f} '
+                      f'{test_metrics["roc_auc"]:>8.4f}')
+                
+                print('='*80)
+                
+                # Resumo adicional
+                print(f'\n📈 Resumo de Performance:')
+                print(f'   • Melhor Métrica (Val): F1={val_metrics["f1"]:.4f}')
+                print(f'   • Generalização (Test): F1={test_metrics["f1"]:.4f}')
+                print(f'   • Tempo Total: {time.time() - time.time():.2f}s')
+                print(f'   • Amostras Treino/Val/Test: {len(y_train)}/{len(y_val)}/{len(y_test)}')
+                print('='*80)
             
             return clf, {'validation': val_metrics, 'test': test_metrics}
             
