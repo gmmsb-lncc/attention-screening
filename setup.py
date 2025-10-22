@@ -116,7 +116,6 @@ def check_package_installed(python_exe: str, package_name: str) -> bool:
     """Verifica se um pacote está instalado."""
     # Mapear nomes de pacotes para módulos de import
     import_map = {
-        "fair-esm": "esm",
         "scikit-learn": "sklearn",
         "torch-geometric": "torch_geometric",
         "torch-scatter": "torch_scatter",
@@ -190,7 +189,7 @@ def install_dependencies() -> bool:
     # Dependências opcionais (instaladas com tratamento de erro)
     optional_deps = [
         # Embeddings de Proteínas e Ligantes
-        "fair-esm",               # ESM models para embeddings de proteínas
+        # ESM incluído localmente em ESM/ (não precisa instalar fair-esm)
         "transformers>=4.38",     # HuggingFace models (necessário para ESM)
         "sentencepiece",          # Tokenizer (usado por alguns modelos)
         
