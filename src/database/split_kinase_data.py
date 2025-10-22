@@ -145,12 +145,12 @@ if __name__ == "__main__":
     # Configuração dos caminhos
     input_file = os.path.expanduser("~/Desktop/2024_desktop/chembl_35/kinase_all_compounds.tsv")
     
-    # Diretórios de saída no projeto docktkinase
-    base_dir = "/Users/sulfierry/docktkinase/src"
+    # Diretórios de saída no projeto docktkinase (caminho relativo ao script)
+    base_dir = Path(__file__).parent  # docktkinase/src/database -> parent = src
     output_dirs = {
-        'all': os.path.join(base_dir, 'kinase_all'),
-        'humans': os.path.join(base_dir, 'kinase_humans'),
-        'non_humans': os.path.join(base_dir, 'kinase_non_humans')
+        'all': base_dir / 'kinase_all',
+        'humans': base_dir / 'kinase_humans',
+        'non_humans': base_dir / 'kinase_non_humans'
     }
     
     # Criar diretórios se não existirem

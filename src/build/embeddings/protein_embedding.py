@@ -1,11 +1,18 @@
 """
 Geração de embeddings de proteínas usando modelos ESM (Meta AI).
+Utiliza código fonte local do ESM incluído no repositório.
 """
 
 import os
+import sys
 from typing import Dict, Any, List, Tuple, Optional, TYPE_CHECKING, Union
 import numpy as np
 from pathlib import Path
+
+# Adicionar ESM local ao path
+ESM_LOCAL_PATH = Path(__file__).parent.parent.parent.parent / "ESM"
+if str(ESM_LOCAL_PATH) not in sys.path:
+    sys.path.insert(0, str(ESM_LOCAL_PATH))
 
 if TYPE_CHECKING:
     from build.core import BuildConfig
@@ -53,12 +60,15 @@ class ProteinEmbedding(BaseEmbedding):
             )
         
         try:
+            # Importar ESM do código fonte local
             import esm
             self.esm = esm
             self.esm_available = True
-        except ImportError:
+            self.logger.info(f"ESM carregado do código fonte local: {ESM_LOCAL_PATH}")
+        except ImportError as e:
             raise DependencyError(
-                "ESM não está disponível. Instale com: pip install fair-esm"
+                f"ESM não está disponível no repositório local ({ESM_LOCAL_PATH}). "
+                f"Verifique se a pasta ESM/ existe e contém o código fonte. Erro: {e}"
             )
     
     def _validate_config(self) -> None:
