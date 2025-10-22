@@ -45,7 +45,8 @@
   "project_name": "docktkinase_embeddings",
   "output_directory": "concatenated_embeddings",
   "esm_config": {
-    "model_name": "esm2_t33_650M_UR50D",
+    "model_name": "esm2_t36_3B_UR50D",
+    "model_path": "../ESM",
     "batch_size": 16,
     "device": "auto",
     "max_sequence_length": 1024

@@ -186,12 +186,13 @@ pipeline.run_validation()
         "memory": "8g"
     },
     "esm_config": {
-        "model_name": "esm2_t33_650M_UR50D",
+        "model_name": "esm2_t36_3B_UR50D",
+        "model_path": "../ESM",
         "batch_size": 16,
         "device": "auto"
     },
     "fm4m_config": {
-        "model_path": "/path/to/FM4M",
+        "model_path": "../FM4M",
         "batch_size": 32
     },
     "binary_threshold": 1000.0

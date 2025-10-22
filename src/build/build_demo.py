@@ -70,16 +70,20 @@ def example_custom_configuration():
     
     # Custom settings
     config = BuildConfig({
-        'esm_model': 'esm2_t33_650M_UR50D',  # Faster model
-        'fm4m_model': 'SELFIES-TED',         # Alternative ligand model
-        'batch_size': 16,                    # Smaller batches
-        'use_parallel': True,                # Enable parallelism
-        'checkpoint_enabled': True           # Enable checkpointing
+        'esm_model': 'esm2_t36_3B_UR50D',  # ESM-2 modelo mais recente
+        'esm_model_path': '../ESM',        # Caminho do código ESM local
+        'fm4m_model': 'SELFIES-TED',       # Alternative ligand model
+        'fm4m_model_path': '../FM4M',      # Caminho do código FM4M local
+        'batch_size': 16,                  # Smaller batches
+        'use_parallel': True,              # Enable parallelism
+        'checkpoint_enabled': True         # Enable checkpointing
     })
     
     print("Custom configuration:")
     print(f"  • ESM model: {config.get('esm_model')}")
+    print(f"  • ESM path: {config.get('esm_model_path')}")
     print(f"  • FM4M model: {config.get('fm4m_model')}")
+    print(f"  • FM4M path: {config.get('fm4m_model_path')}")
     print(f"  • Batch size: {config.batch_size}")
     print(f"  • Parallel processing: {config.use_parallel}")
     print(f"  • Checkpointing: {config.get('checkpoint_enabled')}")
