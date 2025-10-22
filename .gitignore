@@ -17,8 +17,17 @@ test_output*/
 tests/humans/
 tests/non_humans/
 tests/test_output*/
+tests/pipeline_output*/
+tests/comparison_*/
 results/
 output/
+
+# ⚠️ IMPORTANTE: Pastas de teste na RAIZ não devem ser criadas!
+# Todos os testes devem ir para tests/
+# Mas se forem criadas acidentalmente na raiz, serão ignoradas:
+/test_*/
+/comparison_*/
+/pipeline_output/
 
 # ============================================
 # Logs and Temporary Files
