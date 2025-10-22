@@ -182,8 +182,10 @@ def install_dependencies() -> bool:
         "psutil",                 # System utilities (embeddingIBM.py, embeddingBuild.py)  
         "pyspark>=3.0.0",        # Apache Spark (buildInteractionLabels.py, embeddingBuild.py)
         "optuna",                 # Hyperparameter optimization
-        "scipy>=1.12.0",         # Scientific computing
+        "scipy>=1.12.0",         # Scientific computing (também usado em compare_classifiers.py)
         "pyarrow>=14.0.1",       # Apache Arrow (para Spark e pandas)
+        # Dependências para compare_classifiers.py e run_complete_pipeline.py
+        "threadpoolctl>=3.1.0",  # Thread pool control (para evitar bugs do KNN)
     ]
     
     # Dependências opcionais (instaladas com tratamento de erro)
