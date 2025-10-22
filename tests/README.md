@@ -5,7 +5,14 @@ Esta pasta contém todos os testes, validações e relatórios do sistema DockTK
 ## 📋 Estrutura dos Testes
 
 ### 🔍 Testes Funcionais
+
+#### Modelos e Embeddings
 - **`test_models.py`** - Testa carregamento e funcionamento dos modelos FM4M
+- **`test_esm_integration.py`** - Suite completa de testes ESM-2 (6 testes)
+- **`test_esm_quick.py`** - Validação rápida ESM-2 (sem imports pesados)
+- **`test_esm_embedding.py`** - Teste de geração de embeddings com proteína real
+
+#### Sistema
 - **`test_device_management.py`** - Valida sistema de gerenciamento de devices (CPU/GPU)
 - **`test_memory_management.py`** - Testa gestão de memória e otimização
 - **`test_integrity.py`** - Verifica integridade geral do sistema
@@ -33,13 +40,22 @@ python test/validacao_final.py
 ### Testes Específicos
 ```bash
 # Testar modelos FM4M
-python test/test_models.py
+python tests/test_models.py
+
+# Testar ESM-2 (validação rápida)
+python tests/test_esm_quick.py
+
+# Testar geração de embeddings ESM-2
+python tests/test_esm_embedding.py
+
+# Testar ESM-2 completo (suite completa)
+python tests/test_esm_integration.py
 
 # Testar device management
-python test/test_device_management.py
+python tests/test_device_management.py
 
 # Testar performance
-python test/test_performance.py
+python tests/test_performance.py
 ```
 
 ### Validação de Produção

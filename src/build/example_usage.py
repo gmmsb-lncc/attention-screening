@@ -30,7 +30,8 @@ def create_example_config(config_path: str = "build_config.json") -> BuildConfig
             "max_result_size": "2g"
         },
         "esm_config": {
-            "model_name": "esm2_t33_650M_UR50D",
+            "model_name": "esm2_t36_3B_UR50D",
+            "model_path": "../ESM",
             "batch_size": 16,
             "device": "auto",
             "max_sequence_length": 1024

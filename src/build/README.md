@@ -107,8 +107,10 @@ config = BuildConfig({
     'output_dir': 'custom_output',
     
     # Models
-    'esm_model': 'esm2_t33_650M_UR50D',  # Smaller model for faster processing
+    'esm_model': 'esm2_t36_3B_UR50D',    # ESM-2 modelo mais recente (3B params)
+    'esm_model_path': '../ESM',          # Caminho do código ESM local
     'fm4m_model': 'SELFIES-TED',         # Alternative ligand model
+    'fm4m_model_path': '../FM4M',        # Caminho do código FM4M local
     
     # Performance
     'batch_size': 16,
@@ -416,8 +418,10 @@ print(f"✅ Processed {results['total_pairs']} protein-ligand pairs")
 ### Example 2: Custom Model Selection
 ```python
 config = BuildConfig({
-    'esm_model': 'esm2_t33_650M_UR50D',  # Faster model
+    'esm_model': 'esm2_t36_3B_UR50D',    # ESM-2 modelo padrão (3B params)
+    'esm_model_path': '../ESM',          # Código ESM local
     'fm4m_model': 'SELFIES-TED',         # Alternative encoding
+    'fm4m_model_path': '../FM4M',        # Código FM4M local
     'batch_size': 16
 })
 
