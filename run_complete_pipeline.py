@@ -25,6 +25,12 @@ import time
 import json
 from datetime import datetime
 
+# Visualização
+import matplotlib
+matplotlib.use('Agg')  # Backend não-interativo
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 # Adicionar paths
 ROOT_DIR = Path(__file__).parent
 sys.path.insert(0, str(ROOT_DIR / 'src'))
@@ -501,6 +507,9 @@ class CompletePipeline:
         self.stats['train_size'] = len(X_train)
         self.stats['val_size'] = len(X_val)
         self.stats['test_size'] = len(X_test)
+        self.stats['train_samples'] = len(X_train)
+        self.stats['val_samples'] = len(X_val)
+        self.stats['test_samples'] = len(X_test)
         self.stats['max_proportion_diff'] = float(max_diff_overall)
         self.stats['chi2_p_values'] = {
             'train': float(p_value_train),
@@ -508,7 +517,127 @@ class CompletePipeline:
             'test': float(p_value_test)
         }
         
+        # Gerar visualização da estratificação
+        if self.verbose:
+            self.plot_stratification(y_train, y_val, y_test, y)
+        
         return X_train, X_val, X_test, y_train, y_val, y_test
+    
+    def plot_stratification(self, y_train, y_val, y_test, y_original):
+        """
+        Criar visualizações da estratificação
+        
+        Args:
+            y_train: Labels de treino
+            y_val: Labels de validação
+            y_test: Labels de teste
+            y_original: Labels originais
+        """
+        try:
+            # Criar diretório de visualizações
+            viz_dir = self.output_dir / 'visualizations'
+            viz_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Configurar estilo
+            sns.set_style("whitegrid")
+            plt.rcParams['figure.facecolor'] = 'white'
+            
+            # Criar figura com 3 subplots
+            fig = plt.figure(figsize=(16, 5))
+            
+            # ===== SUBPLOT 1: Contagem de classes =====
+            ax1 = plt.subplot(1, 3, 1)
+            
+            datasets = ['Original', 'Train', 'Val', 'Test']
+            y_sets = [y_original, y_train, y_val, y_test]
+            
+            class_0_counts = [np.sum(y == 0) for y in y_sets]
+            class_1_counts = [np.sum(y == 1) for y in y_sets]
+            
+            x = np.arange(len(datasets))
+            width = 0.35
+            
+            bars1 = ax1.bar(x - width/2, class_0_counts, width, label='Classe 0 (INATIVO)', 
+                           color='#3498db', alpha=0.8)
+            bars2 = ax1.bar(x + width/2, class_1_counts, width, label='Classe 1 (ATIVO)', 
+                           color='#e74c3c', alpha=0.8)
+            
+            ax1.set_xlabel('Conjunto de Dados', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Número de Amostras', fontsize=12, fontweight='bold')
+            ax1.set_title('Distribuição de Classes por Conjunto', fontsize=14, fontweight='bold')
+            ax1.set_xticks(x)
+            ax1.set_xticklabels(datasets)
+            ax1.legend(loc='upper right')
+            ax1.grid(axis='y', alpha=0.3)
+            
+            # Adicionar valores nas barras
+            for bars in [bars1, bars2]:
+                for bar in bars:
+                    height = bar.get_height()
+                    ax1.text(bar.get_x() + bar.get_width()/2., height,
+                            f'{int(height)}',
+                            ha='center', va='bottom', fontsize=9, fontweight='bold')
+            
+            # ===== SUBPLOT 2: Proporções =====
+            ax2 = plt.subplot(1, 3, 2)
+            
+            proportions_0 = [c / (c + class_1_counts[i]) * 100 
+                           for i, c in enumerate(class_0_counts)]
+            proportions_1 = [c / (class_0_counts[i] + c) * 100 
+                           for i, c in enumerate(class_1_counts)]
+            
+            bars1 = ax2.bar(x - width/2, proportions_0, width, label='Classe 0 (INATIVO)',
+                           color='#3498db', alpha=0.8)
+            bars2 = ax2.bar(x + width/2, proportions_1, width, label='Classe 1 (ATIVO)',
+                           color='#e74c3c', alpha=0.8)
+            
+            ax2.set_xlabel('Conjunto de Dados', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Proporção (%)', fontsize=12, fontweight='bold')
+            ax2.set_title('Proporções de Classes (Estratificação)', fontsize=14, fontweight='bold')
+            ax2.set_xticks(x)
+            ax2.set_xticklabels(datasets)
+            ax2.legend(loc='upper right')
+            ax2.set_ylim([0, 100])
+            ax2.grid(axis='y', alpha=0.3)
+            
+            # Adicionar valores nas barras
+            for bars in [bars1, bars2]:
+                for bar in bars:
+                    height = bar.get_height()
+                    ax2.text(bar.get_x() + bar.get_width()/2., height,
+                            f'{height:.1f}%',
+                            ha='center', va='bottom', fontsize=9, fontweight='bold')
+            
+            # ===== SUBPLOT 3: Tamanhos dos conjuntos =====
+            ax3 = plt.subplot(1, 3, 3)
+            
+            sizes = [len(y) for y in y_sets]
+            colors = ['#95a5a6', '#2ecc71', '#f39c12', '#9b59b6']
+            
+            wedges, texts, autotexts = ax3.pie(sizes, labels=datasets, autopct='%1.1f%%',
+                                               colors=colors, startangle=90,
+                                               textprops={'fontsize': 11, 'fontweight': 'bold'})
+            
+            ax3.set_title('Distribuição de Amostras por Conjunto', 
+                         fontsize=14, fontweight='bold')
+            
+            # Adicionar legenda com contagens
+            legend_labels = [f'{ds}: {sz:,} amostras' for ds, sz in zip(datasets, sizes)]
+            ax3.legend(legend_labels, loc='center left', bbox_to_anchor=(1, 0, 0.5, 1))
+            
+            plt.tight_layout()
+            
+            # Salvar figura
+            viz_file = viz_dir / 'stratification_analysis.png'
+            plt.savefig(viz_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            if self.verbose:
+                print(f'   📊 Visualização salva: {viz_file}')
+        
+        except Exception as e:
+            if self.verbose:
+                print(f'   ⚠️  Erro ao gerar visualização: {e}')
     
     def train_classifier(self, X_train, y_train, X_val=None, y_val=None):
         """
@@ -643,7 +772,95 @@ class CompletePipeline:
         self.stats['eval_time'] = eval_time
         self.stats['metrics'] = metrics
         
+        # Gerar visualização da avaliação
+        if self.verbose:
+            self.plot_evaluation(y_test, y_pred, y_proba, dataset_name)
+        
         return metrics
+    
+    def plot_evaluation(self, y_true, y_pred, y_proba, dataset_name='Test'):
+        """
+        Criar visualizações da avaliação do modelo
+        
+        Args:
+            y_true: Labels verdadeiros
+            y_pred: Labels preditos
+            y_proba: Probabilidades preditas
+            dataset_name: Nome do conjunto (Test/Validation)
+        """
+        try:
+            # Criar diretório de visualizações
+            viz_dir = self.output_dir / 'visualizations'
+            viz_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Configurar estilo
+            sns.set_style("whitegrid")
+            
+            # Criar figura com 2 subplots
+            fig = plt.figure(figsize=(14, 6))
+            
+            # ===== SUBPLOT 1: Matriz de Confusão =====
+            ax1 = plt.subplot(1, 2, 1)
+            
+            cm = confusion_matrix(y_true, y_pred)
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                       xticklabels=['INATIVO (0)', 'ATIVO (1)'],
+                       yticklabels=['INATIVO (0)', 'ATIVO (1)'],
+                       cbar_kws={'label': 'Contagem'},
+                       ax=ax1)
+            
+            ax1.set_xlabel('Predito', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Verdadeiro', fontsize=12, fontweight='bold')
+            ax1.set_title(f'Matriz de Confusão - {dataset_name}', 
+                         fontsize=14, fontweight='bold')
+            
+            # Adicionar porcentagens
+            cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+            for i in range(cm.shape[0]):
+                for j in range(cm.shape[1]):
+                    ax1.text(j + 0.5, i + 0.7, f'({cm_norm[i, j]*100:.1f}%)',
+                            ha='center', va='center', fontsize=10, color='gray')
+            
+            # ===== SUBPLOT 2: Curva ROC =====
+            ax2 = plt.subplot(1, 2, 2)
+            
+            if len(np.unique(y_true)) == 2:
+                from sklearn.metrics import roc_curve, auc
+                
+                fpr, tpr, _ = roc_curve(y_true, y_proba[:, 1])
+                roc_auc = auc(fpr, tpr)
+                
+                ax2.plot(fpr, tpr, color='#e74c3c', lw=2, 
+                        label=f'ROC curve (AUC = {roc_auc:.3f})')
+                ax2.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--', 
+                        label='Random')
+                
+                ax2.set_xlim([0.0, 1.0])
+                ax2.set_ylim([0.0, 1.05])
+                ax2.set_xlabel('Taxa de Falsos Positivos', fontsize=12, fontweight='bold')
+                ax2.set_ylabel('Taxa de Verdadeiros Positivos', fontsize=12, fontweight='bold')
+                ax2.set_title(f'Curva ROC - {dataset_name}', fontsize=14, fontweight='bold')
+                ax2.legend(loc="lower right", fontsize=10)
+                ax2.grid(alpha=0.3)
+            else:
+                ax2.text(0.5, 0.5, 'Curva ROC disponível apenas\npara classificação binária',
+                        ha='center', va='center', fontsize=12,
+                        transform=ax2.transAxes)
+                ax2.set_title(f'Curva ROC - {dataset_name}', fontsize=14, fontweight='bold')
+            
+            plt.tight_layout()
+            
+            # Salvar figura
+            viz_file = viz_dir / f'evaluation_{dataset_name.lower()}.png'
+            plt.savefig(viz_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            if self.verbose:
+                print(f'   📊 Visualização salva: {viz_file}')
+        
+        except Exception as e:
+            if self.verbose:
+                print(f'   ⚠️  Erro ao gerar visualização: {e}')
     
     def save_results(self):
         """Salvar resultados do pipeline"""
