@@ -615,9 +615,13 @@ def main() -> int:
     """Função principal do setup."""
     print_header("SETUP AUTOMATIZADO DOCKTKINASE")
     
-    # Verificar diretório correto
-    if not Path("docktkinase.py").exists():
-        print("❌ Execute este script no diretório raiz do DockTKinase")
+    # Verificar diretório correto (usando arquivos que realmente existem)
+    required_markers = ["run_complete_pipeline.py", "src", "requirements.txt"]
+    missing_markers = [m for m in required_markers if not Path(m).exists()]
+    
+    if missing_markers:
+        print(f"❌ Execute este script no diretório raiz do DockTKinase")
+        print(f"   Arquivos/pastas não encontrados: {', '.join(missing_markers)}")
         return 1
     
     print("📁 Diretório do projeto detectado")
