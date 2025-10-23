@@ -169,7 +169,7 @@ class CompletePipeline:
         
         # Limitar amostras se necessário
         if self.max_samples and len(df) > self.max_samples:
-            df = df.sample(n=self.max_samples, random_state=self.random_state)
+            df = df.sample(n=self.max_samples, random_state=self.random_state).reset_index(drop=True)
             if self.verbose:
                 print(f'   ⚠️  Limitado a {self.max_samples} amostras')
         
@@ -351,7 +351,7 @@ class CompletePipeline:
             
             # Filtrar dataframe
             if n_removed > 0:
-                df = df[valid_mask].copy()
+                df = df[valid_mask].copy().reset_index(drop=True)
                 labels = labels[valid_mask]
         
         else:
@@ -823,6 +823,13 @@ class CompletePipeline:
             indices: Índices das amostras
             dataset_name: Nome do conjunto (Test/Validation)
         """
+        def safe_get(row_dict, key, default='N/A'):
+            """Obter valor do dicionário tratando NaN e None"""
+            value = row_dict.get(key, default)
+            if pd.isna(value):
+                return default
+            return value
+        
         try:
             # Determinar categoria de predição (TP, FP, TN, FN)
             categories = []
@@ -844,21 +851,21 @@ class CompletePipeline:
                 
                 prediction_row = {
                     'prediction_category': cat,
-                    'molregno': row_data.get('molregno', 'N/A'),
-                    'seq_id': row_data.get('seq_id', 'N/A'),
-                    'target_kinase': row_data.get('target_kinase', 'N/A'),
-                    'canonical_smiles': row_data.get('canonical_smiles', 'N/A'),
-                    'aminoacid_sequence': row_data.get('seq', 'N/A'),
+                    'molregno': safe_get(row_data, 'molregno'),
+                    'seq_id': safe_get(row_data, 'seq_id'),
+                    'target_kinase': safe_get(row_data, 'target_kinase'),
+                    'canonical_smiles': safe_get(row_data, 'canonical_smiles'),
+                    'aminoacid_sequence': safe_get(row_data, 'seq'),
                     'true_label': int(yt),
                     'predicted_label': int(yp),
                     'probability_class_0': float(y_proba[idx, 0]),
                     'probability_class_1': float(y_proba[idx, 1]),
-                    'pchembl_value': row_data.get('pchembl_value', 'N/A'),
-                    'standard_value': row_data.get('standard_value', 'N/A'),
-                    'standard_type': row_data.get('standard_type', 'N/A'),
-                    'compound_name': row_data.get('compound_name', 'N/A'),
-                    'chembl_id': row_data.get('chembl_id', 'N/A'),
-                    'organism': row_data.get('organism', 'N/A'),
+                    'pchembl_value': safe_get(row_data, 'pchembl_value'),
+                    'standard_value': safe_get(row_data, 'standard_value'),
+                    'standard_type': safe_get(row_data, 'standard_type'),
+                    'compound_name': safe_get(row_data, 'compound_name'),
+                    'chembl_id': safe_get(row_data, 'chembl_id'),
+                    'organism': safe_get(row_data, 'organism'),
                     'dataset': dataset_name
                 }
                 predictions_data.append(prediction_row)
@@ -884,7 +891,7 @@ class CompletePipeline:
                 print(f'   📊 Distribuição das predições:')
                 for cat in ['TP', 'FP', 'TN', 'FN']:
                     count = category_counts.get(cat, 0)
-                    pct = (count / len(df_predictions)) * 100
+                    pct = (count / len(df_predictions)) * 100 if len(df_predictions) > 0 else 0
                     print(f'      {cat}: {count:>4} ({pct:>5.1f}%)')
                 
         except Exception as e:
