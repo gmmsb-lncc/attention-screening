@@ -353,7 +353,8 @@ class ClassifierComparison:
             'eval_time': eval_time
         }
     
-    def compare(self, X_train, y_train, X_val, y_val, X_test, y_test):
+    def compare(self, X_train, y_train, X_val, y_val, X_test, y_test, 
+                df_original=None, idx_val=None, idx_test=None):
         """
         Comparar todos os classificadores
         
@@ -361,6 +362,9 @@ class ClassifierComparison:
             X_train, y_train: Dados de treino
             X_val, y_val: Dados de validação
             X_test, y_test: Dados de teste
+            df_original: DataFrame original com informações dos compostos (opcional)
+            idx_val: Índices do conjunto de validação (opcional)
+            idx_test: Índices do conjunto de teste (opcional)
             
         Returns:
             List de resultados, nome do melhor modelo
@@ -369,6 +373,11 @@ class ClassifierComparison:
             print('\n' + '='*60)
             print('🏆 COMPARAÇÃO DE CLASSIFICADORES')
             print('='*60)
+        
+        # Armazenar informações para salvar CSVs detalhados
+        self.df_original = df_original
+        self.idx_val = idx_val
+        self.idx_test = idx_test
         
         classifiers = self.get_classifiers()
         
@@ -475,7 +484,117 @@ class ClassifierComparison:
             print('='*100)
         
         self.results = results
+        self.best_model_result = best_model  # Armazenar para salvar CSV depois
         return results, best_model['name']
+    
+    def save_best_model_predictions(self, output_dir, X_val, y_val, X_test, y_test):
+        """
+        Salvar CSVs detalhados das predições do melhor modelo
+        
+        Args:
+            output_dir: Diretório de saída
+            X_val, y_val: Dados de validação
+            X_test, y_test: Dados de teste
+        """
+        if not hasattr(self, 'best_model_result') or not hasattr(self, 'df_original'):
+            return
+        
+        if self.df_original is None or self.idx_val is None or self.idx_test is None:
+            return
+        
+        try:
+            best_model = self.best_model_result
+            clf = best_model['classifier']
+            
+            output_dir = Path(output_dir)
+            
+            # Predições para validação
+            y_val_pred = clf.predict(X_val)
+            y_val_proba = clf.predict_proba(X_val)
+            
+            # Predições para teste
+            y_test_pred = clf.predict(X_test)
+            y_test_proba = clf.predict_proba(X_test)
+            
+            # Salvar CSV de validação
+            self._save_prediction_csv(
+                y_val, y_val_pred, y_val_proba, 
+                self.df_original, self.idx_val, 
+                'Validation', output_dir, best_model['name']
+            )
+            
+            # Salvar CSV de teste
+            self._save_prediction_csv(
+                y_test, y_test_pred, y_test_proba,
+                self.df_original, self.idx_test,
+                'Test', output_dir, best_model['name']
+            )
+            
+        except Exception as e:
+            if self.verbose:
+                print(f'\n   ⚠️  Erro ao salvar CSVs de predições: {e}')
+    
+    def _save_prediction_csv(self, y_true, y_pred, y_proba, df_subset, indices, 
+                            dataset_name, output_dir, model_name):
+        """Método auxiliar para salvar CSV de predições"""
+        # Determinar categoria de predição
+        categories = []
+        for yt, yp in zip(y_true, y_pred):
+            if yt == 1 and yp == 1:
+                categories.append('TP')
+            elif yt == 0 and yp == 1:
+                categories.append('FP')
+            elif yt == 0 and yp == 0:
+                categories.append('TN')
+            else:
+                categories.append('FN')
+        
+        # Preparar dados
+        predictions_data = []
+        
+        for idx, (i, cat, yt, yp) in enumerate(zip(indices, categories, y_true, y_pred)):
+            row_data = df_subset.iloc[i].to_dict()
+            
+            prediction_row = {
+                'prediction_category': cat,
+                'model_name': model_name,
+                'molregno': row_data.get('molregno', 'N/A'),
+                'seq_id': row_data.get('seq_id', 'N/A'),
+                'target_kinase': row_data.get('target_kinase', 'N/A'),
+                'canonical_smiles': row_data.get('canonical_smiles', 'N/A'),
+                'aminoacid_sequence': row_data.get('seq', 'N/A'),
+                'true_label': int(yt),
+                'predicted_label': int(yp),
+                'probability_class_0': float(y_proba[idx, 0]),
+                'probability_class_1': float(y_proba[idx, 1]),
+                'pchembl_value': row_data.get('pchembl_value', 'N/A'),
+                'standard_value': row_data.get('standard_value', 'N/A'),
+                'standard_type': row_data.get('standard_type', 'N/A'),
+                'compound_name': row_data.get('compound_name', 'N/A'),
+                'chembl_id': row_data.get('chembl_id', 'N/A'),
+                'organism': row_data.get('organism', 'N/A'),
+                'dataset': dataset_name
+            }
+            predictions_data.append(prediction_row)
+        
+        # Criar DataFrame e ordenar
+        df_predictions = pd.DataFrame(predictions_data)
+        category_order = {'TP': 0, 'FP': 1, 'TN': 2, 'FN': 3}
+        df_predictions['sort_key'] = df_predictions['prediction_category'].map(category_order)
+        df_predictions = df_predictions.sort_values('sort_key').drop('sort_key', axis=1)
+        
+        # Salvar CSV
+        csv_filename = f'best_model_predictions_{dataset_name.lower()}.csv'
+        csv_path = output_dir / csv_filename
+        df_predictions.to_csv(csv_path, index=False)
+        
+        if self.verbose:
+            category_counts = df_predictions['prediction_category'].value_counts()
+            print(f'      {dataset_name}: {csv_filename}')
+            for cat in ['TP', 'FP', 'TN', 'FN']:
+                count = category_counts.get(cat, 0)
+                pct = (count / len(df_predictions)) * 100 if len(df_predictions) > 0 else 0
+                print(f'         {cat}: {count:>4} ({pct:>5.1f}%)')
     
     def save_results(self, results, output_dir):
         """Salvar resultados da comparação"""
@@ -600,6 +719,7 @@ class ClassifierComparison:
             print(f'   📄 JSON detalhado: classifier_comparison.json')
             print(f'   📊 Tabela resumo:  comparison_table.txt')
             print(f'   📈 Visualizações:  comparison_*.png')
+            print(f'\n   💾 CSVs detalhados do melhor modelo:')
     
     def plot_comparison(self, results, output_dir):
         """
@@ -836,7 +956,7 @@ Exemplos:
     X = pipeline.generate_embeddings(df, batch_size=8)
     
     # Split estratificado
-    X_train, X_val, X_test, y_train, y_val, y_test = pipeline.stratified_split(X, y)
+    X_train, X_val, X_test, y_train, y_val, y_test, idx_train, idx_val, idx_test = pipeline.stratified_split(X, y)
     
     # ETAPA 2: Comparar classificadores
     print('\n' + '='*60)
@@ -849,11 +969,16 @@ Exemplos:
     )
     
     results, best_model = comparison.compare(
-        X_train, y_train, X_val, y_val, X_test, y_test
+        X_train, y_train, X_val, y_val, X_test, y_test,
+        df_original=df, idx_val=idx_val, idx_test=idx_test
     )
     
     # ETAPA 3: Salvar resultados
     comparison.save_results(results, args.output_dir)
+    
+    # ETAPA 4: Salvar CSVs detalhados do melhor modelo
+    if df is not None and idx_val is not None and idx_test is not None:
+        comparison.save_best_model_predictions(args.output_dir, X_val, y_val, X_test, y_test)
     
     print('\n✅ Comparação concluída!')
     if best_model:
