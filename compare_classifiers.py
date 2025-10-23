@@ -537,6 +537,13 @@ class ClassifierComparison:
     def _save_prediction_csv(self, y_true, y_pred, y_proba, df_subset, indices, 
                             dataset_name, output_dir, model_name):
         """Método auxiliar para salvar CSV de predições"""
+        def safe_get(row_dict, key, default='N/A'):
+            """Obter valor do dicionário tratando NaN e None"""
+            value = row_dict.get(key, default)
+            if pd.isna(value):
+                return default
+            return value
+        
         # Determinar categoria de predição
         categories = []
         for yt, yp in zip(y_true, y_pred):
@@ -558,21 +565,21 @@ class ClassifierComparison:
             prediction_row = {
                 'prediction_category': cat,
                 'model_name': model_name,
-                'molregno': row_data.get('molregno', 'N/A'),
-                'seq_id': row_data.get('seq_id', 'N/A'),
-                'target_kinase': row_data.get('target_kinase', 'N/A'),
-                'canonical_smiles': row_data.get('canonical_smiles', 'N/A'),
-                'aminoacid_sequence': row_data.get('seq', 'N/A'),
+                'molregno': safe_get(row_data, 'molregno'),
+                'seq_id': safe_get(row_data, 'seq_id'),
+                'target_kinase': safe_get(row_data, 'target_kinase'),
+                'canonical_smiles': safe_get(row_data, 'canonical_smiles'),
+                'aminoacid_sequence': safe_get(row_data, 'seq'),
                 'true_label': int(yt),
                 'predicted_label': int(yp),
                 'probability_class_0': float(y_proba[idx, 0]),
                 'probability_class_1': float(y_proba[idx, 1]),
-                'pchembl_value': row_data.get('pchembl_value', 'N/A'),
-                'standard_value': row_data.get('standard_value', 'N/A'),
-                'standard_type': row_data.get('standard_type', 'N/A'),
-                'compound_name': row_data.get('compound_name', 'N/A'),
-                'chembl_id': row_data.get('chembl_id', 'N/A'),
-                'organism': row_data.get('organism', 'N/A'),
+                'pchembl_value': safe_get(row_data, 'pchembl_value'),
+                'standard_value': safe_get(row_data, 'standard_value'),
+                'standard_type': safe_get(row_data, 'standard_type'),
+                'compound_name': safe_get(row_data, 'compound_name'),
+                'chembl_id': safe_get(row_data, 'chembl_id'),
+                'organism': safe_get(row_data, 'organism'),
                 'dataset': dataset_name
             }
             predictions_data.append(prediction_row)
