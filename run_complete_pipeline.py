@@ -389,13 +389,16 @@ class CompletePipeline:
             y: Labels
             
         Returns:
-            X_train, X_val, X_test, y_train, y_val, y_test
+            X_train, X_val, X_test, y_train, y_val, y_test, idx_train, idx_val, idx_test
         """
         if self.verbose:
             print('🔀 ETAPA 3: Divisão Estratificada (Treino/Val/Teste)')
             print('-'*60)
         
         start_time = time.time()
+        
+        # Criar array de índices para rastrear amostras originais
+        indices = np.arange(len(y))
         
         # Distribuição original
         unique, counts = np.unique(y, return_counts=True)
@@ -409,8 +412,8 @@ class CompletePipeline:
         # PASSO 1: Separar TEST set primeiro (10%)
         # Isso garante que o test set nunca foi visto durante treinamento/validação
         test_size_adjusted = self.test_size
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y,
+        X_temp, X_test, y_temp, y_test, idx_temp, idx_test = train_test_split(
+            X, y, indices,
             test_size=test_size_adjusted,
             stratify=y,
             random_state=self.random_state
@@ -419,8 +422,8 @@ class CompletePipeline:
         # PASSO 2: Do restante (90%), separar VALIDATION (10% do total = 11.1% do restante)
         # val_size_adjusted calcula a proporção correta do restante
         val_size_adjusted = self.val_size / (1 - self.test_size)
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp,
+        X_train, X_val, y_train, y_val, idx_train, idx_val = train_test_split(
+            X_temp, y_temp, idx_temp,
             test_size=val_size_adjusted,
             stratify=y_temp,
             random_state=self.random_state
@@ -521,7 +524,7 @@ class CompletePipeline:
         if self.verbose:
             self.plot_stratification(y_train, y_val, y_test, y)
         
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        return X_train, X_val, X_test, y_train, y_val, y_test, idx_train, idx_val, idx_test
     
     def plot_stratification(self, y_train, y_val, y_test, y_original):
         """
@@ -675,14 +678,31 @@ class CompletePipeline:
         
         train_time = time.time() - start_time
         
-        # Calcular acurácia no treino e validação
-        train_acc = clf.score(X_train, y_train)
+        # Calcular métricas completas no treino
+        y_train_pred = clf.predict(X_train)
+        y_train_proba = clf.predict_proba(X_train)
+        
+        train_acc = accuracy_score(y_train, y_train_pred)
+        train_precision, train_recall, train_f1, _ = precision_recall_fscore_support(
+            y_train, y_train_pred, average='weighted'
+        )
+        
+        # ROC AUC para treino
+        if len(np.unique(y_train)) == 2:
+            train_roc_auc = roc_auc_score(y_train, y_train_proba[:, 1])
+        else:
+            train_roc_auc = roc_auc_score(y_train, y_train_proba, multi_class='ovr', average='weighted')
         
         if self.verbose:
             print(f'   ✅ Modelo treinado!')
             print(f'   📊 N° estimadores: {clf.n_estimators}')
             print(f'   📊 Max depth: {clf.max_depth}')
-            print(f'   📊 Acurácia Treino: {train_acc:.4f}')
+            print(f'   📊 Métricas Treino:')
+            print(f'      Acurácia: {train_acc:.4f}')
+            print(f'      F1-Score: {train_f1:.4f}')
+            print(f'      Precisão: {train_precision:.4f}')
+            print(f'      Recall: {train_recall:.4f}')
+            print(f'      ROC-AUC: {train_roc_auc:.4f}')
             
             if X_val is not None and y_val is not None:
                 val_acc = clf.score(X_val, y_val)
@@ -692,14 +712,21 @@ class CompletePipeline:
             print(f'   ⏱️  Tempo: {train_time:.2f}s')
             print()
         
+        # Salvar todas as métricas de treino
         self.stats['train_time'] = train_time
-        self.stats['train_accuracy'] = float(train_acc)
+        self.stats['train_metrics'] = {
+            'accuracy': float(train_acc),
+            'f1': float(train_f1),
+            'precision': float(train_precision),
+            'recall': float(train_recall),
+            'roc_auc': float(train_roc_auc)
+        }
         self.stats['model_type'] = 'RandomForest'
         self.stats['n_estimators'] = clf.n_estimators
         
         return clf
     
-    def evaluate_classifier(self, clf, X_test, y_test, dataset_name='Test'):
+    def evaluate_classifier(self, clf, X_test, y_test, dataset_name='Test', df_subset=None, indices=None):
         """
         Avaliar classificador
         
@@ -708,6 +735,8 @@ class CompletePipeline:
             X_test: Features de teste
             y_test: Labels de teste
             dataset_name: Nome do conjunto ('Test' ou 'Validation')
+            df_subset: DataFrame com informações originais (opcional)
+            indices: Índices originais das amostras (opcional)
             
         Returns:
             Dict com métricas
@@ -772,11 +801,97 @@ class CompletePipeline:
         self.stats['eval_time'] = eval_time
         self.stats['metrics'] = metrics
         
+        # Salvar CSV detalhado das predições
+        if df_subset is not None and indices is not None:
+            self.save_predictions_csv(y_test, y_pred, y_proba, df_subset, indices, dataset_name)
+        
         # Gerar visualização da avaliação
         if self.verbose:
             self.plot_evaluation(y_test, y_pred, y_proba, dataset_name)
         
         return metrics
+    
+    def save_predictions_csv(self, y_true, y_pred, y_proba, df_subset, indices, dataset_name='Test'):
+        """
+        Salvar CSV detalhado com informações de cada predição
+        
+        Args:
+            y_true: Labels verdadeiros
+            y_pred: Labels preditos
+            y_proba: Probabilidades preditas
+            df_subset: DataFrame original com informações dos compostos
+            indices: Índices das amostras
+            dataset_name: Nome do conjunto (Test/Validation)
+        """
+        try:
+            # Determinar categoria de predição (TP, FP, TN, FN)
+            categories = []
+            for yt, yp in zip(y_true, y_pred):
+                if yt == 1 and yp == 1:
+                    categories.append('TP')  # True Positive
+                elif yt == 0 and yp == 1:
+                    categories.append('FP')  # False Positive
+                elif yt == 0 and yp == 0:
+                    categories.append('TN')  # True Negative
+                else:  # yt == 1 and yp == 0
+                    categories.append('FN')  # False Negative
+            
+            # Preparar dados para o CSV
+            predictions_data = []
+            
+            for idx, (i, cat, yt, yp) in enumerate(zip(indices, categories, y_true, y_pred)):
+                row_data = df_subset.iloc[i].to_dict()
+                
+                prediction_row = {
+                    'prediction_category': cat,
+                    'molregno': row_data.get('molregno', 'N/A'),
+                    'seq_id': row_data.get('seq_id', 'N/A'),
+                    'target_kinase': row_data.get('target_kinase', 'N/A'),
+                    'canonical_smiles': row_data.get('canonical_smiles', 'N/A'),
+                    'aminoacid_sequence': row_data.get('seq', 'N/A'),
+                    'true_label': int(yt),
+                    'predicted_label': int(yp),
+                    'probability_class_0': float(y_proba[idx, 0]),
+                    'probability_class_1': float(y_proba[idx, 1]),
+                    'pchembl_value': row_data.get('pchembl_value', 'N/A'),
+                    'standard_value': row_data.get('standard_value', 'N/A'),
+                    'standard_type': row_data.get('standard_type', 'N/A'),
+                    'compound_name': row_data.get('compound_name', 'N/A'),
+                    'chembl_id': row_data.get('chembl_id', 'N/A'),
+                    'organism': row_data.get('organism', 'N/A'),
+                    'dataset': dataset_name
+                }
+                predictions_data.append(prediction_row)
+            
+            # Criar DataFrame e salvar
+            df_predictions = pd.DataFrame(predictions_data)
+            
+            # Ordenar por categoria para facilitar análise
+            category_order = {'TP': 0, 'FP': 1, 'TN': 2, 'FN': 3}
+            df_predictions['sort_key'] = df_predictions['prediction_category'].map(category_order)
+            df_predictions = df_predictions.sort_values('sort_key').drop('sort_key', axis=1)
+            
+            # Salvar CSV
+            csv_filename = f'predictions_detailed_{dataset_name.lower()}.csv'
+            csv_path = self.output_dir / csv_filename
+            df_predictions.to_csv(csv_path, index=False)
+            
+            if self.verbose:
+                print(f'\n   💾 CSV detalhado salvo: {csv_filename}')
+                
+                # Estatísticas por categoria
+                category_counts = df_predictions['prediction_category'].value_counts()
+                print(f'   📊 Distribuição das predições:')
+                for cat in ['TP', 'FP', 'TN', 'FN']:
+                    count = category_counts.get(cat, 0)
+                    pct = (count / len(df_predictions)) * 100
+                    print(f'      {cat}: {count:>4} ({pct:>5.1f}%)')
+                
+        except Exception as e:
+            if self.verbose:
+                print(f'   ⚠️  Erro ao salvar CSV detalhado: {e}')
+                import traceback
+                traceback.print_exc()
     
     def plot_evaluation(self, y_true, y_pred, y_proba, dataset_name='Test'):
         """
@@ -975,16 +1090,18 @@ class CompletePipeline:
             X = self.generate_embeddings(df, batch_size=8)
             
             # 4. Split estratificado em 3 conjuntos (treino/val/teste) SEM data leaking
-            X_train, X_val, X_test, y_train, y_val, y_test = self.stratified_split(X, y)
+            X_train, X_val, X_test, y_train, y_val, y_test, idx_train, idx_val, idx_test = self.stratified_split(X, y)
             
             # 5. Treinar classificador (com validação)
             clf = self.train_classifier(X_train, y_train, X_val, y_val)
             
             # 6. Avaliar no conjunto de validação
-            val_metrics = self.evaluate_classifier(clf, X_val, y_val, dataset_name='Validation')
+            val_metrics = self.evaluate_classifier(clf, X_val, y_val, dataset_name='Validation', 
+                                                   df_subset=df, indices=idx_val)
             
             # 7. Avaliar no conjunto de teste (nunca visto antes!)
-            test_metrics = self.evaluate_classifier(clf, X_test, y_test, dataset_name='Test')
+            test_metrics = self.evaluate_classifier(clf, X_test, y_test, dataset_name='Test',
+                                                    df_subset=df, indices=idx_test)
             
             # 8. Salvar resultados
             self.stats['validation_metrics'] = val_metrics
@@ -1001,8 +1118,13 @@ class CompletePipeline:
                 print('-'*80)
                 
                 # Treino
-                train_acc = self.stats.get("train_accuracy", 0)
-                print(f'{"Treino":<12} {"N/A":>7} {train_acc:>9.4f} {"N/A":>9} {"N/A":>7} {"N/A":>8}')
+                train_m = self.stats.get("train_metrics", {})
+                print(f'{"Treino":<12} '
+                      f'{train_m.get("f1", 0):>7.4f} '
+                      f'{train_m.get("accuracy", 0):>9.4f} '
+                      f'{train_m.get("precision", 0):>9.4f} '
+                      f'{train_m.get("recall", 0):>7.4f} '
+                      f'{train_m.get("roc_auc", 0):>8.4f}')
                 
                 # Validação
                 print(f'{"Validação":<12} '
