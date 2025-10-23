@@ -612,6 +612,10 @@ class ClassifierComparison:
         try:
             output_dir = Path(output_dir)
             
+            # Criar subdiretório para visualizações
+            viz_dir = output_dir / 'visualizations'
+            viz_dir.mkdir(parents=True, exist_ok=True)
+            
             # Filtrar apenas modelos bem-sucedidos
             successful = [r for r in results if r['status'] == 'success']
             if not successful:
@@ -669,7 +673,7 @@ class ClassifierComparison:
                        ha='left', va='center', fontsize=9, fontweight='bold')
             
             plt.tight_layout()
-            plt.savefig(output_dir / 'comparison_metrics.png', dpi=300, bbox_inches='tight')
+            plt.savefig(viz_dir / 'comparison_metrics.png', dpi=300, bbox_inches='tight')
             plt.close()
             
             # ===== FIGURA 2: Ranking =====
@@ -700,7 +704,7 @@ class ClassifierComparison:
                 plt.text(-0.05, i, medal, fontsize=20, ha='right', va='center')
             
             plt.tight_layout()
-            plt.savefig(output_dir / 'comparison_ranking.png', dpi=300, bbox_inches='tight')
+            plt.savefig(viz_dir / 'comparison_ranking.png', dpi=300, bbox_inches='tight')
             plt.close()
             
             # ===== FIGURA 3: Overfitting Analysis =====
@@ -750,11 +754,15 @@ class ClassifierComparison:
             ax2.set_ylim([0, 1])
             
             plt.tight_layout()
-            plt.savefig(output_dir / 'comparison_overfitting.png', dpi=300, bbox_inches='tight')
+            plt.savefig(viz_dir / 'comparison_overfitting.png', dpi=300, bbox_inches='tight')
             plt.close()
             
             if self.verbose:
                 print(f'   📊 Visualizações geradas com sucesso!')
+                print(f'      📁 {viz_dir}/')
+                print(f'      📈 comparison_metrics.png')
+                print(f'      🏆 comparison_ranking.png')
+                print(f'      📊 comparison_overfitting.png')
         
         except Exception as e:
             if self.verbose:
