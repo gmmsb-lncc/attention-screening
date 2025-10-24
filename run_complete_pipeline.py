@@ -432,17 +432,14 @@ class CompletePipeline:
         threshold = self.label_threshold
         
         # Método automático: PRIORIZAR valores de atividade sobre pchembl
-        # Ordem: IC50 > Ki > Kd > pchembl
+        # No modo AUTO, usar TODAS as medidas (Ki + Kd + IC50) combinadas
         if method == 'auto':
             if 'standard_value' in df.columns and 'standard_type' in df.columns:
-                # Verificar qual tipo tem mais dados
-                type_counts = df[df['standard_value'].notna()]['standard_type'].value_counts()
-                if 'IC50' in type_counts.index:
-                    method = 'ic50'
-                elif 'Ki' in type_counts.index:
-                    method = 'ki'
-                elif 'Kd' in type_counts.index:
-                    method = 'kd'
+                # Verificar se há alguma medida de atividade disponível
+                valid_types = ['Ki', 'Kd', 'IC50']
+                has_activity = df['standard_type'].isin(valid_types).any()
+                if has_activity:
+                    method = 'combined'  # Novo método interno para usar todas as medidas
                 else:
                     # Fallback para pchembl se não houver valores de atividade
                     if 'pchembl_value' in df.columns and df['pchembl_value'].notna().sum() > 0:
@@ -451,7 +448,8 @@ class CompletePipeline:
                 method = 'pchembl'
         
         if self.verbose:
-            print(f'   📊 Método selecionado: {method}')
+            display_method = 'Ki+Kd+IC50 (combinado)' if method == 'combined' else method
+            print(f'   📊 Método selecionado: {display_method}')
         
         # Criar labels baseado no método
         if method == 'pchembl':
@@ -478,7 +476,7 @@ class CompletePipeline:
             if threshold is None:
                 threshold = 1000.0
             
-            # Filtrar pelo tipo de medida
+            # USAR APENAS O TIPO ESPECÍFICO solicitado (ic50, ki ou kd)
             type_map = {'kd': 'Kd', 'ki': 'Ki', 'ic50': 'IC50'}
             std_type = type_map[method]
             
@@ -499,6 +497,45 @@ class CompletePipeline:
                     print(f'   ⚠️  {n_removed} amostras removidas (sem medida {std_type})')
             
             # Filtrar dataframe
+            if n_removed > 0:
+                df = df[valid_mask].copy().reset_index(drop=True)
+                labels = labels[valid_mask]
+        
+        elif method == 'combined':
+            # Modo COMBINADO (usado por 'auto'): Usar TODAS as medidas de atividade (IC50 + Ki + Kd)
+            if 'standard_value' not in df.columns or 'standard_type' not in df.columns:
+                raise ValueError("Colunas 'standard_value' e 'standard_type' não encontradas")
+            
+            # Threshold padrão: <= 1000 nM = ativo
+            if threshold is None:
+                threshold = 1000.0
+            
+            # Usar TODAS as medidas de atividade: Ki, Kd, IC50 (em ordem de prioridade)
+            valid_types = ['Ki', 'Kd', 'IC50']
+            valid_mask = df['standard_type'].isin(valid_types)
+            
+            # Valores MENORES = MAIS ATIVOS (positivo)
+            # Ki/Kd/IC50 <= 1000 nM = ATIVO (classe 1)
+            labels = np.zeros(len(df), dtype=int)
+            labels[valid_mask] = (df.loc[valid_mask, 'standard_value'] <= threshold).astype(int)
+            
+            # Estatísticas por tipo de medida (ordem de prioridade: Ki > Kd > IC50)
+            type_counts = df[valid_mask]['standard_type'].value_counts()
+            n_removed = (~valid_mask).sum()
+            
+            if self.verbose:
+                print(f'   ✅ Labels criados usando TODAS as medidas de atividade:')
+                print(f'      Ki/Kd/IC50 <= {threshold} nM = ATIVO (classe 1)')
+                print(f'      Ki/Kd/IC50 > {threshold} nM = INATIVO (classe 0)')
+                print(f'\n   📊 Distribuição por tipo de medida (prioridade: Ki > Kd > IC50):')
+                for measure_type in ['Ki', 'Kd', 'IC50']:
+                    count = type_counts.get(measure_type, 0)
+                    pct = (count / valid_mask.sum() * 100) if valid_mask.sum() > 0 else 0
+                    print(f'      {measure_type}: {count:,} amostras ({pct:.1f}%)')
+                if n_removed > 0:
+                    print(f'   ⚠️  {n_removed:,} amostras removidas (sem medida Ki/Kd/IC50)')
+            
+            # Filtrar dataframe para manter apenas amostras com medidas válidas
             if n_removed > 0:
                 df = df[valid_mask].copy().reset_index(drop=True)
                 labels = labels[valid_mask]
@@ -1324,10 +1361,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos:
-  # Dataset humano com modelo pequeno (teste rápido - usa IC50/Ki/Kd automaticamente)
+  # Dataset humano com modelo pequeno (teste rápido - usa Ki/Kd/IC50 automaticamente)
   python run_complete_pipeline.py --dataset human --model esm2_t6_8M_UR50D --max-samples 1000
   
-  # Dataset com labels baseados em IC50 <= 1000 nM (modo padrão)
+  # Dataset com labels baseados em todas as medidas <= 1000 nM (modo padrão)
   python run_complete_pipeline.py --dataset human --label-method auto
   
   # Dataset com threshold personalizado (500 nM para compostos mais potentes)
@@ -1336,16 +1373,16 @@ Exemplos:
   # Dataset completo com modelo grande (produção)
   python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda
   
-Métodos de Label (PRIORIDADE: IC50 > Ki > Kd > pchembl):
+Métodos de Label (PRIORIDADE: Ki > Kd > IC50 > pchembl):
   - auto: Detecta automaticamente (RECOMENDADO)
-          Ordem de prioridade: IC50 > Ki > Kd > pchembl_value
-  - ic50: IC50 <= threshold (default: 1000 nM) = ATIVO
+          Usa TODAS as medidas disponíveis: Ki, Kd e IC50 combinadas
   - ki: Ki <= threshold (default: 1000 nM) = ATIVO
   - kd: Kd <= threshold (default: 1000 nM) = ATIVO
+  - ic50: IC50 <= threshold (default: 1000 nM) = ATIVO
   - pchembl: pchembl_value >= threshold (default: 6.0) = ATIVO
   
 Threshold Padrão:
-  - Valores de atividade (IC50/Ki/Kd): 1000 nM
+  - Valores de atividade (Ki/Kd/IC50): 1000 nM
     * <= 1000 nM = ATIVO (classe 1) - compostos potentes
     * > 1000 nM = INATIVO (classe 0) - compostos fracos
   
