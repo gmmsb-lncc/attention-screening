@@ -30,6 +30,23 @@ This tool is particularly valuable for researchers working on neglected tropical
 - **⚙️ Scalable Processing**: Apache Spark integration for distributed computing
 - **📊 Comprehensive Validation**: Complete output verification and quality control
 
+## ⚠️ Pré-requisitos do Sistema
+
+**IMPORTANTE**: Antes de executar o setup, você **DEVE** instalar:
+
+```bash
+# Ubuntu/Debian (OBRIGATÓRIO)
+sudo apt-get install python3.12-dev -y
+
+# CentOS/RHEL
+sudo yum install python3-devel -y
+
+# Fedora
+sudo dnf install python3-devel -y
+```
+
+📖 **Documentação completa**: [docs/SETUP_PREREQUISITES.md](docs/SETUP_PREREQUISITES.md)
+
 ### 🎯 Performance Metrics
 
 | Phase | Time | Improvement | Status |

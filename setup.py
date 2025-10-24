@@ -68,6 +68,27 @@ def check_system_requirements() -> bool:
         print("❌ pip não encontrado")
         return False
     
+    # Verificar Python development headers (CRÍTICO para extensões PyG)
+    print("\n🔍 Verificando Python development headers...")
+    python_h_paths = [
+        f"/usr/include/python{python_version.major}.{python_version.minor}/Python.h",
+        f"/usr/local/include/python{python_version.major}.{python_version.minor}/Python.h",
+    ]
+    
+    python_h_found = any(Path(p).exists() for p in python_h_paths)
+    
+    if not python_h_found:
+        print("⚠️  AVISO: Python development headers NÃO encontrados!")
+        print("   Isso impedirá a instalação de extensões PyG (torch-scatter, torch-sparse, torch-cluster)")
+        print("   O sistema funcionará normalmente, mas com funcionalidade limitada.")
+        print("\n   📝 Para instalar:")
+        print(f"      sudo apt-get install python{python_version.major}.{python_version.minor}-dev -y  # Ubuntu/Debian")
+        print(f"      sudo yum install python{python_version.major}-devel -y       # CentOS/RHEL")
+        print(f"      sudo dnf install python{python_version.major}-devel -y       # Fedora")
+        print("\n   💡 Após instalar, execute este setup novamente.")
+    else:
+        print("✅ Python development headers encontrados")
+    
     return True
 
 def setup_virtual_environment() -> bool:
@@ -286,24 +307,44 @@ def install_dependencies() -> bool:
     print("\n🔧 Verificando extensões PyTorch Geometric...")
     print("⚠️  Estas dependências precisam compilar contra PyTorch (pode demorar)")
     
-    # Verificar se Python development headers estão disponíveis
-    python_h_check = subprocess.run(
-        ["python3-config", "--includes"],
-        capture_output=True
-    )
+    # Verificar se Python.h realmente existe (verificação mais robusta)
+    python_h_paths = [
+        "/usr/include/python3.12/Python.h",
+        "/usr/include/python3.11/Python.h", 
+        "/usr/include/python3.10/Python.h",
+        f"/usr/include/python{sys.version_info.major}.{sys.version_info.minor}/Python.h",
+        f"{sys.prefix}/include/python{sys.version_info.major}.{sys.version_info.minor}/Python.h",
+    ]
     
-    if python_h_check.returncode != 0:
-        print("\n⚠️  AVISO: Python development headers (Python.h) não encontrados!")
-        print("   As extensões PyG precisam de headers do Python para compilar.")
-        print("   Para instalar:")
-        print(f"      sudo apt-get install python3.12-dev  # Ubuntu/Debian")
-        print(f"      sudo yum install python3-devel       # CentOS/RHEL")
-        print(f"      sudo dnf install python3-devel       # Fedora")
-        print("\n   Pulando instalação de extensões PyG (opcionais)")
-        print("   O sistema funcionará normalmente sem elas.")
+    python_h_found = any(Path(p).exists() for p in python_h_paths)
+    
+    if not python_h_found:
+        print("\n" + "=" * 80)
+        print("❌" * 40)
+        print("ERRO: Python development headers (Python.h) NÃO ESTÃO INSTALADOS!")
+        print("❌" * 40)
+        print("=" * 80)
+        print(f"\n🔍 Procurei em: {', '.join(python_h_paths[:3])}")
+        print("\n⚠️  As extensões PyG (torch-scatter/sparse/cluster) precisam COMPILAR código C++.")
+        print("   Isso requer os headers de desenvolvimento do Python (Python.h).")
+        print("\n🛠️  SOLUÇÃO: Execute este comando NO SERVIDOR DE PRODUÇÃO:")
+        print(f"\n   Ubuntu/Debian:")
+        print(f"      sudo apt-get update")
+        print(f"      sudo apt-get install -y python{sys.version_info.major}.{sys.version_info.minor}-dev")
+        print(f"\n   CentOS/RHEL:")
+        print(f"      sudo yum install -y python3-devel")
+        print(f"\n   Fedora:")
+        print(f"      sudo dnf install -y python3-devel")
+        print("\n⏭️  PULANDO instalação automática de extensões PyG (são opcionais)")
+        print("✅ O sistema DockTKinase funcionará PERFEITAMENTE sem elas!")
+        print("\n💡 Depois de instalar python-dev, você pode instalar manualmente:")
+        print("   source env/bin/activate")
+        print("   pip install --no-build-isolation torch-scatter torch-sparse torch-cluster")
+        print("\n" + "=" * 80)
         failed_pyg = pyg_extensions.copy()
     else:
-        print("✅ Python development headers encontrados")
+        found_path = next(p for p in python_h_paths if Path(p).exists())
+        print(f"✅ Python.h encontrado: {found_path}")
         
         failed_pyg = []
         for dep in pyg_extensions:
