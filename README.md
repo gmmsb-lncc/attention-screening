@@ -381,6 +381,80 @@ classifier = ModularClassifier()
 results = classifier.train_and_evaluate("features.npy", "labels.npy")
 ```
 
+#### 📊 Regression Pipeline for Activity Prediction
+
+**NEW**: Predict quantitative activity values (nM) using regression models!
+
+```bash
+# Step 1: Run classification pipeline to generate embeddings and splits
+python run_complete_pipeline.py \
+    --dataset all \
+    --model esm2_t36_3B_UR50D \
+    --device cuda
+
+# Step 2: Run regression pipeline (reuses embeddings and splits)
+python run_regression_pipeline.py \
+    --dataset all \
+    --model esm2_t36_3B_UR50D \
+    --classification-stats results/pipeline_stats.json \
+    --embeddings-cache results/embeddings_esm2_t36_3B_UR50D.npz \
+    --device cuda
+```
+
+**Features**:
+- 🎯 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
+- 📊 **Target Prioritization**: Ki > Kd > IC50 (uses highest priority available)
+- 🔄 **Embeddings Reuse**: Leverages embeddings from classification pipeline
+- 📈 **Same Splits**: Uses identical train/val/test splits for fair comparison
+- 📉 **Comprehensive Metrics**: MAE, RMSE, R², MAPE, percentile errors
+- 🎨 **Rich Visualizations**: Predictions vs actual, residuals, model comparison, error distribution
+- 💾 **Complete Output**: Models, predictions (CSV), metrics (JSON), plots (PNG)
+
+**Output Structure**:
+```
+results/regression/
+├── models/                    # Trained models (joblib)
+│   ├── RandomForest_model.joblib
+│   ├── XGBoost_model.joblib
+│   └── best_model.joblib
+├── predictions/               # Detailed predictions per model
+│   ├── RandomForest_predictions.csv
+│   └── ...
+├── metrics/                   # Performance metrics
+│   ├── test_metrics.json
+│   └── models_comparison.csv
+├── visualizations/            # Analysis plots
+│   ├── predictions_vs_actual.png
+│   ├── residuals_analysis.png
+│   ├── models_comparison_rmse.png
+│   └── error_distribution.png
+└── regression_stats.json      # Pipeline statistics
+```
+
+**Python API**:
+```python
+from src.regression import (
+    RegressionModels,
+    RegressionTrainer,
+    RegressionEvaluator,
+    prepare_regression_targets
+)
+
+# Prepare regression targets (Ki > Kd > IC50)
+y, df_filtered, measure_types = prepare_regression_targets(
+    df, 
+    priority=['Ki', 'Kd', 'IC50']
+)
+
+# Train all models
+trainer = RegressionTrainer(random_state=42)
+trainer.train_all(X_train, y_train, X_val, y_val)
+
+# Evaluate and get best model
+test_results = trainer.evaluate_on_test(X_test, y_test)
+best_model_name = trainer.get_best_model(metric='RMSE')
+```
+
 ### Legacy Configuration
 
 Edit `legacy/docktkinase.py` to set your input file and output directory:
