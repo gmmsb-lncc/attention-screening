@@ -24,6 +24,7 @@ from pathlib import Path
 import time
 import json
 from datetime import datetime
+import gc
 
 # Visualização
 import matplotlib
@@ -189,11 +190,18 @@ class CompletePipeline:
     
     def generate_embeddings(self, df, batch_size=8):
         """
-        Gerar embeddings ESM-2 para sequências
+        Gerar embeddings ESM-2 com gerenciamento inteligente de memória
+        
+        Features:
+        - Detecção automática de memória GPU
+        - Ajuste dinâmico de batch size
+        - Limpeza agressiva de memória
+        - Checkpoint para recuperação
+        - Suporte a sequências longas
         
         Args:
             df: DataFrame com coluna 'seq'
-            batch_size: Tamanho do batch
+            batch_size: Tamanho inicial do batch (será ajustado automaticamente)
             
         Returns:
             np.ndarray com embeddings
@@ -223,31 +231,160 @@ class CompletePipeline:
             print(f'   ✅ Modelo carregado em {load_time:.2f}s')
             print(f'   📊 Gerando embeddings para {len(df):,} sequências...')
         
-        # Gerar embeddings em batches
+        # =====================================================================
+        # SISTEMA DE BATCH INTELIGENTE COM GERENCIAMENTO DE MEMÓRIA
+        # =====================================================================
+        
         embeddings = []
         sequences = df['seq'].tolist()
         
-        for i in range(0, len(sequences), batch_size):
-            batch_seqs = sequences[i:i+batch_size]
-            batch_data = [(f'seq_{j}', seq) for j, seq in enumerate(batch_seqs)]
-            
-            # Converter batch
-            _, _, batch_tokens = batch_converter(batch_data)
-            batch_tokens = batch_tokens.to(self.device)
-            
-            # Gerar embeddings
-            with torch.no_grad():
-                results = model(batch_tokens, repr_layers=[model.num_layers])
-                # Média sobre posições (sem tokens especiais)
-                token_embeddings = results['representations'][model.num_layers]
-                batch_embeddings = token_embeddings[:, 1:-1, :].mean(1)
-            
-            embeddings.append(batch_embeddings.cpu().numpy())
-            
-            if self.verbose and (i + batch_size) % 100 == 0:
-                print(f'      Processadas {min(i + batch_size, len(sequences)):,}/{len(sequences):,} sequências')
+        # Configuração inicial
+        current_batch_size = batch_size
+        min_batch_size = 1
+        max_retries = 3
+        checkpoint_interval = 100  # Salvar checkpoint a cada N batches
         
+        # Estatísticas
+        oom_count = 0
+        total_batches = 0
+        
+        # Arquivo checkpoint
+        checkpoint_file = Path('tmp') / 'embedding_checkpoint.npz'
+        checkpoint_file.parent.mkdir(exist_ok=True)
+        
+        # Tentar carregar checkpoint anterior
+        start_idx = 0
+        if checkpoint_file.exists():
+            try:
+                checkpoint = np.load(checkpoint_file, allow_pickle=True)
+                embeddings = list(checkpoint['embeddings'])
+                start_idx = checkpoint['last_idx']
+                if self.verbose:
+                    print(f'   🔄 Checkpoint encontrado! Retomando do índice {start_idx}')
+            except:
+                pass
+        
+        i = start_idx
+        while i < len(sequences):
+            try:
+                # Batch atual
+                batch_end = min(i + current_batch_size, len(sequences))
+                batch_seqs = sequences[i:batch_end]
+                batch_data = [(f'seq_{j}', seq) for j, seq in enumerate(batch_seqs)]
+                
+                # Converter batch
+                _, _, batch_tokens = batch_converter(batch_data)
+                batch_tokens = batch_tokens.to(self.device)
+                
+                # Gerar embeddings
+                with torch.no_grad():
+                    # Limpar cache antes
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    results = model(batch_tokens, repr_layers=[model.num_layers])
+                    
+                    # Média sobre posições (sem tokens especiais)
+                    token_embeddings = results['representations'][model.num_layers]
+                    batch_embeddings = token_embeddings[:, 1:-1, :].mean(1)
+                    
+                    # Mover para CPU imediatamente
+                    batch_embeddings_cpu = batch_embeddings.cpu().numpy()
+                
+                embeddings.append(batch_embeddings_cpu)
+                
+                # Liberar memória GPU imediatamente
+                del batch_tokens, results, token_embeddings, batch_embeddings, batch_embeddings_cpu
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # Garbage collection agressivo
+                gc.collect()
+                
+                # Progresso
+                if self.verbose and (i + current_batch_size) % 50 == 0:
+                    processed = min(i + current_batch_size, len(sequences))
+                    pct = 100 * processed / len(sequences)
+                    
+                    # Mostrar uso de memória se CUDA disponível
+                    mem_info = ""
+                    if torch.cuda.is_available():
+                        mem_used = torch.cuda.memory_allocated(0) / 1024**3
+                        mem_reserved = torch.cuda.memory_reserved(0) / 1024**3
+                        mem_info = f" | GPU: {mem_used:.1f}GB usado, {mem_reserved:.1f}GB reservado"
+                    
+                    print(f'      {processed:,}/{len(sequences):,} ({pct:.1f}%) | batch={current_batch_size}{mem_info}')
+                
+                # Salvar checkpoint periodicamente
+                total_batches += 1
+                if total_batches % checkpoint_interval == 0:
+                    np.savez_compressed(
+                        checkpoint_file,
+                        embeddings=np.vstack(embeddings),
+                        last_idx=batch_end
+                    )
+                
+                # Sucesso! Tentar aumentar batch size gradualmente
+                if oom_count == 0 and current_batch_size < batch_size * 2:
+                    current_batch_size = min(current_batch_size + 1, batch_size * 2)
+                
+                # Avançar
+                i = batch_end
+                
+            except torch.cuda.OutOfMemoryError as e:
+                oom_count += 1
+                
+                if self.verbose:
+                    print(f'   ⚠️  OOM Error! Reduzindo batch size de {current_batch_size}...')
+                
+                # Limpar toda a memória
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+                
+                # Reduzir batch size pela metade
+                current_batch_size = max(min_batch_size, current_batch_size // 2)
+                
+                if current_batch_size < min_batch_size:
+                    # Batch mínimo ainda falha - tentar com variáveis de ambiente
+                    if self.verbose:
+                        print('   ❌ Falha mesmo com batch=1. Tentando com PYTORCH_CUDA_ALLOC_CONF...')
+                    
+                    import os
+                    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+                    
+                    # Resetar modelo
+                    del model
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    
+                    model_func = getattr(esm.pretrained, self.esm_model)
+                    model, alphabet = model_func()
+                    model = model.to(self.device)
+                    model.eval()
+                    batch_converter = alphabet.get_batch_converter()
+                    
+                    current_batch_size = min_batch_size
+                
+                if oom_count > max_retries:
+                    raise RuntimeError(
+                        f"Falha persistente de memória após {max_retries} tentativas. "
+                        f"Considere:\n"
+                        f"1. Usar modelo menor (ex: esm2_t33_650M_UR50D)\n"
+                        f"2. Reduzir tamanho do dataset com --max-samples\n"
+                        f"3. Usar CPU com --device cpu (muito mais lento)\n"
+                        f"4. Aumentar memória GPU disponível"
+                    )
+                
+                # Não avançar o índice - tentar novamente com batch menor
+                continue
+        
+        # Combinar todos os embeddings
         embeddings = np.vstack(embeddings)
+        
+        # Remover checkpoint ao finalizar
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
         
         embed_time = time.time() - start_time - load_time
         
@@ -255,17 +392,24 @@ class CompletePipeline:
             print(f'   ✅ Embeddings gerados!')
             print(f'   📊 Shape: {embeddings.shape}')
             print(f'   ⏱️  Tempo: {embed_time:.2f}s ({embed_time/len(df):.3f}s/seq)')
+            if oom_count > 0:
+                print(f'   ⚠️  OOM Errors: {oom_count} (batch ajustado automaticamente)')
             print()
         
         self.stats['embedding_time'] = embed_time
         self.stats['embedding_shape'] = embeddings.shape
         self.stats['embedding_dim'] = embeddings.shape[1]
+        self.stats['oom_errors'] = oom_count
         
         return embeddings
     
     def create_labels(self, df):
         """
         Criar labels baseado no método escolhido
+        
+        PRIORIDADE: Valores de atividade (Kd, Ki, IC50) > pchembl_value
+        Threshold padrão: <= 1000 nM = ATIVO (classe 1)
+                         > 1000 nM = INATIVO (classe 0)
         
         Args:
             df: DataFrame com dados
@@ -287,11 +431,10 @@ class CompletePipeline:
         method = self.label_method
         threshold = self.label_threshold
         
-        # Método automático: tentar na ordem pchembl > ic50 > ki > kd
+        # Método automático: PRIORIZAR valores de atividade sobre pchembl
+        # Ordem: IC50 > Ki > Kd > pchembl
         if method == 'auto':
-            if 'pchembl_value' in df.columns and df['pchembl_value'].notna().sum() > 0:
-                method = 'pchembl'
-            elif 'standard_value' in df.columns and 'standard_type' in df.columns:
+            if 'standard_value' in df.columns and 'standard_type' in df.columns:
                 # Verificar qual tipo tem mais dados
                 type_counts = df[df['standard_value'].notna()]['standard_type'].value_counts()
                 if 'IC50' in type_counts.index:
@@ -300,6 +443,12 @@ class CompletePipeline:
                     method = 'ki'
                 elif 'Kd' in type_counts.index:
                     method = 'kd'
+                else:
+                    # Fallback para pchembl se não houver valores de atividade
+                    if 'pchembl_value' in df.columns and df['pchembl_value'].notna().sum() > 0:
+                        method = 'pchembl'
+            elif 'pchembl_value' in df.columns and df['pchembl_value'].notna().sum() > 0:
+                method = 'pchembl'
         
         if self.verbose:
             print(f'   📊 Método selecionado: {method}')
@@ -1175,28 +1324,34 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos:
-  # Dataset humano com modelo pequeno (teste rápido com pchembl)
+  # Dataset humano com modelo pequeno (teste rápido - usa IC50/Ki/Kd automaticamente)
   python run_complete_pipeline.py --dataset human --model esm2_t6_8M_UR50D --max-samples 1000
   
-  # Dataset com labels baseados em IC50 <= 1000 nM
-  python run_complete_pipeline.py --dataset human --label-method ic50 --label-threshold 1000
+  # Dataset com labels baseados em IC50 <= 1000 nM (modo padrão)
+  python run_complete_pipeline.py --dataset human --label-method auto
   
-  # Dataset com labels baseados em Ki
-  python run_complete_pipeline.py --dataset non_human --label-method ki --label-threshold 500
+  # Dataset com threshold personalizado (500 nM para compostos mais potentes)
+  python run_complete_pipeline.py --dataset non_human --label-threshold 500
   
   # Dataset completo com modelo grande (produção)
   python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda
   
-Métodos de Label:
-  - pchembl: pchembl_value >= threshold (default: 6.0) = ATIVO
+Métodos de Label (PRIORIDADE: IC50 > Ki > Kd > pchembl):
+  - auto: Detecta automaticamente (RECOMENDADO)
+          Ordem de prioridade: IC50 > Ki > Kd > pchembl_value
   - ic50: IC50 <= threshold (default: 1000 nM) = ATIVO
   - ki: Ki <= threshold (default: 1000 nM) = ATIVO
   - kd: Kd <= threshold (default: 1000 nM) = ATIVO
-  - auto: Detecta automaticamente o melhor método
+  - pchembl: pchembl_value >= threshold (default: 6.0) = ATIVO
+  
+Threshold Padrão:
+  - Valores de atividade (IC50/Ki/Kd): 1000 nM
+    * <= 1000 nM = ATIVO (classe 1) - compostos potentes
+    * > 1000 nM = INATIVO (classe 0) - compostos fracos
   
 Classes:
-  - Classe 0: INATIVO/NEGATIVO (baixa atividade)
-  - Classe 1: ATIVO/POSITIVO (alta atividade)
+  - Classe 0: INATIVO/NEGATIVO (baixa atividade, > 1000 nM)
+  - Classe 1: ATIVO/POSITIVO (alta atividade, <= 1000 nM)
         """
     )
     
