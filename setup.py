@@ -283,35 +283,51 @@ def install_dependencies() -> bool:
         print("✅ Todas as dependências opcionais já estão instaladas!")
     
     # Instalar extensões PyG (DEPOIS do torch estar instalado)
-    print("\n🔧 Instalando extensões PyTorch Geometric...")
+    print("\n🔧 Verificando extensões PyTorch Geometric...")
     print("⚠️  Estas dependências precisam compilar contra PyTorch (pode demorar)")
     
-    failed_pyg = []
-    for dep in pyg_extensions:
-        if check_package_installed(python_exe, dep):
-            print(f"✅ {dep}: Já instalado")
-        else:
-            print(f"📥 Instalando {dep}...")
-            # Usar --no-build-isolation para acessar torch do ambiente atual
-            success, _ = run_command(
-                [pip_exe, "install", "--no-build-isolation", dep], 
-                f"Instalando {dep}"
-            )
-            if not success:
-                failed_pyg.append(dep)
-                print(f"⚠️  Falha ao instalar {dep}")
+    # Verificar se Python development headers estão disponíveis
+    python_h_check = subprocess.run(
+        ["python3-config", "--includes"],
+        capture_output=True
+    )
     
-    if failed_pyg:
-        print(f"\n⚠️  Extensões PyG não instaladas ({len(failed_pyg)}):")
-        for dep in failed_pyg:
-            print(f"   - {dep}")
-        print("\n💡 DICA: Estas extensões requerem compilação.")
-        print("   Se a instalação falhou, tente:")
-        print("   1. Verificar se você tem compiladores C++ instalados")
-        print("   2. Instalar manualmente após o setup:")
-        print("      source env/bin/activate")
-        for dep in failed_pyg:
-            print(f"      pip install {dep}")
+    if python_h_check.returncode != 0:
+        print("\n⚠️  AVISO: Python development headers (Python.h) não encontrados!")
+        print("   As extensões PyG precisam de headers do Python para compilar.")
+        print("   Para instalar:")
+        print(f"      sudo apt-get install python3.12-dev  # Ubuntu/Debian")
+        print(f"      sudo yum install python3-devel       # CentOS/RHEL")
+        print(f"      sudo dnf install python3-devel       # Fedora")
+        print("\n   Pulando instalação de extensões PyG (opcionais)")
+        print("   O sistema funcionará normalmente sem elas.")
+        failed_pyg = pyg_extensions.copy()
+    else:
+        print("✅ Python development headers encontrados")
+        
+        failed_pyg = []
+        for dep in pyg_extensions:
+            if check_package_installed(python_exe, dep):
+                print(f"✅ {dep}: Já instalado")
+            else:
+                print(f"📥 Instalando {dep}...")
+                # Usar --no-build-isolation para acessar torch do ambiente atual
+                success, _ = run_command(
+                    [pip_exe, "install", "--no-build-isolation", dep], 
+                    f"Instalando {dep}"
+                )
+                if not success:
+                    failed_pyg.append(dep)
+                    print(f"⚠️  Falha ao instalar {dep}")
+        
+        if failed_pyg:
+            print(f"\n⚠️  Extensões PyG não instaladas ({len(failed_pyg)}):")
+            for dep in failed_pyg:
+                print(f"   - {dep}")
+            print("\n💡 Para instalar manualmente:")
+            print("      source env/bin/activate")
+            for dep in failed_pyg:
+                print(f"      pip install --no-build-isolation {dep}")
     
     # Resumo da instalação
     print("\n" + "=" * 60)
