@@ -706,6 +706,13 @@ class CompletePipeline:
             'test': float(p_value_test)
         }
         
+        # 🔥 NOVO: Salvar índices dos splits para reutilização no pipeline de regressão
+        self.stats['split_indices'] = {
+            'train': idx_train.tolist(),
+            'val': idx_val.tolist(),
+            'test': idx_test.tolist()
+        }
+        
         # Gerar visualização da estratificação
         if self.verbose:
             self.plot_stratification(y_train, y_val, y_test, y)
