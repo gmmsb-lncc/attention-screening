@@ -86,7 +86,7 @@ class RegressionModels:
         # 4. Lasso Regression (L1 regularization)
         models['Lasso'] = Lasso(
             alpha=1.0,
-            max_iter=2000,
+            max_iter=10000,  # Aumentado para evitar warnings de convergência
             random_state=random_state
         )
         
