@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 
-def prepare_regression_targets(df, priority=['Ki', 'Kd', 'IC50'], verbose=True, keep_all=False):
+def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False):
     """
     Prepara targets de regressão com priorização de medidas.
     
@@ -20,7 +20,7 @@ def prepare_regression_targets(df, priority=['Ki', 'Kd', 'IC50'], verbose=True, 
     
     Args:
         df: DataFrame com colunas 'standard_type' e 'standard_value'
-        priority: Lista de prioridade das medidas (default: Ki > Kd > IC50)
+        priority: Lista de prioridade das medidas (default: ['Ki', 'Kd', 'IC50'])
         verbose: Mostrar informações
         keep_all: Se True, mantém TODAS as medidas (sem remover duplicatas).
                   Use True quando já tiver splits pré-definidos.
@@ -31,6 +31,10 @@ def prepare_regression_targets(df, priority=['Ki', 'Kd', 'IC50'], verbose=True, 
         measure_types: Array com tipo de medida usada para cada amostra
         kept_indices: Índices das linhas mantidas no DataFrame original
     """
+    # FIX: Mutable default argument - criar nova lista a cada chamada
+    if priority is None:
+        priority = ['Ki', 'Kd', 'IC50']
+    
     if 'standard_type' not in df.columns or 'standard_value' not in df.columns:
         raise ValueError("DataFrame deve ter colunas 'standard_type' e 'standard_value'")
     
@@ -51,7 +55,7 @@ def prepare_regression_targets(df, priority=['Ki', 'Kd', 'IC50'], verbose=True, 
     if keep_all:
         # Modo: manter TODAS as medidas (não remover duplicatas)
         # Ordenar por prioridade para ter ordem consistente
-        df_filtered = df_valid.sort_values('_priority').reset_index(drop=True)
+        df_filtered = df_valid.sort_values('_priority')
         
         if verbose:
             print(f'   ℹ️  Modo keep_all=True: mantendo todas as medidas')
@@ -75,14 +79,8 @@ def prepare_regression_targets(df, priority=['Ki', 'Kd', 'IC50'], verbose=True, 
     kept_indices = df_filtered['_original_index'].values
     
     # Remover colunas temporárias
-    df_filtered = df_filtered.drop(['_priority', '_original_index'], axis=1)
-    # Extrair targets e índices originais
-    y = df_filtered['standard_value'].values
-    measure_types = df_filtered['standard_type'].values
-    kept_indices = df_filtered['_original_index'].values
-    
-    # Remover colunas temporárias
-    df_filtered = df_filtered.drop(['_priority', '_original_index'], axis=1)
+    columns_to_drop = ['_priority', '_original_index']
+    df_filtered = df_filtered.drop(columns=columns_to_drop, errors='ignore')
     
     if verbose:
         print(f'   ✅ Amostras finais: {len(y):,}')

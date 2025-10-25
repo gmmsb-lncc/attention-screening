@@ -51,6 +51,9 @@ from sklearn.metrics import (
     confusion_matrix, classification_report
 )
 
+# Import utilitários centralizados
+from utils.data_utils import safe_get, safe_get_str
+
 # Importar pipeline completo
 from run_complete_pipeline import CompletePipeline
 
@@ -537,13 +540,6 @@ class ClassifierComparison:
     def _save_prediction_csv(self, y_true, y_pred, y_proba, df_subset, indices, 
                             dataset_name, output_dir, model_name):
         """Método auxiliar para salvar CSV de predições"""
-        def safe_get(row_dict, key, default='N/A'):
-            """Obter valor do dicionário tratando NaN e None"""
-            value = row_dict.get(key, default)
-            if pd.isna(value):
-                return default
-            return value
-        
         # Determinar categoria de predição
         categories = []
         for yt, yp in zip(y_true, y_pred):
@@ -560,7 +556,8 @@ class ClassifierComparison:
         predictions_data = []
         
         for idx, (i, cat, yt, yp) in enumerate(zip(indices, categories, y_true, y_pred)):
-            row_data = df_subset.iloc[i].to_dict()
+            # FIX #37: Usar .loc para indexação por label do índice, não posição
+            row_data = df_subset.loc[i].to_dict()
             
             prediction_row = {
                 'prediction_category': cat,

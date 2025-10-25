@@ -204,7 +204,8 @@ class DeviceManager:
             try:
                 props = torch.cuda.get_device_properties(device.index or 0)
                 return props.name
-            except:
+            # FIX #42: Especificar exceções esperadas
+            except (RuntimeError, AttributeError):
                 return "CUDA GPU"
         elif device.type == "mps":
             return "Apple Metal Performance Shaders"
@@ -367,7 +368,8 @@ class DeviceManager:
                 try:
                     allocated = torch.cuda.memory_allocated(i) / 1024**3
                     available = total_memory - allocated
-                except:
+                # FIX #43: Especificar exceções CUDA esperadas
+                except (RuntimeError, torch.cuda.CudaError):
                     available = total_memory  # Fallback
                 
                 info = DeviceInfo(
