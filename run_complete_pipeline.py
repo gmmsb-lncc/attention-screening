@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT_DIR / 'src'))
 ESM_PATH = ROOT_DIR / 'ESM'
 sys.path.insert(0, str(ESM_PATH))
 
+# Imports principais
 import torch
 import numpy as np
 import pandas as pd
@@ -48,6 +49,43 @@ from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support
 )
 from scipy import stats
+
+# Import utilitários centralizados
+from utils.data_utils import safe_get, safe_get_str, safe_get_numeric
+
+# Import ESM (tratado como opcional)
+try:
+    import esm
+    ESM_AVAILABLE = True
+except ImportError:
+    ESM_AVAILABLE = False
+    esm = None
+
+
+# ====== Exceções Customizadas ======
+class PipelineError(Exception):
+    """Classe base para exceções do pipeline"""
+    pass
+
+
+class DatasetNotFoundError(PipelineError):
+    """Erro quando dataset não é encontrado"""
+    pass
+
+
+class ESMNotAvailableError(PipelineError):
+    """Erro quando ESM não está disponível"""
+    pass
+
+
+class InvalidParameterError(PipelineError):
+    """Erro quando parâmetro inválido é fornecido"""
+    pass
+
+
+class StratificationError(PipelineError):
+    """Erro durante estratificação dos dados"""
+    pass
 
 
 class CompletePipeline:
@@ -95,6 +133,9 @@ class CompletePipeline:
         self.label_threshold = label_threshold
         self.verbose = verbose
         
+        # Validar parâmetros
+        self._validate_parameters()
+        
         # Criar diretório de saída
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -110,6 +151,45 @@ class CompletePipeline:
         
         if self.verbose:
             self._print_header()
+    
+    def _validate_parameters(self):
+        """Validar parâmetros de entrada"""
+        # Validar dataset
+        valid_datasets = ['human', 'non_human', 'all']
+        if self.dataset_name not in valid_datasets:
+            raise ValueError(
+                f"dataset_name deve ser um de {valid_datasets}, "
+                f"recebido: '{self.dataset_name}'"
+            )
+        
+        # Validar proporções
+        if not (0 < self.val_size < 1):
+            raise ValueError(
+                f"val_size deve estar entre 0 e 1, recebido: {self.val_size}"
+            )
+        if not (0 < self.test_size < 1):
+            raise ValueError(
+                f"test_size deve estar entre 0 e 1, recebido: {self.test_size}"
+            )
+        if self.val_size + self.test_size >= 1:
+            raise ValueError(
+                f"val_size + test_size deve ser < 1, "
+                f"recebido: {self.val_size + self.test_size}"
+            )
+        
+        # Validar label_method
+        valid_methods = ['pchembl', 'kd', 'ki', 'ic50', 'auto']
+        if self.label_method not in valid_methods:
+            raise ValueError(
+                f"label_method deve ser um de {valid_methods}, "
+                f"recebido: '{self.label_method}'"
+            )
+        
+        # Validar max_samples
+        if self.max_samples is not None and self.max_samples <= 0:
+            raise ValueError(
+                f"max_samples deve ser > 0 ou None, recebido: {self.max_samples}"
+            )
     
     def _setup_device(self, device):
         """Configurar device (CPU/GPU)"""
@@ -210,7 +290,12 @@ class CompletePipeline:
             print('🧬 ETAPA 2: Gerando Embeddings ESM-2')
             print('-'*60)
         
-        import esm
+        # Verificar se ESM está disponível
+        if not ESM_AVAILABLE:
+            raise ImportError(
+                "ESM não está disponível. É necessário para gerar embeddings.\n"
+                "Instale com: cd ESM && pip install -e ."
+            )
         
         start_time = time.time()
         
@@ -261,8 +346,9 @@ class CompletePipeline:
                 start_idx = checkpoint['last_idx']
                 if self.verbose:
                     print(f'   🔄 Checkpoint encontrado! Retomando do índice {start_idx}')
-            except:
-                pass
+            except (FileNotFoundError, KeyError, ValueError, EOFError) as e:
+                if self.verbose:
+                    print(f'   ℹ️  Checkpoint inválido ou corrompido, iniciando do zero: {e}')
         
         i = start_idx
         while i < len(sequences):
@@ -367,7 +453,7 @@ class CompletePipeline:
                     current_batch_size = min_batch_size
                 
                 if oom_count > max_retries:
-                    raise RuntimeError(
+                    raise ESMNotAvailableError(
                         f"Falha persistente de memória após {max_retries} tentativas. "
                         f"Considere:\n"
                         f"1. Usar modelo menor (ex: esm2_t33_650M_UR50D)\n"
@@ -425,7 +511,7 @@ class CompletePipeline:
         if 'label' in df.columns:
             if self.verbose:
                 print('   ✅ Coluna "label" encontrada, usando labels existentes')
-            return df['label'].values
+            return df['label'].values, df  # Retornar tupla para manter consistência
         
         # Determinar método e threshold
         method = self.label_method
@@ -484,11 +570,12 @@ class CompletePipeline:
             # Kd/Ki/IC50 <= 1000 nM = bom (classe 1)
             labels = np.zeros(len(df), dtype=int)
             mask = df['standard_type'] == std_type
-            labels[mask] = (df.loc[mask, 'standard_value'] <= threshold).astype(int)
+            # FIX: Converter mask para numpy array para indexação segura
+            mask_array = mask.values
+            labels[mask_array] = (df.loc[mask, 'standard_value'] <= threshold).astype(int).values
             
-            # Remover amostras sem o tipo de medida desejado
-            valid_mask = df['standard_type'] == std_type
-            n_removed = (~valid_mask).sum()
+            # Calcular amostras removidas
+            n_removed = (~mask).sum()
             
             if self.verbose:
                 print(f'   ✅ Labels criados: {std_type} <= {threshold} nM = ATIVO (classe 1)')
@@ -498,8 +585,8 @@ class CompletePipeline:
             
             # Filtrar dataframe
             if n_removed > 0:
-                df = df[valid_mask].copy().reset_index(drop=True)
-                labels = labels[valid_mask]
+                df = df[mask].copy().reset_index(drop=True)
+                labels = labels[mask_array]
         
         elif method == 'combined':
             # Modo COMBINADO (usado por 'auto'): Usar TODAS as medidas de atividade (IC50 + Ki + Kd)
@@ -517,7 +604,9 @@ class CompletePipeline:
             # Valores MENORES = MAIS ATIVOS (positivo)
             # Ki/Kd/IC50 <= 1000 nM = ATIVO (classe 1)
             labels = np.zeros(len(df), dtype=int)
-            labels[valid_mask] = (df.loc[valid_mask, 'standard_value'] <= threshold).astype(int)
+            # FIX #29: Converter mask para numpy array para indexação segura
+            valid_mask_array = valid_mask.values
+            labels[valid_mask_array] = (df.loc[valid_mask, 'standard_value'] <= threshold).astype(int).values
             
             # Estatísticas por tipo de medida (ordem de prioridade: Ki > Kd > IC50)
             type_counts = df[valid_mask]['standard_type'].value_counts()
@@ -528,9 +617,10 @@ class CompletePipeline:
                 print(f'      Ki/Kd/IC50 <= {threshold} nM = ATIVO (classe 1)')
                 print(f'      Ki/Kd/IC50 > {threshold} nM = INATIVO (classe 0)')
                 print(f'\n   📊 Distribuição por tipo de medida (prioridade: Ki > Kd > IC50):')
+                valid_count = valid_mask.sum()  # Calcular uma vez
                 for measure_type in ['Ki', 'Kd', 'IC50']:
                     count = type_counts.get(measure_type, 0)
-                    pct = (count / valid_mask.sum() * 100) if valid_mask.sum() > 0 else 0
+                    pct = (count / valid_count * 100) if valid_count > 0 else 0
                     print(f'      {measure_type}: {count:,} amostras ({pct:.1f}%)')
                 if n_removed > 0:
                     print(f'   ⚠️  {n_removed:,} amostras removidas (sem medida Ki/Kd/IC50)')
@@ -538,7 +628,7 @@ class CompletePipeline:
             # Filtrar dataframe para manter apenas amostras com medidas válidas
             if n_removed > 0:
                 df = df[valid_mask].copy().reset_index(drop=True)
-                labels = labels[valid_mask]
+                labels = labels[valid_mask_array]  # FIX: Usar array numpy
         
         else:
             raise ValueError(
@@ -693,9 +783,6 @@ class CompletePipeline:
             print()
         
         self.stats['split_time'] = split_time
-        self.stats['train_size'] = len(X_train)
-        self.stats['val_size'] = len(X_val)
-        self.stats['test_size'] = len(X_test)
         self.stats['train_samples'] = len(X_train)
         self.stats['val_samples'] = len(X_val)
         self.stats['test_samples'] = len(X_test)
@@ -729,6 +816,7 @@ class CompletePipeline:
             y_test: Labels de teste
             y_original: Labels originais
         """
+        fig = None
         try:
             # Criar diretório de visualizações
             viz_dir = self.output_dir / 'visualizations'
@@ -826,7 +914,6 @@ class CompletePipeline:
             # Salvar figura
             viz_file = viz_dir / 'stratification_analysis.png'
             plt.savefig(viz_file, dpi=300, bbox_inches='tight')
-            plt.close()
             
             if self.verbose:
                 print(f'   📊 Visualização salva: {viz_file}')
@@ -834,6 +921,12 @@ class CompletePipeline:
         except Exception as e:
             if self.verbose:
                 print(f'   ⚠️  Erro ao gerar visualização: {e}')
+        finally:
+            # Sempre fechar a figura para liberar memória
+            if fig is not None:
+                plt.close(fig)
+            else:
+                plt.close('all')  # Garantir que todas as figuras sejam fechadas
     
     def train_classifier(self, X_train, y_train, X_val=None, y_val=None):
         """
@@ -1016,13 +1109,6 @@ class CompletePipeline:
             indices: Índices das amostras
             dataset_name: Nome do conjunto (Test/Validation)
         """
-        def safe_get(row_dict, key, default='N/A'):
-            """Obter valor do dicionário tratando NaN e None"""
-            value = row_dict.get(key, default)
-            if pd.isna(value):
-                return default
-            return value
-        
         try:
             # Determinar categoria de predição (TP, FP, TN, FN)
             categories = []
@@ -1040,7 +1126,8 @@ class CompletePipeline:
             predictions_data = []
             
             for idx, (i, cat, yt, yp) in enumerate(zip(indices, categories, y_true, y_pred)):
-                row_data = df_subset.iloc[i].to_dict()
+                # FIX #28: Usar .loc para indexação por label do índice, não posição
+                row_data = df_subset.loc[i].to_dict()
                 
                 prediction_row = {
                     'prediction_category': cat,
@@ -1103,6 +1190,7 @@ class CompletePipeline:
             y_proba: Probabilidades preditas
             dataset_name: Nome do conjunto (Test/Validation)
         """
+        fig = None
         try:
             # Criar diretório de visualizações
             viz_dir = self.output_dir / 'visualizations'
@@ -1168,7 +1256,6 @@ class CompletePipeline:
             # Salvar figura
             viz_file = viz_dir / f'evaluation_{dataset_name.lower()}.png'
             plt.savefig(viz_file, dpi=300, bbox_inches='tight')
-            plt.close()
             
             if self.verbose:
                 print(f'   📊 Visualização salva: {viz_file}')
@@ -1176,6 +1263,12 @@ class CompletePipeline:
         except Exception as e:
             if self.verbose:
                 print(f'   ⚠️  Erro ao gerar visualização: {e}')
+        finally:
+            # Sempre fechar a figura para liberar memória
+            if fig is not None:
+                plt.close(fig)
+            else:
+                plt.close('all')  # Garantir que todas as figuras sejam fechadas
     
     def save_results(self):
         """Salvar resultados do pipeline"""
