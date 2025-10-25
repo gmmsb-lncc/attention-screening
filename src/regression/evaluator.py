@@ -17,6 +17,9 @@ from sklearn.metrics import (
     mean_absolute_percentage_error
 )
 
+# Import utilitários centralizados
+from utils.data_utils import safe_get, safe_get_numeric
+
 
 class RegressionEvaluator:
     """
@@ -52,7 +55,7 @@ class RegressionEvaluator:
         # MAPE (cuidado com divisão por zero)
         try:
             mape = mean_absolute_percentage_error(y_true, y_pred)
-        except:
+        except (ValueError, ZeroDivisionError):
             # Se y_true tem zeros, calcular manualmente excluindo-os
             mask = y_true != 0
             if mask.sum() > 0:
@@ -162,13 +165,6 @@ class RegressionEvaluator:
             indices: Índices das amostras no DataFrame original (opcional)
             dataset_name: Nome do conjunto (train/val/test)
         """
-        def safe_get(row_dict, key, default='N/A'):
-            """Obter valor tratando NaN e None"""
-            value = row_dict.get(key, default)
-            if pd.isna(value):
-                return default
-            return value
-        
         try:
             # Calcular erro absoluto e relativo
             errors = np.abs(y_true - y_pred)
@@ -182,7 +178,8 @@ class RegressionEvaluator:
                 for idx, (i, yt, yp, err, rel_err) in enumerate(
                     zip(indices, y_true, y_pred, errors, relative_errors)
                 ):
-                    row_data = df_original.iloc[i].to_dict()
+                    # FIX #38: Usar .loc para indexação por label do índice, não posição
+                    row_data = df_original.loc[i].to_dict()
                     
                     prediction_row = {
                         'dataset': dataset_name,

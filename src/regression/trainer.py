@@ -252,7 +252,7 @@ class RegressionTrainer:
                     if self.verbose:
                         print(f'   💾 Salvo: {model_path.name}')
         
-        # Sempre salvar o melhor
+        # Salvar melhor modelo
         try:
             best_name, best_model, _ = self.get_best_model(metric='MAE', dataset='val')
             best_path = output_dir / 'best_model.pkl'
@@ -260,8 +260,9 @@ class RegressionTrainer:
             
             if self.verbose:
                 print(f'   ⭐ Melhor modelo salvo: {best_name} → best_model.pkl')
-        except:
-            pass
+        except Exception as e:
+            if self.verbose:
+                print(f'   ⚠️  Erro ao salvar melhor modelo: {e}')
     
     def _print_validation_ranking(self):
         """Imprime ranking de modelos baseado na validação."""
@@ -271,14 +272,21 @@ class RegressionTrainer:
         df = RegressionEvaluator.compare_models(self.val_results, metric='MAE')
         
         for idx, (model_name, row) in enumerate(df.iterrows(), 1):
-            mae = row['MAE']
-            r2 = row['R2']
-            rmse = row['RMSE']
+            mae = row['MAE'] if row['MAE'] is not None else float('inf')
+            r2 = row['R2'] if row['R2'] is not None else float('-inf')
+            rmse = row['RMSE'] if row['RMSE'] is not None else float('inf')
             time_taken = self.training_times.get(model_name, 0)
             
             medal = '🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else '  '
-            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae:7.2f} | '
-                  f'RMSE: {rmse:7.2f} | R²: {r2:6.4f} | Tempo: {time_taken:6.2f}s')
+            
+            # Formatar valores com tratamento para inf
+            mae_str = f'{mae:7.2f}' if mae != float('inf') else '    N/A'
+            rmse_str = f'{rmse:7.2f}' if rmse != float('inf') else '    N/A'
+            r2_str = f'{r2:6.4f}' if r2 != float('-inf') else '   N/A'
+            time_str = f'{time_taken:6.2f}s' if time_taken is not None else '   N/A'
+            
+            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae_str} | '
+                  f'RMSE: {rmse_str} | R²: {r2_str} | Tempo: {time_str}')
         
         print('-'*60)
     
@@ -290,13 +298,19 @@ class RegressionTrainer:
         df = RegressionEvaluator.compare_models(self.test_results, metric='MAE')
         
         for idx, (model_name, row) in enumerate(df.iterrows(), 1):
-            mae = row['MAE']
-            r2 = row['R2']
-            rmse = row['RMSE']
+            mae = row['MAE'] if row['MAE'] is not None else float('inf')
+            r2 = row['R2'] if row['R2'] is not None else float('-inf')
+            rmse = row['RMSE'] if row['RMSE'] is not None else float('inf')
             
             medal = '🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else '  '
-            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae:7.2f} | '
-                  f'RMSE: {rmse:7.2f} | R²: {r2:6.4f}')
+            
+            # Formatar valores com tratamento para inf
+            mae_str = f'{mae:7.2f}' if mae != float('inf') else '    N/A'
+            rmse_str = f'{rmse:7.2f}' if rmse != float('inf') else '    N/A'
+            r2_str = f'{r2:6.4f}' if r2 != float('-inf') else '   N/A'
+            
+            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae_str} | '
+                  f'RMSE: {rmse_str} | R²: {r2_str}')
         
         print('-'*60)
 
