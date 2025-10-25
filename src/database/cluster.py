@@ -145,7 +145,8 @@ class MoleculeClusterer:
             if len(cluster_data_sorted) >= threshold:
                 cluster_data_to_save = cluster_data_sorted[output_columns]
                 cluster_data_to_save.to_csv(f'./clusters/cluster_{cluster_id}.tsv', sep='\t', index=False)
-                cluster_hits.append(cluster_data_sorted.iloc[0][output_columns])
+                # FIX #39: Usar [output_columns] primeiro, depois .iloc[0] para evitar confusão semântica
+                cluster_hits.append(cluster_data_sorted[output_columns].iloc[0])
 
         cluster_hits_df = pd.DataFrame(cluster_hits, columns=output_columns)
         cluster_hits_df.to_csv(cluster_hits_file, sep='\t', index=False)

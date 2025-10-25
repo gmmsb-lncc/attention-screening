@@ -252,7 +252,10 @@ class TrainTestSplitter:
                 return p_value
             else:
                 return 1.0  # Não significativo se apenas uma classe
-        except:
+        # FIX #40: Especificar exceções esperadas ao invés de bare except
+        except (ValueError, ZeroDivisionError, RuntimeError) as e:
+            if hasattr(self, 'verbose') and self.verbose:
+                print(f'   ⚠️  Erro ao calcular chi-quadrado: {e}')
             return 1.0  # Em caso de erro, assumir não significativo
     
     def _create_minimal_report(self) -> SplitValidationReport:
