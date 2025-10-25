@@ -156,7 +156,8 @@ class DataCleaner(BaseAnalyzer):
             try:
                 mol = Chem.MolFromSmiles(smiles)
                 return mol is not None
-            except:
+            # FIX #44: RDKit pode lançar várias exceções, usar Exception genérico
+            except Exception:
                 return False
         
         # Filter valid SMILES
