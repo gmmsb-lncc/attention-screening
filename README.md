@@ -49,13 +49,13 @@ sudo dnf install python3-devel -y
 
 ### 🎯 Performance Metrics
 
-| Phase | Time | Improvement | Status |
-|-------|------|-------------|--------|
-| **Embedding Generation** | ~10s | 91% faster | ✅ Optimized |
-| **Matrix Construction** | ~15s | Stable | ✅ Validated |
-| **Label Generation** | ~20s | Stable | ✅ Validated |
-| **Stratification** | ~5s | Stable | ✅ Validated |
-| **Total Pipeline** | ~71s | 35% faster | ✅ Production |
+| Phase | Improvement | Status |
+|-------|-------------|--------|
+| **Embedding Generation** | 91% faster | ✅ Optimized |
+| **Matrix Construction** | Stable | ✅ Validated |
+| **Label Generation** | Stable | ✅ Validated |
+| **Stratification** | Stable | ✅ Validated |
+| **Total Pipeline** | 35% faster | ✅ Production |
 
 ## 🏗️ Modular Architecture
 
@@ -66,8 +66,10 @@ DockTKinase features a **professional modular architecture** that separates conc
 graph TB
     A[Raw Kinase Data] --> B[🧬 database/]
     B --> |Processed Data| C[🏗️ build/]
-    C --> |Embeddings & Matrices| D[🧠 classifier/]
-    D --> |Trained Model| E[Predictions]
+    C --> |Embeddings & Matrices| D1[🧠 classifier/]
+    C --> |Embeddings & Matrices| D2[📈 regression/]
+    D1 --> |Classification Model| E1[Binary Predictions]
+    D2 --> |Regression Model| E2[Activity Values]
     
     B --> B1[Molecular Analysis]
     B --> B2[Data Cleaning]
@@ -77,9 +79,13 @@ graph TB
     C --> C2[Protein Embeddings]
     C --> C3[Matrix Construction]
     
-    D --> D1[MLP Training]
-    D --> D2[Hyperparameter Tuning]
-    D --> D3[Cross-Validation]
+    D1 --> D1A[MLP Training]
+    D1 --> D1B[Hyperparameter Tuning]
+    D1 --> D1C[Cross-Validation]
+    
+    D2 --> D2A[11 Regression Models]
+    D2 --> D2B[Validation & Logging]
+    D2 --> D2C[Model Comparison]
 ```
 
 ### **🎯 Key Benefits**
@@ -158,7 +164,8 @@ docktkinase/
 ├── 📋 Logs (logs/)                 # Execution logs (not versioned)
 │
 ├── 📦 Models & Data
-│   ├── FM4M/                       # IBM FM4M models
+│   ├── ESM/                        # Meta ESM-2 protein models
+│   ├── FM4M/                       # IBM FM4M ligand models
 │   ├── models_cache/               # Model cache (not versioned)
 │   ├── humans/                     # Human kinase data
 │   ├── non_humans/                 # Non-human kinase data
