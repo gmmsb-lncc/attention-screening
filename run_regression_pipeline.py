@@ -21,6 +21,19 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
+import gc
+
+# Imports para geração de embeddings (opcionais, carregados quando necessário)
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
+# Adicionar ESM ao sys.path
+esm_path = Path(__file__).parent / 'ESM'
+if esm_path.exists() and str(esm_path) not in sys.path:
+    sys.path.insert(0, str(esm_path))
 
 # Imports do projeto
 from src.regression import (
@@ -32,7 +45,29 @@ from src.regression import (
     load_embeddings_cache,
     save_embeddings_cache
 )
-from src.database.manage import load_data
+
+# Root directory
+ROOT_DIR = Path(__file__).resolve().parent
+
+
+def load_data(dataset_name):
+    """Carregar dataset de teste."""
+    dataset_files = {
+        'human': 'kinase_human_compounds.tsv',
+        'non_human': 'kinase_non_human_compounds.tsv',
+        'all': 'kinase_all_compounds.tsv'
+    }
+    
+    if dataset_name not in dataset_files:
+        raise ValueError(f"Dataset '{dataset_name}' inválido. Use: {list(dataset_files.keys())}")
+    
+    dataset_path = ROOT_DIR / 'tests' / 'datasets' / dataset_files[dataset_name]
+    
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset não encontrado: {dataset_path}")
+    
+    df = pd.read_csv(dataset_path, sep='\t')
+    return df
 
 
 class RegressionPipeline:
@@ -96,9 +131,12 @@ class RegressionPipeline:
             'random_state': random_state
         }
         
-    def load_data_and_prepare_targets(self):
+    def load_data_and_prepare_targets(self, max_samples=None):
         """
         Carregar dados e preparar targets de regressão.
+        
+        Args:
+            max_samples: Número máximo de amostras a carregar (None = todas)
         
         Returns:
             df: DataFrame com targets preparados
@@ -112,7 +150,13 @@ class RegressionPipeline:
         start_time = time.time()
         
         # Carregar dados
-        df = load_data(self.dataset, verbose=self.verbose)
+        df = load_data(self.dataset)
+        
+        # Limitar amostras se necessário
+        if max_samples and len(df) > max_samples:
+            df = df.head(max_samples).copy()
+            if self.verbose:
+                print(f'   ⚠️  Dataset limitado a {max_samples:,} amostras para teste')
         
         # Preparar targets de regressão (Ki > Kd > IC50)
         # IMPORTANTE: keep_all=True para manter mesmo número de amostras que os splits
@@ -153,74 +197,144 @@ class RegressionPipeline:
             'measure_distribution': {k: int(v) for k, v in measure_counts.items()}
         }
         
-        return df_filtered, y, measure_types
+        return df_filtered, y, measure_types, kept_indices
     
     def load_or_generate_embeddings(self, df):
         """
         Carregar embeddings do cache ou gerar novos.
         
         Args:
-            df: DataFrame com sequências
+            df: DataFrame com coluna 'sequence'
             
         Returns:
-            embeddings: Array de embeddings
+            embeddings: Array numpy com embeddings
         """
         if self.verbose:
             print('🧬 ETAPA 2: Carregamento de Embeddings')
             print('='*70)
         
-        start_time = time.time()
+        # Tentar carregar do cache
+        if self.embeddings_cache:
+            cache_path = Path(self.embeddings_cache)
+            
+            if cache_path.exists():
+                try:
+                    data = np.load(cache_path, allow_pickle=True)
+                    embeddings = data['embeddings']
+                    
+                    # Validar dimensões
+                    if len(embeddings) == len(df):
+                        if self.verbose:
+                            print(f'   ✅ Embeddings carregados do cache: {cache_path}')
+                            print(f'   📊 Shape: {embeddings.shape}')
+                            print()
+                        return embeddings
+                    else:
+                        if self.verbose:
+                            print(f'   ⚠️  Dimensões incompatíveis: {len(embeddings)} vs {len(df)}')
+                
+                except Exception as e:
+                    if self.verbose:
+                        print(f'   ⚠️  Erro ao carregar cache: {e}')
+                        print(f'   🔄 Será necessário gerar embeddings novos')
         
-        # Tentar carregar do cache especificado
-        if self.embeddings_cache and Path(self.embeddings_cache).exists():
-            try:
-                embeddings, metadata = load_embeddings_cache(self.embeddings_cache)
-                
-                if self.verbose:
-                    print(f'   ✅ Embeddings carregados do cache:')
-                    print(f'      Arquivo: {self.embeddings_cache}')
-                    print(f'      Shape: {embeddings.shape}')
-                    print(f'      Modelo: {metadata.get("model_name", "N/A")}')
-                    print(f'      Dataset: {metadata.get("dataset", "N/A")}')
-                    print(f'      Dimensão: {embeddings.shape[1]}')
-                
-                # Validar compatibilidade
-                if len(embeddings) != len(df):
-                    raise ValueError(
-                        f'Tamanho incompatível: cache tem {len(embeddings)} amostras, '
-                        f'mas df tem {len(df)} amostras'
-                    )
-                
-                load_time = time.time() - start_time
-                self.stats['embeddings'] = {
-                    'source': 'cache',
-                    'cache_file': str(self.embeddings_cache),
-                    'load_time': float(load_time),
-                    'shape': list(embeddings.shape),
-                    'dimension': int(embeddings.shape[1])
-                }
-                
-                if self.verbose:
-                    print(f'   ⏱️  Tempo: {load_time:.2f}s')
-                    print()
-                
-                return embeddings
-                
-            except Exception as e:
-                if self.verbose:
-                    print(f'   ⚠️  Erro ao carregar cache: {e}')
-                    print(f'   🔄 Será necessário gerar embeddings novos')
-        
-        # Se não conseguiu carregar, precisa gerar
+        # Se não conseguiu carregar, gerar novos embeddings
         if self.verbose:
-            print(f'   ❌ Cache não disponível ou incompatível')
-            print(f'   ℹ️  Para gerar embeddings, execute primeiro:')
-            print(f'      python run_complete_pipeline.py --dataset {self.dataset} --model {self.model_name}')
+            print(f'   ❌ Cache não encontrado')
+            print(f'   🔄 Gerando embeddings usando modelo {self.model_name}...')
+        
+        # Verificar se torch está disponível
+        if not TORCH_AVAILABLE:
+            raise ImportError(
+                "PyTorch não está instalado. É necessário para gerar embeddings.\n"
+                "Instale com: pip install torch"
+            )
+        
+        # Importar biblioteca ESM
+        import esm
+        
+        # Carregar modelo
+        model_func = getattr(esm.pretrained, self.model_name)
+        model, alphabet = model_func()
+        model = model.to(self.device)
+        model.eval()
+        batch_converter = alphabet.get_batch_converter()
+        
+        if self.verbose:
+            print(f'   ✅ Modelo carregado')
+            print(f'   📊 Gerando embeddings para {len(df):,} sequências...')
+        
+        # Gerar embeddings em batches
+        embeddings = []
+        # Verificar qual coluna de sequência está disponível
+        seq_col = 'seq' if 'seq' in df.columns else 'sequence'
+        sequences = df[seq_col].tolist()
+        batch_size = 8
+        
+        for i in range(0, len(sequences), batch_size):
+            batch_end = min(i + batch_size, len(sequences))
+            batch_seqs = sequences[i:batch_end]
+            batch_data = [(f'seq_{j}', seq) for j, seq in enumerate(batch_seqs)]
+            
+            # Converter batch
+            _, _, batch_tokens = batch_converter(batch_data)
+            batch_tokens = batch_tokens.to(self.device)
+            
+            # Gerar embeddings
+            with torch.no_grad():
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                results = model(batch_tokens, repr_layers=[model.num_layers])
+                token_embeddings = results['representations'][model.num_layers]
+                batch_embeddings = token_embeddings[:, 1:-1, :].mean(1)
+                batch_embeddings_cpu = batch_embeddings.cpu().numpy()
+            
+            embeddings.append(batch_embeddings_cpu)
+            
+            # Limpar memória
+            del batch_tokens, results, token_embeddings, batch_embeddings, batch_embeddings_cpu
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            
+            # Progresso
+            if self.verbose and (i + batch_size) % 50 == 0:
+                processed = min(i + batch_size, len(sequences))
+                pct = 100 * processed / len(sequences)
+                print(f'      {processed}/{len(sequences)} ({pct:.1f}%)')
+        
+        # Concatenar
+        embeddings = np.vstack(embeddings)
+        
+        # Liberar modelo da memória
+        del model, alphabet, batch_converter
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        
+        # Salvar no cache se path foi especificado
+        if self.embeddings_cache:
+            cache_path = Path(self.embeddings_cache)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            np.savez_compressed(
+                cache_path,
+                embeddings=embeddings,
+                model=self.model_name,
+                dataset=self.dataset,
+                n_samples=len(embeddings)
+            )
+            
+            if self.verbose:
+                print(f'   � Embeddings salvos no cache: {cache_path}')
+        
+        if self.verbose:
+            print(f'   ✅ Embeddings gerados!')
+            print(f'   📊 Shape: {embeddings.shape}')
             print()
         
-        raise FileNotFoundError(
-            f'Embeddings não encontrados. Execute o pipeline de classificação primeiro.'
-        )
+        return embeddings
     
     def load_split_indices(self):
         """
@@ -342,9 +456,9 @@ class RegressionPipeline:
         if self.verbose:
             print('\n   🏆 RANKING FINAL (Test Set - RMSE):')
             print('   ' + '='*66)
-            for idx, row in comparison_df.head(5).iterrows():
-                medal = ['🥇', '🥈', '🥉', '  ', '  '][idx] if idx < 5 else '  '
-                print(f'   {medal} {idx+1}. {row["model"]:20s} | '
+            for rank, (model_name, row) in enumerate(comparison_df.head(5).iterrows()):
+                medal = ['🥇', '🥈', '🥉', '  ', '  '][rank] if rank < 5 else '  '
+                print(f'   {medal} {rank+1}. {model_name:20s} | '
                       f'RMSE: {row["RMSE"]:8.2f} | R²: {row["R2"]:6.4f} | '
                       f'MAE: {row["MAE"]:8.2f}')
             print()
@@ -452,6 +566,12 @@ class RegressionPipeline:
             print('='*70)
         
         for model_name, model in trainer.trained_models.items():
+            # Pular modelos que falharam (None)
+            if model is None:
+                if self.verbose:
+                    print(f'   ⚠️  {model_name}: modelo falhou, pulando')
+                continue
+            
             y_pred = model.predict(X_test)
             
             # Salvar predições em CSV
@@ -505,16 +625,27 @@ class RegressionPipeline:
         pipeline_start = time.time()
         
         try:
-            # 1. Carregar dados e preparar targets
-            df, y, measure_types, kept_indices = self.load_data_and_prepare_targets()
-            
-            # 2. Carregar embeddings
-            embeddings = self.load_or_generate_embeddings(df)
-            
-            # 3. Carregar splits
+            # 1. Carregar splits primeiro (para saber quais amostras usar)
             idx_train, idx_val, idx_test = self.load_split_indices()
             
-            # Aplicar splits
+            # Combinar todos os índices dos splits
+            all_split_indices = np.concatenate([idx_train, idx_val, idx_test])
+            n_samples_needed = len(all_split_indices)
+            
+            if self.verbose:
+                print(f'📊 Total de amostras nos splits: {n_samples_needed:,}')
+                print(f'   Train: {len(idx_train):,}')
+                print(f'   Val:   {len(idx_val):,}')
+                print(f'   Test:  {len(idx_test):,}')
+                print()
+            
+            # 2. Carregar apenas as amostras necessárias
+            df, y, measure_types, kept_indices = self.load_data_and_prepare_targets(max_samples=n_samples_needed)
+            
+            # 3. Carregar/gerar embeddings apenas para as amostras necessárias
+            embeddings = self.load_or_generate_embeddings(df)
+            
+            # 4. Aplicar splits
             X_train = embeddings[idx_train]
             X_val = embeddings[idx_val]
             X_test = embeddings[idx_test]
@@ -578,6 +709,13 @@ Exemplos de uso:
       --classification-stats results/pipeline_stats.json \\
       --embeddings-cache results/embeddings_esm2_t36_3B_UR50D.npz
 
+  # Gerar embeddings automaticamente (sem cache)
+  python run_regression_pipeline.py \\
+      --dataset human \\
+      --model esm2_t6_8M_UR50D \\
+      --classification-stats results/test_small/pipeline_stats.json \\
+      --output-dir results/test_small/regression
+
   # Com GPU CUDA
   python run_regression_pipeline.py \\
       --dataset egfr \\
@@ -597,9 +735,8 @@ Exemplos de uso:
     parser.add_argument('--classification-stats', type=str,
                        default='results/pipeline_stats.json',
                        help='Path para pipeline_stats.json da classificação')
-    parser.add_argument('--embeddings-cache', type=str,
-                       default='results/embeddings_esm2_t36_3B_UR50D.npz',
-                       help='Path para cache de embeddings')
+    parser.add_argument('--embeddings-cache', type=str, default=None,
+                       help='Path para cache de embeddings (opcional, será gerado se não fornecido)')
     parser.add_argument('--output-dir', type=str, default='results/regression',
                        help='Diretório para salvar resultados')
     parser.add_argument('--device', type=str, default='auto',
