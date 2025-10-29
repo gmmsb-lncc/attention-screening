@@ -52,7 +52,28 @@
 
 ---
 
-## 📦 Configuração e Setup
+## � Pipeline de Regressão
+
+- **[../src/regression/README.md](../src/regression/README.md)** ⭐ - Módulo de regressão completo
+  - 11 modelos de regressão (LinearRegression, RandomForest, XGBoost, etc.)
+  - Predição quantitativa de atividades (Ki, Kd, IC50)
+  - Sistema de logging profissional
+  - Validação automática de dados
+  - Visualizações avançadas
+
+---
+
+## 🛠️ Utilitários
+
+- **[../src/utils/README.md](../src/utils/README.md)** - Módulo de utilitários centralizados
+  - Funções DRY (Don't Repeat Yourself)
+  - safe_get(), safe_get_numeric(), safe_get_int(), safe_get_str()
+  - Tratamento robusto de tipos e erros
+  - API documentada com exemplos
+
+---
+
+## �📦 Configuração e Setup
 
 - **[SETUP_SUMMARY.md](SETUP_SUMMARY.md)** - Resumo de configuração
 - **[DEPENDENCY_RESOLUTION.md](DEPENDENCY_RESOLUTION.md)** - Resolução de dependências
@@ -110,8 +131,15 @@ docs/
 │   ├── RELATORIO_FINAL_MODULARIZACAO.md
 │   └── RELATORIO_VALIDACAO_BUILD.md
 │
-├── 📦 Setup
+├── � Regressão (Novo!)
+│   └── ../src/regression/README.md  ⭐ 11 modelos
+│
+├── 🛠️ Utilitários (Novo!)
+│   └── ../src/utils/README.md       ⭐ Funções DRY
+│
+├── �📦 Setup
 │   ├── SETUP_SUMMARY.md
+│   ├── SETUP_PREREQUISITES.md
 │   ├── DEPENDENCY_RESOLUTION.md
 │   └── PATH_PORTABILITY_FIX.md
 │
@@ -135,6 +163,19 @@ Para novos usuários, recomendamos ler nesta ordem:
 ---
 
 ## 🔄 Atualizações Recentes
+
+**28 de outubro de 2025** (Branch: regression):
+- ✅ **Módulo de Regressão completo** - 11 modelos para predição quantitativa
+  - LinearRegression, Ridge, Lasso, ElasticNet
+  - RandomForest, GradientBoosting, XGBoost
+  - SVR, KNN, DecisionTree, MLP
+  - Prioridade: Ki > Kd > IC50 (cientificamente justificada)
+- ✅ **Módulo Utils** - Funções utilitárias centralizadas (DRY principle)
+  - safe_get(), safe_get_numeric(), safe_get_int(), safe_get_str()
+  - Tratamento robusto de tipos e valores ausentes
+- ✅ **Sistema de Logging profissional** - Logs coloridos com níveis configuráveis
+- ✅ **Validação automática de dados** - 10+ checagens automáticas
+- ✅ **100% testes passando** - 19/19 testes aprovados
 
 **22 de outubro de 2025**:
 - ✅ Integração ESM-2 local completa
@@ -178,4 +219,4 @@ Para adicionar nova documentação:
 
 ---
 
-**Última atualização**: 22 de outubro de 2025
+**Última atualização**: 28 de outubro de 2025
