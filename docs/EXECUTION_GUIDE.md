@@ -1,278 +1,292 @@
-# 🚀 DockTKinase Execution Guide - Correct Script Order
+# 🚀 DockTKinase Execution Guide
 
-**Step-by-step guide to execute the DockTKinase pipeline in the correct order.**
+**Comprehensive step-by-step guide to execute classification and regression pipelines.**
 
 ---
 
 ## 📋 **Workflow Overview**
 
-DockTKinase works in **3 main stages**:
+DockTKinase provides **dual pipelines** for molecular activity prediction:
 
-```mermaid
-graph TD
-    A[1. Setup & Installation] --> B[2. Data Analysis]
-    B --> C[3. Embedding Generation]
-    C --> D[4. ML Training]
-    
-    A --> A1[setup_conda.sh]
-    A --> A2[scripts/post_install.py]
-    
-    B --> B1[src/database/ scripts]
-    B --> B2[Comparative analysis]
-    
-    C --> C1[docktkinase.py]
-    C --> C2[Embedding pipeline]
-    
-    D --> D1[run_classifier.py]
-    D --> D2[ML models]
+```
+┌──────────────┐
+│   Setup      │  python setup.py
+└──────┬───────┘
+       │
+┌──────▼───────────┐
+│ Data Preparation │  Place TSV in src/database/
+└──────┬───────────┘
+       │
+       ├─────────────────────┬─────────────────────┐
+       │                     │                     │
+┌──────▼──────────┐  ┌──────▼──────────┐  ┌──────▼──────────┐
+│ Classification  │  │   Regression    │  │  Both Pipelines │
+│   Pipeline      │  │    Pipeline     │  │   (Recommended) │
+│                 │  │                 │  │                 │
+│ Binary          │  │ Quantitative    │  │ Complete        │
+│ (Active/        │  │ (Ki, Kd, IC50)  │  │ Analysis        │
+│  Inactive)      │  │                 │  │                 │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
 ---
 
 ## 🔧 **STAGE 1: Setup and Installation**
 
-### **1.1 Environment Setup (REQUIRED)**
+### **1.1 Automatic Installation (RECOMMENDED)**
 ```bash
-# Execute once to configure everything
-./setup_conda.sh
+# Clone repository
+git clone https://github.com/gmmsb-lncc/docktkinase.git
+cd docktkinase
+
+# Create virtual environment
+python3 -m venv env
+source env/bin/activate  # Windows: env\Scripts\activate
+
+# Automatic installation
+python setup.py
 ```
 
-**What it does:**
-- ✅ Creates conda environment with all dependencies
-- ✅ Activates environment automatically
-- ✅ Downloads all required models (FM4M + ESM)
-- ✅ Verifies everything is working
-
-### **1.2 Manual Model Download (if needed)**
+### **1.2 Verification**
 ```bash
-# Only execute if setup_conda.sh failed during download
-conda activate docktkinase
-python scripts/post_install.py
+# Run tests
+python -m pytest tests/ -v
+
+# Expected: 19/19 tests passing ✅
 ```
 
 ---
 
-## 📊 **STAGE 2: Data Analysis (OPTIONAL but RECOMMENDED)**
+## 📊 **STAGE 2: Data Preparation**
 
-### **2.1 Exploratory Data Analysis**
-```bash
-conda activate docktkinase
+### **2.1 TSV File Format**
 
-# Molecular clustering analysis
-python src/database/cluster.py
+**Required columns for CLASSIFICATION:**
+- `Ligand_SMILES` - SMILES representation
+- `Target_Seq` - Protein sequence
+- `Y` - Binary label (0=inactive, 1=active)
 
-# Molecular descriptors analysis  
-python src/database/descriptors.py
+**Additional columns for REGRESSION:**
+- `Ki` - Ki value in nM (nanomolar)
+- `Kd` - Kd value in nM
+- `IC50` - IC50 value in nM
 
-# Comparative analysis (human vs non-human)
-python src/database/comparative_analysis.py
-
-# Redundancy removal
-python src/database/remove_redundance.py
-```
-
-### **2.2 Using Modular API (NEW)**
-```python
-# Analysis using the new modular API
-from src.database import ComparativeAnalyzer, MolecularClusterer, BalanceChecker
-
-# Comparative analysis
-analyzer = ComparativeAnalyzer()
-stats = analyzer.compare_datasets("src/database/your_file.tsv")
-
-# Molecular clustering
-clusterer = MolecularClusterer()
-clusters = clusterer.cluster_by_similarity("src/database/your_file.tsv", threshold=0.7)
-
-# Balance checking
-balance_checker = BalanceChecker()
-balance_report = balance_checker.analyze_balance("src/database/your_file.tsv")
+**Example:**
+```tsv
+Ligand_SMILES	Target_Seq	Y	Ki	Kd	IC50
+CC(=O)Oc1ccccc1C(=O)O	MKTAYIAK...	1	10.5	25.3	100.0
 ```
 
 ---
 
-## 🏗️ **STAGE 3: Embedding Generation (MAIN)**
+## 🎯 **STAGE 3A: Classification Pipeline**
 
-### **3.1 Data Configuration**
-1. **Place your TSV file** in `src/database/`
-2. **Edit `docktkinase.py`** to configure:
-   ```python
-   # Input TSV filename (must be in src/database/)
-   INPUT_TSV_FILENAME = "your_file.tsv"
-   
-   # Output folder name for all results
-   OUTPUT_FOLDER_NAME = "your_results"
-   ```
-
-### **3.2 Main Pipeline Execution**
+### **3A.1 Complete Pipeline**
 ```bash
-conda activate docktkinase
-
-# Complete embedding pipeline
-python docktkinase.py
+python run_complete_pipeline.py \
+    --input src/database/your_file.tsv \
+    --output results/my_experiment \
+    --model esm2_t36_3B_UR50D \
+    --device cuda
 ```
 
-**What it does:**
-- ✅ Reads TSV file from `src/database/` folder
-- ✅ Extracts unique ligands and proteins
-- ✅ Generates ligand embeddings (IBM FM4M)
-- ✅ Generates protein embeddings (Meta ESM)  
-- ✅ Builds concatenated matrices
-- ✅ Saves everything in specified folder
+**Steps executed:**
+1. ✅ Protein embeddings (ESM-2)
+2. ✅ Ligand embeddings (FM4M)
+3. ✅ Matrix construction
+4. ✅ Binary labels
+5. ✅ Stratification (80/10/10)
+6. ✅ Train 6 classification models
 
-### **3.3 Using Modular API (NEW)**
-```python
-# Pipeline using the new API
-from src.build import BuildPipeline
-
-# Configuration and execution
-pipeline = BuildPipeline()
-results = pipeline.run_complete_pipeline(
-    input_file="src/database/your_file.tsv",
-    output_dir="your_results/"
-)
-```
+### **3A.2 Classification Models (6)**
+- RandomForest
+- XGBoost
+- GradientBoosting
+- SVM
+- KNN
+- MLP
 
 ---
 
-## 🧠 **STAGE 4: Machine Learning Training**
+## 📈 **STAGE 3B: Regression Pipeline**
 
-### **4.1 MLP Classifier (Main Method)**
+### **3B.1 Complete Regression Pipeline**
 ```bash
-conda activate docktkinase
-
-# Classifier training
-python run_classifier.py
+python run_regression_pipeline.py \
+    --data results/my_experiment/matrix/embedding_matrix.npz \
+    --output results/my_experiment/regression \
+    --activity-type Ki
 ```
 
-### **4.2 Modular ML Pipeline (NEW)**
-```python
-# ML using the new modular API
-from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+**Steps executed:**
+1. ✅ Load matrix
+2. ✅ Extract activity (Ki/Kd/IC50)
+3. ✅ Data validation (10+ checks)
+4. ✅ Train 11 regression models
+5. ✅ Evaluate (R², MAE, RMSE)
+6. ✅ Generate visualizations
 
-classifier = MLPEmbeddingPipeline()
-model = classifier.train_with_optimization(
-    features_path="your_results/concatenated_matrix.npy",
-    labels_path="your_results/labels.npy"
-)
-```
+### **3B.2 Regression Models (11)**
+
+**Linear:**
+- LinearRegression
+- Ridge
+- Lasso
+- ElasticNet
+
+**Tree-based:**
+- RandomForest
+- GradientBoosting
+- XGBoost
+- DecisionTree
+
+**Others:**
+- SVR
+- KNN
+- MLP
+
+### **3B.3 Activity Priority**
+**Ki > Kd > IC50**
 
 ---
 
-## 🎯 **COMPLETE EXECUTION ORDER**
+## 🔄 **QUICK START EXAMPLES**
 
-### **For Beginners (Simple Method):**
-```bash
-# 1. Setup (once only)
-./setup_conda.sh
-
-# 2. Configure data
-# - Place TSV file in src/database/
-# - Edit docktkinase.py with filename
-
-# 3. Execute complete pipeline
-conda activate docktkinase
-python docktkinase.py
-
-# 4. Train classifier
-python run_classifier.py
-```
-
-### **For Advanced Users (Modular Method):**
+### **Beginners (Complete Workflow)**
 ```bash
 # 1. Setup
-./setup_conda.sh
+python3 -m venv env
+source env/bin/activate
+python setup.py
 
-# 2. Exploratory analysis (optional)
-conda activate docktkinase
-python src/database/cluster.py
-python src/database/comparative_analysis.py
+# 2. Classification
+python run_complete_pipeline.py \
+    --input src/database/data.tsv \
+    --output results/exp1
 
-# 3. Custom pipeline
-python -c "
+# 3. Regression (optional)
+python run_regression_pipeline.py \
+    --data results/exp1/matrix/embedding_matrix.npz \
+    --output results/exp1/regression \
+    --activity-type Ki
+```
+
+### **Advanced (Custom Configuration)**
+```bash
+# Classification with GPU
+python run_complete_pipeline.py \
+    --input src/database/data.tsv \
+    --output results/exp1 \
+    --model esm2_t36_3B_UR50D \
+    --device cuda \
+    --batch-size 8
+
+# Regression with specific models
+python run_regression_pipeline.py \
+    --data results/exp1/matrix/embedding_matrix.npz \
+    --output results/exp1/regression \
+    --activity-type Ki \
+    --models RandomForest,XGBoost,MLP
+```
+
+### **Python API (Maximum Control)**
+```python
 from src.build import BuildPipeline
-from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+from src.regression import RegressionTrainer, RegressionConfig
 
-# Embeddings
-pipeline = BuildPipeline()
-results = pipeline.run_complete_pipeline('src/database/data.tsv', 'results/')
+# 1. Embeddings
+pipeline = BuildPipeline(
+    input_tsv='src/database/data.tsv',
+    output_dir='results/custom'
+)
+pipeline.run()
 
-# ML
-classifier = MLPEmbeddingPipeline()
-model = classifier.train_with_optimization('results/concatenated_matrix.npy', 'results/labels.npy')
-"
+# 2. Regression
+config = RegressionConfig(
+    data_path='results/custom/matrix/embedding_matrix.npz',
+    output_dir='results/custom/regression',
+    activity_type='Ki'
+)
+trainer = RegressionTrainer(config)
+trainer.train_all_models()
 ```
 
 ---
 
-## 📁 **Expected File Structure**
+## 📁 **Output Structure**
 
-### **Before Execution:**
 ```
-docktkinase/
-├── src/database/
-│   └── your_file.tsv            # ← Your data here
-├── docktkinase.py               # ← Configure here
-├── run_classifier.py
-└── setup_conda.sh
-```
-
-### **After Execution:**
-```
-docktkinase/
-├── your_results/                # ← Folder created by pipeline
-│   ├── ligand_embeddings/       # Ligand embeddings
-│   ├── protein_embeddings/      # Protein embeddings
-│   ├── concatenated_matrix.npy  # Final matrix for ML
-│   ├── labels.npy              # Labels for ML
-│   └── metadata.json           # Process metadata
-└── src/classifier/
-    ├── models/                  # Trained models
-    ├── results/                 # Performance results
-    └── logs/                    # Training logs
+results/my_experiment/
+├── embeddings/
+│   ├── proteins/                # ESM-2 embeddings
+│   └── ligands/                 # FM4M embeddings
+├── matrix/
+│   └── embedding_matrix.npz     # Combined matrix
+├── labels/
+│   └── binary_labels.csv        # Labels
+├── models/                      # Classification models
+│   ├── RandomForest.pkl
+│   └── XGBoost.pkl
+└── regression/                  # Regression results
+    ├── models/
+    │   ├── LinearRegression.pkl
+    │   └── RandomForest.pkl
+    ├── evaluations/
+    │   └── metrics_summary.json
+    └── visualizations/
+        ├── scatter_plots.png
+        └── residual_plots.png
 ```
 
 ---
 
-## 🚨 **Common Problems and Solutions**
+## 🚨 **Troubleshooting**
 
-### **Error: "File not found"**
+### **CUDA out of memory**
 ```bash
-# Check if you're in the correct directory
-pwd  # Should show the docktkinase directory
+# Reduce batch size
+python run_complete_pipeline.py --batch-size 4
 
-# Activate the environment
-conda activate docktkinase
+# Or use CPU
+python run_complete_pipeline.py --device cpu
 ```
 
-### **Error: "Model not found"**
+### **Module not found**
 ```bash
-# Execute manual download
-python scripts/post_install.py
+# Activate environment
+source env/bin/activate
+
+# Reinstall
+python setup.py
 ```
 
-### **Error: "TSV file not found"**
+### **No activity values**
 ```bash
-# Check if file is in correct folder
-ls src/database/
+# Check columns
+head -1 src/database/your_file.tsv
 
-# Check filename in docktkinase.py
-grep "INPUT_TSV_FILENAME" docktkinase.py
+# Ensure Ki, Kd, or IC50 column exists
 ```
 
 ---
 
-## 🎓 **Quick Summary**
+## 📊 **Performance**
 
-| Stage | Script | Description | Frequency |
-|-------|---------|-----------|------------|
-| 1 | `./setup_conda.sh` | Initial setup | Once |
-| 2 | `src/database/*.py` | Data analysis | Optional |
-| 3 | `python docktkinase.py` | Embedding generation | Per dataset |
-| 4 | `python run_classifier.py` | ML training | Per model |
-
-**📌 Order is always: Setup → (Analysis) → Embeddings → ML**
+| Dataset | Embeddings | Training | Total |
+|---------|-----------|----------|-------|
+| 1K samples | ~5 min | ~1 min | ~6 min |
+| 10K samples | ~30 min | ~5 min | ~35 min |
+| 100K samples | ~4 hours | ~20 min | ~4.5h |
 
 ---
 
-**💡 Tip:** For new projects, always start with the simple sequence. Use the modular API when you need greater control or customization.
+## 📚 **See Also**
+
+- [QUICK_START.md](QUICK_START.md) - Quick start
+- [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) - Installation
+- [USER_GUIDE.md](USER_GUIDE.md) - User manual
+- [../src/regression/README.md](../src/regression/README.md) - Regression docs
+
+---
+
+**Last updated**: October 28, 2025 | **Branch**: regression
