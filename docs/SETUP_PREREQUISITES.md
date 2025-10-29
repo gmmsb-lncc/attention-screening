@@ -1,5 +1,9 @@
 # Pré-requisitos para Setup do DockTKinase
 
+**Data**: 28 de Outubro de 2025  
+**Branch**: regression  
+**Sistema**: Dual Pipeline (Classification + Regression)
+
 ## ⚠️ REQUISITOS OBRIGATÓRIOS
 
 Antes de executar `python setup.py`, você **DEVE** instalar os seguintes pacotes do sistema:
@@ -16,6 +20,8 @@ Antes de executar `python setup.py`, você **DEVE** instalar os seguintes pacote
 #### Ubuntu/Debian:
 ```bash
 sudo apt-get update
+sudo apt-get install python3.11-dev -y
+# OU para Python 3.12
 sudo apt-get install python3.12-dev -y
 ```
 
@@ -29,10 +35,17 @@ sudo yum install python3-devel -y
 sudo dnf install python3-devel -y
 ```
 
+#### macOS (Homebrew):
+```bash
+# Python headers incluídos com Python do Homebrew
+brew install python@3.11
+```
+
 #### Verificar instalação:
 ```bash
 # Verificar se Python.h existe
-ls /usr/include/python3.12/Python.h
+ls /usr/include/python3.11/Python.h  # Linux
+ls /opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Headers/Python.h  # macOS
 
 # Ou usar python3-config
 python3-config --includes
@@ -49,6 +62,9 @@ sudo yum groupinstall "Development Tools" -y
 
 # Fedora
 sudo dnf groupinstall "Development Tools" -y
+
+# macOS (Homebrew)
+xcode-select --install
 ```
 
 ### 3. Git (para clonar o repositório)
@@ -62,6 +78,9 @@ sudo yum install git -y
 
 # Fedora
 sudo dnf install git -y
+
+# macOS (Homebrew)
+brew install git
 ```
 
 ---
@@ -74,9 +93,9 @@ Execute **ANTES** de rodar `python setup.py`:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-    python3.12 \
-    python3.12-dev \
-    python3.12-venv \
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
     build-essential \
     git
 ```
@@ -105,6 +124,21 @@ sudo dnf install -y \
     git
 ```
 
+### macOS (Apple Silicon):
+```bash
+# Instalar Homebrew (se não tiver)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Instalar dependências
+brew install python@3.11 git
+
+# Opcional: conda para RDKit
+brew install --cask miniconda
+conda create -n docktkinase python=3.11
+conda activate docktkinase
+conda install -c conda-forge rdkit
+```
+
 ---
 
 ## 📋 Checklist de Pré-requisitos
@@ -112,11 +146,13 @@ sudo dnf install -y \
 Antes de executar `python setup.py`, verifique:
 
 - [ ] Python 3.8+ instalado
-- [ ] **Python development headers instalados** (`python3.12-dev`)
+- [ ] **Python development headers instalados** (`python3.11-dev` ou `python3.12-dev`)
 - [ ] Compilador C++ instalado (`build-essential` ou `gcc`)
 - [ ] Git instalado
 - [ ] Permissões para criar ambiente virtual
-- [ ] Espaço em disco suficiente (~5GB para dependências)
+- [ ] Espaço em disco suficiente (~5-8GB para dependências + models)
+- [ ] **Dual pipeline support** (Classification + Regression) ⭐
+- [ ] Conexão de internet (para download de modelos)
 
 ---
 
@@ -129,11 +165,45 @@ Após instalar os pré-requisitos:
 git clone https://github.com/gmmsb-lncc/docktkinase.git
 cd docktkinase
 
-# Executar setup
-python3 setup.py
+# Executar setup automatizado
+python setup.py
+
+# Ativar ambiente
+source env/bin/activate  # Linux/macOS
+# OU
+env\Scripts\activate  # Windows
 ```
 
 O script verificará automaticamente se todos os pré-requisitos estão instalados.
+
+---
+
+## 🧪 Testar Instalação
+
+Após setup completo:
+
+```bash
+# Ativar ambiente
+source env/bin/activate
+
+# Testar imports
+python -c "
+from src.build.core import BuildConfig
+from src.classifier.core import DataManager
+from src.regression import RegressionConfig  # NOVO!
+from src.utils.data_utils import load_data  # NOVO!
+print('✅ Dual pipeline system ready!')
+"
+
+# Executar testes automatizados (19 testes)
+pytest tests/ -v
+
+# Testar classification pipeline
+python run_complete_pipeline.py --help
+
+# Testar regression pipeline (NOVO!)
+python run_regression_pipeline.py --help
+```
 
 ---
 
@@ -145,8 +215,14 @@ O script verificará automaticamente se todos os pré-requisitos estão instalad
 
 **Solução:**
 ```bash
-sudo apt-get install python3.12-dev -y
-python3 setup.py  # Execute novamente
+# Ubuntu/Debian
+sudo apt-get install python3.11-dev -y
+
+# macOS (Homebrew)
+brew install python@3.11
+
+# Reexecutar setup
+python setup.py
 ```
 
 ### Erro: "ModuleNotFoundError: No module named 'torch'"
@@ -167,7 +243,8 @@ pip install --no-build-isolation torch-scatter torch-sparse torch-cluster
 Para instalar manualmente depois:
 ```bash
 # Instalar headers primeiro
-sudo apt-get install python3.12-dev -y
+sudo apt-get install python3.11-dev -y  # Linux
+brew install python@3.11  # macOS
 
 # Ativar ambiente
 source env/bin/activate
@@ -178,35 +255,105 @@ pip install --no-build-isolation torch-sparse
 pip install --no-build-isolation torch-cluster
 ```
 
+### macOS Apple Silicon: RDKit Installation
+
+**Recomendação:** Use conda para RDKit no macOS:
+
+```bash
+# Criar ambiente conda
+conda create -n docktkinase python=3.11
+conda activate docktkinase
+
+# Instalar RDKit via conda
+conda install -c conda-forge rdkit
+
+# Instalar restante via pip
+pip install -r requirements-mac.txt
+```
+
+### Erro: "xgboost installation failed" (Regression)
+
+**Causa:** xgboost requer compilação em alguns sistemas
+
+**Solução:**
+```bash
+# Ubuntu/Debian
+sudo apt-get install cmake -y
+pip install xgboost
+
+# macOS
+brew install cmake
+pip install xgboost
+
+# Alternativa: usar conda
+conda install -c conda-forge xgboost
+```
+
 ---
 
 ## 📚 Mais Informações
 
 - [INSTALLATION_GUIDE.md](./INSTALLATION_GUIDE.md) - Guia detalhado de instalação
 - [QUICK_START.md](./QUICK_START.md) - Início rápido
-- [USER_GUIDE.md](./USER_GUIDE.md) - Guia do usuário
+- [USER_GUIDE.md](./USER_GUIDE.md) - Guia do usuário completo
+- [SETUP_SUMMARY.md](./SETUP_SUMMARY.md) - Resumo das dependências
 
 ---
 
-## ✅ Resumo
+## ✅ Resumo - Comandos Únicos
 
-**Comando único para Ubuntu/Debian:**
+**Ubuntu/Debian:**
 ```bash
 sudo apt-get update && \
-sudo apt-get install -y python3.12 python3.12-dev python3.12-venv build-essential git && \
+sudo apt-get install -y python3.11 python3.11-dev python3.11-venv build-essential git && \
+git clone https://github.com/gmmsb-lncc/docktkinase.git && \
+cd docktkinase && \
 python3 setup.py
 ```
 
-**Comando único para CentOS/RHEL:**
+**CentOS/RHEL:**
 ```bash
 sudo yum update -y && \
 sudo yum install -y python3 python3-devel gcc gcc-c++ make git && \
+git clone https://github.com/gmmsb-lncc/docktkinase.git && \
+cd docktkinase && \
 python3 setup.py
 ```
 
-**Comando único para Fedora:**
+**macOS (Apple Silicon):**
 ```bash
-sudo dnf update -y && \
-sudo dnf install -y python3 python3-devel gcc gcc-c++ make git && \
+brew install python@3.11 git && \
+git clone https://github.com/gmmsb-lncc/docktkinase.git && \
+cd docktkinase && \
 python3 setup.py
 ```
+
+---
+
+## 🎯 Sistema Dual Pipeline
+
+Após instalação completa, você terá acesso a:
+
+### Classification Pipeline (6 modelos):
+```bash
+python run_complete_pipeline.py \
+    --dataset data/test_dataset_1000.tsv \
+    --output-dir results/classification
+```
+
+### Regression Pipeline (11 modelos): ⭐ **NOVO!**
+```bash
+python run_regression_pipeline.py \
+    --dataset data/test_dataset_1000.tsv \
+    --activity-type ki \
+    --models linear_regression ridge xgboost \
+    --output-dir results/regression
+```
+
+---
+
+**Última atualização**: 28 de Outubro de 2025  
+**Branch**: regression  
+**Sistema**: Dual Pipeline (Classification + Regression)  
+**Modelos ML**: 17 total (6 classifiers + 11 regressors)  
+**Testes**: 19 automatizados (100% passing)

@@ -1,57 +1,66 @@
 # 📋 RESUMO DAS ALTERAÇÕES - Setup de Dependências
 
-**Data**: 20 de Outubro de 2025  
-**Objetivo**: Preparar ambiente para execução do pipeline build com estratificação balanceada
+**Data**: 28 de Outubro de 2025  
+**Branch**: regression  
+**Objetivo**: Sistema completo com dual pipeline (Classification + Regression)
 
 ---
 
 ## ✅ **Arquivos Criados/Atualizados**
 
-### **1. setup.py** ✏️ **ATUALIZADO**
-- ✅ Adicionadas todas as dependências necessárias para o módulo `build`
+### **1. setup.py** ✅ **ATUALIZADO**
+- ✅ Adicionadas todas as dependências para dual pipeline system
 - ✅ Separadas em **basic_deps** (obrigatórias) e **optional_deps** (opcionais)
-- ✅ Validação específica para dependências do build
+- ✅ Validação específica para dependências do build + regression
 
-**Dependências adicionadas:**
+**Dependências Principais:**
 ```python
-Basic:
+Basic (Obrigatórias):
   - numpy>=1.26.1
+  - pandas>=2.1.0
   - scipy>=1.12.0  
+  - scikit-learn>=1.3.0 (classification + regression)
   - matplotlib>=3.9.2
+  - seaborn>=0.12.0
+  - tqdm>=4.66.4
+  - psutil>=5.9.0
   - pyarrow>=14.0.1
 
+Regression (Adicionadas):
+  - xgboost>=2.0.0 (Gradient boosting regressor)
+  - scipy>=1.12.0 (Statistical metrics)
+
 Optional:
-  - fair-esm (ESM models)
+  - fair-esm (ESM protein embeddings)
   - transformers>=4.38
   - sentencepiece
   - rdkit>=2024.3.5
-  - torch-geometric>=2.3.1
-  - torch-scatter, torch-sparse, torch-cluster
   - selfies>=2.1.0
+  - umap-learn>=0.5.5
   - mordred
-  - xgboost==1.6.2
-  - ase==3.24.0
 ```
 
 ---
 
-### **2. requirements.txt** 📦 **CRIADO**
-Arquivo de requirements **universal** com todas as dependências documentadas.
+### **2. requirements.txt** 📦 **ATUALIZADO**
+Arquivo de requirements **universal** com todas as dependências incluindo regression.
 
 **Estrutura:**
 - Core Dependencies (obrigatórias)
 - Embeddings (ESM + FM4M)
-- Graph Neural Networks
+- **Regression** (scikit-learn, xgboost, scipy) ⭐
+- Graph Neural Networks (opcional)
 - Machine Learning Extras
 - Utilities & HTTP
 
 ---
 
-### **3. requirements-mac.txt** 🍎 **CRIADO**
-Requirements específico para **Mac M1/M2/M3** (Apple Silicon).
+### **3. requirements-mac.txt** 🍎 **ATUALIZADO**
+Requirements específico para **Mac M1/M2/M3** (Apple Silicon) com regression support.
 
 **Características:**
-- ✅ PyTorch para ARM
+- ✅ PyTorch para ARM (Apple Silicon)
+- ✅ **Regression models** (scikit-learn, xgboost) ⭐
 - ⚠️ RDKit recomendado via conda
 - ⚠️ PyTorch Geometric pode ter problemas
 - ⚠️ Sem suporte CUDA (CPU only)
@@ -66,12 +75,13 @@ pip install -r requirements-mac.txt
 
 ---
 
-### **4. requirements-cuda.txt** 🚀 **CRIADO**
-Requirements para **Linux com CUDA** (RTX 4090).
+### **4. requirements-cuda.txt** 🚀 **ATUALIZADO**
+Requirements para **Linux com CUDA** (RTX 4090) com regression support.
 
 **Características:**
 - ✅ PyTorch com CUDA 12.1
 - ✅ PyTorch Geometric com CUDA support
+- ✅ **Regression models acelerados por GPU** ⭐
 - ✅ Todos os recursos acelerados por GPU
 - ✅ PySpark para processamento distribuído
 
@@ -85,28 +95,39 @@ pip install -r requirements-cuda.txt
 
 ---
 
-### **5. INSTALLATION_GUIDE.md** 📚 **CRIADO**
+### **5. INSTALLATION_GUIDE.md** 📚 **ATUALIZADO**
 Guia completo de instalação com:
 - ✅ Instruções para Mac M1
 - ✅ Instruções para Linux CUDA
+- ✅ **Dual pipeline setup** ⭐
 - ✅ Troubleshooting
 - ✅ Testes de validação
 - ✅ Checklist de instalação
 
 ---
 
-### **6. test_pipeline_setup.py** 🧪 **ATUALIZADO**
-- ✅ Corrigido import de `esm` (era `fair_esm`)
-- ✅ Testa todas as dependências do build
-- ✅ Valida estrutura de módulos
-- ✅ Verifica arquivos de dados
+### **6. src/regression/** 🆕 **NOVO MÓDULO COMPLETO**
+- ✅ `config.py` - RegressionConfig para 11 modelos
+- ✅ `trainer.py` - RegressionTrainer
+- ✅ `models.py` - 11 implementações
+- ✅ `evaluator.py` - Métricas (RMSE, MAE, R², Pearson, Spearman)
+- ✅ `validation.py` - 10+ validações de dados
+- ✅ `logger.py` - Logging estruturado colorido
+- ✅ `visualizer.py` - Scatter, residuais, distribuições
+- ✅ `utils.py` - Utilitários regression
+
+---
+
+### **7. src/utils/** 🆕 **NOVO MÓDULO COMPARTILHADO**
+- ✅ `data_utils.py` - Funções compartilhadas (DRY principle)
+- ✅ Reutilizado por: `build/`, `classifier/`, `regression/`
 
 ---
 
 ## 📊 **Estrutura de Dependências**
 
 ```
-DockTKinase Build Pipeline
+DockTKinase Dual Pipeline System
 │
 ├── CORE (Obrigatórias)
 │   ├── torch, numpy, pandas
@@ -118,7 +139,17 @@ DockTKinase Build Pipeline
 │   ├── Proteínas: fair-esm, transformers
 │   └── Ligantes: FM4M (rdkit, umap-learn)
 │
-├── STRATIFICATION (Novo!)
+├── CLASSIFICATION
+│   ├── scikit-learn (6 classifiers)
+│   └── Binary predictions
+│
+├── REGRESSION ⭐ NOVO!
+│   ├── scikit-learn (Linear, Tree-based)
+│   ├── xgboost (Gradient boosting)
+│   ├── scipy (Metrics)
+│   └── Quantitative predictions (Ki/Kd/IC50)
+│
+├── STRATIFICATION
 │   ├── scikit-learn (clustering)
 │   └── scipy (similarity)
 │
@@ -136,6 +167,7 @@ DockTKinase Build Pipeline
 ### **Mac M1/M2/M3 (Desenvolvimento)**
 - ✅ CPU only
 - ✅ Testes e desenvolvimento
+- ✅ **Classification + Regression** ⭐
 - ⚠️ Embeddings mais lentos
 - 📊 Dataset pequeno: OK
 - 📊 Dataset completo: Lento
@@ -143,6 +175,7 @@ DockTKinase Build Pipeline
 ### **Linux + CUDA (Produção)**
 - ✅ GPU RTX 4090
 - ✅ Processamento acelerado
+- ✅ **Classification + Regression** ⭐
 - ✅ Todos os recursos
 - 📊 Dataset completo: Rápido
 - 🚀 Produção ready!
@@ -153,31 +186,41 @@ DockTKinase Build Pipeline
 
 ### **Instalar (Mac):**
 ```bash
-pip install -r requirements-mac.txt
-python test_pipeline_setup.py
+python setup.py  # Setup automático completo
 ```
 
 ### **Instalar (Linux CUDA):**
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements-cuda.txt
-python test_pipeline_setup.py
+python setup.py  # Setup automático completo
 ```
 
-### **Executar setup.py:**
+### **Executar Classification Pipeline:**
 ```bash
-python setup.py
+source env/bin/activate
+python run_complete_pipeline.py \
+    --dataset data/test_dataset_1000.tsv \
+    --output-dir results/classification
+```
+
+### **Executar Regression Pipeline:** ⭐ **NOVO!**
+```bash
+source env/bin/activate
+python run_regression_pipeline.py \
+    --dataset data/test_dataset_1000.tsv \
+    --activity-type ki \
+    --models linear_regression ridge xgboost \
+    --output-dir results/regression
 ```
 
 ---
 
 ## ✅ **Próximos Passos**
 
-1. **Instalar dependências** no Mac M1 para testes
-2. **Validar instalação** com `test_pipeline_setup.py`
-3. **Testar pipeline** com dataset pequeno (kinase_humans)
-4. **Transferir para Linux CUDA** para produção
-5. **Executar pipeline completo** com dataset full (kinase_all)
+1. ✅ **Instalar dependências** com `python setup.py`
+2. ✅ **Validar instalação** com `pytest tests/`
+3. ✅ **Testar classification** com dataset pequeno
+4. ✅ **Testar regression** com dataset pequeno ⭐
+5. ✅ **Executar dual pipeline** com dataset completo
 
 ---
 
@@ -186,21 +229,27 @@ python setup.py
 Execute para validar:
 ```bash
 # 1. Testar setup completo
-python test_pipeline_setup.py
+python setup.py
 
 # 2. Testar imports
 python -c "
-from build.core import BuildConfig
-from build.pipeline import BuildPipeline
-from build.stratification import Stratifier
+from src.build.core import BuildConfig
+from src.build.pipeline import BuildPipeline
+from src.classifier.core import DataManager
+from src.regression import RegressionConfig, RegressionTrainer  # NOVO!
+from src.utils.data_utils import load_data  # NOVO!
 print('✅ Sistema pronto!')
 "
 
-# 3. Verificar CUDA (Linux)
+# 3. Executar testes automatizados
+pytest tests/ -v  # 19 testes (100% passing)
+
+# 4. Verificar CUDA (Linux)
 python -c "
 import torch
 print(f'CUDA: {torch.cuda.is_available()}')
-print(f'GPU: {torch.cuda.get_device_name(0)}')
+if torch.cuda.is_available():
+    print(f'GPU: {torch.cuda.get_device_name(0)}')
 "
 ```
 
@@ -215,102 +264,17 @@ print(f'GPU: {torch.cuda.get_device_name(0)}')
 | `requirements-mac.txt` | Específico Mac M1 |
 | `requirements-cuda.txt` | Específico Linux CUDA |
 | `INSTALLATION_GUIDE.md` | Guia completo de instalação |
-| `test_pipeline_setup.py` | Teste de validação |
+| `run_regression_pipeline.py` | **Pipeline de regressão** ⭐ |
 
 ---
 
-**Status**: ✅ **Setup completo e pronto para instalação!**
-
-**Próximo passo**: Instalar dependências e testar o pipeline! 🚀
+**Status**: ✅ **Setup completo e dual pipeline pronto para instalação!**  
+**Próximo passo**: Instalar dependências e testar os pipelines! 🚀  
+**Sistema**: Dual Pipeline (Classification + Regression)  
+**Modelos ML**: 17 total (6 classifiers + 11 regressors)
 
 ---
 
-# 🎯 ATUALIZAÇÃO 21/10/2025 - Setup Melhorado
-
-## ✅ Resposta: "Preciso me preocupar com '❌ Pipeline falhou!'?"
-
-**NÃO!** Era apenas falta de dependências que agora foram instaladas! 🎉
-
-## 📦 Dependências Adicionadas
-
-### Recém Instaladas:
-- ✅ **umap-learn** (dimensionality reduction para FM4M)
-- ✅ **xgboost** (gradient boosting para FM4M)
-- ✅ **selfies** (representação molecular)
-- ✅ **mordred** (descritores moleculares)
-- ✅ **numba** (compilador JIT para umap)
-- ✅ **networkx 2.8** (processamento de grafos)
-- ✅ **ase** (atomic simulation environment)
-- ✅ **RDKit 2025.9.1** (já estava instalado!)
-
-## 🔧 Setup.py Melhorado
-
-### Nova Função: Verificação Inteligente de Pacotes
-```python
-def check_package_installed(python_exe: str, package_name: str) -> bool:
-    """Verifica se um pacote está instalado antes de tentar instalar."""
-    # Mapeia nomes de pacotes para módulos (fair-esm → esm, etc.)
-    # Evita reinstalação desnecessária
-    # Muito mais rápido em execuções subsequentes!
-```
-
-### Benefícios:
-- ♻️  **Instalação Incremental**: Instala apenas o que falta
-- ⚡ **Mais Rápido**: Pula pacotes já instalados
-- 📊 **Relatório Detalhado**: Mostra resumo de instalação
-- 🎯 **Focado em env**: Ignora conda, usa apenas ambiente virtual Python
-
-### Uso:
-```bash
-# Primeira vez: instala tudo (5-10 min)
-python setup.py
-
-# Execuções seguintes: verifica e instala apenas novos (30s)
-python setup.py
-```
-
-## 🚀 Status do Pipeline
-
-### Teste em Execução:
-- Script: `test_pipeline_small.py`
-- Dataset: 1000 amostras (500 ativas + 500 inativas)
-- Modelo ESM: `esm2_t6_8M_UR50D` (8M parâmetros, ~30MB)
-- Cache: `models_cache/ESM/` (modelo já baixado)
-
-### Progresso:
-1. ✅ Embeddings de proteínas: 275 sequências únicas processadas
-2. 🔄 Embeddings de ligantes: Processando com FM4M
-3. ⏳ Matriz concatenada: Aguardando
-4. ⏳ Estratificação 80/10/10: Aguardando
-
-## 📝 Comandos Úteis
-
-### Verificar Status:
-```bash
-source env/bin/activate
-python -c "import rdkit, umap, xgboost; print('✅ Todas dependências OK!')"
-```
-
-### Ver Pacotes Instalados:
-```bash
-source env/bin/activate
-pip list | grep -E "(esm|rdkit|umap|xgboost|torch)"
-```
-
-### Reexecutar Teste:
-```bash
-source env/bin/activate
-python test_pipeline_small.py
-```
-
-## 🎉 Conclusão
-
-**Tudo resolvido!** O pipeline agora tem:
-- ✅ Todas as dependências instaladas
-- ✅ Setup inteligente (não reinstala o que já tem)
-- ✅ Modelo ESM menor para testes rápidos
-- ✅ Cache local de modelos
-- ✅ Foco em ambiente virtual Python (env)
-
-**Erro "Pipeline falhou" resolvido** - eram apenas pacotes faltando! 🚀
-
+**Gerado em**: 28 de Outubro de 2025  
+**Branch**: regression  
+**Commits**: 7 total (c59e86d → 0a35ea3)
