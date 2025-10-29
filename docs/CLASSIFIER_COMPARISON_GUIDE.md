@@ -4,6 +4,10 @@
 
 O script `compare_classifiers.py` treina e compara **automaticamente** múltiplos algoritmos de machine learning para encontrar o **melhor classificador** para seus dados.
 
+> **🆕 NOVO**: O DockTKinase agora suporta **dual pipeline system**:
+> - **Classification Pipeline**: Predição binária (ATIVO/INATIVO) - Este guia
+> - **Regression Pipeline**: Predição quantitativa (Ki, Kd, IC50) - Ver `run_regression_pipeline.py`
+
 ## 🎯 Modelos Testados
 
 | Modelo | Tipo | Descrição | Vantagens |
@@ -246,7 +250,7 @@ Val Acc:   0.40
 
 Após identificar o melhor modelo:
 
-1. **Retreinar com dataset completo**:
+1. **Retreinar com dataset completo** (Classification):
    ```bash
    python run_complete_pipeline.py \
        --dataset human \
@@ -255,18 +259,57 @@ Após identificar o melhor modelo:
    ```
    (Modifique o código para usar o classificador escolhido)
 
-2. **Hyperparameter tuning**:
+2. **OU Usar Regression Pipeline** (Predição Quantitativa):
+   ```bash
+   # Para predições de valores numéricos (Ki, Kd, IC50)
+   python run_regression_pipeline.py \
+       --dataset data/kinase_all.tsv \
+       --activity-type ki \
+       --models random_forest xgboost \
+       --output-dir results/regression_ki
+   ```
+   Ver documentação em `src/regression/README_IMPROVEMENTS.md`
+
+3. **Hyperparameter tuning**:
    - GridSearchCV
    - RandomizedSearchCV
    - Optuna
 
-3. **Cross-validation**:
+4. **Cross-validation**:
    - K-fold para estabilidade
    - Stratified K-fold
 
-4. **Feature engineering**:
+5. **Feature engineering**:
    - Diferentes métodos de pooling de embeddings
    - Combinação de features
+
+---
+
+## 🔄 Comparação: Classification vs Regression
+
+### Quando usar Classification?
+- ✅ Decisão binária: ATIVO/INATIVO
+- ✅ Screening inicial de compostos
+- ✅ Priorização de candidatos
+- ✅ Análise exploratória rápida
+
+### Quando usar Regression?
+- ✅ Predição de valores exatos (Ki, Kd, IC50)
+- ✅ Otimização quantitativa de compostos
+- ✅ Análise de relação estrutura-atividade (SAR)
+- ✅ Modelagem farmacocinética
+
+### Dual Pipeline Workflow Recomendado:
+```bash
+# 1. Classification para screening inicial
+python compare_classifiers.py --max-samples 10000
+
+# 2. Regression para compostos ativos
+python run_regression_pipeline.py \
+    --dataset data/active_compounds.tsv \
+    --activity-type ki \
+    --models xgboost random_forest
+```
 
 ---
 
@@ -282,4 +325,7 @@ Após identificar o melhor modelo:
 
 **Autor**: DockTKinase Pipeline  
 **Data**: Outubro 2025  
-**Versão**: 1.0
+**Versão**: 2.0 - Dual Pipeline System  
+**Sistema**: 17 modelos ML total (6 classifiers + 11 regressors)
+
+````
