@@ -1,12 +1,27 @@
-# ⚡ Quick Start - DockTKinase
+# Quick Start
 
-**Guia rápido para executar os pipelines de classificação e regressão.**
+**Last Updated**: October 28, 2025  
+**Section**: Chapter 01 - Getting Started  
+**Audience**: New Users
 
 ---
 
-## 🚀 **4 Passos Simples**
+Quick guide to run classification and regression pipelines in 4 simple steps.
 
-### **1️⃣ Setup Inicial (apenas uma vez)**
+## Table of Contents
+
+1. [4 Simple Steps](#4-simple-steps)
+2. [Complete Execution Order](#complete-execution-order)
+3. [Available Pipelines](#available-pipelines)
+4. [Available Models](#available-models)
+5. [Quick Configuration](#quick-configuration)
+6. [Quick Troubleshooting](#quick-troubleshooting)
+
+---
+
+## 4 Simple Steps
+
+### Step 1: Initial Setup (one-time only)
 
 ```bash
 # Clonar repositório
