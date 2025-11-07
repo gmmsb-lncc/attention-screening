@@ -146,18 +146,10 @@ class ModelManager:
             if str(fm4m_path) not in sys.path:
                 sys.path.insert(0, str(fm4m_path))
             
-            # Import load_smi_ted from the main module (not inference subdir)
-            # Both light and large versions have the same interface
-            if 'large' in model_name.lower():
-                # For large model - would need smi-ted-Large_30.pt
-                checkpoint_file = 'smi-ted-Large_30.pt'
-                version = 'Large'
-                # Note: Large model uses same load function but different checkpoint
-                from models.smi_ted.smi_ted_light.load import load_smi_ted
-            else:  # light or default
-                checkpoint_file = 'smi-ted-Light_40.pt'
-                version = 'Light'
-                from models.smi_ted.smi_ted_light.load import load_smi_ted
+            # Only Light model is available on HuggingFace
+            checkpoint_file = 'smi-ted-Light_40.pt'
+            version = 'Light'
+            from models.smi_ted.smi_ted_light.load import load_smi_ted
             
             # Determine model path
             if model_path is None:
@@ -169,7 +161,7 @@ class ModelManager:
                 raise FileNotFoundError(
                     f"FM4M checkpoint not found: {checkpoint_file}\n"
                     f"Expected at: {ckpt_path}\n"
-                    f"Please download the model file or use 'smi_ted_light' which is available."
+                    f"Download from: https://huggingface.co/ibm/materials.smi-ted"
                 )
             
             # Load model - load_smi_ted returns the model instance

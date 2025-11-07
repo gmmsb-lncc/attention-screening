@@ -90,21 +90,14 @@ class ModelRegistry:
         )
     }
     
-    # FM4M Models
+    # FM4M models (SMI-TED)
+    # Note: Only Light model is available on HuggingFace
     FM4M_MODELS = {
         'smi_ted_light': ModelInfo(
             name='smi_ted_light',
             type='fm4m',
             embedding_dim=768,
-            description='SMI-TED Light (small molecule embeddings, faster)',
-            requires_gpu=False
-        ),
-        'smi_ted_large': ModelInfo(
-            name='smi_ted_large',
-            type='fm4m',
-            embedding_dim=768,
-            description='SMI-TED Large (small molecule embeddings, higher quality)',
-            requires_gpu=False
+            description='SMI-TED Light model (40 layers) for molecular embeddings'
         )
     }
     
@@ -176,7 +169,7 @@ class ModelRegistry:
         if model_type == 'esm':
             return 'esm2_t33_650M_UR50D'
         elif model_type == 'fm4m':
-            return 'smi_ted_large'  # Use large for production, light for testing
+            return 'smi_ted_light'  # Only Light model available on HuggingFace
         else:
             raise ValueError(f"Unknown model type: {model_type}")
     
