@@ -4,13 +4,24 @@ Pipeline de Regressão - DockTKinase
 ====================================
 
 Pipeline completo para previsão de valores de atividade (Ki, Kd, IC50).
-Reutiliza embeddings e splits do pipeline de classificação.
 
-Uso:
+🎯 DUAS INTERFACES DISPONÍVEIS:
+
+1. **Pipeline Tradicional**: Reutiliza embeddings e splits do classificador
+2. **Pipeline Modular** ⭐ NOVO: Standalone com interface simplificada
+
+Uso Tradicional:
     python run_regression_pipeline.py --dataset all --model esm2_t36_3B_UR50D
 
+Uso Modular (Standalone):
+    python src/regression/modular_regression.py embeddings.npy targets.npy
+
+Ver documentação completa:
+    - README.md (pipeline tradicional)
+    - src/regression/README_MODULAR.md (pipeline modular)
+
 Autor: DockTKinase Team
-Data: 2024
+Data: 2024-2025
 """
 
 import argparse
@@ -702,29 +713,49 @@ def main():
         epilog="""
 Exemplos de uso:
 
-  # Regressão usando embeddings e splits da classificação
+  # Pipeline TRADICIONAL (reutiliza embeddings do classificador):
+  
+  # 1. Regressão usando embeddings e splits da classificação
   python run_regression_pipeline.py \\
       --dataset all \\
       --model esm2_t36_3B_UR50D \\
       --classification-stats results/pipeline_stats.json \\
       --embeddings-cache results/embeddings_esm2_t36_3B_UR50D.npz
 
-  # Gerar embeddings automaticamente (sem cache)
+  # 2. Gerar embeddings automaticamente (sem cache)
   python run_regression_pipeline.py \\
       --dataset human \\
       --model esm2_t6_8M_UR50D \\
       --classification-stats results/test_small/pipeline_stats.json \\
       --output-dir results/test_small/regression
 
-  # Com GPU CUDA
+  # 3. Com GPU CUDA
   python run_regression_pipeline.py \\
       --dataset egfr \\
       --device cuda
 
-  # Com Apple Silicon (M1/M2)
+  # 4. Com Apple Silicon (M1/M2)
   python run_regression_pipeline.py \\
       --dataset all \\
       --device mps
+
+  # Pipeline MODULAR ⭐ NOVO (standalone, interface simplificada):
+  
+  # 1. Execução básica
+  python src/regression/modular_regression.py embeddings.npy targets.npy
+  
+  # 2. Com modelos específicos
+  python src/regression/modular_regression.py embeddings.npy targets.npy \\
+      --models RandomForest XGBoost KNN
+  
+  # 3. Customizar output e splits
+  python src/regression/modular_regression.py embeddings.npy targets.npy \\
+      --output results/my_experiment \\
+      --test-size 0.15 --val-size 0.15
+  
+  Ver documentação completa em:
+    - README.md (pipeline tradicional)
+    - src/regression/README_MODULAR.md (pipeline modular)
         """
     )
     
