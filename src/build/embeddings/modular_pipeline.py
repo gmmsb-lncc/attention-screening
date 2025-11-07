@@ -126,13 +126,13 @@ class EmbeddingPipeline:
             if self.verbose:
                 print("\n✓ Step 2: Validating sequences...")
             
-            valid_seqs, valid_indices, errors = validate_protein_batch(
+            valid_seqs, valid_indices = validate_protein_batch(
                 sequences,
                 verbose=self.verbose
             )
             
-            if len(errors) > 0 and self.verbose:
-                print(f"   ⚠️  Removed {len(errors)} invalid sequences")
+            if len(valid_seqs) < len(sequences) and self.verbose:
+                print(f"   ⚠️  Removed {len(sequences) - len(valid_seqs)} invalid sequences")
             
             sequences = valid_seqs
             ids = [ids[i] for i in valid_indices]
@@ -248,13 +248,13 @@ class EmbeddingPipeline:
             if self.verbose:
                 print("\n✓ Step 2: Validating SMILES...")
             
-            valid_smiles, valid_indices, errors = validate_smiles_batch(
+            valid_smiles, valid_indices = validate_smiles_batch(
                 smiles_list,
                 verbose=self.verbose
             )
             
-            if len(errors) > 0 and self.verbose:
-                print(f"   ⚠️  Removed {len(errors)} invalid SMILES")
+            if len(valid_smiles) < len(smiles_list) and self.verbose:
+                print(f"   ⚠️  Removed {len(smiles_list) - len(valid_smiles)} invalid SMILES")
             
             smiles_list = valid_smiles
             ids = [ids[i] for i in valid_indices]
