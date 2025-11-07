@@ -146,14 +146,21 @@ class ModelManager:
             if str(fm4m_path) not in sys.path:
                 sys.path.insert(0, str(fm4m_path))
             
-            from models.SMI_TED import SMI_TED_Light
+            # Import SMI-TED from inference module
+            # Note: Only Light model is available on HuggingFace (ibm/materials.smi-ted)
+            # Large model not publicly released yet
+            from models.smi_ted.smi_ted_light.load import load_smi_ted
             
             # Determine model path
             if model_path is None:
                 model_path = fm4m_path / 'model_files'
             
-            # Load model
-            model = SMI_TED_Light(folder=str(model_path))
+            # Load model - load_smi_ted returns the model instance
+            # Using Light model (only one available: smi-ted-Light_40.pt)
+            model = load_smi_ted(
+                folder=str(model_path),
+                ckpt_filename='smi-ted-Light_40.pt'
+            )
             
             # Cache
             self._fm4m_models[cache_key] = model
@@ -165,7 +172,7 @@ class ModelManager:
             }
             
             if self.verbose:
-                print(f"   ✅ FM4M model loaded successfully")
+                print(f"   ✅ FM4M model loaded successfully (SMI-TED)")
                 print(f"      Embedding dimension: 768")
             
             return model

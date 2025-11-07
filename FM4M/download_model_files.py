@@ -40,13 +40,15 @@ def download_model_files_with_retry(repo_id, filenames, local_dir="./model_files
     return downloaded_files
 
 if __name__ == "__main__":
-    # Files needed for SMI-TED model
+    # Files needed for SMI-TED models (Light for testing, Large for production)
     files = [
         "bert_vocab_curated.txt",
-        "smi-ted-Light_40.pt"
+        "smi-ted-Light_40.pt",  # ~1.1GB for testing
+        "smi_ted_Large.pt"       # ~3GB for production
     ]
     
     print("Downloading SMI-TED model files...")
+    print("Note: Downloading both Light (~1.1GB) and Large (~3GB) models")
     downloaded = download_model_files_with_retry(
         repo_id="ibm/materials.smi-ted",
         filenames=files,
