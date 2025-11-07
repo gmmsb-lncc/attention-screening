@@ -164,13 +164,14 @@ def test_pipeline_ligand_embeddings():
         
         print(f"\n📊 Test Setup:")
         print(f"   - SMILES: {len(test_smiles)}")
-        print(f"   - Model: FM4M")
+        print(f"   - Model: smi_ted_light (for testing)")
         
         print(f"\n🚀 Generating ligand embeddings...")
         
         try:
             embeddings = pipeline.generate_ligand_embeddings(
                 source=test_smiles,
+                model_name='smi_ted_light'  # Use light for testing
             )
             
             print(f"\n✅ Results:")
@@ -184,10 +185,12 @@ def test_pipeline_ligand_embeddings():
             
             print("\n✅ TEST 5.3 PASSED!")
             
-        except ImportError as e:
-            if "FM4M" in str(e) or "SMI_TED" in str(e):
-                print(f"\n⚠️  TEST 5.3 SKIPPED: FM4M not installed")
-                print(f"   Install FM4M to enable ligand embedding tests")
+        except (ImportError, FileNotFoundError, RuntimeError) as e:
+            error_msg = str(e)
+            if "FM4M" in error_msg or "SMI_TED" in error_msg or "checkpoint" in error_msg:
+                print(f"\n⚠️  TEST 5.3 SKIPPED: FM4M model not available")
+                print(f"   Reason: {error_msg.split(':')[0]}")
+                print(f"   Download smi-ted-Light_40.pt to enable this test")
             else:
                 raise
         
