@@ -42,10 +42,10 @@ def test_cache_manager_init():
         info = cache.get_cache_info()
         print(f"\n📊 Cache info:")
         print(f"   - Memory cache size: {info['memory_cache_size']}")
-        print(f"   - Disk cache files: {info['disk_cache_files']}")
+        print(f"   - Disk cache files: {info['disk_cache_size']}")
         
         assert info['memory_cache_size'] == 0
-        assert info['disk_cache_files'] == 0
+        assert info['disk_cache_size'] == 0
         
         print("\n✅ TEST 4.1 PASSED!")
         
@@ -59,9 +59,7 @@ def test_memory_cache():
     print("TEST 4.2: Memory Cache")
     print("="*70)
     
-    cache_dir = tempfile.mkdtemp()
-    
-    try:
+    # No disk cache for this test
     try:
         cache = CacheManager(
             cache_dir=None,  # No disk cache
@@ -104,8 +102,9 @@ def test_memory_cache():
         
         print("\n✅ TEST 4.2 PASSED!")
         
-    finally:
-        shutil.rmtree(cache_dir)
+    except Exception as e:
+        print(f"\n❌ TEST 4.2 FAILED: {e}")
+        raise
 
 
 def test_disk_cache():
@@ -157,7 +156,7 @@ def test_disk_cache():
         
         # Check cache files
         info = cache.get_cache_info()
-        assert info['disk_cache_files'] >= 1, "Should have cache files on disk"
+        assert info['disk_cache_size'] >= 1, "Should have cache files on disk"
         
         print("\n✅ TEST 4.3 PASSED!")
         
@@ -233,7 +232,7 @@ def test_clear_cache():
         info = cache.get_cache_info()
         print(f"\n📊 Before clear:")
         print(f"   - Memory cache: {info['memory_cache_size']}")
-        print(f"   - Disk cache: {info['disk_cache_files']}")
+        print(f"   - Disk cache: {info['disk_cache_size']}")
         
         # Clear all
         print(f"\n📊 Clearing all caches...")
@@ -243,10 +242,10 @@ def test_clear_cache():
         info = cache.get_cache_info()
         print(f"\n📊 After clear:")
         print(f"   - Memory cache: {info['memory_cache_size']}")
-        print(f"   - Disk cache: {info['disk_cache_files']}")
+        print(f"   - Disk cache: {info['disk_cache_size']}")
         
         assert info['memory_cache_size'] == 0
-        assert info['disk_cache_files'] == 0
+        assert info['disk_cache_size'] == 0
         
         print("\n✅ TEST 4.5 PASSED!")
         
