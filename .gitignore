@@ -34,6 +34,31 @@ non_humans/
 
 # FM4M - exclude large model files but keep structure
 FM4M/models/*/model_files/
+FM4M/model_files/
 FM4M/data/
 FM4M/examples/*.ipynb
 FM4M/img/test.py
+
+# ESM - exclude downloaded models
+ESM/
+
+# Model caches
+models_cache/
+
+# Results and outputs
+results/
+tests/comparison_output/
+tests/pipeline_output/
+tests/test_output_small/
+tests/regression_modular_test/
+
+# Temporary files
+tmp/
+
+# Test datasets (keep structure but ignore data)
+tests/datasets/*.tsv
+tests/datasets/*.csv
+
+# macOS system files
+.DS_Store
+**/.DS_Store
