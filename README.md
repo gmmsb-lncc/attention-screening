@@ -406,8 +406,11 @@ results = classifier.train_and_evaluate("features.npy", "labels.npy")
 
 #### 📊 Regression Pipeline for Activity Prediction
 
-**NEW**: Predict quantitative activity values (nM) using regression models with **production-ready infrastructure**!
+**NEW**: Predict quantitative activity values (nM) using regression models with **production-ready infrastructure** and **modular architecture**!
 
+**🎯 Two interfaces available:**
+
+**1. Pipeline Tradicional** (reutiliza embeddings do classificador):
 ```bash
 # Step 1: Run classification pipeline to generate embeddings and splits
 python run_complete_pipeline.py \
@@ -424,16 +427,41 @@ python run_regression_pipeline.py \
     --device cuda
 ```
 
+**2. Pipeline Modular** ⭐ **NOVO** (standalone, não requer classificador):
+```bash
+# Execução standalone com embeddings pré-gerados
+python src/regression/modular_regression.py embeddings.npy targets.npy
+
+# Com opções customizadas
+python src/regression/modular_regression.py embeddings.npy targets.npy \
+    --models RandomForest XGBoost KNN \
+    --output results/my_experiment \
+    --test-size 0.2 --val-size 0.1
+
+# Via API Python
+from regression.modular_pipeline import RegressionPipeline
+
+pipeline = RegressionPipeline(
+    embeddings_path='embeddings.npy',
+    targets_path='targets.npy',
+    output_dir='results/regression'
+)
+results = pipeline.run()
+```
+
 **Features**:
 - 🎯 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
+- 🏗️ **Modular Architecture** ⭐ **NOVO**: Structured as core/models/utils (same pattern as classifier)
 - 📊 **Target Prioritization**: Ki > Kd > IC50 (uses highest priority available)
-- 🔄 **Embeddings Reuse**: Leverages embeddings from classification pipeline
+- 🔀 **Stratified Split**: Quantile-based stratification for regression targets
+- 🔄 **Embeddings Reuse**: Leverages embeddings from classification pipeline (traditional) OR standalone (modular)
 - 📈 **Same Splits**: Uses identical train/val/test splits for fair comparison
-- 📉 **Comprehensive Metrics**: MAE, RMSE, R², MAPE, percentile errors
+- 📉 **Comprehensive Metrics**: 15+ metrics (MAE, RMSE, R², MAPE, percentiles, CV-RMSE)
 - 🎨 **Rich Visualizations**: Predictions vs actual, residuals, model comparison, error distribution
 - 💾 **Complete Output**: Models, predictions (CSV), metrics (JSON), plots (PNG)
 - ✅ **Production-Ready**: Robust validation, professional logging, centralized configuration
 - 🧪 **100% Tested**: All modules tested with comprehensive test suites
+- 🔌 **Two Interfaces**: Traditional pipeline OR modular API/CLI
 
 **Professional Infrastructure** (NEW - Oct 2025):
 - 🔍 **Robust Validation**: 10+ automatic data checks (NaN, Inf, outliers, variance, compatibility)
@@ -467,7 +495,7 @@ results/regression/
 └── regression_stats.json      # Pipeline statistics
 ```
 
-**Python API with Professional Modules**:
+**Python API - Traditional Approach**:
 ```python
 from src.regression import (
     RegressionModels,
@@ -509,6 +537,39 @@ evaluator = RegressionEvaluator(verbose=config.verbose)
 test_results = evaluator.evaluate_all(trainer.trained_models, X_test, y_test)
 best_model = evaluator.get_best_model(metric='RMSE')
 logger.success(f'Best model: {best_model}')
+```
+
+**Python API - Modular Approach** ⭐ **NOVO**:
+```python
+from regression.modular_pipeline import RegressionPipeline
+from regression.core import DataManager
+from regression.utils import MetricsCalculator
+from regression.models import RegressionModels
+
+# 1. Complete pipeline (recommended)
+pipeline = RegressionPipeline(
+    embeddings_path='protein_embeddings.npy',
+    targets_path='activity_targets.npy',
+    output_dir='results/regression',
+    models_to_train=['RandomForest', 'XGBoost', 'KNN'],
+    test_size=0.2,
+    val_size=0.1,
+    random_state=42
+)
+results = pipeline.run()
+
+# 2. OR use components individually
+manager = DataManager('embeddings.npy', 'targets.npy')
+X_train, X_val, X_test, y_train, y_val, y_test = manager.split_data(
+    test_size=0.2, val_size=0.1, stratify_bins=5
+)
+
+calculator = MetricsCalculator()
+metrics = calculator.calculate_all_metrics(y_true, y_pred, 'MyModel')
+print(calculator.format_metrics_table(metrics))
+
+# 3. Get all available models
+models = RegressionModels.get_all_models(random_state=42)
 ```
 
 **Quality Metrics** (Oct 2025 Update):
@@ -822,13 +883,23 @@ config = BuildConfig({
 
 ### 🚀 Major Feature: Production-Ready Regression Module
 
-**NEW Regression Pipeline** with professional infrastructure (Oct 25, 2025):
+**NEW Regression Pipeline** with professional infrastructure and **modular architecture** (Oct-Nov 2025):
+
+#### **🏗️ Modular Architecture** ⭐ **NOVO** (Nov 2025)
+- **Structured** as `core/`, `models/`, `utils/` (identical pattern to classifier)
+- **DataManager**: Smart data loading with stratified split using quantile bins
+- **MetricsCalculator**: 15+ comprehensive metrics (MAE, RMSE, R², percentiles, CV-RMSE)
+- **RegressionPipeline**: Complete orchestrated pipeline
+- **CLI Interface**: `modular_regression.py` for standalone execution
+- **100% compatible** with original implementation
+- **Fully documented** with examples and tests
 
 #### **Core Features**
 - 📈 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
 - 📊 **Target Prioritization**: Ki > Kd > IC50 (configurable, scientifically justified)
-- 🔄 **Embeddings Reuse**: Leverages classification pipeline outputs
-- 📉 **Comprehensive Metrics**: MAE, RMSE, R², MAPE, percentile errors
+- 🔄 **Embeddings Reuse**: Leverages classification pipeline outputs OR standalone
+- � **Stratified Split**: Quantile-based stratification for regression targets
+- �📉 **Comprehensive Metrics**: 15+ metrics including percentiles and normalized RMSE
 
 #### **Professional Infrastructure** (4 New Modules)
 1. **`validation.py` (250 lines)** - Robust data validation
@@ -857,10 +928,14 @@ config = BuildConfig({
 
 #### **Quality Metrics**
 - ✅ **45 bugs fixed** across classification and regression modules
-- ✅ **100% test pass rate** (19/19 comprehensive tests)
+- ✅ **Modular architecture** applied to regression (Nov 2025) - same pattern as classifier
+- ✅ **100% test pass rate** (19/19 comprehensive tests + realistic regression test)
 - ✅ **~950 lines** of production-ready infrastructure code
 - ✅ **Complete documentation** with docstrings, type hints, and examples
-- ✅ **2 git commits** on dedicated `regression` branch (pushed to GitHub)
+- ✅ **3 git commits** on dedicated `regression` branch:
+  - Implementation of modular structure
+  - Comprehensive documentation
+  - Integration updates
 
 ### ✅ Classification & Build Improvements
 
@@ -888,7 +963,9 @@ config = BuildConfig({
 
 **📋 Reports**: 
 - [Pipeline Success](docs/PIPELINE_SUCCESS_REPORT.md)
+- [Regression Modular Architecture](src/regression/README_MODULAR.md) ⭐ **NOVO**
 - [Regression Improvements](src/regression/README_IMPROVEMENTS.md)
+- [Regression Modularization Report](docs/REGRESSION_MODULAR_REPORT.md) ⭐ **NOVO**
 - [Bug Fixes Analysis](ANALISE_ERROS_E_INCONSISTENCIAS.md)
 
 ## 🔧 Troubleshooting

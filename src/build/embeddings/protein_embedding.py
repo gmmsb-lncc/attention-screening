@@ -79,11 +79,17 @@ class ProteinEmbedding(BaseEmbedding):
         if self.model_name not in ESM_MODELS:
             raise EmbeddingError(f"Modelo ESM inválido: {self.model_name}. Modelos disponíveis: {list(ESM_MODELS.keys())}")
         
-        # Verificar configuração de GPU
+        # Verificar configuração de GPU (CUDA ou MPS)
         if self.use_gpu:
-            if not hasattr(self, 'torch') or not self.torch.cuda.is_available():
+            import torch
+            has_cuda = torch.cuda.is_available()
+            has_mps = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+            
+            if not (has_cuda or has_mps):
                 self.logger.warning("GPU solicitada mas não disponível. Usando CPU.")
                 self.use_gpu = False
+            elif has_mps and not has_cuda:
+                self.logger.info("✨ Usando MPS (Metal Performance Shaders) para aceleração GPU")
     
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
         """Retorna modelos ESM suportados."""
@@ -93,10 +99,17 @@ class ProteinEmbedding(BaseEmbedding):
         """Carrega modelo ESM com cache local."""
         self.logger.info(f"Configurando dispositivo...")
         
-        # Configurar dispositivo
-        if self.use_gpu and self.torch.cuda.is_available():
-            self.device = self.torch.device("cuda")
-            self.logger.info(f"Usando GPU: {self.torch.cuda.get_device_name()}")
+        # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
+        if self.use_gpu:
+            if self.torch.cuda.is_available():
+                self.device = self.torch.device("cuda")
+                self.logger.info(f"Usando GPU CUDA: {self.torch.cuda.get_device_name()}")
+            elif hasattr(self.torch.backends, 'mps') and self.torch.backends.mps.is_available():
+                self.device = self.torch.device("mps")
+                self.logger.info("✨ Usando GPU MPS (Metal Performance Shaders - Apple Silicon)")
+            else:
+                self.device = self.torch.device("cpu")
+                self.logger.info("Usando CPU")
         else:
             self.device = self.torch.device("cpu")
             self.logger.info("Usando CPU")
