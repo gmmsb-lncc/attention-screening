@@ -35,20 +35,26 @@ This directory contains the core source code of DockTKinase, organized into thre
 - **Documentation**: [Classifier Module README](classifier/README.md)
 
 ### 📈 [`regression/`](regression/) - Machine Learning Regression **NEW**
-**Professional regression pipeline for quantitative activity prediction with production-ready infrastructure.**
+**Professional regression pipeline for quantitative activity prediction with production-ready infrastructure and modular architecture.**
 
 - **Purpose**: Predict continuous activity values (Ki, Kd, IC50 in nM)
+- **🏗️ Architecture** ⭐ **NOVO** (Nov 2025):
+  - **Modular structure**: `core/` (DataManager, Trainer, Evaluator) | `models/` (ML models) | `utils/` (MetricsCalculator)
+  - **Same pattern** as classifier for consistency
+  - **Two interfaces**: Traditional pipeline OR standalone modular API/CLI
 - **Key Features**:
   - **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
   - **Target Prioritization**: Ki > Kd > IC50 (configurable)
+  - **Stratified Split**: Quantile-based stratification for regression ⭐ NOVO
+  - **15+ Metrics**: MAE, RMSE, R², MAPE, percentiles, CV-RMSE ⭐ NOVO
   - **Robust Validation**: 10+ automatic checks (NaN, Inf, outliers, variance)
   - **Professional Logging**: Colored console output with file logging
   - **Centralized Configuration**: JSON-serializable configs with profiles
-  - Comprehensive metrics (MAE, RMSE, R², MAPE) and visualizations
   - Model comparison and automatic best model selection
-- **Architecture**: Clean modular design with validation.py, logger.py, config.py
-- **Quality**: 100% tested, 45 bugs fixed, production-ready
-- **Documentation**: [Regression Improvements README](regression/README_IMPROVEMENTS.md)
+- **Quality**: 100% tested with realistic tests, 45 bugs fixed, production-ready
+- **Documentation**: 
+  - [Modular Architecture Guide](regression/README_MODULAR.md) ⭐ **NOVO**
+  - [Regression Improvements README](regression/README_IMPROVEMENTS.md)
 
 ### 🔧 [`utils/`](utils/) - Shared Utilities **NEW**
 **Centralized utilities following DRY (Don't Repeat Yourself) principle.**
