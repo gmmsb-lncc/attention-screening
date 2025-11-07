@@ -47,10 +47,8 @@
     - Loaded 3 unique sequences
     - Generated 320-dim embeddings
   - ⚠️  Test 5.3: Ligand embeddings with FM4M
-    - **SKIPPED** → **PASSED** ✅ (Fixed!)
-    - SMI-TED Light model working correctly
-    - Generated 768-dim embeddings for 3 SMILES
-    - Model: `smi_ted_light` (only version available on HuggingFace)
+    - **SKIPPED**: FM4M not installed (expected, optional dependency)
+    - Test gracefully handles missing FM4M
   - ✅ Test 5.4: Error handling
     - Empty sequences → ValueError ✅
     - Invalid model name → RuntimeError ✅
@@ -83,21 +81,16 @@ valid_seqs, valid_indices = validate_protein_batch(...)
 - Removed `batch_size` from method calls (set in `__init__`)
 
 ### 3. FM4M Optional Dependency
-**Problem:** Test 5.3 failed when FM4M not properly integrated
+**Problem:** Test 5.3 failed when FM4M not installed
 
-**Fix:** Corrected import path to use `models.smi_ted.smi_ted_light.load`:
+**Fix:** Added graceful exception handling:
 ```python
-# Correct import
-from models.smi_ted.smi_ted_light.load import load_smi_ted
-
-# Load model
-model = load_smi_ted(
-    folder=str(model_path),
-    ckpt_filename='smi-ted-Light_40.pt'
-)
+try:
+    embeddings = pipeline.generate_ligand_embeddings(...)
+except ImportError as e:
+    if "FM4M" in str(e) or "SMI_TED" in str(e):
+        print("⚠️  TEST 5.3 SKIPPED: FM4M not installed")
 ```
-
-**Note:** Only SMI-TED Light model is available on HuggingFace. Large model not yet publicly released.
 
 ### 4. Error Handling Test
 **Problem:** Test expected `ValueError` but got `RuntimeError` for invalid model

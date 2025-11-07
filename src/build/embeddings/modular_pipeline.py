@@ -204,29 +204,34 @@ class EmbeddingPipeline:
     
     def generate_ligand_embeddings(
         self,
-        source: Union[str, Path, List[str], pd.DataFrame],
-        model_name: str = 'smi_ted_large',  # Use large for production
-        smiles_column: str = 'smiles',
-        id_column: Optional[str] = None,
-        validate: bool = True,
+        source: Union[str, List[str]],
+        model_name: str = 'smi_ted_light',  # Only Light model available
+        batch_size: int = 100,
+        output_file: Optional[str] = None,
+        return_dict: bool = False,
         use_cache: bool = True,
-        output_path: Optional[Path] = None
-    ) -> np.ndarray:
+        smiles_column: str = 'SMILES',
+        id_column: Optional[str] = None,
+        validate: bool = True
+    ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
         """
         Generate ligand embeddings using FM4M models.
         
         Args:
             source: Source of SMILES (file, list, or DataFrame)
-            model_name: FM4M model name (default: 'smi_ted_large' for production)
+            model_name: FM4M model name (default: 'smi_ted_light' - only model available)
             smiles_column: Column name for SMILES (if DataFrame/CSV)
             id_column: Column name for IDs (if DataFrame/CSV)
             validate: Whether to validate SMILES
             use_cache: Whether to use caching
-            output_path: Path to save embeddings (optional)
+            output_file: Path to save embeddings (optional)
             
         Returns:
             NumPy array of embeddings
         """
+        # Convert output_file to Path if provided
+        output_path = Path(output_file) if output_file else None
+        
         if self.verbose:
             print("\n" + "="*80)
             print("💊 LIGAND EMBEDDING GENERATION")
