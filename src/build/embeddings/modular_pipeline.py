@@ -205,7 +205,7 @@ class EmbeddingPipeline:
     def generate_ligand_embeddings(
         self,
         source: Union[str, Path, List[str], pd.DataFrame],
-        model_name: str = 'smi_ted_light',
+        model_name: str = 'smi_ted_large',  # Use large for production
         smiles_column: str = 'smiles',
         id_column: Optional[str] = None,
         validate: bool = True,
@@ -217,7 +217,7 @@ class EmbeddingPipeline:
         
         Args:
             source: Source of SMILES (file, list, or DataFrame)
-            model_name: FM4M model name
+            model_name: FM4M model name (default: 'smi_ted_large' for production)
             smiles_column: Column name for SMILES (if DataFrame/CSV)
             id_column: Column name for IDs (if DataFrame/CSV)
             validate: Whether to validate SMILES

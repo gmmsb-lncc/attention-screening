@@ -131,7 +131,61 @@ class EmbeddingGenerator:
         # Load model
         model = self.model_manager.load_fm4m_model(model_name)
         
-        # Generate embeddings
+        # FM4M models use batch encoding for efficiency
+        # The encode method handles batching internally
+        try:
+            if self.verbose:
+                print(f"   Encoding {len(smiles_list)} molecules with SMI-TED...")
+            
+            # Encode all SMILES at once (model handles batching)
+            embeddings = model.encode(
+                smiles_list,
+                useCuda=torch.cuda.is_available(),
+                batch_size=100,
+                return_torch=False  # Return numpy arrays
+            )
+            
+            # Convert to numpy if needed
+            if isinstance(embeddings, torch.Tensor):
+                embeddings = embeddings.cpu().numpy()
+            elif not isinstance(embeddings, np.ndarray):
+                embeddings = np.array(embeddings)
+            
+            # Ensure 2D array (n_samples, embedding_dim)
+            if embeddings.ndim == 1:
+                embeddings = embeddings.reshape(1, -1)
+            
+            if self.verbose:
+                print(f"   ✅ Generated embeddings shape: {embeddings.shape}")
+            
+            return embeddings
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"   ❌ Error encoding SMILES: {e}")
+            raise RuntimeError(f"Failed to generate FM4M embeddings: {e}")
+    
+    def _generate_fm4m_embeddings_individual(
+        self,
+        smiles_list: List[str],
+        model_name: str,
+        show_progress: bool = True
+    ) -> np.ndarray:
+        """
+        Generate FM4M embeddings one-by-one (fallback method).
+        
+        Args:
+            smiles_list: List of SMILES strings
+            model_name: FM4M model name
+            show_progress: Whether to show progress bar
+            
+        Returns:
+            NumPy array of embeddings (n_samples, embedding_dim)
+        """
+        # Load model
+        model = self.model_manager.load_fm4m_model(model_name)
+        
+        # Generate embeddings one by one
         all_embeddings = []
         
         # Create iterator
@@ -141,8 +195,12 @@ class EmbeddingGenerator:
         
         for smiles in iterator:
             try:
-                # Generate embedding for single SMILES
-                embedding = model.get_embedding(smiles)
+                # Generate embedding for single SMILES using encode
+                embedding = model.encode(
+                    [smiles],  # encode expects a list
+                    useCuda=torch.cuda.is_available(),
+                    return_torch=False
+                )
                 
                 # Handle different return types
                 if isinstance(embedding, torch.Tensor):

@@ -96,7 +96,14 @@ class ModelRegistry:
             name='smi_ted_light',
             type='fm4m',
             embedding_dim=768,
-            description='SMI-TED Light (default small molecule embeddings)',
+            description='SMI-TED Light (small molecule embeddings, faster)',
+            requires_gpu=False
+        ),
+        'smi_ted_large': ModelInfo(
+            name='smi_ted_large',
+            type='fm4m',
+            embedding_dim=768,
+            description='SMI-TED Large (small molecule embeddings, higher quality)',
             requires_gpu=False
         )
     }
@@ -169,7 +176,7 @@ class ModelRegistry:
         if model_type == 'esm':
             return 'esm2_t33_650M_UR50D'
         elif model_type == 'fm4m':
-            return 'smi_ted_light'
+            return 'smi_ted_large'  # Use large for production, light for testing
         else:
             raise ValueError(f"Unknown model type: {model_type}")
     
