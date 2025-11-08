@@ -172,6 +172,14 @@ class EmbeddingPipeline:
             show_progress=True
         )
         
+        # Validate embeddings for NaN/Inf
+        nan_count = np.isnan(embeddings).sum()
+        inf_count = np.isinf(embeddings).sum()
+        if nan_count > 0 or inf_count > 0:
+            if self.verbose:
+                print(f"   ⚠️  Warning: Embeddings contain {nan_count} NaN and {inf_count} Inf values")
+                print(f"      This may indicate issues with input sequences or model")
+        
         # Step 5: Cache embeddings
         if use_cache:
             if self.verbose:
@@ -293,6 +301,15 @@ class EmbeddingPipeline:
             show_progress=True
         )
         
+        # Validate embeddings for NaN (FM4M limitation with complex SMILES)
+        nan_count = np.isnan(embeddings).sum()
+        if nan_count > 0:
+            nan_rows = np.isnan(embeddings).any(axis=1).sum()
+            if self.verbose:
+                print(f"   ⚠️  Warning: {nan_rows} embeddings contain NaN values")
+                print(f"      This is a known FM4M limitation with complex SMILES")
+                print(f"      Consider using simpler SMILES or filtering these molecules")
+        
         # Step 5: Cache embeddings
         if use_cache:
             if self.verbose:
@@ -356,8 +373,36 @@ class EmbeddingPipeline:
         ModelRegistry.print_models(model_type)
     
     def get_cache_info(self) -> Dict[str, Any]:
-        """Get cache information."""
+        """
+        Get cache information and statistics.
+        
+        Returns:
+            Dictionary with cache statistics including size and entry count
+        """
         return self.cache_manager.get_cache_info()
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get detailed cache statistics.
+        
+        Returns:
+            Dictionary with:
+            - total_entries: Number of cached embeddings
+            - memory_cache_size: Size of in-memory cache
+            - disk_cache_size: Size of disk cache (if available)
+            - cache_hit_rate: Percentage of cache hits (if tracked)
+        """
+        stats = self.get_cache_info()
+        
+        # Add additional statistics
+        if hasattr(self.cache_manager, 'cache_hits') and hasattr(self.cache_manager, 'cache_misses'):
+            total = self.cache_manager.cache_hits + self.cache_manager.cache_misses
+            hit_rate = (self.cache_manager.cache_hits / total * 100) if total > 0 else 0
+            stats['cache_hit_rate'] = f"{hit_rate:.1f}%"
+            stats['cache_hits'] = self.cache_manager.cache_hits
+            stats['cache_misses'] = self.cache_manager.cache_misses
+        
+        return stats
     
     def clear_cache(self):
         """Clear all caches."""

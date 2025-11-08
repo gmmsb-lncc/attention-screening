@@ -485,7 +485,77 @@ print("✅ Test passed!")
 - Lazy model loading
 - Device management
 
-## 📈 Performance Tips
+## � Automatic Quality Checks (New!)
+
+### 1. NaN/Inf Detection in Protein Embeddings
+
+The pipeline now **automatically detects** invalid values in protein embeddings:
+
+```python
+pipeline = EmbeddingPipeline(use_gpu=True)
+embeddings = pipeline.generate_protein_embeddings(sequences)
+
+# If NaN/Inf detected, you'll see:
+# ⚠️  Warning: Embeddings contain 5 NaN and 0 Inf values
+#    This may indicate issues with input sequences or model
+```
+
+**What it means:**
+- NaN/Inf values indicate problematic sequences or model issues
+- The embeddings are still returned, but flagged for review
+- Consider removing problematic sequences and regenerating
+
+### 2. FM4M Limitation Detection
+
+The pipeline warns about **known FM4M limitations** with complex SMILES:
+
+```python
+embeddings = pipeline.generate_ligand_embeddings(complex_smiles)
+
+# If complex stereochemistry detected:
+# ⚠️  Warning: 3 embeddings contain NaN values
+#    This is a known FM4M limitation with complex SMILES
+#    Consider using simpler SMILES or filtering these molecules
+```
+
+**Known issue:**
+- FM4M can generate NaN for SMILES with complex stereochemistry
+- Example: Ibuprofen derivatives with multiple chiral centers
+- Solution: Filter or simplify problematic molecules
+
+### 3. Enhanced Cache Statistics
+
+New method to monitor cache performance:
+
+```python
+pipeline = EmbeddingPipeline(cache_dir=Path('cache'))
+
+# Generate some embeddings with cache enabled
+embeddings = pipeline.generate_protein_embeddings(
+    sequences, 
+    use_cache=True
+)
+
+# Get detailed cache statistics
+stats = pipeline.get_cache_stats()
+print(stats)
+# Output:
+# {
+#   'cache_dir': PosixPath('cache'),
+#   'total_entries': 150,
+#   'memory_cache_size': 45,
+#   'disk_cache_size': 105,
+#   'cache_hit_rate': '87.3%'  # If tracking enabled
+# }
+```
+
+**Benefits:**
+- Monitor cache efficiency
+- Track hit/miss rates
+- Optimize caching strategy
+- Debug cache issues
+
+## �📈 Performance Tips
 
 ### 1. Use GPU When Available
 ```python
@@ -512,6 +582,17 @@ pipeline = EmbeddingPipeline(batch_size=64)  # Default is 32
 # Fast: esm2_t6_8M_UR50D (320 dim)
 # Balanced: esm2_t33_650M_UR50D (1280 dim) ⭐ DEFAULT
 # Best: esm2_t48_15B_UR50D (5120 dim, requires GPU)
+```
+
+### 5. Monitor Cache Performance (New!)
+```python
+# Check cache statistics periodically
+stats = pipeline.get_cache_stats()
+print(f"Cache hit rate: {stats.get('cache_hit_rate', 'N/A')}")
+
+# Clear cache if hit rate is low
+if stats['memory_cache_size'] > 1000:
+    pipeline.clear_cache()
 ```
 
 ## 🔧 Troubleshooting
@@ -547,6 +628,54 @@ pipeline = EmbeddingPipeline(cache_dir=Path('cache'))
 ```python
 pipeline = EmbeddingPipeline(batch_size=64)
 ```
+
+### Issue: NaN Values in Embeddings (New!)
+
+**For Proteins (ESM):**
+```python
+# Check which sequences caused NaN
+embeddings = pipeline.generate_protein_embeddings(sequences)
+
+# If warning appears, inspect sequences:
+for i, seq in enumerate(sequences):
+    if np.isnan(embeddings[i]).any():
+        print(f"Problematic sequence: {seq}")
+        
+# Solution: Remove or fix problematic sequences
+valid_idx = ~np.isnan(embeddings).any(axis=1)
+clean_embeddings = embeddings[valid_idx]
+clean_sequences = [seq for i, seq in enumerate(sequences) if valid_idx[i]]
+```
+
+**For Ligands (FM4M):**
+```python
+# Known limitation with complex stereochemistry
+embeddings = pipeline.generate_ligand_embeddings(smiles_list)
+
+# If warning appears, filter NaN embeddings:
+valid_idx = ~np.isnan(embeddings).any(axis=1)
+clean_embeddings = embeddings[valid_idx]
+clean_smiles = [s for i, s in enumerate(smiles_list) if valid_idx[i]]
+
+# Or use simpler SMILES representations
+from rdkit import Chem
+simplified = [Chem.MolToSmiles(Chem.MolFromSmiles(s), isomericSmiles=False) 
+              for s in smiles_list]
+```
+
+### Issue: Low Cache Hit Rate (New!)
+
+**Check cache performance:**
+```python
+stats = pipeline.get_cache_stats()
+print(f"Hit rate: {stats.get('cache_hit_rate', 'N/A')}")
+```
+
+**Solutions:**
+- Ensure `use_cache=True` in generation calls
+- Verify sequences haven't changed (cache uses sequence as key)
+- Check cache directory is writable
+- Increase memory cache size if using many unique sequences
 
 ## 📚 Additional Resources
 
