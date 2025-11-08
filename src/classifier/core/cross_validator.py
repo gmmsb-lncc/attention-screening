@@ -26,7 +26,7 @@ try:
     from .trainer import ModelTrainer, TrainingConfig
     from ..utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
     from ..utils.data_validation import DataValidator
-    from ..config.mlp_config import MLPConfig
+    from ..classifier import MLPConfig
 except ImportError:
     # Fallback para execução direta - ajustar sys.path se necessário
     import sys
@@ -40,7 +40,7 @@ except ImportError:
     from core.trainer import ModelTrainer, TrainingConfig
     from utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
     from utils.data_validation import DataValidator
-    from config.mlp_config import MLPConfig
+    from classifier import MLPConfig
 
 logger = logging.getLogger(__name__)
 
