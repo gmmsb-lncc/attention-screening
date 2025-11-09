@@ -21,7 +21,7 @@ from typing import Optional, Dict, Any, List, Tuple
 try:
     from .core import RegressionEvaluator, DataManager, RegressionTrainer
     from .utils import MetricsCalculator
-    from .models import RegressionModels
+    from .models.models import RegressionModels  # UPDATED: usar models/models.py
 except ImportError:
     # Fallback para execução direta
     import sys
@@ -31,7 +31,7 @@ except ImportError:
     
     from core import RegressionEvaluator, DataManager, RegressionTrainer
     from utils import MetricsCalculator
-    from models import RegressionModels
+    from models.models import RegressionModels  # UPDATED: usar models/models.py
 
 
 class RegressionPipeline:
