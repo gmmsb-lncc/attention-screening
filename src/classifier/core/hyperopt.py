@@ -27,7 +27,7 @@ import os
 from ..models.base_model import BaseClassifier  
 from .cross_validator import CrossValidator, CrossValidationConfig
 from .trainer import TrainingConfig
-from ..config.mlp_config import MLPConfig
+from ..classifier import MLPConfig
 from ..utils.metrics import MetricsCalculator
 
 logger = logging.getLogger(__name__)
