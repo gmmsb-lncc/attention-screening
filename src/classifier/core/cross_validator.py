@@ -26,7 +26,6 @@ try:
     from .trainer import ModelTrainer, TrainingConfig
     from ..utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
     from ..utils.data_validation import DataValidator
-    from ..classifier import MLPConfig
 except ImportError:
     # Fallback para execução direta - ajustar sys.path se necessário
     import sys
@@ -40,7 +39,6 @@ except ImportError:
     from core.trainer import ModelTrainer, TrainingConfig
     from utils.metrics import MetricsCalculator, ClassificationMetrics, MetricsAggregator
     from utils.data_validation import DataValidator
-    from classifier import MLPConfig
 
 logger = logging.getLogger(__name__)
 
@@ -429,32 +427,32 @@ class CrossValidator:
         logger.info(f"Resultados de CV salvos em: {save_path}")
 
 
-def quick_cross_validate(
-    model_config: MLPConfig,
-    X: torch.Tensor,
-    y: torch.Tensor,
-    n_splits: int = 5,
-    device: Optional[torch.device] = None
-) -> Dict[str, Any]:
-    """
-    Função de conveniência para CV rápido com configurações padrão.
-    """
-    try:
-        from ..models.mlp import MLPEmbeddingClassifier
-    except ImportError:
-        from models.mlp import MLPEmbeddingClassifier
-    
-    # Configurações padrão
-    cv_config = CrossValidationConfig(n_splits=n_splits)
-    training_config = TrainingConfig(max_epochs=50, patience=10)
-    
-    # Factories
-    def model_factory():
-        return MLPEmbeddingClassifier(model_config)
-    
-    def optimizer_factory(model):
-        return torch.optim.Adam(model.parameters(), lr=model_config.learning_rate)
-    
-    # Executar CV
-    cv = CrossValidator(cv_config, training_config, device)
-    return cv.cross_validate(model_factory, optimizer_factory, X, y)
+# def quick_cross_validate(
+#     model_config: MLPConfig,
+#     X: torch.Tensor,
+#     y: torch.Tensor,
+#     n_splits: int = 5,
+#     device: Optional[torch.device] = None
+# ) -> Dict[str, Any]:
+#     """
+#     Função de conveniência para CV rápido com configurações padrão.
+#     """
+#     try:
+#         from ..models.mlp import MLPEmbeddingClassifier
+#     except ImportError:
+#         from models.mlp import MLPEmbeddingClassifier
+#     
+#     # Configurações padrão
+#     cv_config = CrossValidationConfig(n_splits=n_splits)
+#     training_config = TrainingConfig(max_epochs=50, patience=10)
+#     
+#     # Factories
+#     def model_factory():
+#         return MLPEmbeddingClassifier(model_config)
+#     
+#     def optimizer_factory(model):
+#         return torch.optim.Adam(model.parameters(), lr=model_config.learning_rate)
+#     
+#     # Executar CV
+#     cv = CrossValidator(cv_config, training_config, device)
+#     return cv.cross_validate(model_factory, optimizer_factory, X, y)
