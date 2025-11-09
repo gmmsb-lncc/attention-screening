@@ -9,10 +9,10 @@ COMPATIBILIDADE:
 - Adiciona estrutura modular (core, models, utils)
 """
 
-# Imports originais (compatibilidade)
-from .models import RegressionModels  # Original: models.py
-from .trainer import RegressionTrainer  # Original: trainer.py
-from .evaluator import RegressionEvaluator  # Original: evaluator.py
+# Imports originais (compatibilidade) - REFATORADO para usar core/ e models/
+from .models.models import RegressionModels  # MOVED: models/ directory
+from .core.trainer import RegressionTrainer  # MOVED: core/ directory
+from .core.evaluator import RegressionEvaluator  # MOVED: core/ directory
 from .visualizer import RegressionVisualizer  # Original: visualizer.py
 
 # Imports de utils originais
