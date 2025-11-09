@@ -10,10 +10,10 @@ from pathlib import Path
 
 # Imports com fallbacks
 try:
-    from ..config.mlp_config import MLPConfig
+    from ..classifier import MLPConfig
     from ..core.trainer import TrainingConfig
 except ImportError:
-    from config.mlp_config import MLPConfig
+    from classifier import MLPConfig
     try:
         from core.trainer import TrainingConfig
     except ImportError:
@@ -116,8 +116,12 @@ class SimpleConfig:
         
         # Criar nova configuração otimizada
         try:
-            from config.mlp_config import MLPConfig
-            optimized_model = MLPConfig(hidden_layers=hidden_layers, dropout_rate=0.3)
+            from ..classifier import MLPConfig as MLP
+            optimized_model = MLP()
+            # Configurar atributos ao invés de passar no construtor
+            optimized_model.hidden_dim = hidden_layers[0] if hidden_layers else 256
+            optimized_model.n_layers = len(hidden_layers) if hidden_layers else 3
+            optimized_model.dropout = 0.3
         except ImportError:
             # Fallback simples
             optimized_model = self.model
@@ -133,7 +137,7 @@ class SimpleConfig:
 
 def create_default_config() -> SimpleConfig:
     """Cria configuração padrão otimizada."""
-    from config.mlp_config import create_default_config as create_mlp_config
+    from ..classifier import MLPConfig as create_mlp_config
     
     return SimpleConfig(
         model=create_mlp_config(),
