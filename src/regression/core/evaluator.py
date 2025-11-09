@@ -18,7 +18,11 @@ from sklearn.metrics import (
 )
 
 # Import utilitários centralizados
-from utils.data_utils import safe_get, safe_get_numeric
+try:
+    from utils.data_utils import safe_get, safe_get_numeric
+except ImportError:
+    # Fallback para import relativo do módulo pai
+    from ...utils.data_utils import safe_get, safe_get_numeric
 
 
 class RegressionEvaluator:
