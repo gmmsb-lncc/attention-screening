@@ -270,7 +270,7 @@ if __name__ == "__main__":
     
     if success1 and success2:
         print("🎉 DataManager: FULLY FUNCTIONAL ✅")
-        exit(0)
+        sys.exit(0)
     else:
         print("❌ DataManager: NEEDS ATTENTION")
-        exit(1)
+        sys.exit(1)
