@@ -4,45 +4,35 @@
 **Python**: 3.8+  
 **Scikit-learn**: 1.3+
 
-Modular regression pipeline with comprehensive model comparison, cross-validation, and evaluation capabilities.
-
----
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Module Structure](#module-structure)
-- [API Reference](#api-reference)
-- [Examples](#examples)
-- [Testing](#testing)
+Modular regression pipeline for pKi prediction with 9 algorithms, stratified validation, and cross-validation support.
 
 ---
 
 ## 🎯 Overview
 
-Complete regression pipeline supporting 9 algorithms with train/val/test stratified splitting, cross-validation, and comprehensive metrics (MAE, RMSE, R², MSE).
+Complete pipeline for regression tasks supporting 9 machine learning algorithms with professional validation strategies:
 
-**Key Components**:
-- **Stratified Data Split**: 70/10/20 (train/val/test)
-- **9 Regression Models**: Ridge, Lasso, ElasticNet, RF, GB, SVR, KNN, MLP, XGBoost
-- **K-Fold Cross-Validation**: Professional CV with fold-level metrics
-- **Model Comparison**: Automatic ranking and selection
-- **Visualization**: Plots for predictions, residuals, and model comparison
+- **Stratified Split**: 70/10/20 (train/val/test) maintaining target distribution
+- **9 Models**: Ridge, Lasso, ElasticNet, RandomForest, GradientBoosting, SVR, KNN, MLP, XGBoost
+- **K-Fold CV**: Professional cross-validation with fold-level statistics
+- **4 Metrics**: MAE, RMSE, R², MSE
+- **Reproducible**: Fixed random seeds for consistent results
 
 ---
 
-## ✨ Features
+## 📦 Installation
 
-- ✅ **9 Regression Algorithms** ready to use
-- ✅ **Stratified Splitting** (70/10/20) for robust validation
-- ✅ **Cross-Validation** (K-Fold) with comprehensive statistics
-- ✅ **4 Core Metrics**: MAE, RMSE, R², MSE
-- ✅ **Model Comparison** with automatic ranking
-- ✅ **Visualization Suite** for analysis
-- ✅ **Reproducibility** via random seeds
-- ✅ **CSV Export** for results
+```bash
+cd /path/to/docktkinase
+pip install -e .
+```
+
+**Core Dependencies**:
+- numpy >= 1.24.0
+- pandas >= 2.0.0
+- scikit-learn >= 1.3.0
+- xgboost >= 2.0.0
+- joblib >= 1.3.0
 
 ---
 
@@ -52,64 +42,72 @@ Complete regression pipeline supporting 9 algorithms with train/val/test stratif
 
 ```python
 from regression.modular_pipeline import RegressionPipeline
-import numpy as np
 
-# Load data
-X = np.load("features.npy")
-y = np.load("targets.npy")
+# Initialize pipeline
+pipeline = RegressionPipeline(
+    embeddings_path="protein_embeddings.npy",
+    targets_path="pki_values.npy",
+    output_dir="results/",
+    test_size=0.2,
+    val_size=0.1,
+    random_state=42
+)
 
-# Create pipeline
-pipeline = RegressionPipeline(X, y, test_size=0.2, val_size=0.1)
+# Load and split data
+pipeline.load_data()
 
-# Train models
-results = pipeline.train_models(['Ridge', 'RandomForest', 'XGBoost'])
+# Train all models (or specify subset)
+results = pipeline.train_all_models()  # or train_all_models(['Ridge', 'XGBoost'])
 
 # Best model
-best = results['best_model']
-print(f"Best: {best} (MAE: {results['best_mae']:.2f})")
+print(f"Best Model: {results['best_model']}")
+print(f"Best MAE: {results['best_mae']:.3f}")
 
-# Cross-validation
-cv_results = pipeline.cross_validate(['Ridge', 'Lasso'], n_splits=5)
+# Results saved automatically in output_dir/
 ```
 
-### Cross-Validation Only
+### Cross-Validation
 
 ```python
 from regression.core import quick_cross_validate
-import numpy as np
 
-X = np.load("features.npy")
-y = np.load("targets.npy")
-
-# Quick CV with 3 models
-results = quick_cross_validate(
+# Quick CV with default settings
+cv_results = quick_cross_validate(
     X, y,
-    model_names=['Ridge', 'Lasso', 'ElasticNet'],
-    n_splits=5
+    model_names=['Ridge', 'Lasso', 'RandomForest'],
+    n_splits=5,
+    random_state=42
 )
 
-# Results
-for model, result in results.items():
-    print(f"{model}: MAE = {result.get_mean_metric('mae'):.2f} ± {result.get_std_metric('mae'):.2f}")
+# Analyze results
+for model_name, result in cv_results.items():
+    mae_mean = result.get_mean_metric('mae')
+    mae_std = result.get_std_metric('mae')
+    print(f"{model_name}: MAE = {mae_mean:.3f} ± {mae_std:.3f}")
 ```
 
 ### Command Line
 
 ```bash
-# Train multiple models
-python -m regression.modular_pipeline \
-    --X_path features.npy \
-    --y_path targets.npy \
-    --models Ridge Lasso RandomForest \
-    --output_dir results/
+# Train with all default models
+python -m regression.modular_regression \
+    --embeddings protein_embeddings.npy \
+    --targets pki_values.npy \
+    --output results/
+
+# Train specific models
+python -m regression.modular_regression \
+    --embeddings protein_embeddings.npy \
+    --targets pki_values.npy \
+    --models Ridge Lasso XGBoost \
+    --output results/
 
 # With cross-validation
-python -m regression.modular_pipeline \
-    --X_path features.npy \
-    --y_path targets.npy \
-    --models Ridge XGBoost \
-    --cv_folds 5 \
-    --output_dir results/
+python -m regression.modular_regression \
+    --embeddings protein_embeddings.npy \
+    --targets pki_values.npy \
+    --cv-folds 5 \
+    --output results/
 ```
 
 ---
@@ -119,28 +117,33 @@ python -m regression.modular_pipeline \
 ```
 src/regression/
 ├── __init__.py                    # Package initialization
-├── modular_pipeline.py            # Main pipeline (RegressionPipeline)
+├── modular_pipeline.py            # RegressionPipeline (main)
+├── modular_regression.py          # CLI entry point
 ├── config.py                      # RegressionConfig
 ├── logger.py                      # RegressionLogger
 ├── visualizer.py                  # RegressionVisualizer
+├── validation.py                  # Data validation utilities
+├── utils.py                       # Helper functions
 │
 ├── core/                          # Core modules
 │   ├── __init__.py
 │   ├── data_loader.py            # DataManager (stratified split)
 │   ├── trainer.py                # RegressionTrainer
-│   ├── evaluator.py              # RegressionEvaluator (metrics)
+│   ├── evaluator.py              # RegressionEvaluator
 │   └── cross_validator.py        # RegressionCrossValidator
 │
 └── models/                        # Model definitions
     ├── __init__.py
-    └── models.py                 # RegressionModels (9 algorithms)
+    └── models.py                 # RegressionModels factory
 ```
 
 ---
 
 ## 📚 API Reference
 
-### RegressionPipeline
+### Core Classes
+
+#### RegressionPipeline
 **Module**: `regression.modular_pipeline`
 
 Main pipeline for complete regression workflow.
@@ -149,52 +152,67 @@ Main pipeline for complete regression workflow.
 class RegressionPipeline:
     def __init__(
         self,
-        X: np.ndarray,
-        y: np.ndarray,
+        embeddings_path: str,
+        targets_path: str,
+        output_dir: str = 'results/regression',
+        models_to_train: Optional[List[str]] = None,
         test_size: float = 0.2,
         val_size: float = 0.1,
-        random_state: int = 42
+        random_state: int = 42,
+        verbose: bool = True
     )
     
-    def train_models(
-        self,
-        model_names: List[str],
-        verbose: bool = True
-    ) -> Dict[str, Any]
+    def load_data(self) -> None:
+        """Load and split data (stratified 70/10/20)"""
     
-    def cross_validate(
+    def train_all_models(
         self,
-        model_names: List[str],
-        n_splits: int = 5,
-        verbose: bool = True
-    ) -> Dict[str, CrossValidationResults]
+        models_to_train: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Train multiple models and compare results"""
     
-    def predict(
+    def train_single_model(
         self,
-        model_name: str,
-        X_new: np.ndarray
-    ) -> np.ndarray
+        model_name: str
+    ) -> Dict[str, Any]:
+        """Train a single model"""
     
-    def save_results(
-        self,
-        output_dir: str,
-        format: str = "csv"
-    ) -> None
+    def save_results(self) -> None:
+        """Save metrics, predictions, and visualizations"""
 ```
+
+**Available Models**:
+- `Ridge` - L2 regularized linear regression
+- `Lasso` - L1 regularized linear regression
+- `ElasticNet` - Combined L1/L2 regularization
+- `RandomForest` - Ensemble of decision trees
+- `GradientBoosting` - Sequential boosted trees
+- `SVR` - Support Vector Regression
+- `KNN` - K-Nearest Neighbors
+- `MLP` - Multi-Layer Perceptron
+- `XGBoost` - Gradient boosting (competition-grade)
 
 **Example**:
 ```python
-pipeline = RegressionPipeline(X, y, test_size=0.2)
-results = pipeline.train_models(['Ridge', 'Lasso'])
-pipeline.save_results("results/")
+pipeline = RegressionPipeline(
+    embeddings_path="embeddings.npy",
+    targets_path="pki.npy",
+    output_dir="results/",
+    models_to_train=['Ridge', 'XGBoost'],  # Optional: train subset
+    random_state=42
+)
+
+pipeline.load_data()
+results = pipeline.train_all_models()
+pipeline.save_results()
 ```
 
 ---
 
-### RegressionCrossValidator
+#### RegressionCrossValidator
 **Module**: `regression.core.cross_validator`
 
-K-Fold cross-validation with comprehensive metrics.
+K-Fold cross-validation with comprehensive statistics.
 
 ```python
 class RegressionCrossValidator:
@@ -209,14 +227,17 @@ class RegressionCrossValidator:
         y: np.ndarray,
         models_dict: Dict[str, Any],
         model_names: List[str]
-    ) -> Dict[str, CrossValidationResults]
+    ) -> Dict[str, CrossValidationResults]:
+        """Run K-Fold CV for multiple models"""
     
     def get_best_model(
         self,
         metric: str = 'mae'
-    ) -> str
+    ) -> str:
+        """Get best model by specified metric"""
     
-    def compare_models(self) -> pd.DataFrame
+    def compare_models(self) -> pd.DataFrame:
+        """Compare all models in DataFrame"""
 
 # Convenience function
 def quick_cross_validate(
@@ -224,120 +245,12 @@ def quick_cross_validate(
     y: np.ndarray,
     model_names: List[str],
     n_splits: int = 5,
-    random_state: int = 42
+    random_state: int = 42,
+    verbose: bool = True
 ) -> Dict[str, CrossValidationResults]
 ```
 
-**Example**:
-```python
-from regression.core import quick_cross_validate
-
-results = quick_cross_validate(X, y, ['Ridge', 'Lasso'], n_splits=5)
-best = results['Ridge'].get_mean_metric('mae')
-print(f"Ridge MAE: {best:.2f}")
-```
-
----
-
-### RegressionEvaluator
-**Module**: `regression.core.evaluator`
-
-Compute and compare regression metrics.
-
-```python
-class RegressionEvaluator:
-    def __init__(self)
-    
-    def evaluate(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        model_name: str = "Model"
-    ) -> Dict[str, float]
-    
-    def compare_models(
-        self,
-        results: Dict[str, Dict[str, float]]
-    ) -> pd.DataFrame
-    
-    def export_to_csv(
-        self,
-        results: Dict[str, Dict[str, float]],
-        filepath: str
-    ) -> None
-```
-
-**Metrics**: MAE, RMSE, R², MSE
-
-**Example**:
-```python
-from regression.core import RegressionEvaluator
-
-evaluator = RegressionEvaluator()
-metrics = evaluator.evaluate(y_true, y_pred, "Ridge")
-print(f"MAE: {metrics['mae']:.2f}")
-```
-
----
-
-### RegressionModels
-**Module**: `regression.models.models`
-
-Factory for 9 regression algorithms.
-
-```python
-class RegressionModels:
-    @staticmethod
-    def get_model(model_name: str) -> Any:
-        """
-        Available models:
-        - Ridge
-        - Lasso
-        - ElasticNet
-        - RandomForest
-        - GradientBoosting
-        - SVR
-        - KNN
-        - MLP
-        - XGBoost
-        """
-    
-    @staticmethod
-    def get_all_models() -> Dict[str, Any]
-    
-    @staticmethod
-    def get_model_names() -> List[str]
-```
-
-**Example**:
-```python
-from regression.models import RegressionModels
-
-# Single model
-ridge = RegressionModels.get_model('Ridge')
-ridge.fit(X_train, y_train)
-
-# All models
-all_models = RegressionModels.get_all_models()
-```
-
----
-
-### Configuration Classes
-
-#### CrossValidationConfig
-
-```python
-@dataclass
-class CrossValidationConfig:
-    n_splits: int = 5
-    shuffle: bool = True
-    random_state: Optional[int] = 42
-    verbose: bool = True
-```
-
-#### CrossValidationResults
-
+**CrossValidationResults**:
 ```python
 @dataclass
 class CrossValidationResults:
@@ -351,144 +264,437 @@ class CrossValidationResults:
     def get_std_metric(self, metric_name: str) -> float
 ```
 
----
-
-## 💡 Examples
-
-### Example 1: Train and Compare Models
-
-```python
-from regression.modular_pipeline import RegressionPipeline
-import numpy as np
-
-# Data
-X = np.load("features.npy")
-y = np.load("targets.npy")
-
-# Pipeline
-pipeline = RegressionPipeline(X, y, test_size=0.2, val_size=0.1)
-
-# Train 5 models
-results = pipeline.train_models([
-    'Ridge', 'Lasso', 'ElasticNet',
-    'RandomForest', 'GradientBoosting'
-])
-
-# Results
-print(f"Best model: {results['best_model']}")
-print(f"Best MAE: {results['best_mae']:.2f}")
-print(f"Test R²: {results['models'][results['best_model']]['test_metrics']['r2']:.4f}")
-```
-
-### Example 2: Cross-Validation Comparison
-
-```python
-from regression.core import quick_cross_validate
-import numpy as np
-
-X = np.load("features.npy")
-y = np.load("targets.npy")
-
-# CV with 5 folds
-results = quick_cross_validate(
-    X, y,
-    model_names=['Ridge', 'Lasso', 'RandomForest', 'XGBoost'],
-    n_splits=5
-)
-
-# Compare
-for model, result in results.items():
-    mae_mean = result.get_mean_metric('mae')
-    mae_std = result.get_std_metric('mae')
-    r2_mean = result.get_mean_metric('r2')
-    
-    print(f"{model:15s} MAE: {mae_mean:6.2f} ± {mae_std:5.2f}  R²: {r2_mean:.4f}")
-```
-
-### Example 3: Manual Cross-Validation
-
+**Example**:
 ```python
 from regression.core import RegressionCrossValidator, CrossValidationConfig
 from regression.models import RegressionModels
-import numpy as np
 
-# Data
-X = np.load("features.npy")
-y = np.load("targets.npy")
-
-# Config
+# Configuration
 config = CrossValidationConfig(
-    n_splits=10,
+    n_splits=5,
     shuffle=True,
-    random_state=999
+    random_state=42,
+    verbose=True
 )
 
 # Models
 models = {
     'Ridge': RegressionModels.get_model('Ridge'),
-    'Lasso': RegressionModels.get_model('Lasso'),
-    'RF': RegressionModels.get_model('RandomForest')
+    'XGBoost': RegressionModels.get_model('XGBoost')
 }
 
-# CV
+# Run CV
 cv = RegressionCrossValidator(config)
 results = cv.cross_validate(X, y, models, list(models.keys()))
 
 # Best model
-best = cv.get_best_model(metric='r2')
-print(f"Best by R²: {best}")
+best = cv.get_best_model(metric='mae')
+print(f"Best model: {best}")
 
-# Comparison DataFrame
+# Compare
 df = cv.compare_models()
+print(df[['model', 'mae_mean', 'mae_std', 'r2_mean']])
+```
+
+---
+
+#### RegressionEvaluator
+**Module**: `regression.core.evaluator`
+
+Compute and compare regression metrics.
+
+```python
+class RegressionEvaluator:
+    def evaluate(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        model_name: str = "Model"
+    ) -> Dict[str, float]:
+        """Evaluate predictions with 4 core metrics"""
+    
+    def compare_models(
+        self,
+        results: Dict[str, Dict[str, float]]
+    ) -> pd.DataFrame:
+        """Compare multiple models in DataFrame"""
+    
+    def export_to_csv(
+        self,
+        results: Dict[str, Dict[str, float]],
+        filepath: str
+    ) -> None:
+        """Export results to CSV"""
+```
+
+**Metrics**:
+- **MAE** (Mean Absolute Error): Average absolute difference
+- **RMSE** (Root Mean Squared Error): Square root of MSE
+- **R²** (Coefficient of Determination): Variance explained (0-1)
+- **MSE** (Mean Squared Error): Average squared difference
+
+**Example**:
+```python
+from regression.core import RegressionEvaluator
+
+evaluator = RegressionEvaluator()
+
+# Single model
+metrics = evaluator.evaluate(y_true, y_pred, "Ridge")
+print(f"MAE: {metrics['mae']:.3f}")
+print(f"R²: {metrics['r2']:.4f}")
+
+# Multiple models comparison
+results = {
+    'Ridge': evaluator.evaluate(y_true, y_pred_ridge, "Ridge"),
+    'XGBoost': evaluator.evaluate(y_true, y_pred_xgb, "XGBoost")
+}
+
+df = evaluator.compare_models(results)
+evaluator.export_to_csv(results, "model_comparison.csv")
+```
+
+---
+
+#### DataManager
+**Module**: `regression.core.data_loader`
+
+Data loading with stratified splitting.
+
+```python
+class DataManager:
+    def __init__(
+        self,
+        embeddings_path: str,
+        targets_path: str
+    )
+    
+    def load_data(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Load embeddings and targets"""
+    
+    def split_data(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        test_size: float = 0.2,
+        val_size: float = 0.1,
+        random_state: int = 42
+    ) -> Tuple[np.ndarray, ...]:
+        """Stratified train/val/test split (70/10/20)"""
+```
+
+**Stratification**: Splits data maintaining target value distribution across all sets.
+
+**Example**:
+```python
+from regression.core import DataManager
+
+dm = DataManager("embeddings.npy", "targets.npy")
+X, y = dm.load_data()
+
+X_train, X_val, X_test, y_train, y_val, y_test = dm.split_data(
+    X, y, test_size=0.2, val_size=0.1, random_state=42
+)
+
+print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+```
+
+---
+
+#### RegressionModels
+**Module**: `regression.models.models`
+
+Factory for 9 regression algorithms with sensible defaults.
+
+```python
+class RegressionModels:
+    @staticmethod
+    def get_model(model_name: str, **kwargs) -> Any:
+        """Get single model by name"""
+    
+    @staticmethod
+    def get_all_models() -> Dict[str, Any]:
+        """Get all 9 models"""
+    
+    @staticmethod
+    def get_model_names() -> List[str]:
+        """List available model names"""
+```
+
+**Models & Hyperparameters**:
+
+| Model | Key Parameters | Best For |
+|-------|---------------|----------|
+| Ridge | alpha=1.0 | High-dimensional, correlated features |
+| Lasso | alpha=0.1 | Feature selection, sparse solutions |
+| ElasticNet | alpha=0.1, l1_ratio=0.5 | Combined L1/L2 regularization |
+| RandomForest | n_estimators=100 | Non-linear, robust to outliers |
+| GradientBoosting | n_estimators=100, lr=0.1 | High accuracy, tunable |
+| SVR | kernel='rbf', C=1.0 | Non-linear patterns |
+| KNN | n_neighbors=5 | Local patterns, simple |
+| MLP | hidden_layers=(100,50) | Complex non-linear |
+| XGBoost | n_estimators=100, lr=0.1 | Competition-grade performance |
+
+**Example**:
+```python
+from regression.models import RegressionModels
+
+# Single model
+ridge = RegressionModels.get_model('Ridge', alpha=2.0)
+ridge.fit(X_train, y_train)
+y_pred = ridge.predict(X_test)
+
+# All models
+all_models = RegressionModels.get_all_models()
+for name, model in all_models.items():
+    model.fit(X_train, y_train)
+    score = model.score(X_test, y_test)
+    print(f"{name}: R² = {score:.4f}")
+
+# List available
+print(RegressionModels.get_model_names())
+```
+
+---
+
+### Configuration
+
+#### RegressionConfig
+**Module**: `regression.config`
+
+Configuration management with presets.
+
+```python
+class RegressionConfig:
+    # Data settings
+    test_size: float = 0.2
+    val_size: float = 0.1
+    random_state: int = 42
+    
+    # Training settings
+    models_to_train: List[str] = field(default_factory=list)
+    cv_folds: int = 5
+    
+    # Output settings
+    output_dir: str = "results/regression"
+    save_models: bool = True
+    save_predictions: bool = True
+    
+    # Visualization
+    create_plots: bool = True
+    plot_format: str = "png"
+    
+    # Verbosity
+    verbose: bool = True
+
+# Presets
+def get_fast_config() -> RegressionConfig:
+    """Fast iteration, fewer models"""
+
+def get_production_config() -> RegressionConfig:
+    """Production settings, all models"""
+
+def get_debug_config() -> RegressionConfig:
+    """Debug settings, minimal"""
+```
+
+**Example**:
+```python
+from regression.config import RegressionConfig, get_production_config
+
+# Custom config
+config = RegressionConfig(
+    test_size=0.15,
+    val_size=0.15,
+    models_to_train=['Ridge', 'XGBoost'],
+    cv_folds=10,
+    verbose=True
+)
+
+# Production preset
+config = get_production_config()
+```
+
+---
+
+## 💡 Examples
+
+### Example 1: Complete Pipeline
+
+```python
+from regression.modular_pipeline import RegressionPipeline
+
+# Initialize
+pipeline = RegressionPipeline(
+    embeddings_path="data/protein_embeddings.npy",
+    targets_path="data/pki_values.npy",
+    output_dir="results/pki_prediction",
+    test_size=0.2,
+    val_size=0.1,
+    random_state=42
+)
+
+# Load data
+pipeline.load_data()
+print(f"Data loaded: {len(pipeline.X_train)} train samples")
+
+# Train all models
+results = pipeline.train_all_models()
+
+# Results
+print(f"\nBest Model: {results['best_model']}")
+print(f"Best MAE: {results['best_mae']:.3f}")
+print(f"Best R²: {results['best_r2']:.4f}")
+
+# Save everything (metrics, predictions, plots)
+pipeline.save_results()
+print(f"\nResults saved to: {pipeline.output_dir}")
+```
+
+### Example 2: Train Specific Models
+
+```python
+from regression.modular_pipeline import RegressionPipeline
+
+pipeline = RegressionPipeline(
+    embeddings_path="embeddings.npy",
+    targets_path="pki.npy",
+    output_dir="results/",
+    models_to_train=['Ridge', 'Lasso', 'XGBoost'],  # Only these 3
+    random_state=42
+)
+
+pipeline.load_data()
+results = pipeline.train_all_models()
+
+# Access individual model results
+for model_name in ['Ridge', 'Lasso', 'XGBoost']:
+    metrics = results['models'][model_name]['test_metrics']
+    print(f"{model_name}:")
+    print(f"  MAE: {metrics['mae']:.3f}")
+    print(f"  R²: {metrics['r2']:.4f}")
+```
+
+### Example 3: Cross-Validation
+
+```python
+from regression.core import quick_cross_validate
+import numpy as np
+
+# Load data
+X = np.load("embeddings.npy")
+y = np.load("pki.npy")
+
+# Quick CV
+cv_results = quick_cross_validate(
+    X, y,
+    model_names=['Ridge', 'RandomForest', 'XGBoost'],
+    n_splits=5,
+    random_state=42
+)
+
+# Analyze results
+print("Cross-Validation Results (5-fold):")
+print("-" * 50)
+
+for model_name, result in cv_results.items():
+    mae_mean = result.get_mean_metric('mae')
+    mae_std = result.get_std_metric('mae')
+    r2_mean = result.get_mean_metric('r2')
+    r2_std = result.get_std_metric('r2')
+    
+    print(f"\n{model_name}:")
+    print(f"  MAE: {mae_mean:.3f} ± {mae_std:.3f}")
+    print(f"  R²:  {r2_mean:.4f} ± {r2_std:.4f}")
+    print(f"  Best fold: {result.best_fold}")
+```
+
+### Example 4: Manual Workflow
+
+```python
+from regression.core import DataManager, RegressionTrainer, RegressionEvaluator
+from regression.models import RegressionModels
+
+# 1. Load and split data
+dm = DataManager("embeddings.npy", "pki.npy")
+X, y = dm.load_data()
+X_train, X_val, X_test, y_train, y_val, y_test = dm.split_data(
+    X, y, test_size=0.2, val_size=0.1, random_state=42
+)
+
+# 2. Get models
+models = {
+    'Ridge': RegressionModels.get_model('Ridge'),
+    'XGBoost': RegressionModels.get_model('XGBoost')
+}
+
+# 3. Train
+trainer = RegressionTrainer()
+trained_models = {}
+
+for name, model in models.items():
+    print(f"Training {name}...")
+    trained_model = trainer.train(model, X_train, y_train)
+    trained_models[name] = trained_model
+
+# 4. Evaluate
+evaluator = RegressionEvaluator()
+results = {}
+
+for name, model in trained_models.items():
+    y_pred = model.predict(X_test)
+    metrics = evaluator.evaluate(y_test, y_pred, name)
+    results[name] = metrics
+
+# 5. Compare
+df = evaluator.compare_models(results)
+print("\nModel Comparison:")
 print(df)
 ```
 
-### Example 4: Predictions and Visualization
+### Example 5: Custom Configuration
 
 ```python
-from regression.modular_pipeline import RegressionPipeline
-import numpy as np
+from regression.config import RegressionConfig
+from regression.modular_pipeline import run_regression_pipeline
 
-# Pipeline
-pipeline = RegressionPipeline(X, y)
-results = pipeline.train_models(['Ridge', 'RandomForest'])
+# Custom config
+config = RegressionConfig(
+    # Data
+    test_size=0.15,
+    val_size=0.15,
+    random_state=999,
+    
+    # Models
+    models_to_train=['Ridge', 'Lasso', 'ElasticNet', 'XGBoost'],
+    cv_folds=10,
+    
+    # Output
+    output_dir="results/custom_run",
+    save_models=True,
+    save_predictions=True,
+    create_plots=True,
+    
+    # Verbosity
+    verbose=True
+)
 
-# Best model predictions
-best_model = results['best_model']
-y_pred = pipeline.predict(best_model, X_test)
+# Run pipeline with config
+results = run_regression_pipeline(
+    embeddings_path="embeddings.npy",
+    targets_path="pki.npy",
+    config=config
+)
 
-# Visualize
-from regression.visualizer import RegressionVisualizer
-
-viz = RegressionVisualizer()
-viz.plot_predictions(y_test, y_pred, title=f"{best_model} Predictions")
-viz.plot_residuals(y_test, y_pred, title=f"{best_model} Residuals")
-viz.save_all("figures/")
-```
-
-### Example 5: Export Results
-
-```python
-from regression.modular_pipeline import RegressionPipeline
-
-pipeline = RegressionPipeline(X, y)
-results = pipeline.train_models(['Ridge', 'Lasso', 'RandomForest'])
-
-# Export to CSV
-pipeline.save_results("results/", format="csv")
-
-# Files created:
-# - results/train_metrics.csv
-# - results/val_metrics.csv
-# - results/test_metrics.csv
-# - results/summary.csv
+print(f"Best model: {results['best_model']}")
+print(f"Best MAE: {results['best_mae']:.3f}")
 ```
 
 ---
 
 ## 🧪 Testing
 
-Complete test suite with **66 tests** across 9 levels (100% passing).
+Complete test suite with **66 tests** (100% passing).
 
 ### Run All Tests
 
@@ -497,92 +703,71 @@ cd tests/regression_test/
 python -m pytest -v
 ```
 
-### Run Specific Levels
+### Test Levels
 
-```bash
-# Data loading tests
-python test_1_1_data_loader.py
+| Level | Tests | Description |
+|-------|-------|-------------|
+| 1 | 10 | Data loading & preprocessing |
+| 2 | 6 | Feature engineering |
+| 3 | 9 | Model training |
+| 4 | 9 | Model evaluation |
+| 5 | 7 | Hyperparameter optimization |
+| 6 | 7 | Predictions & inference |
+| 7 | 6 | Visualization |
+| 8 | 8 | Error handling |
+| 9 | 4 | Cross-validation |
 
-# Model tests
-python test_2_1_models_factory.py
+**Total**: 66 tests, 100% passing ✅
 
-# Training tests
-python test_3_1_trainer.py
+---
 
-# Cross-validation tests
-python test_9_cross_validation.py
+## 📊 Output Structure
+
+```
+results/regression/
+├── metrics/
+│   ├── train_metrics.csv
+│   ├── val_metrics.csv
+│   ├── test_metrics.csv
+│   └── summary.json
+├── predictions/
+│   ├── ridge_predictions.npy
+│   ├── xgboost_predictions.npy
+│   └── ...
+├── models/
+│   ├── ridge_model.joblib
+│   ├── xgboost_model.joblib
+│   └── ...
+└── plots/
+    ├── predictions_comparison.png
+    ├── residuals.png
+    └── model_ranking.png
 ```
 
-### Test Coverage
-
-| Level | Description | Tests | Status |
-|-------|-------------|-------|--------|
-| 1 | Data Loading & Preprocessing | 10 | ✅ 100% |
-| 2 | Feature Engineering | 6 | ✅ 100% |
-| 3 | Model Training | 9 | ✅ 100% |
-| 4 | Model Evaluation | 9 | ✅ 100% |
-| 5 | Hyperparameter Optimization | 7 | ✅ 100% |
-| 6 | Predictions & Inference | 7 | ✅ 100% |
-| 7 | Visualization | 6 | ✅ 100% |
-| 8 | Error Handling | 8 | ✅ 100% |
-| 9 | Cross-Validation | 4 | ✅ 100% |
-
-**Total**: 66 tests, 100% passing
-
-See [REGRESSION_MODULE_COMPLETE_SUMMARY.md](../../docs/REGRESSION_MODULE_COMPLETE_SUMMARY.md) for details.
-
 ---
 
-## 📈 Supported Models
+## 🎯 Best Practices
 
-| Model | Type | Best For |
-|-------|------|----------|
-| Ridge | Linear | High dimensionality, regularized |
-| Lasso | Linear | Feature selection, sparse |
-| ElasticNet | Linear | Combined L1/L2 regularization |
-| Random Forest | Ensemble | Non-linear, robust |
-| Gradient Boosting | Ensemble | High accuracy, tunable |
-| SVR | Kernel | Non-linear patterns |
-| KNN | Instance | Local patterns |
-| MLP | Neural Network | Complex non-linear |
-| XGBoost | Ensemble | Competition-grade performance |
-
----
-
-## 📊 Metrics
-
-All models evaluated with 4 core metrics:
-
-- **MAE** (Mean Absolute Error): Average prediction error
-- **RMSE** (Root Mean Squared Error): Penalizes large errors
-- **R²** (Coefficient of Determination): Variance explained
-- **MSE** (Mean Squared Error): Squared error average
+1. **Always use stratified splitting** for robust validation
+2. **Set random_state** for reproducibility
+3. **Start with fast models** (Ridge, Lasso) before slower ones (XGBoost, MLP)
+4. **Use cross-validation** for final model selection
+5. **Check R²** - values < 0.3 suggest poor fit
+6. **Monitor MAE** - main metric for regression performance
 
 ---
 
 ## 📄 License
 
-This module is part of the DockTKinase project.
-
----
-
-## 🤝 Contributing
-
-### Guidelines
-
-1. **Keep it simple**: Avoid over-engineering
-2. **Type hints**: Use annotations for clarity
-3. **Tests**: Maintain 100% coverage
-4. **Documentation**: Clear docstrings
-5. **Consistency**: Follow existing patterns
+Part of DockTKinase project.
 
 ---
 
 ## 📞 Support
 
 - **Repository**: [gmmsb-lncc/docktkinase](https://github.com/gmmsb-lncc/docktkinase)
-- **Tests**: See `tests/regression_test/` for examples
-- **Docs**: `docs/REGRESSION_MODULE_COMPLETE_SUMMARY.md`
+- **Tests**: See `tests/regression_test/`
+- **Issues**: GitHub Issues
 
 ---
 
