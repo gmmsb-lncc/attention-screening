@@ -415,28 +415,52 @@ ls tests/test_output_small/
 # ✅ train/val/test splits (799/97/104)
 ```
 
-### 📊 Complete Workflow
+### 📊 Complete Workflow (Integrated Pipeline)
+
+**Recommended: Use the unified IntegratedPipeline for end-to-end automation**
 
 ```python
-from src.build.pipeline import BuildPipeline
-from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+from src.integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
-# Step 1: Generate embeddings
-pipeline = BuildPipeline(
-    base_dir='.',
-    input_tsv='your_data.tsv',
-    output_dir='results/'
-)
-pipeline.run_complete_pipeline()
-
-# Step 2: Train classifier
-classifier = MLPEmbeddingPipeline()
-model = classifier.train_with_optimization(
-    features_path='results/embedding_matrix.npy',
-    labels_path='results/binary_labels.npy'
+# Configure complete workflow
+config = IntegratedConfig(
+    input_tsv="data/kinase_data.tsv",
+    output_dir="results/integrated",
+    esm_model="esm2_t6_8M_UR50D",  # or esm2_t33_650M_UR50D for better quality
+    device="cpu",  # or "cuda" if GPU available
+    run_classification=True,
+    run_regression=True,
+    regression_models=['Ridge', 'Lasso', 'XGBoost', 'RandomForest'],
+    random_state=42
 )
 
-# Done! Model trained with optimized hyperparameters
+# Execute complete pipeline: Build → Classification → Regression
+pipeline = IntegratedPipeline(config)
+results = pipeline.run()
+
+# Access results
+print(f"✅ Build completed: {results['build']['status']}")
+print(f"✅ Classification ROC-AUC: {results['classifier']['test_metrics']['roc_auc']:.4f}")
+print(f"✅ Best Regression Model: {results['regression']['best_model']}")
+print(f"✅ Best MAE: {results['regression']['best_mae']:.3f}")
+```
+
+**Output Structure**:
+```
+results/integrated/
+├── build/                    # Embeddings & matrices
+│   ├── embedding_matrix.npy
+│   ├── binary_labels.npy
+│   └── continuous_labels.npy
+├── classification/           # Classifier results
+│   ├── model.pt
+│   ├── metrics.json
+│   └── plots/
+└── regression/               # Regression results
+    ├── models/               # Trained models
+    ├── predictions/          # Predictions per model
+    ├── metrics/              # Performance metrics
+    └── visualizations/       # Analysis plots
 ```
 
 ### 📚 Documentation
@@ -450,6 +474,208 @@ model = classifier.train_with_optimization(
 | **Development** | Contributing guide | `docs/05-development/` |
 | **Validation** | Test reports | `docs/06-validation-reports/` |
 | **Troubleshooting** | Common issues | `docs/07-troubleshooting/` |
+
+---
+
+## 🎮 How to Execute Workflows
+
+DockTKinase offers **three execution modes** depending on your needs:
+
+### **1️⃣ Integrated Pipeline** (Recommended) ⭐
+
+**Use Case**: Complete end-to-end workflow (embeddings → classification → regression)
+
+**Command Line**:
+```bash
+# Activate environment
+source env/bin/activate  # or: env\Scripts\activate on Windows
+
+# Execute complete workflow
+python -m src.integrated_pipeline \
+    --input data/kinase_data.tsv \
+    --output results/integrated \
+    --esm-model esm2_t6_8M_UR50D \
+    --device cpu
+
+# Execution time: ~5-10 minutes for small datasets (1000 samples)
+```
+
+**Python API**:
+```python
+from src.integrated_pipeline import IntegratedPipeline, IntegratedConfig
+
+# Full configuration
+config = IntegratedConfig(
+    input_tsv="data/kinase_data.tsv",
+    output_dir="results/integrated",
+    esm_model="esm2_t6_8M_UR50D",
+    device="cpu",
+    run_classification=True,
+    run_regression=True,
+    regression_models=['Ridge', 'XGBoost', 'RandomForest'],
+    random_state=42
+)
+
+pipeline = IntegratedPipeline(config)
+results = pipeline.run()
+
+# Check results
+print(f"Classification ROC-AUC: {results['classifier']['test_metrics']['roc_auc']:.4f}")
+print(f"Best Regression: {results['regression']['best_model']} (MAE: {results['regression']['best_mae']:.3f})")
+```
+
+**Flexible Execution Options**:
+```bash
+# Embeddings only (skip ML)
+python -m src.integrated_pipeline --input data.tsv --no-classification --no-regression
+
+# Build + Classification (no regression)
+python -m src.integrated_pipeline --input data.tsv --no-regression
+
+# Build + Regression (no classification)
+python -m src.integrated_pipeline --input data.tsv --no-classification
+
+# Custom regression models
+python -m src.integrated_pipeline --input data.tsv --regression-models Ridge Lasso XGBoost
+```
+
+---
+
+### **2️⃣ Module-by-Module Execution**
+
+**Use Case**: Fine-grained control, custom workflows, or debugging specific modules
+
+#### **Step 1: Build Module** (Generate Embeddings)
+
+```python
+from src.build.pipeline import BuildPipeline
+from src.build.core import BuildConfig
+
+# Configure build
+config = BuildConfig({
+    'base_dir': '.',
+    'embedding_type': 'cls',  # or 'mean'
+    'esm_model': 'esm2_t6_8M_UR50D',
+    'batch_size': 32,
+    'use_gpu': False
+})
+
+# Generate embeddings
+build_pipeline = BuildPipeline(config)
+build_results = build_pipeline.run_complete_pipeline(
+    input_file="data/kinase_data.tsv",
+    output_dir="results/embeddings"
+)
+
+print(f"✅ Generated embeddings for {build_results['ligands_processed']} ligands")
+print(f"✅ Generated embeddings for {build_results['proteins_processed']} proteins")
+print(f"✅ Matrix shape: {build_results['matrix_shape']}")
+```
+
+#### **Step 2: Classification Module**
+
+```python
+from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+
+# Train classifier with hyperparameter optimization
+classifier = MLPEmbeddingPipeline()
+model_results = classifier.train_with_optimization(
+    features_path="results/embeddings/embedding_matrix.npy",
+    labels_path="results/embeddings/binary_labels.npy",
+    n_trials=50,  # Optuna trials
+    n_folds=5     # Cross-validation folds
+)
+
+print(f"✅ Best ROC-AUC: {model_results['best_metrics']['roc_auc']:.4f}")
+print(f"✅ Model saved to: {model_results['model_path']}")
+```
+
+#### **Step 3: Regression Module**
+
+```python
+from src.regression.modular_pipeline import RegressionPipeline
+
+# Train regression models
+regression = RegressionPipeline(
+    embeddings_path="results/embeddings/embedding_matrix.npy",
+    targets_path="results/embeddings/continuous_labels.npy",
+    output_dir="results/regression",
+    models_to_train=['Ridge', 'Lasso', 'XGBoost', 'RandomForest'],
+    test_size=0.2,
+    val_size=0.1
+)
+
+reg_results = regression.run()
+
+print(f"✅ Best Model: {reg_results['best_model']}")
+print(f"✅ Best MAE: {reg_results['best_mae']:.3f}")
+print(f"✅ Best RMSE: {reg_results['best_rmse']:.3f}")
+print(f"✅ Best R²: {reg_results['best_r2']:.3f}")
+```
+
+---
+
+### **3️⃣ Command Line Interface** (Quick Testing)
+
+**Use Case**: Quick experiments, testing, or scripted workflows
+
+#### **Build Phase**:
+```bash
+# Generate embeddings using build module
+python -m src.build.pipeline \
+    --input data/kinase_data.tsv \
+    --output results/build \
+    --esm-model esm2_t6_8M_UR50D
+```
+
+#### **Classification Phase**:
+```bash
+# Train classifier
+python -m src.classifier.modular_pipeline \
+    --features results/build/embedding_matrix.npy \
+    --labels results/build/binary_labels.npy \
+    --output results/classification \
+    --n-trials 50
+```
+
+#### **Regression Phase**:
+```bash
+# Train regression models
+python -m src.regression.modular_pipeline \
+    results/build/embedding_matrix.npy \
+    results/build/continuous_labels.npy \
+    --models Ridge Lasso XGBoost RandomForest \
+    --output results/regression
+```
+
+---
+
+### **📊 Comparing Execution Modes**
+
+| Feature | Integrated Pipeline | Module-by-Module | CLI |
+|---------|-------------------|------------------|-----|
+| **Ease of Use** | ⭐⭐⭐⭐⭐ Very Easy | ⭐⭐⭐ Moderate | ⭐⭐⭐⭐ Easy |
+| **Flexibility** | ⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐⭐ Good |
+| **Control** | ⭐⭐⭐ Automated | ⭐⭐⭐⭐⭐ Full Control | ⭐⭐⭐⭐ High |
+| **Best For** | Production, Quick Results | Debugging, Custom Workflows | Testing, Scripting |
+| **Code Required** | Minimal | Moderate | None (shell only) |
+| **Data Flow** | Automatic | Manual | Manual |
+
+**Recommendation**: 
+- 🚀 **Start with Integrated Pipeline** for fastest results
+- 🔧 **Use Module-by-Module** when you need custom processing
+- ⚡ **Use CLI** for quick tests or shell scripting
+
+---
+
+### **📝 Examples**
+
+See `examples/` directory for working code samples:
+- `examples/integrated_pipeline_examples.py` - Complete workflows
+- `examples/exemplo_config_management.py` - Configuration patterns
+- `examples/exemplo_device_management.py` - GPU/CPU handling
+
+---
 
 ## ▶️ Usage
 
@@ -976,104 +1202,71 @@ config = BuildConfig({
 })
 ```
 
-## 🎯 Recent Updates (October 2025)
+## 🎯 Recent Updates (November 2025)
 
-### ⚡ Pipeline Optimization Achievement
+### 🏗️ Documentation Consolidation & Organization
 
-**35% Performance Improvement** - Complete end-to-end optimization and validation!
+**Professional Documentation Structure** - Complete reorganization for better maintainability:
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Total Pipeline** | ~110s | ~71s | **35% faster** ⚡ |
-| **SMI-TED Loading** | ~93s | ~10s | **91% faster** 🚀 |
-| **Model Loads** | 935× | 1× | **934× reduction** 💾 |
+| Category | Location | Contents |
+|----------|----------|----------|
+| **Archive** | `docs/00-archive/` | Historical reports & analyses |
+| **Getting Started** | `docs/01-getting-started/` | Installation & setup guides |
+| **User Guide** | `docs/02-user-guide/` | Usage documentation |
+| **Architecture** | `docs/03-architecture/` | System design patterns |
+| **Modules** | `docs/04-modules/` | Module-specific docs |
+| **Development** | `docs/05-development/` | Contributing guides |
+| **Validation** | `docs/06-validation-reports/` | Test reports |
+| **Troubleshooting** | `docs/07-troubleshooting/` | Problem resolution |
+| **Maintenance** | `docs/08-maintenance/` | Maintenance procedures |
+| **Changelogs** | `docs/09-changelogs/` | Version history |
+| **Reference** | `docs/10-reference/` | API reference |
 
-### 🚀 Major Feature: Production-Ready Regression Module
+### ⚡ Integrated Pipeline System
 
-**NEW Regression Pipeline** with professional infrastructure and **modular architecture** (Oct-Nov 2025):
+**Complete End-to-End Orchestration** - Unified workflow automation:
 
-#### **🏗️ Modular Architecture** ⭐ **NOVO** (Nov 2025)
-- **Structured** as `core/`, `models/`, `utils/` (identical pattern to classifier)
-- **DataManager**: Smart data loading with stratified split using quantile bins
-- **MetricsCalculator**: 15+ comprehensive metrics (MAE, RMSE, R², percentiles, CV-RMSE)
-- **RegressionPipeline**: Complete orchestrated pipeline
-- **CLI Interface**: `modular_regression.py` for standalone execution
-- **100% compatible** with original implementation
-- **Fully documented** with examples and tests
+- **IntegratedPipeline Class**: Single orchestrator for all modules (Build → Classification → Regression)
+- **Flexible Execution**: Run specific phases or complete workflow
+- **Automatic Data Flow**: Seamless output propagation between modules
+- **14 Integration Tests**: Comprehensive end-to-end validation
+- **Ready Examples**: Working code samples in `examples/` directory
 
-#### **Core Features**
-- 📈 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
-- 📊 **Target Prioritization**: Ki > Kd > IC50 (configurable, scientifically justified)
-- 🔄 **Embeddings Reuse**: Leverages classification pipeline outputs OR standalone
-- � **Stratified Split**: Quantile-based stratification for regression targets
-- �📉 **Comprehensive Metrics**: 15+ metrics including percentiles and normalized RMSE
+### 🚀 Modular Regression Pipeline
 
-#### **Professional Infrastructure** (4 New Modules)
-1. **`validation.py` (250 lines)** - Robust data validation
-   - 10+ automatic checks (NaN, Inf, outliers, variance, compatibility)
-   - Train/test split validation
-   - Model parameter validation
-   - Clear error messages with suggestions
+**Production-Ready Regression System** with professional infrastructure:
 
-2. **`logger.py` (220 lines)** - Professional logging system
-   - Colored console output (5 colors for different levels)
-   - File logging with timestamps
-   - Specialized methods (section, metrics, model_training, success/failure)
-   - UTF-8 encoding support
+**Core Capabilities**:
+- 11 regression algorithms (RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting)
+- Modular architecture: `core/`, `models/`, `utils/` (mirrors classifier design)
+- Target prioritization: Ki > Kd > IC50 (scientifically validated hierarchy)
+- Smart data reuse: Leverages embeddings from classification or standalone mode
+- Quantile-based stratification for regression targets
+- 15+ comprehensive metrics (MAE, RMSE, R², MAPE, percentiles, CV-RMSE)
 
-3. **`config.py` (330 lines)** - Centralized configuration
-   - JSON-serializable dataclass with 40+ parameters
-   - Pre-defined profiles (fast/production/debug)
-   - Save/load functionality
-   - Organized by category (data, models, training, evaluation, visualization, output)
+**Professional Infrastructure**:
+- **Validation Module**: 10+ automatic data quality checks
+- **Logging System**: Professional colored console + file logging
+- **Configuration**: JSON-based centralized config with profiles
+- **Shared Utilities**: DRY-compliant helper functions across all modules
 
-4. **`utils/data_utils.py` (140 lines)** - Shared utilities
-   - DRY-compliant common functions
-   - `safe_get()`, `safe_get_numeric()`, `safe_get_int()`, `safe_get_str()`
-   - Complete type hints and docstrings
-   - Used across classification, regression, and database modules
+### 📊 System Status (November 2025)
 
-#### **Quality Metrics**
-- ✅ **45 bugs fixed** across classification and regression modules
-- ✅ **Modular architecture** applied to regression (Nov 2025) - same pattern as classifier
-- ✅ **100% test pass rate** (19/19 comprehensive tests + realistic regression test)
-- ✅ **~950 lines** of production-ready infrastructure code
-- ✅ **Complete documentation** with docstrings, type hints, and examples
-- ✅ **3 git commits** on dedicated `regression` branch:
-  - Implementation of modular structure
-  - Comprehensive documentation
-  - Integration updates
+| Component | Status | Tests | Documentation |
+|-----------|--------|-------|---------------|
+| **Integrated Pipeline** | ✅ Production | 14 integration tests | Complete |
+| **Build Module** | ✅ Production | Validated | `docs/04-modules/` |
+| **Classification** | ✅ Production | 100% pass | `docs/04-modules/` |
+| **Regression** | ✅ Production | 66 tests | `docs/04-modules/` |
+| **Documentation** | ✅ Organized | N/A | 11 categories |
 
-### ✅ Classification & Build Improvements
+**Quality Metrics**:
+- ✅ 80+ tests passing (regression + integration + classifier)
+- ✅ Modular design with clear separation of concerns
+- ✅ Production-ready with comprehensive validation
+- ✅ Complete documentation in organized structure
 
-1. **🚀 SMI-TED Caching**: Model loaded once and reused (91% speedup)
-2. **🔧 Complete Fixes**: All 7 critical issues resolved
-   - Dimension detection with CHEMBL filtering
-   - Spark session initialization
-   - Binary labels attribute ordering
-   - Stratification path resolution
-   - Missing methods added (`get_matrix_info`, `get_output_path`, `save_json`)
-3. **✅ End-to-End Validation**: All 5 phases tested and verified
-4. **📊 Output Verification**: Matrix (1000, 1088), Labels (525/475), Splits (799/97/104)
-5. **📚 Comprehensive Documentation**: 5 new detailed guides
-
-### 📈 Validated Phases
-
-| Phase | Status | Output | Validation |
-|-------|--------|--------|------------|
-| **1. Embeddings** | ✅ | 275 proteins + 935 ligands | Confirmed |
-| **2. Matrix** | ✅ | (1000, 1088) shape | Correct dims |
-| **3. Labels** | ✅ | 525 active + 475 inactive | Balanced |
-| **4. Stratification** | ✅ | 799/97/104 splits | Valid ratios |
-| **5. Validation** | ✅ | All files created | Complete |
-| **6. Regression** | ✅ | 11 models trained | Production-ready |
-
-**📋 Reports**: 
-- [Pipeline Success](docs/PIPELINE_SUCCESS_REPORT.md)
-- [Regression Modular Architecture](src/regression/README_MODULAR.md) ⭐ **NOVO**
-- [Regression Improvements](src/regression/README_IMPROVEMENTS.md)
-- [Regression Modularization Report](docs/REGRESSION_MODULAR_REPORT.md) ⭐ **NOVO**
-- [Bug Fixes Analysis](ANALISE_ERROS_E_INCONSISTENCIAS.md)
+**📋 Historical Documentation**: Previous reports and analyses available in `docs/00-archive/`
 
 ## 🔧 Troubleshooting
 
