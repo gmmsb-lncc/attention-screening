@@ -1,8 +1,8 @@
 # DockTKinase
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.8+](https://img.shields.io/badge/PyTorch-2.8+-red.svg)](https://pytorch.org/)
-[![Pipeline Optimized](https://img.shields.io/badge/performance-35%25_faster-brightgreen.svg)](docs/PIPELINE_SUCCESS_REPORT.md)
+[![PyTorch 2.1+](https://img.shields.io/badge/PyTorch-2.1+-red.svg)](https://pytorch.org/)
+[![Pipeline Optimized](https://img.shields.io/badge/performance-35%25_faster-brightgreen.svg)](docs/06-validation-reports/pipeline-success.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code Quality](https://img.shields.io/badge/code_quality-production-blue.svg)](docs/)
 
@@ -45,7 +45,7 @@ sudo yum install python3-devel -y
 sudo dnf install python3-devel -y
 ```
 
-📖 **Complete documentation**: [docs/SETUP_PREREQUISITES.md](docs/SETUP_PREREQUISITES.md)
+📖 **Complete documentation**: [docs/01-getting-started/prerequisites.md](docs/01-getting-started/prerequisites.md)
 
 ### 🎯 Performance Metrics
 
@@ -210,14 +210,17 @@ docktkinase/
 │   └── .gitignore                  # Git ignore rules
 │
 ├── 📚 Documentation (docs/)
-│   ├── INSTALLATION_GUIDE.md       # Setup instructions
-│   ├── QUICK_START.md              # Fast start guide
-│   ├── EXECUTION_GUIDE.md          # Usage guide
-│   ├── USER_GUIDE.md               # Complete user manual
-│   ├── PIPELINE_SUCCESS_REPORT.md  # Validation report ⭐
-│   ├── OPTIMIZATION_VALIDATION.md  # Performance details
-│   ├── DEPENDENCY_RESOLUTION.md    # Dependency guide
-│   └── SETUP_SUMMARY.md            # Quick reference
+│   ├── 01-getting-started/         # Installation & setup
+│   │   ├── installation.md         # Setup instructions
+│   │   ├── quick-start.md          # Fast start guide
+│   │   └── prerequisites.md        # System requirements
+│   ├── 02-user-guide/              # Usage documentation
+│   │   ├── execution-guide.md      # Usage guide
+│   │   └── user-manual.md          # Complete user manual
+│   ├── 06-validation-reports/      # Performance & validation
+│   │   ├── pipeline-success.md     # Validation report ⭐
+│   │   └── optimization-validation.md  # Performance details
+│   └── 00-archive/                 # Historical documentation
 │
 ├── 🧬 Source Code (src/)
 │   ├── build/                      # 🏗️ Pipeline & Embeddings
@@ -243,7 +246,7 @@ docktkinase/
 │   │   ├── validation.py           # 🆕 Data validation (10+ checks)
 │   │   ├── logger.py               # 🆕 Professional logging
 │   │   ├── config.py               # 🆕 Centralized config
-│   │   └── README_IMPROVEMENTS.md  # Documentation
+│   │   └── README.md               # Documentation
 │   │
 │   ├── utils/                      # 🔧 Shared Utilities (NEW)
 │   │   ├── __init__.py             # Module exports
@@ -281,7 +284,7 @@ docktkinase/
 ```
 
 > **📚 For detailed documentation, see [docs/](docs/) directory**
-> **⭐ Recent validation report: [docs/PIPELINE_SUCCESS_REPORT.md](docs/PIPELINE_SUCCESS_REPORT.md)**
+> **⭐ Recent validation report: [docs/06-validation-reports/pipeline-success.md](docs/06-validation-reports/pipeline-success.md)**
 
 ## 📊 Performance & Capabilities
 
@@ -356,7 +359,7 @@ env\Scripts\activate     # Windows
 ### Prerequisites
 
 - **Python 3.12+** (3.11 also supported)
-- **PyTorch 2.8+** with CUDA 12.4 (optional, for GPU)
+- **PyTorch 2.1+** with CUDA 12.4 (optional, for GPU)
 - **pip** and **venv** (included with Python)
 - **16GB+ RAM** recommended (8GB minimum)
 - **10GB+ disk space** for models
@@ -390,9 +393,9 @@ python tests/test_pipeline_setup.py
 
 ### Troubleshooting
 
-- **Environment issues**: See [docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md)
-- **Dependency conflicts**: See [docs/DEPENDENCY_RESOLUTION.md](docs/DEPENDENCY_RESOLUTION.md)
-- **Setup problems**: See [docs/SETUP_SUMMARY.md](docs/SETUP_SUMMARY.md)
+- **Environment issues**: See [docs/01-getting-started/installation.md](docs/01-getting-started/installation.md)
+- **Dependency conflicts**: See [docs/05-development/dependency-management.md](docs/05-development/dependency-management.md)
+- **Setup problems**: See [docs/01-getting-started/troubleshooting.md](docs/01-getting-started/troubleshooting.md)
 
 ## 🚀 Quick Start
 
@@ -440,11 +443,11 @@ model = classifier.train_with_optimization(
 
 | Guide | Description | Link |
 |-------|-------------|------|
-| **Quick Start** | 5-minute tutorial | [docs/QUICK_START.md](docs/QUICK_START.md) |
-| **User Guide** | Complete manual | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
-| **Execution Guide** | Advanced usage | [docs/EXECUTION_GUIDE.md](docs/EXECUTION_GUIDE.md) |
-| **Validation Report** | Test results ⭐ | [docs/PIPELINE_SUCCESS_REPORT.md](docs/PIPELINE_SUCCESS_REPORT.md) |
-| **Installation** | Detailed setup | [docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md) |
+| **Quick Start** | 5-minute tutorial | [docs/01-getting-started/quick-start.md](docs/01-getting-started/quick-start.md) |
+| **User Guide** | Complete manual | [docs/02-user-guide/user-manual.md](docs/02-user-guide/user-manual.md) |
+| **Execution Guide** | Advanced usage | [docs/02-user-guide/execution-guide.md](docs/02-user-guide/execution-guide.md) |
+| **Validation Report** | Test results ⭐ | [docs/06-validation-reports/pipeline-success.md](docs/06-validation-reports/pipeline-success.md) |
+| **Installation** | Detailed setup | [docs/01-getting-started/installation.md](docs/01-getting-started/installation.md) |
 
 ## ▶️ Usage
 
@@ -553,7 +556,7 @@ results = pipeline.run()
 
 **Features**:
 - 🎯 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
-- 🏗️ **Modular Architecture** ⭐ **NOVO**: Structured as core/models/utils (same pattern as classifier)
+- 🏗️ **Modular Architecture** ⭐ **NEW**: Structured as core/models/utils (same pattern as classifier)
 - 📊 **Target Prioritization**: Ki > Kd > IC50 (uses highest priority available)
 - 🔀 **Stratified Split**: Quantile-based stratification for regression targets
 - 🔄 **Embeddings Reuse**: Leverages embeddings from classification pipeline (traditional) OR standalone (modular)
@@ -674,7 +677,7 @@ print(calculator.format_metrics_table(metrics))
 models = RegressionModels.get_all_models(random_state=42)
 ```
 
-**Quality Metrics** (Oct 2025 Update):
+**Quality Metrics** (November 2025 Update):
 - ✅ **45 bugs fixed** across classification and regression modules
 - ✅ **100% test pass rate** (19/19 tests)
 - ✅ **4 new professional modules**: validation.py, logger.py, config.py, data_utils.py
@@ -971,7 +974,7 @@ config = BuildConfig({
 })
 ```
 
-## 🎯 Recent Updates (October 2025)
+## 🎯 Recent Updates (November 2025)
 
 ### ⚡ Pipeline Optimization Achievement
 
@@ -985,9 +988,9 @@ config = BuildConfig({
 
 ### 🚀 Major Feature: Production-Ready Regression Module
 
-**NEW Regression Pipeline** with professional infrastructure and **modular architecture** (Oct-Nov 2025):
+**NEW Regression Pipeline** with professional infrastructure and **modular architecture** (November 2025):
 
-#### **🏗️ Modular Architecture** ⭐ **NOVO** (Nov 2025)
+#### **🏗️ Modular Architecture** ⭐ **NEW** (November 2025)
 - **Structured** as `core/`, `models/`, `utils/` (identical pattern to classifier)
 - **DataManager**: Smart data loading with stratified split using quantile bins
 - **MetricsCalculator**: 15+ comprehensive metrics (MAE, RMSE, R², percentiles, CV-RMSE)
@@ -1064,11 +1067,9 @@ config = BuildConfig({
 | **6. Regression** | ✅ | 11 models trained | Production-ready |
 
 **📋 Reports**: 
-- [Pipeline Success](docs/PIPELINE_SUCCESS_REPORT.md)
-- [Regression Modular Architecture](src/regression/README_MODULAR.md) ⭐ **NOVO**
-- [Regression Improvements](src/regression/README_IMPROVEMENTS.md)
-- [Regression Modularization Report](docs/REGRESSION_MODULAR_REPORT.md) ⭐ **NOVO**
-- [Bug Fixes Analysis](ANALISE_ERROS_E_INCONSISTENCIAS.md)
+- [Pipeline Success](docs/06-validation-reports/pipeline-success.md)
+- [Regression Module](src/regression/README.md) ⭐ Complete documentation
+- [Optimization Details](docs/06-validation-reports/optimization-validation.md)
 
 ## 🔧 Troubleshooting
 
@@ -1093,7 +1094,7 @@ config = BuildConfig({
    - Check file permissions on output directories
 
 5. **Hugging Face Rate Limiting (HTTP 429 Errors)**
-   - See [docs/HUGGINGFACE_RATE_LIMIT.md](docs/HUGGINGFACE_RATE_LIMIT.md) for detailed instructions
+   - See [docs/07-troubleshooting/huggingface-rate-limit.md](docs/07-troubleshooting/huggingface-rate-limit.md) for detailed instructions
    - Model files are downloaded during setup to avoid repeated downloads
    - Use local model files when available
 
@@ -1148,10 +1149,6 @@ We welcome contributions! Please:
 
 For major changes, please open an issue first.
 
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
 ## 📞 Contact & Support
 
 - **Issues**: [GitHub Issues](https://github.com/gmmsb-lncc/docktkinase/issues)
@@ -1200,11 +1197,11 @@ MIT License - see [LICENSE](LICENSE) file for details.
 3. **Convergence Warning (Lasso)**: Non-critical warning - Model works correctly
 
 **📋 Detailed Analysis**: Complete analysis files available in `docs/00-archive/root_md_files/`:
-- `ANALISE_ERROS_E_INCONSISTENCIAS.md` - Detailed analysis of 33 issues
-- `ANALISE_FINAL_COMPLETA.md` - Thorough review with resolutions
-- `INTEGRATION_COMPLETE.md` - Technical summary of integration system
-- `QUICK_START_INTEGRATED.md` - Integrated pipeline quick guide
-- `PIPELINE_GUIDE.md` - Complete traditional pipeline guide
+- `ANALISE_ERROS_E_INCONSISTENCIAS.md` - Detailed analysis of 33 issues (archived)
+- `ANALISE_FINAL_COMPLETA.md` - Thorough review with resolutions (archived)
+- `INTEGRATION_COMPLETE.md` - Technical summary of integration system (archived)
+- `QUICK_START_INTEGRATED.md` - Integrated pipeline quick guide (archived)
+- `PIPELINE_GUIDE.md` - Complete traditional pipeline guide (archived)
 
 ### 🎯 Quality Assurance Process
 
