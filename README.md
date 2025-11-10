@@ -313,8 +313,8 @@ The integrated ML system achieves state-of-the-art performance on kinase activit
 - **Output Formats**: NumPy arrays, HDF5, Parquet, JSON
 
 ### **Embedding Capabilities**
-- **Ligand Embeddings**: 512-dimensional vectors from IBM FM4M SMI-TED
-- **Protein Embeddings**: 1280-dimensional vectors from Meta ESM-2
+- **Ligand Embeddings**: 768-dimensional vectors from IBM FM4M SMI-TED
+- **Protein Embeddings**: 320-1280 dimensional vectors from Meta ESM-2 (configurable)
 - **Matrix Sizes**: Support for matrices up to 1M+ compounds x proteins
 - **Batch Processing**: Configurable batch sizes for memory optimization
 
@@ -1003,8 +1003,8 @@ config = BuildConfig({
 - 📈 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
 - 📊 **Target Prioritization**: Ki > Kd > IC50 (configurable, scientifically justified)
 - 🔄 **Embeddings Reuse**: Leverages classification pipeline outputs OR standalone
-- � **Stratified Split**: Quantile-based stratification for regression targets
-- �📉 **Comprehensive Metrics**: 15+ metrics including percentiles and normalized RMSE
+- 🔀 **Stratified Split**: Quantile-based stratification for regression targets
+- 📉 **Comprehensive Metrics**: 15+ metrics including percentiles and normalized RMSE
 
 #### **Professional Infrastructure** (4 New Modules)
 1. **`validation.py` (250 lines)** - Robust data validation
@@ -1166,7 +1166,8 @@ For major changes, please open an issue first.
 
 **⭐ Star this repo if you find it useful!**
 
-**� Documentation**: [docs/](docs/) | **🐛 Report Issues**: [GitHub Issues](https://github.com/gmmsb-lncc/docktkinase/issues) | **💬 Discussions**: [GitHub Discussions](https://github.com/gmmsb-lncc/docktkinase/discussions)
+**📚 Documentation**: [docs/](docs/) | **🐛 Report Issues**: [GitHub Issues](https://github.com/gmmsb-lncc/docktkinase/issues) | **💬 Discussions**: [GitHub Discussions](https://github.com/gmmsb-lncc/docktkinase/discussions)
+
 ## 📊 Project Status & Quality Assurance
 
 ### ✅ Production Readiness
