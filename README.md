@@ -2,17 +2,18 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.8+](https://img.shields.io/badge/PyTorch-2.8+-red.svg)](https://pytorch.org/)
-[![Pipeline Optimized](https://img.shields.io/badge/performance-35%25_faster-brightgreen.svg)](docs/PIPELINE_SUCCESS_REPORT.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code Quality](https://img.shields.io/badge/code_quality-production-blue.svg)](docs/)
+[![Tests](https://img.shields.io/badge/tests-159_passing-brightgreen.svg)](#testing)
 
 ## 🧬 Overview
 
-DockTKinase is a **production-grade computational pipeline** for generating molecular embeddings of kinase inhibitors and their target proteins, with an integrated **machine learning classification system** for activity prediction. Specifically designed for non-human kinases, the pipeline combines state-of-the-art foundation models with high-performance ML classifiers to create complete drug discovery workflows.
+**DockTKinase** é um pipeline computacional modular para geração de embeddings moleculares e predição de atividade de inibidores de quinases usando foundation models e machine learning.
 
-**Recent Achievement**: Pipeline optimized to **35% faster** with complete end-to-end validation! 🚀
-
-This tool is particularly valuable for researchers working on neglected tropical diseases, veterinary medicine, or comparative studies between human and non-human kinases, where traditional drug discovery approaches may be limited by data availability.
+**Características Principais**:
+- 🧠 **Classificação Binária**: MLP com ROC-AUC 0.85 ± 0.01
+- 📊 **Regressão Quantitativa**: 9 modelos (Ridge, RF, XGBoost, etc.)
+- 🔬 **Embeddings Multi-Modal**: FM4M (ligantes) + ESM-2 (proteínas)
+- ✅ **Production-Ready**: 159 testes (93 classifier + 66 regression)
 
 ## 🚀 Key Features
 
