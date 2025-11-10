@@ -1,0 +1,583 @@
+#!/usr/bin/env python3
+"""
+DockTKinase Integrated Pipeline
+================================
+
+Sistema de integração end-to-end que orquestra todos os módulos:
+- build: Geração de embeddings e matrizes
+- classifier: Classificação binária (ativo/inativo)
+- regression: Predição quantitativa (pKi/IC50)
+
+Uso:
+    # CLI
+    python -m integrated_pipeline --input data.tsv --output results/
+
+    # Python API
+    from integrated_pipeline import IntegratedPipeline
+    
+    pipeline = IntegratedPipeline(
+        input_tsv="data.tsv",
+        output_dir="results/"
+    )
+    results = pipeline.run()
+"""
+
+import sys
+import json
+import time
+import argparse
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Union
+from datetime import datetime
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+
+# Adicionar paths
+ROOT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT_DIR / 'src'))
+
+
+@dataclass
+class IntegratedConfig:
+    """Configuração integrada para todos os módulos."""
+    
+    # Input/Output
+    input_tsv: str
+    output_dir: str = "results/integrated"
+    
+    # Build module
+    esm_model: str = "esm2_t6_8M_UR50D"
+    ligand_model: str = "smi-ted-large"
+    batch_size: int = 8
+    device: str = "cpu"
+    
+    # Data split
+    test_size: float = 0.2
+    val_size: float = 0.1
+    random_state: int = 42
+    
+    # Classification
+    run_classification: bool = True
+    classifier_epochs: int = 50
+    classifier_cv_folds: int = 5
+    
+    # Regression
+    run_regression: bool = True
+    regression_models: List[str] = field(default_factory=lambda: [
+        'Ridge', 'Lasso', 'ElasticNet', 'RandomForest', 'XGBoost'
+    ])
+    regression_cv_folds: int = 5
+    
+    # Binary threshold for classification labels
+    binary_threshold: float = 1000.0  # nM
+    
+    # Options
+    verbose: bool = True
+    save_models: bool = True
+    create_visualizations: bool = True
+
+
+class IntegratedPipeline:
+    """
+    Pipeline integrado end-to-end do DockTKinase.
+    
+    Orquestra todos os módulos em sequência:
+    1. Build: Gera embeddings (ligand + protein) e matrizes
+    2. Classifier: Treina modelo de classificação binária
+    3. Regression: Treina modelos de regressão quantitativa
+    """
+    
+    def __init__(self, config: Union[IntegratedConfig, Dict[str, Any]]):
+        """
+        Inicializar pipeline integrado.
+        
+        Args:
+            config: IntegratedConfig ou dict com configurações
+        """
+        if isinstance(config, dict):
+            config = IntegratedConfig(**config)
+        
+        self.config = config
+        self.output_dir = Path(config.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Subdirectories
+        self.build_dir = self.output_dir / "build"
+        self.classifier_dir = self.output_dir / "classifier"
+        self.regression_dir = self.output_dir / "regression"
+        
+        for dir_path in [self.build_dir, self.classifier_dir, self.regression_dir]:
+            dir_path.mkdir(exist_ok=True)
+        
+        # Results storage
+        self.results = {
+            'config': self.config.__dict__ if hasattr(config, '__dict__') else config,
+            'build': {},
+            'classifier': {},
+            'regression': {},
+            'status': 'initialized',
+            'timestamp_start': None,
+            'timestamp_end': None,
+            'total_time_seconds': None
+        }
+    
+    def run(self) -> Dict[str, Any]:
+        """
+        Executar pipeline completo integrado.
+        
+        Returns:
+            Dict com resultados de todos os módulos
+        """
+        start_time = time.time()
+        self.results['timestamp_start'] = datetime.now().isoformat()
+        
+        if self.config.verbose:
+            self._print_header()
+        
+        try:
+            # Phase 1: Build embeddings and matrices
+            if self.config.verbose:
+                print("\n" + "="*80)
+                print("PHASE 1: BUILD - Embedding Generation & Matrix Construction")
+                print("="*80)
+            
+            build_results = self._run_build_phase()
+            self.results['build'] = build_results
+            
+            # Phase 2: Classification (optional)
+            if self.config.run_classification:
+                if self.config.verbose:
+                    print("\n" + "="*80)
+                    print("PHASE 2: CLASSIFICATION - Binary Activity Prediction")
+                    print("="*80)
+                
+                classifier_results = self._run_classification_phase(build_results)
+                self.results['classifier'] = classifier_results
+            
+            # Phase 3: Regression (optional)
+            if self.config.run_regression:
+                if self.config.verbose:
+                    print("\n" + "="*80)
+                    print("PHASE 3: REGRESSION - Quantitative Activity Prediction")
+                    print("="*80)
+                
+                regression_results = self._run_regression_phase(build_results)
+                self.results['regression'] = regression_results
+            
+            # Success
+            self.results['status'] = 'completed'
+            
+        except Exception as e:
+            self.results['status'] = 'failed'
+            self.results['error'] = str(e)
+            
+            if self.config.verbose:
+                print(f"\n❌ Pipeline failed: {e}")
+            
+            raise
+        
+        finally:
+            end_time = time.time()
+            self.results['timestamp_end'] = datetime.now().isoformat()
+            self.results['total_time_seconds'] = end_time - start_time
+            
+            # Save final results
+            self._save_results()
+            
+            if self.config.verbose:
+                self._print_summary()
+        
+        return self.results
+    
+    def _run_build_phase(self) -> Dict[str, Any]:
+        """
+        Phase 1: Gerar embeddings e construir matrizes.
+        
+        Returns:
+            Dict com paths dos arquivos gerados
+        """
+        from build.pipeline import BuildPipeline
+        from build.core import BuildConfig
+        
+        # Configurar build
+        build_config = BuildConfig(
+            input_tsv=self.config.input_tsv,
+            output_dir=str(self.build_dir),
+            esm_model=self.config.esm_model,
+            ligand_model=self.config.ligand_model,
+            batch_size=self.config.batch_size,
+            device=self.config.device,
+            binary_threshold=self.config.binary_threshold,
+            test_size=self.config.test_size,
+            val_size=self.config.val_size,
+            random_state=self.config.random_state
+        )
+        
+        # Executar build pipeline
+        build_pipeline = BuildPipeline(build_config)
+        success = build_pipeline.run_complete_pipeline(
+            input_tsv_path=self.config.input_tsv,
+            output_dir=self.build_dir,
+            matrix_type='embedding',
+            binary_threshold=self.config.binary_threshold,
+            run_validation=True
+        )
+        
+        if not success:
+            raise RuntimeError("Build phase failed")
+        
+        # Coletar paths dos arquivos gerados
+        results = {
+            'success': True,
+            'embeddings': {
+                'protein': str(self.build_dir / "embeddings" / "protein_embeddings.npy"),
+                'ligand': str(self.build_dir / "embeddings" / "ligand_embeddings.npy"),
+                'concatenated': str(self.build_dir / "matrix" / "embedding_matrix.npy")
+            },
+            'labels': {
+                'binary': str(self.build_dir / "labels" / "binary_labels.npy"),
+                'regression': str(self.build_dir / "labels" / "regression_targets.npy")
+            },
+            'splits': {
+                'train_indices': str(self.build_dir / "splits" / "train_indices.npy"),
+                'val_indices': str(self.build_dir / "splits" / "val_indices.npy"),
+                'test_indices': str(self.build_dir / "splits" / "test_indices.npy")
+            }
+        }
+        
+        if self.config.verbose:
+            print("✅ Build phase completed successfully")
+            print(f"   Embeddings saved to: {self.build_dir / 'embeddings'}")
+            print(f"   Matrix saved to: {self.build_dir / 'matrix'}")
+            print(f"   Labels saved to: {self.build_dir / 'labels'}")
+        
+        return results
+    
+    def _run_classification_phase(self, build_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Phase 2: Treinar classificador binário.
+        
+        Args:
+            build_results: Resultados do build phase
+        
+        Returns:
+            Dict com métricas do classificador
+        """
+        from classifier.modular_pipeline import MLPEmbeddingPipeline
+        
+        # Paths dos dados
+        embeddings_path = build_results['embeddings']['concatenated']
+        labels_path = build_results['labels']['binary']
+        
+        # Criar pipeline de classificação
+        classifier = MLPEmbeddingPipeline(
+            embeddings_path=embeddings_path,
+            labels_path=labels_path,
+            batch_size=32,
+            lr=0.001,
+            epochs=self.config.classifier_epochs,
+            test_split=self.config.test_size,
+            val_split=self.config.val_size,
+            early_stopping_patience=10,
+            model_output=str(self.classifier_dir / "mlp_model.pth"),
+            metrics_output=str(self.classifier_dir / "metrics.json")
+        )
+        
+        # Carregar dados
+        classifier.load_data()
+        
+        # Treinar
+        val_loss = classifier.train()
+        
+        # Cross-validation
+        cv_results = classifier.cross_validate(k=self.config.classifier_cv_folds)
+        
+        # Avaliar no test set
+        test_metrics = classifier.evaluate(
+            classifier.model,
+            classifier.test_loader
+        )
+        
+        results = {
+            'success': True,
+            'val_loss': float(val_loss),
+            'test_metrics': {
+                'accuracy': float(test_metrics.get('accuracy', 0)),
+                'precision': float(test_metrics.get('precision', 0)),
+                'recall': float(test_metrics.get('recall', 0)),
+                'f1': float(test_metrics.get('f1', 0)),
+                'roc_auc': float(test_metrics.get('roc_auc', 0))
+            },
+            'cv_results': {
+                'mean_roc_auc': float(cv_results.get('mean_roc_auc', 0)),
+                'std_roc_auc': float(cv_results.get('std_roc_auc', 0)),
+                'n_folds': self.config.classifier_cv_folds
+            },
+            'model_path': str(self.classifier_dir / "mlp_model.pth")
+        }
+        
+        if self.config.verbose:
+            print("✅ Classification phase completed successfully")
+            print(f"   Test ROC-AUC: {results['test_metrics']['roc_auc']:.4f}")
+            print(f"   CV ROC-AUC: {results['cv_results']['mean_roc_auc']:.4f} ± {results['cv_results']['std_roc_auc']:.4f}")
+        
+        return results
+    
+    def _run_regression_phase(self, build_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Phase 3: Treinar modelos de regressão.
+        
+        Args:
+            build_results: Resultados do build phase
+        
+        Returns:
+            Dict com métricas dos modelos de regressão
+        """
+        from regression.modular_pipeline import RegressionPipeline
+        
+        # Paths dos dados
+        embeddings_path = build_results['embeddings']['concatenated']
+        targets_path = build_results['labels']['regression']
+        
+        # Criar pipeline de regressão
+        regression = RegressionPipeline(
+            embeddings_path=embeddings_path,
+            targets_path=targets_path,
+            output_dir=str(self.regression_dir),
+            models_to_train=self.config.regression_models,
+            test_size=self.config.test_size,
+            val_size=self.config.val_size,
+            random_state=self.config.random_state,
+            verbose=self.config.verbose
+        )
+        
+        # Carregar dados
+        regression.load_data()
+        
+        # Treinar modelos
+        train_results = regression.train_all_models()
+        
+        # Cross-validation (opcional, para modelos selecionados)
+        from regression.core import quick_cross_validate
+        
+        cv_results = {}
+        if len(self.config.regression_models) <= 3:  # CV apenas para poucos modelos
+            cv_results = quick_cross_validate(
+                regression.X_train,
+                regression.y_train,
+                model_names=self.config.regression_models,
+                n_splits=self.config.regression_cv_folds,
+                random_state=self.config.random_state
+            )
+        
+        # Compilar resultados
+        results = {
+            'success': True,
+            'best_model': train_results['best_model'],
+            'best_mae': float(train_results['best_mae']),
+            'best_r2': float(train_results['best_r2']),
+            'models_trained': len(self.config.regression_models),
+            'individual_results': {}
+        }
+        
+        # Adicionar métricas individuais
+        for model_name in self.config.regression_models:
+            if model_name in train_results.get('models', {}):
+                model_metrics = train_results['models'][model_name]['test_metrics']
+                results['individual_results'][model_name] = {
+                    'mae': float(model_metrics.get('mae', 0)),
+                    'rmse': float(model_metrics.get('rmse', 0)),
+                    'r2': float(model_metrics.get('r2', 0))
+                }
+        
+        # Adicionar CV se disponível
+        if cv_results:
+            results['cv_results'] = {}
+            for model_name, cv_result in cv_results.items():
+                results['cv_results'][model_name] = {
+                    'mae_mean': float(cv_result.get_mean_metric('mae')),
+                    'mae_std': float(cv_result.get_std_metric('mae')),
+                    'r2_mean': float(cv_result.get_mean_metric('r2')),
+                    'r2_std': float(cv_result.get_std_metric('r2'))
+                }
+        
+        if self.config.verbose:
+            print("✅ Regression phase completed successfully")
+            print(f"   Best model: {results['best_model']}")
+            print(f"   Best MAE: {results['best_mae']:.3f}")
+            print(f"   Best R²: {results['best_r2']:.4f}")
+        
+        return results
+    
+    def _save_results(self) -> None:
+        """Salvar resultados finais em JSON."""
+        results_file = self.output_dir / "integrated_results.json"
+        
+        with open(results_file, 'w') as f:
+            json.dump(self.results, f, indent=2)
+        
+        if self.config.verbose:
+            print(f"\n📁 Results saved to: {results_file}")
+    
+    def _print_header(self) -> None:
+        """Imprimir cabeçalho do pipeline."""
+        print("\n" + "="*80)
+        print(" " * 20 + "🧬 DOCKTKINASE INTEGRATED PIPELINE 🧬")
+        print("="*80)
+        print(f"Input TSV: {self.config.input_tsv}")
+        print(f"Output Dir: {self.config.output_dir}")
+        print(f"ESM Model: {self.config.esm_model}")
+        print(f"Device: {self.config.device}")
+        print(f"Random Seed: {self.config.random_state}")
+        print("\nModules to run:")
+        print(f"  • Build: ✅ (always required)")
+        print(f"  • Classification: {'✅' if self.config.run_classification else '❌'}")
+        print(f"  • Regression: {'✅' if self.config.run_regression else '❌'}")
+        print("="*80)
+    
+    def _print_summary(self) -> None:
+        """Imprimir resumo final."""
+        print("\n" + "="*80)
+        print(" " * 25 + "🎉 PIPELINE SUMMARY 🎉")
+        print("="*80)
+        
+        print(f"\n📊 Status: {self.results['status'].upper()}")
+        print(f"⏱️  Total time: {self.results['total_time_seconds']:.2f} seconds")
+        
+        # Build results
+        if self.results.get('build', {}).get('success'):
+            print("\n✅ Build Phase: SUCCESS")
+        
+        # Classification results
+        if self.config.run_classification and self.results.get('classifier', {}).get('success'):
+            clf = self.results['classifier']
+            print("\n✅ Classification Phase: SUCCESS")
+            print(f"   Test ROC-AUC: {clf['test_metrics']['roc_auc']:.4f}")
+            print(f"   Test Accuracy: {clf['test_metrics']['accuracy']:.4f}")
+            print(f"   CV ROC-AUC: {clf['cv_results']['mean_roc_auc']:.4f} ± {clf['cv_results']['std_roc_auc']:.4f}")
+        
+        # Regression results
+        if self.config.run_regression and self.results.get('regression', {}).get('success'):
+            reg = self.results['regression']
+            print("\n✅ Regression Phase: SUCCESS")
+            print(f"   Best model: {reg['best_model']}")
+            print(f"   Best MAE: {reg['best_mae']:.3f}")
+            print(f"   Best R²: {reg['best_r2']:.4f}")
+        
+        print("\n" + "="*80)
+        print(f"📁 All results saved to: {self.output_dir}")
+        print("="*80 + "\n")
+
+
+def main():
+    """Entry point de linha de comando."""
+    parser = argparse.ArgumentParser(
+        description="DockTKinase Integrated Pipeline",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Complete workflow (classification + regression)
+  python -m integrated_pipeline --input data.tsv --output results/
+
+  # Classification only
+  python -m integrated_pipeline --input data.tsv --no-regression
+
+  # Regression only
+  python -m integrated_pipeline --input data.tsv --no-classification
+
+  # Custom models
+  python -m integrated_pipeline --input data.tsv \\
+      --regression-models Ridge Lasso XGBoost \\
+      --esm-model esm2_t33_650M_UR50D
+        """
+    )
+    
+    # Required
+    parser.add_argument(
+        '--input',
+        required=True,
+        help='Input TSV file with kinase data'
+    )
+    
+    parser.add_argument(
+        '--output',
+        default='results/integrated',
+        help='Output directory (default: results/integrated)'
+    )
+    
+    # Build options
+    parser.add_argument(
+        '--esm-model',
+        default='esm2_t6_8M_UR50D',
+        help='ESM model name (default: esm2_t6_8M_UR50D)'
+    )
+    
+    parser.add_argument(
+        '--device',
+        default='cpu',
+        choices=['cpu', 'cuda', 'mps'],
+        help='Device for computation (default: cpu)'
+    )
+    
+    # Module selection
+    parser.add_argument(
+        '--no-classification',
+        action='store_true',
+        help='Skip classification phase'
+    )
+    
+    parser.add_argument(
+        '--no-regression',
+        action='store_true',
+        help='Skip regression phase'
+    )
+    
+    # Regression options
+    parser.add_argument(
+        '--regression-models',
+        nargs='+',
+        default=['Ridge', 'Lasso', 'ElasticNet', 'RandomForest', 'XGBoost'],
+        help='Regression models to train (default: Ridge Lasso ElasticNet RandomForest XGBoost)'
+    )
+    
+    # General options
+    parser.add_argument(
+        '--random-state',
+        type=int,
+        default=42,
+        help='Random seed (default: 42)'
+    )
+    
+    parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress verbose output'
+    )
+    
+    args = parser.parse_args()
+    
+    # Criar configuração
+    config = IntegratedConfig(
+        input_tsv=args.input,
+        output_dir=args.output,
+        esm_model=args.esm_model,
+        device=args.device,
+        run_classification=not args.no_classification,
+        run_regression=not args.no_regression,
+        regression_models=args.regression_models,
+        random_state=args.random_state,
+        verbose=not args.quiet
+    )
+    
+    # Executar pipeline
+    pipeline = IntegratedPipeline(config)
+    results = pipeline.run()
+    
+    # Status de saída
+    return 0 if results['status'] == 'completed' else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

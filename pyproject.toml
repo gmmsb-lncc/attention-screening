@@ -1,0 +1,46 @@
+[tool.pytest.ini_options]
+# Pytest configuration
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Custom markers
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "unit: marks tests as unit tests",
+    "regression: marks tests for regression module",
+    "classifier: marks tests for classifier module",
+    "build: marks tests for build module",
+    "requires_gpu: marks tests that require GPU",
+    "requires_data: marks tests that require external data"
+]
+
+# Output options
+addopts = [
+    "-ra",                # Show summary of all test outcomes
+    "--strict-markers",   # Ensure only registered markers are used
+    "--tb=short",        # Short traceback format
+    "-v",                # Verbose output
+]
+
+# Coverage options (when running with --cov)
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/env/*",
+    "*/venv/*"
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
