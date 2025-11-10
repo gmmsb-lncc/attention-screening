@@ -30,12 +30,12 @@ This tool is particularly valuable for researchers working on neglected tropical
 - **⚙️ Scalable Processing**: Apache Spark integration for distributed computing
 - **📊 Comprehensive Validation**: Complete output verification and quality control
 
-## ⚠️ Pré-requisitos do Sistema
+## ⚠️ System Prerequisites
 
-**IMPORTANTE**: Antes de executar o setup, você **DEVE** instalar:
+**IMPORTANT**: Before running setup, you **MUST** install:
 
 ```bash
-# Ubuntu/Debian (OBRIGATÓRIO)
+# Ubuntu/Debian (REQUIRED)
 sudo apt-get install python3.12-dev -y
 
 # CentOS/RHEL
@@ -45,7 +45,7 @@ sudo yum install python3-devel -y
 sudo dnf install python3-devel -y
 ```
 
-📖 **Documentação completa**: [docs/SETUP_PREREQUISITES.md](docs/SETUP_PREREQUISITES.md)
+📖 **Complete documentation**: [docs/SETUP_PREREQUISITES.md](docs/SETUP_PREREQUISITES.md)
 
 ### 🎯 Performance Metrics
 
@@ -59,35 +59,35 @@ sudo dnf install python3-devel -y
 
 ## 🔗 Integrated Workflow (NEW!)
 
-DockTKinase agora oferece um **pipeline integrado end-to-end** que orquestra automaticamente todos os módulos:
+DockTKinase now offers an **end-to-end integrated pipeline** that automatically orchestrates all modules:
 
 ### ⚡ Quick Start - Unified Workflow
 
 ```bash
-# Execute o workflow completo com um único comando
+# Execute complete workflow with a single command
 python -m src.integrated_pipeline \
     --input data/kinase_data.tsv \
     --output results/integrated
 
-# Workflow completo em ~5 minutos (dataset pequeno)
-# ✅ Build: Embeddings gerados
-# ✅ Classification: MLP treinado (ROC-AUC ~0.85)
-# ✅ Regression: 5 modelos treinados
+# Complete workflow in ~5 minutes (small dataset)
+# ✅ Build: Embeddings generated
+# ✅ Classification: MLP trained (ROC-AUC ~0.85)
+# ✅ Regression: 5 models trained
 ```
 
-### 🎯 Modos de Execução Flexíveis
+### 🎯 Flexible Execution Modes
 
 ```bash
-# Apenas embeddings (build)
+# Embeddings only (build)
 python -m src.integrated_pipeline --input data.tsv --no-classification --no-regression
 
-# Build + Classification (sem regression)
+# Build + Classification (without regression)
 python -m src.integrated_pipeline --input data.tsv --no-regression
 
-# Build + Regression (sem classification)
+# Build + Regression (without classification)
 python -m src.integrated_pipeline --input data.tsv --no-classification
 
-# Workflow completo (padrão)
+# Complete workflow (default)
 python -m src.integrated_pipeline --input data.tsv --output results/
 ```
 
@@ -96,7 +96,7 @@ python -m src.integrated_pipeline --input data.tsv --output results/
 ```python
 from src.integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
-# Configuração completa
+# Complete configuration
 config = IntegratedConfig(
     input_tsv="data/kinase_data.tsv",
     output_dir="results/integrated",
@@ -108,11 +108,11 @@ config = IntegratedConfig(
     random_state=42
 )
 
-# Executar pipeline integrado
+# Execute integrated pipeline
 pipeline = IntegratedPipeline(config)
 results = pipeline.run()
 
-# Acessar resultados
+# Access results
 print(f"Classification ROC-AUC: {results['classifier']['test_metrics']['roc_auc']:.4f}")
 print(f"Best Regression Model: {results['regression']['best_model']}")
 print(f"Best MAE: {results['regression']['best_mae']:.3f}")
@@ -166,36 +166,36 @@ DockTKinase features a **professional modular architecture** with unified orches
 ### **🎯 Key Components**
 
 #### 1️⃣ **IntegratedPipeline** (NEW!)
-- **Unified orchestrator** que coordena todos os módulos
-- **Automação end-to-end**: data → embeddings → classification → regression
-- **Checkpointing automático**: retoma de qualquer fase
-- **Resultados consolidados**: JSON com todas as métricas
+- **Unified orchestrator** that coordinates all modules
+- **End-to-end automation**: data → embeddings → classification → regression
+- **Automatic checkpointing**: Resume from any phase
+- **Consolidated results**: JSON with all metrics
 
 #### 2️⃣ **Build Module** (`src/build/`)
-- Geração de embeddings (ligand + protein)
-- Construção de matrizes concatenadas
-- Estratificação e splits (train/val/test)
-- Labels binárias e contínuas
+- Embedding generation (ligand + protein)
+- Concatenated matrix construction
+- Stratification and splits (train/val/test)
+- Binary and continuous labels
 
 #### 3️⃣ **Classification Module** (`src/classifier/`)
 - MLP binary classifier
 - Hyperparameter optimization (Optuna)
-- Cross-validation rigorosa
-- Métricas: ROC-AUC, F1, Precision, Recall
+- Rigorous cross-validation
+- Metrics: ROC-AUC, F1, Precision, Recall
 
 #### 4️⃣ **Regression Module** (`src/regression/`)
-- 11 algoritmos de regressão
-- Cross-validation profissional
-- Model selection automatizado
-- Métricas: MAE, RMSE, R²
+- 11 regression algorithms
+- Professional cross-validation
+- Automated model selection
+- Metrics: MAE, RMSE, R²
 
 ### **🎯 Key Benefits**
-- **Unified Workflow**: Um comando para executar tudo
-- **Flexible Execution**: Execute fases específicas
-- **Automatic Data Flow**: Outputs de uma fase alimentam a próxima
-- **Maintainability**: Módulos independentes e testáveis
-- **Extensibility**: Fácil adicionar novos modelos
-- **Performance**: Otimizado para datasets grandes
+- **Unified Workflow**: One command to execute everything
+- **Flexible Execution**: Execute specific phases
+- **Automatic Data Flow**: Outputs from one phase feed the next
+- **Maintainability**: Independent and testable modules
+- **Extensibility**: Easy to add new models
+- **Performance**: Optimized for large datasets
 
 ## 📁 Project Structure
 
@@ -512,7 +512,7 @@ results = classifier.train_and_evaluate("features.npy", "labels.npy")
 
 **🎯 Two interfaces available:**
 
-**1. Pipeline Tradicional** (reutiliza embeddings do classificador):
+**1. Traditional Pipeline** (reuses embeddings from classifier):
 ```bash
 # Step 1: Run classification pipeline to generate embeddings and splits
 python run_complete_pipeline.py \
@@ -529,18 +529,18 @@ python run_regression_pipeline.py \
     --device cuda
 ```
 
-**2. Pipeline Modular** ⭐ **NOVO** (standalone, não requer classificador):
+**2. Modular Pipeline** ⭐ **NEW** (standalone, doesn't require classifier):
 ```bash
-# Execução standalone com embeddings pré-gerados
+# Standalone execution with pre-generated embeddings
 python src/regression/modular_regression.py embeddings.npy targets.npy
 
-# Com opções customizadas
+# With custom options
 python src/regression/modular_regression.py embeddings.npy targets.npy \
     --models RandomForest XGBoost KNN \
     --output results/my_experiment \
     --test-size 0.2 --val-size 0.1
 
-# Via API Python
+# Via Python API
 from regression.modular_pipeline import RegressionPipeline
 
 pipeline = RegressionPipeline(
@@ -641,7 +641,7 @@ best_model = evaluator.get_best_model(metric='RMSE')
 logger.success(f'Best model: {best_model}')
 ```
 
-**Python API - Modular Approach** ⭐ **NOVO**:
+**Python API - Modular Approach** ⭐ **NEW**:
 ```python
 from regression.modular_pipeline import RegressionPipeline
 from regression.core import DataManager
@@ -1195,16 +1195,16 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ### 🐛 Known Issues & Workarounds
 
-1. **KNN Model Failure (macOS)**: Bug documentado - Pipeline automaticamente pula KNN se falhar (8/9 modelos funcionam)
-2. **ESM Bug (External)**: Bug na biblioteca ESM externa - Não afeta funcionalidade principal
-3. **Convergence Warning (Lasso)**: Aviso não-crítico - Modelo funciona corretamente
+1. **KNN Model Failure (macOS)**: Documented bug - Pipeline automatically skips KNN if it fails (8/9 models work)
+2. **ESM Bug (External)**: Bug in external ESM library - Does not affect main functionality
+3. **Convergence Warning (Lasso)**: Non-critical warning - Model works correctly
 
-**📋 Detailed Analysis**: Arquivos de análise completa disponíveis em `docs_backup/root_md_files/`:
-- `ANALISE_ERROS_E_INCONSISTENCIAS.md` - Análise detalhada de 33 issues
-- `ANALISE_FINAL_COMPLETA.md` - Revisão minuciosa com resoluções
-- `INTEGRATION_COMPLETE.md` - Resumo técnico do sistema de integração
-- `QUICK_START_INTEGRATED.md` - Guia rápido do pipeline integrado
-- `PIPELINE_GUIDE.md` - Guia completo do pipeline tradicional
+**📋 Detailed Analysis**: Complete analysis files available in `docs/00-archive/root_md_files/`:
+- `ANALISE_ERROS_E_INCONSISTENCIAS.md` - Detailed analysis of 33 issues
+- `ANALISE_FINAL_COMPLETA.md` - Thorough review with resolutions
+- `INTEGRATION_COMPLETE.md` - Technical summary of integration system
+- `QUICK_START_INTEGRATED.md` - Integrated pipeline quick guide
+- `PIPELINE_GUIDE.md` - Complete traditional pipeline guide
 
 ### 🎯 Quality Assurance Process
 
