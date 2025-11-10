@@ -679,115 +679,67 @@ See `examples/` directory for working code samples:
 
 ## ▶️ Usage
 
-### New Modular API (Recommended)
+> **💡 TIP**: For complete workflow execution instructions, see the [**"How to Execute Workflows"**](#-how-to-execute-workflows) section above.
 
-The system now features a **modern modular architecture** with clean APIs for each component:
+### Quick Reference
 
-#### 🚀 Complete End-to-End Pipeline
-```python
-from src.build import BuildPipeline
-from src.classifier.modular_pipeline import MLPEmbeddingPipeline
-from src.database import ComparativeAnalyzer
+**Most Common Use Cases**:
 
-# 1. Analyze and prepare data
-analyzer = ComparativeAnalyzer()
-data_stats = analyzer.compare_datasets("src/database/kinase_data.tsv")
-
-# 2. Generate embeddings with modular build system
-config = BuildConfig({
-    'base_dir': '.',
-    'ligand_dir': 'ligand',
-    'protein_dir': 'protein', 
-    'ligand_output_dir': 'ligand_embeddings',
-    'protein_output_dir': 'protein_embeddings'
-})
-
-pipeline = BuildPipeline(config)
-embeddings = pipeline.run_complete_pipeline(
-    input_file="src/database/kinase_data.tsv",
-    output_dir="embeddings/"
-)
-
-# 3. Train ML classifier with optimization
-classifier = MLPEmbeddingPipeline()
-model = classifier.train_with_optimization(
-    features_path="embeddings/concatenated_matrix.npy",
-    labels_path="embeddings/labels.npy"
-)
-```
-
-#### 🏗️ Individual Module Usage
-```python
-# Database analysis only
-from src.database import MolecularClusterer, BalanceChecker
-
-clusterer = MolecularClusterer()
-clusters = clusterer.cluster_by_similarity("data.tsv", threshold=0.7)
-
-# Embedding generation only  
-from src.build.embeddings import LigandEmbedding, ProteinEmbedding
-
-ligand_emb = LigandEmbedding(model_name="smi-ted")
-protein_emb = ProteinEmbedding(model_name="esm2")
-
-# Classification only
-from src.classifier.modular_classifier import ModularClassifier
-
-classifier = ModularClassifier()
-results = classifier.train_and_evaluate("features.npy", "labels.npy")
-```
-
-#### 📊 Regression Pipeline for Activity Prediction
-
-**NEW**: Predict quantitative activity values (nM) using regression models with **production-ready infrastructure** and **modular architecture**!
-
-**🎯 Two interfaces available:**
-
-**1. Traditional Pipeline** (reuses embeddings from classifier):
 ```bash
-# Step 1: Run classification pipeline to generate embeddings and splits
-python run_complete_pipeline.py \
-    --dataset all \
-    --model esm2_t36_3B_UR50D \
-    --device cuda
+# 1. Complete pipeline (recommended for most users)
+python -m src.integrated_pipeline --input data.tsv --output results/
 
-# Step 2: Run regression pipeline (reuses embeddings and splits)
-python run_regression_pipeline.py \
-    --dataset all \
-    --model esm2_t36_3B_UR50D \
-    --classification-stats results/pipeline_stats.json \
-    --embeddings-cache results/embeddings_esm2_t36_3B_UR50D.npz \
-    --device cuda
+# 2. Only embeddings generation
+python -m src.integrated_pipeline --input data.tsv --no-classification --no-regression
+
+# 3. Embeddings + Classification
+python -m src.integrated_pipeline --input data.tsv --no-regression
+
+# 4. Embeddings + Regression
+python -m src.integrated_pipeline --input data.tsv --no-classification
 ```
 
-**2. Modular Pipeline** ⭐ **NEW** (standalone, doesn't require classifier):
-```bash
-# Standalone execution with pre-generated embeddings
-python src/regression/modular_regression.py embeddings.npy targets.npy
+### Python API - Quick Examples
 
-# With custom options
-python src/regression/modular_regression.py embeddings.npy targets.npy \
-    --models RandomForest XGBoost KNN \
-    --output results/my_experiment \
-    --test-size 0.2 --val-size 0.1
+**Integrated Pipeline (Recommended)**:
+```python
+from src.integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
-# Via Python API
-from regression.modular_pipeline import RegressionPipeline
-
-pipeline = RegressionPipeline(
-    embeddings_path='embeddings.npy',
-    targets_path='targets.npy',
-    output_dir='results/regression'
+config = IntegratedConfig(
+    input_tsv="data/kinase_data.tsv",
+    output_dir="results/",
+    run_classification=True,
+    run_regression=True
 )
+
+pipeline = IntegratedPipeline(config)
 results = pipeline.run()
 ```
 
-**Features**:
-- 🎯 **11 Regression Models**: RandomForest, XGBoost, LightGBM, CatBoost, Ridge, Lasso, ElasticNet, SVR, KNN, MLP, GradientBoosting
-- 🏗️ **Modular Architecture** ⭐ **NOVO**: Structured as core/models/utils (same pattern as classifier)
-- 📊 **Target Prioritization**: Ki > Kd > IC50 (uses highest priority available)
-- 🔀 **Stratified Split**: Quantile-based stratification for regression targets
-- 🔄 **Embeddings Reuse**: Leverages embeddings from classification pipeline (traditional) OR standalone (modular)
+**Individual Modules** (for custom workflows):
+```python
+# Build only
+from src.build.pipeline import BuildPipeline
+build = BuildPipeline(config)
+build_results = build.run_complete_pipeline(input_file="data.tsv")
+
+# Classification only
+from src.classifier.modular_pipeline import MLPEmbeddingPipeline
+classifier = MLPEmbeddingPipeline()
+clf_results = classifier.train_with_optimization(features_path, labels_path)
+
+# Regression only
+from src.regression.modular_pipeline import RegressionPipeline
+regression = RegressionPipeline(embeddings_path, targets_path)
+reg_results = regression.run()
+```
+
+For detailed examples and advanced usage, see:
+- 📖 **Complete Guide**: [How to Execute Workflows](#-how-to-execute-workflows) section above
+- � **Working Examples**: `examples/` directory
+- � **Documentation**: `docs/02-user-guide/`
+
+---
 - 📈 **Same Splits**: Uses identical train/val/test splits for fair comparison
 - 📉 **Comprehensive Metrics**: 15+ metrics (MAE, RMSE, R², MAPE, percentiles, CV-RMSE)
 - 🎨 **Rich Visualizations**: Predictions vs actual, residuals, model comparison, error distribution
@@ -905,87 +857,81 @@ print(calculator.format_metrics_table(metrics))
 models = RegressionModels.get_all_models(random_state=42)
 ```
 
-**Quality Metrics** (Oct 2025 Update):
-- ✅ **45 bugs fixed** across classification and regression modules
-- ✅ **100% test pass rate** (19/19 tests)
-- ✅ **4 new professional modules**: validation.py, logger.py, config.py, data_utils.py
-- ✅ **~950 lines** of production-ready infrastructure code
-- ✅ **Complete documentation** with docstrings and type hints
-
-### Legacy Configuration
-
-Edit `legacy/docktkinase.py` to set your input file and output directory:
-
-```python
-# Input TSV filename (must be in src/database/)
-INPUT_TSV_FILENAME = "kinase_non_human_compounds.tsv"
-
-# Output folder name
-OUTPUT_FOLDER_NAME = "non_human"
-```
-
-### Legacy Execution
-
-For backward compatibility, you can still use the original interface:
-
-```bash
-python legacy/docktkinase.py
-```
-
-The pipeline execution follows these stages:
-1. **Data Preparation**: Processes the input TSV file to extract unique ligands and proteins
-2. **Ligand Embedding Generation**: Creates embeddings for ligands using IBM's FM4M SMI-TED model
-3. **Protein Embedding Generation**: Creates embeddings for proteins using Meta's ESM model
-4. **Matrix Construction**: Combines embeddings into matrices for downstream analysis
-
-### Quality Assurance
-
-The system includes a comprehensive quality assurance system:
-
-```bash
-# Run complete system validation
-python legacy/comprehensive_deep_review.py
-```
-
-This performs:
-- **Syntax Analysis**: Checks all Python files for syntax errors
-- **Import Validation**: Verifies all imports work correctly
-- **Class Inheritance**: Validates class hierarchies
-- **Type Hints**: Checks type annotation consistency  
-- **Memory Leak Detection**: Identifies potential memory issues
-- **Module Integration**: Tests all components work together
-
 ## 🏗️ Architecture
 
 ### Modular Design Philosophy
 
-The system is built with a **clean modular architecture** that separates concerns:
+DockTKinase is built with a **clean modular architecture** with clear separation of concerns:
 
+**Core Modules**:
+- **`integrated_pipeline`**: Unified orchestrator coordinating all modules
+- **`build`**: Embedding generation (ligands + proteins) and matrix construction
+- **`classifier`**: Binary classification with MLP and hyperparameter optimization
+- **`regression`**: Quantitative prediction with 11 regression algorithms
+- **`database`**: Data processing and molecular analysis
+- **`utils`**: Shared utilities and helper functions
+
+**Build Module Structure**:
 - **`build.core`**: Configuration, constants, and base classes
 - **`build.pipeline`**: High-level workflow orchestration
 - **`build.embeddings`**: Specialized embedding generators (ESM, FM4M)
 - **`build.matrix`**: Matrix construction and management
 - **`build.labels`**: Label generation for ML tasks
 - **`build.validation`**: Data quality and integrity checks
-- **`build.utils`**: Shared utilities and helpers
+
+**Classifier Module Structure**:
+- **`classifier.models`**: MLP implementations
+- **`classifier.config`**: Configuration management
+- **`classifier.utils`**: Training and evaluation utilities
+- **`classifier.modular_pipeline`**: Training orchestration
+
+**Regression Module Structure**:
+- **`regression.core`**: Base components (DataManager, MetricsCalculator)
+- **`regression.models`**: 11 regression model implementations
+- **`regression.utils`**: Helper functions and utilities
+- **`regression.validation`**: Data validation (10+ checks)
+- **`regression.logger`**: Professional logging system
+- **`regression.config`**: Centralized configuration
 
 ### Key Benefits
 
-- **🧪 Production Ready**: Zero-error guarantee with comprehensive testing
-- **🔧 Extensible**: Easy to add new embedding types or matrix formats
+- **🎯 Production Ready**: Comprehensive testing with 80+ passing tests
+- **🔧 Extensible**: Easy to add new models or embedding types
 - **⚡ High Performance**: Optimized for large-scale processing
 - **🛡️ Robust**: Extensive error handling and validation
 - **📚 Well Documented**: Clear APIs and comprehensive examples
+- **� Integrated**: Seamless data flow between modules
 
-## 🚀 Complete Workflow Example
+### Data Flow
 
-Here's how to run the complete pipeline from embeddings to classification using the modern API:
+```
+Input TSV
+    ↓
+[Build Module]
+    ├→ Ligand Embeddings (FM4M SMI-TED)
+    ├→ Protein Embeddings (ESM-2)
+    ├→ Concatenated Matrix
+    ├→ Binary Labels
+    └→ Continuous Labels
+    ↓
+[Classification Module]
+    ├→ MLP Training
+    ├→ Hyperparameter Optimization (Optuna)
+    ├→ Cross-Validation
+    └→ Test Evaluation
+    ↓
+[Regression Module]
+    ├→ 11 Model Training
+    ├→ Cross-Validation
+    ├→ Model Selection
+    └→ Performance Analysis
+    ↓
+Consolidated Results (JSON + Plots)
+```
 
-### Step 1: Generate Embeddings (Modern API)
-```python
-from src.build import BuildConfig, BuildPipeline
+For detailed architecture documentation, see `docs/03-architecture/`
 
-# Activate environment
+---
 # source env/bin/activate
 
 # Initialize pipeline with configuration
@@ -1008,199 +954,59 @@ print(f"Generated embeddings for {results['ligands_processed']} ligands")
 print(f"Generated embeddings for {results['proteins_processed']} proteins")
 ```
 
-### Step 1 (Alternative): Legacy Method
-```bash
-# Activate environment
-source env/bin/activate
-
-# Run embedding pipeline
-python legacy/docktkinase.py
-```
-
-### Step 2: Prepare Classification Data
-```python
-import numpy as np
-import pandas as pd
-
-# Load generated embeddings
-ligand_emb = np.load('non_human/matrix_embedding/ligand_matrix_cls.npy')
-protein_emb = np.load('non_human/matrix_embedding/protein_matrix_cls.npy')
-
-# Combine features (example)
-features = np.concatenate([ligand_emb, protein_emb], axis=1)
-
-# Create labels based on your activity threshold
-df = pd.DataFrame(features)
-df['target'] = (activity_values > 6.0).astype(int)  # pchembl > 6.0 as active
-df.to_csv('classification_data.csv', index=False)
-```
-
-### Step 3: Run ML Classification
-```bash
-cd src/classifier
-
-# Full pipeline: optimization + validation + training
-python main.py --data_path ../../classification_data.csv --mode full
-
-# Results will be saved in results/run_YYYYMMDD_HHMMSS/
-```
-
-### Expected Results
-- **Embedding Generation**: ~10-30 min (depending on dataset size)
-- **Classification Training**: ~5-15 min
-- **Final Performance**: ROC-AUC ~0.85 ± 0.01
-
 ## 📊 Output Structure
 
-The pipeline generates the following outputs in the specified output directory:
+The **IntegratedPipeline** generates a comprehensive output structure:
 
 ```
-output_folder/
-├── ligand/                     # Individual ligand SMILES files
-├── protein/                    # Individual protein FASTA files
-├── ligand_embeddings/          # Generated ligand embeddings (NumPy arrays)
-├── protein_embeddings/         # Generated protein embeddings (NumPy arrays)
-├── matrix_embedding/           # Combined embedding matrices:
-│   ├── ligand_matrix_cls.npy   # Ligand embeddings (CLS tokens)
-│   ├── ligand_matrix_mean.npy  # Ligand embeddings (mean pooling)
-│   ├── protein_matrix_cls.npy  # Protein embeddings (CLS tokens)
-│   └── protein_matrix_mean.npy # Protein embeddings (mean pooling)
-├── unique_ligands.csv          # Processed unique ligands
-├── unique_proteins.csv         # Processed unique proteins
-└── embedding_checkpoint.txt    # Pipeline execution checkpoint
+results/integrated/
+├── build/                          # Embeddings & Matrix Construction
+│   ├── embedding_matrix.npy        # Combined embeddings (N samples × M features)
+│   ├── binary_labels.npy           # Binary labels for classification
+│   ├── continuous_labels.npy       # Continuous targets for regression
+│   ├── train_indices.npy           # Training set indices
+│   ├── val_indices.npy             # Validation set indices
+│   ├── test_indices.npy            # Test set indices
+│   ├── ligand_embeddings/          # Individual ligand embeddings
+│   └── protein_embeddings/         # Individual protein embeddings
+│
+├── classification/                 # ML Classification Results
+│   ├── model.pt                    # Trained MLP classifier
+│   ├── metrics.json                # Performance metrics
+│   ├── config.json                 # Model configuration
+│   ├── predictions.csv             # Test set predictions
+│   └── plots/                      # Visualization plots
+│       ├── roc_curve.png
+│       ├── confusion_matrix.png
+│       └── training_curves.png
+│
+└── regression/                     # ML Regression Results
+    ├── models/                     # Trained models
+    │   ├── RandomForest_model.joblib
+    │   ├── XGBoost_model.joblib
+    │   ├── Ridge_model.joblib
+    │   └── best_model.joblib       # Best performing model
+    ├── predictions/                # Predictions per model
+    │   ├── RandomForest_predictions.csv
+    │   ├── XGBoost_predictions.csv
+    │   └── best_predictions.csv
+    ├── metrics/                    # Performance metrics
+    │   ├── test_metrics.json
+    │   ├── cv_results.json
+    │   └── models_comparison.csv
+    └── visualizations/             # Analysis plots
+        ├── predictions_vs_actual.png
+        ├── residuals_analysis.png
+        ├── models_comparison_rmse.png
+        └── error_distribution.png
 ```
 
-## 🧠 Machine Learning Classification System
+**For module-specific outputs**, see:
+- **Build Module**: `docs/04-modules/build/`
+- **Classification**: `docs/04-modules/classifier/`
+- **Regression**: `docs/04-modules/regression/`
 
-Once you have generated the embedding matrices using the pipeline above, you can use the integrated **MLP Classifier System** to perform binary classification tasks on kinase-compound interactions. The classifier is designed to work seamlessly with the generated embeddings.
-
-### Classifier Features
-
-- **High-Performance MLP**: Flexible multi-layer perceptron with configurable architecture
-- **Automated Hyperparameter Optimization**: Optuna-based parameter tuning
-- **Rigorous Cross-Validation**: Scientific validation with statistical metrics
-- **Production-Ready**: Fully tested system with comprehensive error handling
-- **Multiple Execution Modes**: Train, cross-validate, optimize, or run complete pipeline
-
-### Performance Metrics
-
-- **ROC-AUC**: 0.8496 ± 0.0131 (3-fold cross-validation)
-- **Training Time**: ~2-5 seconds per fold
-- **GPU/CPU Support**: Automatic device detection and optimization
-- **Scalability**: Handles datasets from small (100s) to large (100K+) samples
-
-### Using the Classifier
-
-#### 1. Prepare Your Data
-After running the embedding pipeline, prepare your classification data:
-
-```python
-import numpy as np
-import pandas as pd
-
-# Load embeddings generated by the pipeline
-ligand_embeddings = np.load('non_human/matrix_embedding/ligand_matrix_cls.npy')
-protein_embeddings = np.load('non_human/matrix_embedding/protein_matrix_cls.npy')
-
-# Concatenate embeddings (example for binary classification)
-features = np.concatenate([ligand_embeddings, protein_embeddings], axis=1)
-
-# Create your target labels (0/1 for inactive/active)
-# This should be based on your pchembl_value threshold or experimental data
-targets = (your_activity_values > threshold).astype(int)
-
-# Save as CSV for the classifier
-df = pd.DataFrame(features)
-df['target'] = targets
-df.to_csv('classification_data.csv', index=False)
-```
-
-#### 2. Run Classification
-
-```bash
-# Navigate to the classifier directory
-cd src/classifier
-
-# Basic training
-python main.py --data_path ../../classification_data.csv --mode train
-
-# Cross-validation
-python main.py --data_path ../../classification_data.csv --mode cv --n_folds 5
-
-# Hyperparameter optimization
-python main.py --data_path ../../classification_data.csv --mode hyperopt --n_trials 100
-
-# Complete pipeline (optimization + validation + final training)
-python main.py --data_path ../../classification_data.csv --mode full
-```
-
-#### 3. Results and Model Usage
-
-The classifier generates comprehensive results:
-
-```
-results/run_YYYYMMDD_HHMMSS/
-├── config.json           # Model configuration used
-├── results.json          # Detailed performance metrics
-├── final_model.pt        # Trained PyTorch model
-└── plots/               # Performance visualizations
-    ├── training_curves.png
-    ├── confusion_matrix.png
-    └── roc_curve.png
-```
-
-### Classification Workflow Integration
-
-```python
-# Complete workflow example
-from src.classifier.main import MLPPipeline
-
-# 1. Initialize pipeline
-pipeline = MLPPipeline()
-
-# 2. Load your embedding-based features
-pipeline.load_data("classification_data.csv", target_column="target")
-pipeline.load_config()  # Use default or custom configuration
-
-# 3. Find optimal hyperparameters
-best_model_config, best_training_config = pipeline.run_hyperparameter_optimization(n_trials=50)
-
-# 4. Validate performance
-cv_results = pipeline.run_cross_validation(n_folds=5)
-print(f"Cross-validation ROC-AUC: {cv_results['summary_statistics']['roc_auc']['mean']:.4f}")
-
-# 5. Train final model
-final_results = pipeline.train_final_model(train_ratio=0.8)
-print(f"Final test ROC-AUC: {final_results['test_metrics'].roc_auc:.4f}")
-
-# 6. Save everything
-pipeline.save_results("my_kinase_classifier_results")
-```
-
-For detailed classifier documentation, see [src/classifier/README.md](src/classifier/README.md).
-
-## 🛠️ Advanced Configuration
-
-### Environment Settings
-
-Key configuration options in `legacy/docktkinase.py`:
-- `INPUT_TSV_FILENAME`: Input TSV file name (must be in `src/database/`)
-- `OUTPUT_FOLDER_NAME`: Output directory name
-- The pipeline automatically uses the Python virtual environment
-
-### Spark Configuration
-
-For large datasets, adjust Spark settings using the new modular configuration:
-
-```python
-from src.build import BuildConfig
-
-config = BuildConfig({
-    'spark_memory_fraction': 0.8,
-    'spark_cores': 4,
-    'batch_size': 64
-})
-```
+---
 
 ## 🎯 Recent Updates (November 2025)
 
