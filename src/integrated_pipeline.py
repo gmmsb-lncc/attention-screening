@@ -234,11 +234,11 @@ class IntegratedPipeline:
             'embeddings': {
                 'protein': str(self.build_dir / "embeddings" / "protein_embeddings.npy"),
                 'ligand': str(self.build_dir / "embeddings" / "ligand_embeddings.npy"),
-                'concatenated': str(self.build_dir / "matrix" / "embedding_matrix.npy")
+                'concatenated': str(self.build_dir / "embedding_matrix.npy")
             },
             'labels': {
-                'binary': str(self.build_dir / "labels" / "binary_labels.npy"),
-                'regression': str(self.build_dir / "labels" / "regression_targets.npy")
+                'binary': str(self.build_dir / "binary_labels.npy"),
+                'regression': str(self.build_dir / "interaction_labels.npy")
             },
             'splits': {
                 'train_indices': str(self.build_dir / "splits" / "train_indices.npy"),
