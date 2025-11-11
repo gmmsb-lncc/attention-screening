@@ -78,12 +78,13 @@ class DataManager:
         self._embeddings = embeddings
         return embeddings
     
-    def load_targets(self, targets_path: Optional[str] = None) -> np.ndarray:
+    def load_targets(self, targets_path: Optional[str] = None, target_column: int = 3) -> np.ndarray:
         """
         Carregar targets de arquivo.
         
         Args:
             targets_path: Caminho alternativo para targets
+            target_column: Índice da coluna a usar se targets for 2D (default: 3 para standard_value)
             
         Returns:
             Array de targets (n_samples,)
@@ -101,9 +102,21 @@ class DataManager:
         
         targets = np.load(path, allow_pickle=True)
         
-        # Garantir array 1D
+        # Se array 2D (ex: interaction_labels com múltiplas colunas)
+        # Extrair coluna específica ao invés de flatten
         if len(targets.shape) > 1:
-            targets = targets.flatten()
+            if targets.shape[1] > target_column:
+                # Extrair coluna target_column e converter para float
+                targets = targets[:, target_column]
+            else:
+                # Se não tiver coluna suficiente, usar primeira coluna
+                targets = targets[:, 0]
+        
+        # Converter para float e garantir array 1D
+        try:
+            targets = np.array([float(x) for x in targets])
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Erro ao converter targets para float: {e}")
         
         self._targets = targets
         return targets
