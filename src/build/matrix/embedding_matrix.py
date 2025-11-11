@@ -392,12 +392,14 @@ class EmbeddingMatrix(BaseMatrix):
     
     def get_output_path(self) -> Path:
         """
-        Retorna o caminho do diretório de saída.
+        Retorna o caminho do arquivo da matriz de saída.
         
         Returns:
-            Path do diretório de saída
+            Path do arquivo de matriz (embedding_matrix.npy)
         """
-        return self.output_dir
+        if self._output_path and self._output_path.is_file():
+            return self._output_path
+        return self.output_dir / "embedding_matrix.npy"
 
     
     def build(self) -> Dict[str, Any]:
@@ -461,8 +463,8 @@ class EmbeddingMatrix(BaseMatrix):
             np.save(matrix_file, matrix)
             self.logger.info(f"Matriz salva: {matrix_file} - Shape: {matrix.shape}")
             
-            # Atualizar output path
-            self._output_path = self.output_dir
+            # Atualizar output path com o caminho do ARQUIVO, não do diretório
+            self._output_path = matrix_file
             
             return True
             
