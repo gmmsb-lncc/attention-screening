@@ -144,7 +144,7 @@ Dispositivos:
         type=str,
         nargs='+',
         default=None,
-        help='Modelos de regressão específicos (default: todos os 11)'
+        help='Modelos de regressão específicos (default: todos os 10)'
     )
     
     # Configurações gerais
