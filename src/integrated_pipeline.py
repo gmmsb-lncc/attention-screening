@@ -68,7 +68,7 @@ class IntegratedConfig:
     
     # Regression
     run_regression: bool = True
-    regression_models: Optional[List[str]] = None  # None = todos os 11 modelos
+    regression_models: Optional[List[str]] = None  # None = todos os 10 modelos
     regression_cv_folds: int = 5
     
     # Binary threshold for classification labels
@@ -647,7 +647,7 @@ class IntegratedPipeline:
             print(f"  • Classification: ✅ ({mode})")
         else:
             print(f"  • Classification: ❌")
-        print(f"  • Regression: {'✅ (11 models)' if self.config.run_regression else '❌'}")
+        print(f"  • Regression: {'✅ (10 models)' if self.config.run_regression else '❌'}")
         print("="*80)
     
     def _print_summary(self) -> None:
