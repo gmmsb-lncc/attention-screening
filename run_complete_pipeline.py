@@ -242,7 +242,7 @@ def main():
         n_clf_models = len(args.classification_models) if args.classification_models else 10
         phases.append(f'Classification ({n_clf_models} modelos)')
     if run_regression:
-        n_reg_models = len(args.regression_models) if args.regression_models else 11
+        n_reg_models = len(args.regression_models) if args.regression_models else 10
         phases.append(f'Regression ({n_reg_models} modelos)')
     
     print(f'📊 Fases a executar:')
