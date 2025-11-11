@@ -17,13 +17,18 @@ from sklearn.metrics import (
     mean_absolute_percentage_error
 )
 
-# Import utilitários centralizados - sempre adiciona src ao path
+# Import utilitários centralizados - SEMPRE adiciona src no TOPO do sys.path
 import sys
 import os
 src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 src_path = os.path.abspath(src_path)
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
+
+# Remove src do sys.path se já existir para garantir que vai no topo
+while src_path in sys.path:
+    sys.path.remove(src_path)
+
+# Adiciona no índice 0 (topo) do sys.path
+sys.path.insert(0, src_path)
 
 from utils.data_utils import safe_get, safe_get_numeric
 
