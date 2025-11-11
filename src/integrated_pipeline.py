@@ -174,6 +174,50 @@ class IntegratedPipeline:
                 else:
                     if self.config.verbose:
                         print("📂 Usando checkpoint da fase de Classification")
+                    
+                    # Se o checkpoint não tem as chaves esperadas, processar
+                    if 'best_model' not in classifier_results:
+                        # Checkpoint antigo - processar para encontrar melhor modelo
+                        best_model_name = None
+                        best_roc_auc = -1.0
+                        best_metrics = {}
+                        individual_results = {}
+                        
+                        for model_name, metrics in classifier_results.items():
+                            if isinstance(metrics, dict):
+                                roc_auc = metrics.get('ROC_AUC', -1.0)
+                                if roc_auc > best_roc_auc:
+                                    best_roc_auc = roc_auc
+                                    best_model_name = model_name
+                                    best_metrics = metrics
+                                
+                                individual_results[model_name] = {
+                                    'roc_auc': float(metrics.get('ROC_AUC', 0)),
+                                    'accuracy': float(metrics.get('Accuracy', 0)),
+                                    'f1': float(metrics.get('F1', 0)),
+                                    'precision': float(metrics.get('Precision', 0)),
+                                    'recall': float(metrics.get('Recall', 0))
+                                }
+                        
+                        # Reconstruir com estrutura esperada
+                        classifier_results = {
+                            'success': True,
+                            'mode': 'MultiModel',
+                            'n_models_trained': len(individual_results),
+                            'best_model': best_model_name,
+                            'best_metrics': {
+                                'ROC_AUC': float(best_metrics.get('ROC_AUC', 0)),
+                                'Accuracy': float(best_metrics.get('Accuracy', 0)),
+                                'F1': float(best_metrics.get('F1', 0)),
+                                'Precision': float(best_metrics.get('Precision', 0)),
+                                'Recall': float(best_metrics.get('Recall', 0))
+                            },
+                            'individual_results': individual_results
+                        }
+                    
+                    if self.config.verbose and classifier_results.get('best_model'):
+                        print(f"   Best model: {classifier_results['best_model']}")
+                        print(f"   Best ROC-AUC: {classifier_results['best_metrics']['ROC_AUC']:.4f}")
                 
                 self.results['classifier'] = classifier_results
             
@@ -395,18 +439,50 @@ class IntegratedPipeline:
         )
         
         # Executar pipeline completo
-        results = pipeline.run()
+        test_metrics = pipeline.run()
         
-        # Adicionar flag de sucesso
-        results['success'] = True
-        results['mode'] = 'MultiModel'
+        # Encontrar melhor modelo com base em ROC-AUC
+        best_model_name = None
+        best_roc_auc = -1.0
+        best_metrics = {}
         
-        return results
+        for model_name, metrics in test_metrics.items():
+            roc_auc = metrics.get('ROC_AUC', -1.0)
+            if roc_auc > best_roc_auc:
+                best_roc_auc = roc_auc
+                best_model_name = model_name
+                best_metrics = metrics
+        
+        # Compilar resultados
+        results = {
+            'success': True,
+            'mode': 'MultiModel',
+            'n_models_trained': len(test_metrics),
+            'best_model': best_model_name,
+            'best_metrics': {
+                'ROC_AUC': float(best_metrics.get('ROC_AUC', 0)),
+                'Accuracy': float(best_metrics.get('Accuracy', 0)),
+                'F1': float(best_metrics.get('F1', 0)),
+                'Precision': float(best_metrics.get('Precision', 0)),
+                'Recall': float(best_metrics.get('Recall', 0))
+            },
+            'individual_results': {}
+        }
+        
+        # Adicionar métricas individuais
+        for model_name, metrics in test_metrics.items():
+            results['individual_results'][model_name] = {
+                'roc_auc': float(metrics.get('ROC_AUC', 0)),
+                'accuracy': float(metrics.get('Accuracy', 0)),
+                'f1': float(metrics.get('F1', 0)),
+                'precision': float(metrics.get('Precision', 0)),
+                'recall': float(metrics.get('Recall', 0))
+            }
         
         if self.config.verbose:
             print("✅ Classification phase completed successfully")
-            print(f"   Test ROC-AUC: {results['test_metrics']['roc_auc']:.4f}")
-            print(f"   CV ROC-AUC: {results['cv_results']['mean_roc_auc']:.4f} ± {results['cv_results']['std_roc_auc']:.4f}")
+            print(f"   Best model: {best_model_name}")
+            print(f"   Best ROC-AUC: {best_roc_auc:.4f}")
         
         return results
     
@@ -471,9 +547,26 @@ class IntegratedPipeline:
         else:
             if self.config.verbose:
                 print("📂 Checkpoint de treinamento carregado")
-                print(f"   Best model: {train_checkpoint['best_model']}")
-                print(f"   Best MAE: {train_checkpoint['best_mae']:.3f}")
             train_results = train_checkpoint
+            # Recarregar modelos treinados no regression pipeline
+            regression.val_metrics = train_results
+        
+        # Encontrar melhor modelo com base em MAE
+        best_model_name = None
+        best_mae = float('inf')
+        best_r2 = -float('inf')
+        
+        for model_name, metrics in train_results.items():
+            mae = metrics.get('MAE', float('inf'))
+            if mae < best_mae:
+                best_mae = mae
+                best_model_name = model_name
+                best_r2 = metrics.get('R2', 0.0)
+        
+        if self.config.verbose and train_checkpoint:
+            print(f"   Best model: {best_model_name}")
+            print(f"   Best MAE: {best_mae:.3f}")
+            print(f"   Best R²: {best_r2:.4f}")
         
         # Cross-validation (opcional, para modelos selecionados)
         from regression.core import quick_cross_validate
@@ -490,26 +583,23 @@ class IntegratedPipeline:
             )
         
         # Compilar resultados
-        models_trained = len(self.config.regression_models) if self.config.regression_models else len(train_results.get('models', {}))
+        models_trained = len(self.config.regression_models) if self.config.regression_models else len(train_results)
         results = {
             'success': True,
-            'best_model': train_results['best_model'],
-            'best_mae': float(train_results['best_mae']),
-            'best_r2': float(train_results['best_r2']),
+            'best_model': best_model_name,
+            'best_mae': float(best_mae),
+            'best_r2': float(best_r2),
             'models_trained': models_trained,
             'individual_results': {}
         }
         
         # Adicionar métricas individuais
-        models_to_report = self.config.regression_models if self.config.regression_models else train_results.get('models', {}).keys()
-        for model_name in models_to_report:
-            if model_name in train_results.get('models', {}):
-                model_metrics = train_results['models'][model_name]['test_metrics']
-                results['individual_results'][model_name] = {
-                    'mae': float(model_metrics.get('mae', 0)),
-                    'rmse': float(model_metrics.get('rmse', 0)),
-                    'r2': float(model_metrics.get('r2', 0))
-                }
+        for model_name, metrics in train_results.items():
+            results['individual_results'][model_name] = {
+                'mae': float(metrics.get('MAE', 0)),
+                'rmse': float(metrics.get('RMSE', 0)),
+                'r2': float(metrics.get('R2', 0))
+            }
         
         # Adicionar CV se disponível
         if cv_results:
