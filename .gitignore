@@ -108,6 +108,9 @@ FM4M/model_files/
 FM4M/data/
 FM4M/model_files/
 
+# CatBoost training info
+catboost_info/
+
 # ESM model weights (downloaded via torch.hub)
 # Código fonte em ESM/ é versionado, mas modelos baixados não
 models_cache/ESM/*.pt
