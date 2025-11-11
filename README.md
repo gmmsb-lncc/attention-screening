@@ -54,7 +54,7 @@ sudo dnf install python3-devel -y
 | **Integrated Pipeline** | ✅ Production | Complete orchestration |
 | **Build Module** | ✅ Validated | Embeddings + Matrix |
 | **Classification** | ✅ Production | ROC-AUC 0.85 ± 0.01 |
-| **Regression** | ✅ Production | 11 models, modular |
+| **Regression** | ✅ Production | 10 models, modular |
 | **End-to-End** | ✅ Tested | 14 integration tests |
 
 ## 🔗 Integrated Workflow (NEW!)
