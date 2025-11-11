@@ -442,7 +442,7 @@ class IntegratedPipeline:
         regression.load_data()
         
         # Treinar modelos
-        train_results = regression.train_all_models()
+        train_results = regression.train_models()
         
         # Cross-validation (opcional, para modelos selecionados)
         from regression.core import quick_cross_validate
