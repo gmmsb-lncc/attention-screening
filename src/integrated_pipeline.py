@@ -46,6 +46,7 @@ class IntegratedConfig:
     # Input/Output
     input_tsv: str
     output_dir: str = "results/integrated"
+    use_checkpoints: bool = True  # Usar checkpoints para evitar recálculo
     
     # Build module
     esm_model: str = "esm2_t6_8M_UR50D"
@@ -143,7 +144,17 @@ class IntegratedPipeline:
                 print("PHASE 1: BUILD - Embedding Generation & Matrix Construction")
                 print("="*80)
             
-            build_results = self._run_build_phase()
+            # Tentar carregar checkpoint
+            build_results = self._load_checkpoint('build')
+            
+            if build_results is None:
+                # Executar build phase
+                build_results = self._run_build_phase()
+                self._save_checkpoint('build', build_results)
+            else:
+                if self.config.verbose:
+                    print("📂 Usando checkpoint da fase de Build")
+            
             self.results['build'] = build_results
             
             # Phase 2: Classification (optional)
@@ -153,7 +164,17 @@ class IntegratedPipeline:
                     print("PHASE 2: CLASSIFICATION - Binary Activity Prediction")
                     print("="*80)
                 
-                classifier_results = self._run_classification_phase(build_results)
+                # Tentar carregar checkpoint
+                classifier_results = self._load_checkpoint('classifier')
+                
+                if classifier_results is None:
+                    # Executar classification phase
+                    classifier_results = self._run_classification_phase(build_results)
+                    self._save_checkpoint('classifier', classifier_results)
+                else:
+                    if self.config.verbose:
+                        print("📂 Usando checkpoint da fase de Classification")
+                
                 self.results['classifier'] = classifier_results
             
             # Phase 3: Regression (optional)
@@ -163,7 +184,17 @@ class IntegratedPipeline:
                     print("PHASE 3: REGRESSION - Quantitative Activity Prediction")
                     print("="*80)
                 
-                regression_results = self._run_regression_phase(build_results)
+                # Tentar carregar checkpoint
+                regression_results = self._load_checkpoint('regression')
+                
+                if regression_results is None:
+                    # Executar regression phase
+                    regression_results = self._run_regression_phase(build_results)
+                    self._save_checkpoint('regression', regression_results)
+                else:
+                    if self.config.verbose:
+                        print("📂 Usando checkpoint da fase de Regression")
+                
                 self.results['regression'] = regression_results
             
             # Success
@@ -538,6 +569,59 @@ class IntegratedPipeline:
         print("\n" + "="*80)
         print(f"📁 All results saved to: {self.output_dir}")
         print("="*80 + "\n")
+    
+    def _save_checkpoint(self, phase_name: str, phase_results: Dict[str, Any]) -> None:
+        """
+        Salva checkpoint de uma fase específica.
+        
+        Args:
+            phase_name: Nome da fase ('build', 'classifier', 'regression')
+            phase_results: Resultados da fase
+        """
+        if not self.config.use_checkpoints:
+            return
+        
+        checkpoint_dir = self.output_dir / 'checkpoints'
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        checkpoint_file = checkpoint_dir / f'{phase_name}_checkpoint.json'
+        
+        with open(checkpoint_file, 'w') as f:
+            json.dump(phase_results, f, indent=2)
+        
+        if self.config.verbose:
+            print(f"✅ Checkpoint salvo: {checkpoint_file}")
+    
+    def _load_checkpoint(self, phase_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Carrega checkpoint de uma fase se existir.
+        
+        Args:
+            phase_name: Nome da fase
+            
+        Returns:
+            Resultados da fase ou None se checkpoint não existe
+        """
+        if not self.config.use_checkpoints:
+            return None
+        
+        checkpoint_file = self.output_dir / 'checkpoints' / f'{phase_name}_checkpoint.json'
+        
+        if not checkpoint_file.exists():
+            return None
+        
+        try:
+            with open(checkpoint_file, 'r') as f:
+                checkpoint_data = json.load(f)
+            
+            if self.config.verbose:
+                print(f"📂 Checkpoint carregado: {checkpoint_file}")
+            
+            return checkpoint_data
+        except Exception as e:
+            if self.config.verbose:
+                print(f"⚠️  Erro ao carregar checkpoint: {e}")
+            return None
 
 
 def main():
