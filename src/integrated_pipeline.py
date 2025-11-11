@@ -60,14 +60,14 @@ class IntegratedConfig:
     
     # Classification
     run_classification: bool = True
-    classifier_epochs: int = 50
-    classifier_cv_folds: int = 5
+    use_multi_model_classification: bool = False  # True = 10 modelos, False = MLP apenas
+    classification_models: Optional[List[str]] = None  # None = todos, ou lista específica
+    classifier_epochs: int = 50  # Apenas para MLP
+    classifier_cv_folds: int = 5  # Apenas para MLP
     
     # Regression
     run_regression: bool = True
-    regression_models: List[str] = field(default_factory=lambda: [
-        'Ridge', 'Lasso', 'ElasticNet', 'RandomForest', 'XGBoost'
-    ])
+    regression_models: Optional[List[str]] = None  # None = todos os 11 modelos
     regression_cv_folds: int = 5
     
     # Binary threshold for classification labels
@@ -265,11 +265,28 @@ class IntegratedPipeline:
         Returns:
             Dict com métricas do classificador
         """
-        from classifier.modular_pipeline import MLPEmbeddingPipeline
-        
         # Paths dos dados
         embeddings_path = build_results['embeddings']['concatenated']
         labels_path = build_results['labels']['binary']
+        
+        # Escolher pipeline: Multi-modelo ou MLP único
+        if self.config.use_multi_model_classification:
+            return self._run_multi_model_classification(embeddings_path, labels_path)
+        else:
+            return self._run_mlp_classification(embeddings_path, labels_path)
+    
+    def _run_mlp_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+        """
+        Executar classificação com MLP único (modo legado).
+        
+        Args:
+            embeddings_path: Path dos embeddings concatenados
+            labels_path: Path dos labels binários
+            
+        Returns:
+            Dict com métricas do MLP
+        """
+        from classifier.modular_pipeline import MLPEmbeddingPipeline
         
         # Criar pipeline de classificação
         classifier = MLPEmbeddingPipeline(
@@ -302,6 +319,7 @@ class IntegratedPipeline:
         
         results = {
             'success': True,
+            'mode': 'MLP',
             'val_loss': float(val_loss),
             'test_metrics': {
                 'accuracy': float(test_metrics.get('accuracy', 0)),
@@ -317,6 +335,42 @@ class IntegratedPipeline:
             },
             'model_path': str(self.classifier_dir / "mlp_model.pth")
         }
+        
+        return results
+    
+    def _run_multi_model_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+        """
+        Executar classificação com múltiplos modelos sklearn.
+        
+        Args:
+            embeddings_path: Path dos embeddings concatenados
+            labels_path: Path dos labels binários
+            
+        Returns:
+            Dict com métricas de todos os modelos
+        """
+        from classifier.multi_model_pipeline import MultiModelClassificationPipeline
+        
+        # Criar pipeline multi-modelo
+        pipeline = MultiModelClassificationPipeline(
+            embeddings_path=embeddings_path,
+            labels_path=labels_path,
+            output_dir=str(self.classifier_dir),
+            models_to_train=self.config.classification_models,  # None = todos
+            test_size=self.config.test_size,
+            val_size=self.config.val_size,
+            random_state=self.config.random_state,
+            verbose=self.config.verbose
+        )
+        
+        # Executar pipeline completo
+        results = pipeline.run()
+        
+        # Adicionar flag de sucesso
+        results['success'] = True
+        results['mode'] = 'MultiModel'
+        
+        return results
         
         if self.config.verbose:
             print("✅ Classification phase completed successfully")
@@ -433,8 +487,12 @@ class IntegratedPipeline:
         print(f"Random Seed: {self.config.random_state}")
         print("\nModules to run:")
         print(f"  • Build: ✅ (always required)")
-        print(f"  • Classification: {'✅' if self.config.run_classification else '❌'}")
-        print(f"  • Regression: {'✅' if self.config.run_regression else '❌'}")
+        if self.config.run_classification:
+            mode = "Multi-Model (10 models)" if self.config.use_multi_model_classification else "MLP only"
+            print(f"  • Classification: ✅ ({mode})")
+        else:
+            print(f"  • Classification: ❌")
+        print(f"  • Regression: {'✅ (11 models)' if self.config.run_regression else '❌'}")
         print("="*80)
     
     def _print_summary(self) -> None:
@@ -454,9 +512,20 @@ class IntegratedPipeline:
         if self.config.run_classification and self.results.get('classifier', {}).get('success'):
             clf = self.results['classifier']
             print("\n✅ Classification Phase: SUCCESS")
-            print(f"   Test ROC-AUC: {clf['test_metrics']['roc_auc']:.4f}")
-            print(f"   Test Accuracy: {clf['test_metrics']['accuracy']:.4f}")
-            print(f"   CV ROC-AUC: {clf['cv_results']['mean_roc_auc']:.4f} ± {clf['cv_results']['std_roc_auc']:.4f}")
+            
+            # Multi-model mode
+            if clf.get('mode') == 'MultiModel':
+                print(f"   Mode: Multi-Model ({clf.get('n_models_trained', 0)} models)")
+                print(f"   Best model: {clf.get('best_model', 'Unknown')}")
+                if 'best_metrics' in clf:
+                    print(f"   Best ROC-AUC: {clf['best_metrics'].get('ROC_AUC', 0):.4f}")
+                    print(f"   Best F1: {clf['best_metrics'].get('F1', 0):.4f}")
+            # MLP mode
+            else:
+                print(f"   Mode: MLP (single model)")
+                print(f"   Test ROC-AUC: {clf['test_metrics']['roc_auc']:.4f}")
+                print(f"   Test Accuracy: {clf['test_metrics']['accuracy']:.4f}")
+                print(f"   CV ROC-AUC: {clf['cv_results']['mean_roc_auc']:.4f} ± {clf['cv_results']['std_roc_auc']:.4f}")
         
         # Regression results
         if self.config.run_regression and self.results.get('regression', {}).get('success'):
