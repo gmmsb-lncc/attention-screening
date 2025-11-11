@@ -438,17 +438,49 @@ class IntegratedPipeline:
             verbose=self.config.verbose
         )
         
-        # Carregar dados
-        regression.load_data()
+        # FASE 1: Carregar dados (com checkpoint)
+        data_checkpoint = self._load_checkpoint('regression_data')
+        if data_checkpoint is None:
+            if self.config.verbose:
+                print("📊 Carregando dados de regressão...")
+            regression.load_data()
+            
+            # Salvar checkpoint de dados
+            data_info = {
+                'n_samples': len(regression.y_train) + len(regression.y_val) + len(regression.y_test),
+                'n_train': len(regression.y_train),
+                'n_val': len(regression.y_val),
+                'n_test': len(regression.y_test),
+                'n_features': regression.X_train.shape[1]
+            }
+            self._save_checkpoint('regression_data', data_info)
+        else:
+            if self.config.verbose:
+                print("📂 Checkpoint de dados carregado")
+                print(f"   Samples: {data_checkpoint['n_samples']} ({data_checkpoint['n_train']}/{data_checkpoint['n_val']}/{data_checkpoint['n_test']})")
+            # Recarregar dados
+            regression.load_data()
         
-        # Treinar modelos
-        train_results = regression.train_models()
+        # FASE 2: Treinar modelos (com checkpoint)
+        train_checkpoint = self._load_checkpoint('regression_train')
+        if train_checkpoint is None:
+            if self.config.verbose:
+                print("🎯 Treinando modelos de regressão...")
+            train_results = regression.train_models()
+            self._save_checkpoint('regression_train', train_results)
+        else:
+            if self.config.verbose:
+                print("📂 Checkpoint de treinamento carregado")
+                print(f"   Best model: {train_checkpoint['best_model']}")
+                print(f"   Best MAE: {train_checkpoint['best_mae']:.3f}")
+            train_results = train_checkpoint
         
         # Cross-validation (opcional, para modelos selecionados)
         from regression.core import quick_cross_validate
         
         cv_results = {}
-        if len(self.config.regression_models) <= 3:  # CV apenas para poucos modelos
+        # CV apenas para poucos modelos (se modelos específicos foram escolhidos)
+        if self.config.regression_models and len(self.config.regression_models) <= 3:
             cv_results = quick_cross_validate(
                 regression.X_train,
                 regression.y_train,
@@ -458,17 +490,19 @@ class IntegratedPipeline:
             )
         
         # Compilar resultados
+        models_trained = len(self.config.regression_models) if self.config.regression_models else len(train_results.get('models', {}))
         results = {
             'success': True,
             'best_model': train_results['best_model'],
             'best_mae': float(train_results['best_mae']),
             'best_r2': float(train_results['best_r2']),
-            'models_trained': len(self.config.regression_models),
+            'models_trained': models_trained,
             'individual_results': {}
         }
         
         # Adicionar métricas individuais
-        for model_name in self.config.regression_models:
+        models_to_report = self.config.regression_models if self.config.regression_models else train_results.get('models', {}).keys()
+        for model_name in models_to_report:
             if model_name in train_results.get('models', {}):
                 model_metrics = train_results['models'][model_name]['test_metrics']
                 results['individual_results'][model_name] = {
