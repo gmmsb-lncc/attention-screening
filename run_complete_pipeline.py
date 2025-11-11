@@ -6,7 +6,7 @@ DockTKinase - Pipeline Completo Integrado
 Pipeline end-to-end com checkpoints automáticos:
 1. Build: Embeddings (ESM + FM4M) + Matrix
 2. Classification: Multi-Model (10 modelos sklearn)
-3. Regression: Multi-Model (11 modelos)
+3. Regression: Multi-Model (10 modelos)
 
 Uso:
     # Básico
