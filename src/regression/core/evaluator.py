@@ -19,10 +19,11 @@ from sklearn.metrics import (
 
 # Import utilitários centralizados - sempre adiciona src ao path
 import sys
-from pathlib import Path
-src_path = Path(__file__).parent.parent.parent
-if str(src_path) not in sys.path:
-    sys.path.insert(0, str(src_path))
+import os
+src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+src_path = os.path.abspath(src_path)
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 from utils.data_utils import safe_get, safe_get_numeric
 
