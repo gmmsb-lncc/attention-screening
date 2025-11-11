@@ -46,10 +46,10 @@ class SparkManager:
         available_memory_gb = memory_info['available_gb']
         num_cores = cpu_info['logical_cores']
         
-        # Calcular configurações otimizadas
-        driver_memory = int(available_memory_gb * memory_fraction * 0.6)  # 60% para driver
-        executor_memory = int(available_memory_gb * memory_fraction * 0.4)  # 40% para executor
-        offheap_memory = int(total_memory_gb * offheap_fraction)
+        # Calcular configurações otimizadas com valores mínimos garantidos
+        driver_memory = max(1, int(available_memory_gb * memory_fraction * 0.6))  # 60% para driver, mínimo 1GB
+        executor_memory = max(1, int(available_memory_gb * memory_fraction * 0.4))  # 40% para executor, mínimo 1GB
+        offheap_memory = max(1, int(total_memory_gb * offheap_fraction))  # mínimo 1GB
         
         # Configurar executors
         executor_instances = max(1, num_cores // 4)
@@ -69,10 +69,10 @@ class SparkManager:
             "spark.driver.extraJavaOptions": f"-XX:+Use{gc_type}",
             "spark.sql.debug.maxToStringFields": "200",
             "spark.sql.autoBroadcastJoinThreshold": "-1",
-            "spark.driver.maxResultSize": f"{int(total_memory_gb * 0.1)}g",
+            "spark.driver.maxResultSize": f"{max(1, int(total_memory_gb * 0.1))}g",
             "spark.sql.shuffle.partitions": str(num_cores * 4),
             "spark.default.parallelism": str(num_cores * 2),
-            "spark.executor.memoryOverhead": f"{int(total_memory_gb * 0.1)}g",
+            "spark.executor.memoryOverhead": f"{max(1, int(total_memory_gb * 0.1))}g",
             "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
             "spark.sql.adaptive.enabled": "true",
             "spark.sql.adaptive.coalescePartitions.enabled": "true"
