@@ -17,17 +17,14 @@ from sklearn.metrics import (
     mean_absolute_percentage_error
 )
 
-# Import utilitários centralizados
-try:
-    from utils.data_utils import safe_get, safe_get_numeric
-except ImportError:
-    # Fallback para import absoluto dentro do src
-    import sys
-    from pathlib import Path
-    src_path = Path(__file__).parent.parent.parent
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
-    from utils.data_utils import safe_get, safe_get_numeric
+# Import utilitários centralizados - sempre adiciona src ao path
+import sys
+from pathlib import Path
+src_path = Path(__file__).parent.parent.parent
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from utils.data_utils import safe_get, safe_get_numeric
 
 
 class RegressionEvaluator:
