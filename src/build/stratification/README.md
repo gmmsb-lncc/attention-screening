@@ -49,13 +49,54 @@ stratification/
 
 ## 📊 Embedding Dimensions
 
-The module automatically uses correct dimensions from configuration:
+The module **automatically syncs dimensions** with the selected models:
 
-- **Protein embeddings**: 2560 dimensions (ESM-2 t36 3B model)
-- **Ligand embeddings**: 768 dimensions (FM4M model)
-- **Combined embeddings**: 3328 dimensions (concatenated)
+### Dynamic Dimension Synchronization
 
-Each point in visualizations represents a **protein-ligand pair** with concatenated embeddings.
+```python
+from build.core import BuildConfig
+
+# Dimensions automatically match the model
+config = BuildConfig(esm_model='esm2_t36_3B_UR50D')
+dims = config.get_model_dimensions()
+
+print(f"Protein: {dims['protein_dim']} dims")  # 2560
+print(f"Ligand: {dims['ligand_dim']} dims")    # 768
+print(f"Total: {dims['total_dim']} dims")      # 3328
+```
+
+### Supported Models
+
+#### ESM Models (Proteins)
+
+| Model | Dimensions | Parameters | Use Case |
+|-------|-----------|------------|----------|
+| `esm2_t6_8M_UR50D` | 320 | 8M | Quick tests |
+| `esm2_t12_35M_UR50D` | 480 | 35M | Small datasets |
+| `esm2_t30_150M_UR50D` | 640 | 150M | Medium datasets |
+| `esm2_t33_650M_UR50D` | 1280 | 650M | Balanced performance |
+| `esm2_t36_3B_UR50D` | **2560** | 3B | **Production (default)** |
+| `esm2_t48_15B_UR50D` | 5120 | 15B | Maximum accuracy |
+
+#### FM4M Models (Ligands)
+
+| Model | Dimensions | Type |
+|-------|-----------|------|
+| `SMI-TED` | **768** | Transformer **(default)** |
+| `SELFIES-TED` | 768 | Transformer |
+| `SMI-SSED` | 768 | Encoder |
+| `MHG` | 768 | Graph |
+| `MOL-MOE` | 768 | Mixture |
+
+### What Each Point Represents
+
+Each point in visualizations represents a **protein-ligand pair**:
+- Protein embedding: 2560 dimensions (ESM-2 t36 3B default)
+- Ligand embedding: 768 dimensions (SMI-TED default)
+- Combined: 3328 dimensions (concatenated)
+- Reduced to: 2 dimensions (PCA/t-SNE/UMAP for visualization)
+
+**Important**: Dimensions automatically update when you change models!
 
 ## 🚀 Quick Start
 
@@ -382,23 +423,191 @@ y_train = labels[train_idx]
 
 ## 📖 Related Documentation
 
-- [STRATIFIER_REFACTORING.md](../../../docs/04-modules/STRATIFIER_REFACTORING.md) - Detailed refactoring documentation
-- [MULTI_VIEW_STRATIFICATION.md](../../../docs/04-modules/MULTI_VIEW_STRATIFICATION.md) - Multi-view algorithm details
-- [PERFORMANCE_OPTIMIZATIONS.md](../../../docs/04-modules/PERFORMANCE_OPTIMIZATIONS.md) - Performance guide
+- [STRATIFIER_REFACTORING.md](../../../docs/04-modules/STRATIFIER_REFACTORING.md) - Detailed refactoring documentation with SOLID principles
+- [MULTI_VIEW_STRATIFICATION.md](../../../docs/04-modules/MULTI_VIEW_STRATIFICATION.md) - Multi-view algorithm details and theory
+- [PERFORMANCE_OPTIMIZATIONS.md](../../../docs/04-modules/PERFORMANCE_OPTIMIZATIONS.md) - Performance guide and benchmarks
+- [DYNAMIC_DIMENSIONS.md](../../../docs/04-modules/DYNAMIC_DIMENSIONS.md) - Model dimension synchronization
+- [STRATIFICATION_REORGANIZATION.md](../../../docs/04-modules/STRATIFICATION_REORGANIZATION.md) - Module reorganization summary
+
+## 🎓 Key Concepts
+
+### SOLID Principles Applied
+
+1. **Single Responsibility Principle (SRP)**
+   - `Stratifier`: Orchestrates the process
+   - `ClusterSplitter`: Handles splitting logic
+   - `StratificationVisualizer`: Manages visualizations
+
+2. **Open/Closed Principle (OCP)**
+   - Easy to add new clustering algorithms via `ClusteringStrategy`
+   - Extend functionality without modifying existing code
+
+3. **Liskov Substitution Principle (LSP)**
+   - All clustering strategies are interchangeable
+   - `DBSCANClustering`, `HierarchicalClustering`, `KMeansClustering`, `RandomClustering`
+
+4. **Interface Segregation Principle (ISP)**
+   - Small, focused interfaces
+   - Components depend only on what they need
+
+5. **Dependency Inversion Principle (DIP)**
+   - Depends on abstractions (`ClusteringStrategy`)
+   - Not on concrete implementations
+
+### Multi-View Clustering
+
+Combines protein and ligand similarities with configurable weights:
+
+```
+combined_similarity = w_p × protein_similarity + w_l × ligand_similarity
+```
+
+Where:
+- `w_p` = protein_weight (default: 0.6)
+- `w_l` = ligand_weight (default: 0.4)
+- `w_p + w_l = 1.0`
+
+This ensures both views are considered for creating balanced splits.
 
 ## 📝 Testing
 
 Run the test suite:
+
 ```bash
-# Quick test (500 samples)
+# Navigate to project root
+cd /path/to/docktkinase
+
+# Activate environment
+source env/bin/activate
+
+# Quick test (500 samples, ~2s)
 python tests/test_benchmark_quick.py
 
-# Full multi-view tests
+# Full multi-view tests (200 samples, 5 tests)
 python tests/test_multi_view_stratification.py
 
-# Comprehensive benchmark
+# Comprehensive benchmark (1k-1M samples)
 python tests/benchmark_visualization.py
 ```
+
+### Test Coverage
+
+| Test File | Purpose | Duration | Status |
+|-----------|---------|----------|--------|
+| `test_benchmark_quick.py` | Quick validation | ~2s | ✅ Passing |
+| `test_multi_view_stratification.py` | Full suite (5 tests) | ~30s | ✅ Passing |
+| `benchmark_visualization.py` | Performance testing | Variable | ✅ Passing |
+| `test_stratification.py` | Legacy tests | ~10s | ⏭️ To verify |
+
+### Expected Test Results
+
+```
+✅ test_cosine_similarity - Basic similarity calculations
+✅ test_multi_view_similarity - Multi-view weighted similarity  
+✅ test_stratified_split - Split integrity and balance
+✅ test_weight_variations - Different weight configurations
+✅ test_visualization - Generate visualization files
+```
+
+## 🚀 Quick Start Examples
+
+### Example 1: Basic Stratification
+
+```python
+import numpy as np
+from build.stratification import Stratifier
+
+# Load your data
+embeddings = np.load('combined_embeddings.npy')  # (n_samples, 3328)
+labels = np.load('labels.npy')                    # (n_samples,)
+
+# Create stratifier
+stratifier = Stratifier(clustering_algorithm='kmeans')
+
+# Split data
+train_idx, val_idx, test_idx = stratifier.stratified_split(
+    embeddings, labels, test_size=0.2, val_size=0.1
+)
+
+# Use splits
+X_train = embeddings[train_idx]
+y_train = labels[train_idx]
+```
+
+### Example 2: Multi-View with Visualization
+
+```python
+import numpy as np
+from build.stratification import Stratifier
+from build.stratification.visualization import StratificationVisualizer
+
+# Load separate embeddings
+protein_emb = np.load('protein_embeddings.npy')  # (n_samples, 2560)
+ligand_emb = np.load('ligand_embeddings.npy')    # (n_samples, 768)
+labels = np.load('labels.npy')                    # (n_samples,)
+
+# Multi-view stratification
+stratifier = Stratifier(clustering_algorithm='kmeans')
+train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
+    protein_emb, ligand_emb, labels,
+    protein_weight=0.6,
+    ligand_weight=0.4
+)
+
+# Visualize results
+combined = np.concatenate([protein_emb, ligand_emb], axis=1)
+viz = StratificationVisualizer(method='pca')
+viz.plot_split_visualization(
+    combined, train_idx, val_idx, test_idx,
+    cluster_labels=stratifier.cluster_labels,
+    save_path='results/stratification.png'
+)
+```
+
+### Example 3: Large Dataset Optimization
+
+```python
+from build.stratification import Stratifier
+from build.stratification.visualization import StratificationVisualizer
+
+# For large datasets (>100k samples)
+stratifier = Stratifier(clustering_algorithm='kmeans')
+train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
+    protein_emb, ligand_emb, labels
+)
+
+# Optimized visualization
+viz = StratificationVisualizer(
+    method='pca',              # Fastest method
+    max_samples=50000,         # Auto-downsample
+    use_incremental_pca=True   # Memory efficient
+)
+
+viz.plot_split_visualization(
+    combined, train_idx, val_idx, test_idx,
+    save_path='results/large_dataset.png',
+    dpi=150,    # Lower DPI for smaller file
+    show=False  # Don't display, just save
+)
+```
+
+## 📈 Version History
+
+### Current Version (November 2025)
+- ✅ SOLID architecture refactoring
+- ✅ Performance optimizations for large datasets
+- ✅ Dynamic dimension synchronization
+- ✅ Comprehensive visualization system
+- ✅ Bug fixes (index duplication, type errors)
+- ✅ Complete documentation suite
+
+### Previous Version (Legacy)
+- Basic stratification with single algorithm
+- Manual dimension configuration
+- Limited visualization support
+- Monolithic 498-line implementation
+
+See [STRATIFICATION_REORGANIZATION.md](../../../docs/04-modules/STRATIFICATION_REORGANIZATION.md) for detailed changelog.
 
 ## 🤝 Contributing
 
@@ -425,7 +634,119 @@ When adding new clustering algorithms:
 
 Part of the DockTKinase project. See main LICENSE file.
 
+## ❓ FAQ (Frequently Asked Questions)
+
+### Q: Which clustering algorithm should I use?
+
+**A**: For most cases, use **`kmeans`**:
+- ✅ Fast and predictable
+- ✅ Always creates multiple clusters
+- ✅ Works well for benchmarking
+
+Use `hierarchical` when you need to detect natural structure, or `dbscan` for noisy data with outliers.
+
+### Q: Why are my dimensions different from expected?
+
+**A**: Dimensions are **automatically synced** with your model choice. Check your config:
+```python
+config = BuildConfig()
+print(config.get('esm_model'))  # Check which model is selected
+dims = config.get_model_dimensions()
+print(dims)  # See current dimensions
+```
+
+### Q: How do I handle very large datasets (>1M samples)?
+
+**A**: Use these optimizations:
+1. Enable automatic downsampling: `max_samples=50000`
+2. Use IncrementalPCA: `use_incremental_pca=True`
+3. Choose PCA over t-SNE/UMAP for visualization
+4. Lower DPI for smaller file sizes: `dpi=150`
+
+### Q: What does "multi-view" mean?
+
+**A**: Multi-view considers **both protein AND ligand** similarities when clustering:
+- Single-view: Clusters based on combined embeddings
+- Multi-view: Weights protein similarity (0.6) and ligand similarity (0.4) separately
+- Result: Better representation of both molecular spaces
+
+### Q: Can I change the train/val/test split ratios?
+
+**A**: Yes! Adjust `test_size` and `val_size`:
+```python
+train_idx, val_idx, test_idx = stratifier.stratified_split(
+    embeddings, labels,
+    test_size=0.15,  # 15% test
+    val_size=0.15    # 15% validation
+)
+# Remaining 70% goes to train
+```
+
+### Q: How do I ensure reproducibility?
+
+**A**: Set `random_state`:
+```python
+stratifier = Stratifier(
+    clustering_algorithm='kmeans',
+    random_state=42  # Fixed seed
+)
+```
+
+### Q: What's the difference between stratifier.py and stratifier_legacy.py?
+
+**A**: 
+- `stratifier.py`: New SOLID architecture (200 lines, modular, tested)
+- `stratifier_legacy.py`: Old monolithic version (498 lines, backup only)
+
+Always use `stratifier.py` (the default import).
+
+### Q: Why do I get "arrays used as indices must be integer" error?
+
+**A**: Convert indices to int:
+```python
+train_idx = train_idx.astype(np.int32)
+val_idx = val_idx.astype(np.int32)
+test_idx = test_idx.astype(np.int32)
+```
+
+This is now handled automatically in the latest version.
+
+### Q: How do I visualize only specific clusters?
+
+**A**: Filter the data before visualization:
+```python
+# Get cluster 0 samples
+cluster_0_mask = stratifier.cluster_labels == 0
+cluster_0_emb = combined[cluster_0_mask]
+cluster_0_train = train_idx[np.isin(train_idx, np.where(cluster_0_mask)[0])]
+# ... then visualize
+```
+
+### Q: Can I use custom weights for multi-view?
+
+**A**: Yes!
+```python
+train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
+    protein_emb, ligand_emb, labels,
+    protein_weight=0.7,  # 70% protein importance
+    ligand_weight=0.3    # 30% ligand importance
+)
+```
+
+## 🆘 Support
+
+For issues, questions, or contributions:
+- 📧 Email: LNCC Bioinformatics Team
+- 🐛 Issues: GitHub Issues
+- 📚 Docs: See [Related Documentation](#-related-documentation)
+
 ## 👥 Authors
 
 - LNCC Bioinformatics Team
 - For questions: Contact repository maintainers
+
+---
+
+**Last Updated**: November 11, 2025  
+**Version**: 2.0 (SOLID Refactoring)  
+**Branch**: stratifier
