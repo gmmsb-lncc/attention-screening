@@ -15,12 +15,12 @@ if str(ESM_LOCAL_PATH) not in sys.path:
     sys.path.insert(0, str(ESM_LOCAL_PATH))
 
 if TYPE_CHECKING:
-    from build.core import BuildConfig
+    from src.build.core import BuildConfig
 
-from build.embeddings.base_embedding import BaseEmbedding
-from build.core.constants import ESM_MODELS, DEFAULT_ESM_MODEL
-from build.core.exceptions import DependencyError, EmbeddingError, ModelLoadError
-from build.utils import ProgressLogger, ensure_directory
+from src.build.embeddings.base_embedding import BaseEmbedding
+from src.build.core.constants import ESM_MODELS, DEFAULT_ESM_MODEL
+from src.build.core.exceptions import DependencyError, EmbeddingError, ModelLoadError
+from src.build.utils import ProgressLogger, ensure_directory
 
 class ProteinEmbedding(BaseEmbedding):
     """Gerador de embeddings de proteínas usando ESM."""
@@ -419,7 +419,7 @@ class ProteinEmbedding(BaseEmbedding):
             True se sucesso
         """
         import pandas as pd
-        from build.utils import ensure_directory
+        from src.build.utils import ensure_directory
         
         try:
             # Garantir que modelo está inicializado

@@ -18,9 +18,9 @@ from collections import Counter, defaultdict
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from build.core.base_builder import BaseBuilder
-from build.core.config import BuildConfig
-from build.core.exceptions import BuildException
+from src.build.core.base_builder import BaseBuilder
+from src.build.core.config import BuildConfig
+from src.build.core.exceptions import BuildException
 from .cluster_analyzer import ClusterAnalyzer
 
 
