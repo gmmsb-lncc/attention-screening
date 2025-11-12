@@ -443,12 +443,14 @@ class BuildPipeline(BaseBuilder):
             if concatenated_matrix_path:
                 import numpy as np
                 concatenated_embeddings = np.load(concatenated_matrix_path)
+                protein_embeddings = None
+                ligand_embeddings = None
             elif protein_embeddings_path and ligand_embeddings_path:
-                # Load separate embeddings and combine
+                # Load separate embeddings
                 import numpy as np
                 protein_embeddings = np.load(protein_embeddings_path)
                 ligand_embeddings = np.load(ligand_embeddings_path)
-                # Assuming they need to be concatenated row-wise for the same samples
+                # Also create concatenated for fallback
                 concatenated_embeddings = np.concatenate([protein_embeddings, ligand_embeddings], axis=1)
             else:
                 raise ValueError("Either concatenated_matrix_path or both protein_embeddings_path and ligand_embeddings_path must be provided")
@@ -470,13 +472,28 @@ class BuildPipeline(BaseBuilder):
             if similarity_threshold is not None:
                 stratifier.similarity_threshold = similarity_threshold
             
-            # Perform stratified split
-            train_idx, val_idx, test_idx = stratifier.stratified_split(
-                embeddings=concatenated_embeddings,
-                labels=labels,
-                test_size=test_size,
-                val_size=val_size
-            )
+            # Perform stratified split using multi-view if separate embeddings available
+            if protein_embeddings is not None and ligand_embeddings is not None:
+                self.logger.info("Using multi-view stratification (protein + ligand)")
+                self.logger.info(f"  Protein weight: {stratifier.protein_weight}")
+                self.logger.info(f"  Ligand weight: {stratifier.ligand_weight}")
+                train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
+                    protein_embeddings=protein_embeddings,
+                    ligand_embeddings=ligand_embeddings,
+                    labels=labels,
+                    test_size=test_size,
+                    val_size=val_size,
+                    protein_weight=stratifier.protein_weight,
+                    ligand_weight=stratifier.ligand_weight
+                )
+            else:
+                self.logger.info("Using combined embeddings stratification")
+                train_idx, val_idx, test_idx = stratifier.stratified_split(
+                    embeddings=concatenated_embeddings,
+                    labels=labels,
+                    test_size=test_size,
+                    val_size=val_size
+                )
             
             # Validate splits
             split_validator = self.components['split_validator']
