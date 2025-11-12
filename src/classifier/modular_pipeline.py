@@ -18,6 +18,12 @@ from sklearn.model_selection import StratifiedKFold
 from typing import Optional, Dict, Any, List, Tuple
 import logging
 
+# Import SplitIndices for external stratification
+try:
+    from src.build.pipeline.split_indices import SplitIndices
+except ImportError:
+    SplitIndices = None  # Fallback if not available
+
 # Imports dos módulos modularizados
 try:
     from models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
@@ -55,7 +61,8 @@ class MLPEmbeddingPipeline:
                  val_split: float = 0.1, 
                  early_stopping_patience: int = 5,
                  model_output: str = "mlp_model.pth",
-                 metrics_output: str = "training_metrics.json"):
+                 metrics_output: str = "training_metrics.json",
+                 split_indices: Optional['SplitIndices'] = None):
         """
         Inicializa pipeline com EXATAMENTE os mesmos parâmetros do original.
         
@@ -70,6 +77,9 @@ class MLPEmbeddingPipeline:
             early_stopping_patience: Paciência para early stopping (default: 5)
             model_output: Caminho para salvar o modelo (default: "mlp_model.pth")
             metrics_output: Caminho para salvar métricas (default: "training_metrics.json")
+            split_indices: Optional SplitIndices object with pre-defined train/val/test splits.
+                          If provided, these indices will be used instead of random splitting.
+                          This ensures consistency with other pipelines (e.g., regression).
         """
         self.embeddings_path = embeddings_path
         self.labels_path = labels_path
@@ -79,6 +89,7 @@ class MLPEmbeddingPipeline:
         self.early_stopping_patience = early_stopping_patience
         self.model_output = model_output
         self.metrics_output = metrics_output
+        self.split_indices = split_indices  # Store external splits if provided
         # Os parâmetros test_split e val_split não serão usados diretamente,
         # pois a divisão será feita estratificadamente para garantir a proporção exata.
         
@@ -119,7 +130,20 @@ class MLPEmbeddingPipeline:
         
         Se os índices já forem fornecidos, eles serão usados; caso contrário, 
         a divisão padrão é aplicada.
+        
+        **NEW**: If split_indices was provided during initialization, those indices
+        will be used by default (can be overridden by passing explicit train/val/test_idx).
+        This ensures consistent splits across classification and regression pipelines.
         """
+        # Use split_indices if available and no explicit indices provided
+        if train_idx is None and val_idx is None and test_idx is None:
+            if self.split_indices is not None:
+                train_idx = self.split_indices.train_idx
+                val_idx = self.split_indices.val_idx
+                test_idx = self.split_indices.test_idx
+                logger.info(f"Using external split indices: train={len(train_idx)}, "
+                          f"val={len(val_idx)}, test={len(test_idx)}")
+        
         self.train_loader, self.val_loader, self.test_loader = self.data_manager.create_data_loaders(
             train_idx, val_idx, test_idx, self.batch_size
         )
