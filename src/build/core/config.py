@@ -34,6 +34,9 @@ class BuildConfig:
         
         # Override with kwargs
         self._config.update(kwargs)
+        
+        # Sincronizar dimensões após carregar todas as configurações
+        self._sync_model_dimensions()
     
     def _load_default_config(self) -> Dict[str, Any]:
         """Carrega configuração padrão."""
@@ -102,8 +105,42 @@ class BuildConfig:
         except (json.JSONDecodeError, IOError) as e:
             raise ConfigurationError(f"Erro ao carregar arquivo de configuração {config_file}: {e}")
     
+    def _sync_model_dimensions(self) -> None:
+        """
+        Sincroniza dimensões com os modelos escolhidos.
+        
+        Se esm_model ou fm4m_model estão configurados, atualiza automaticamente
+        protein_dim e ligand_dim para corresponder às dimensões corretas do modelo.
+        """
+        # Sincronizar dimensão de proteína com modelo ESM
+        esm_model = self._config.get('esm_model')
+        if esm_model and esm_model in ESM_MODELS:
+            model_dim = ESM_MODELS[esm_model]['dim']
+            current_dim = self._config.get('protein_dim')
+            
+            # Atualizar se diferente
+            if current_dim != model_dim:
+                self._config['protein_dim'] = model_dim
+                # Log quando houver logger disponível
+                # self.logger.info(f"Dimensão de proteína atualizada: {model_dim} (modelo: {esm_model})")
+        
+        # Sincronizar dimensão de ligante com modelo FM4M
+        fm4m_model = self._config.get('fm4m_model')
+        if fm4m_model and fm4m_model in FM4M_MODELS:
+            model_dim = FM4M_MODELS[fm4m_model]['dim']
+            current_dim = self._config.get('ligand_dim')
+            
+            # Atualizar se diferente
+            if current_dim != model_dim:
+                self._config['ligand_dim'] = model_dim
+                # Log quando houver logger disponível
+                # self.logger.info(f"Dimensão de ligante atualizada: {model_dim} (modelo: {fm4m_model})")
+    
     def _validate_config(self) -> None:
         """Valida configuração."""
+        # IMPORTANTE: Sincronizar dimensões ANTES de validar
+        self._sync_model_dimensions()
+        
         # Validar diretórios
         required_dirs = ['base_dir']
         for dir_key in required_dirs:
@@ -137,12 +174,31 @@ class BuildConfig:
     def set(self, key: str, value: Any) -> None:
         """Define valor de configuração."""
         self._config[key] = value
+        # Re-sincronizar dimensões se modelo foi alterado
+        if key in ('esm_model', 'fm4m_model'):
+            self._sync_model_dimensions()
         self._validate_config()
     
     def update(self, config_dict: Dict[str, Any]) -> None:
         """Atualiza múltiplas configurações."""
         self._config.update(config_dict)
+        # Re-sincronizar dimensões após update
+        self._sync_model_dimensions()
         self._validate_config()
+    
+    def get_model_dimensions(self) -> Dict[str, int]:
+        """
+        Retorna as dimensões corretas baseadas nos modelos configurados.
+        
+        Returns:
+            Dict com 'protein_dim', 'ligand_dim', e 'total_dim'
+        """
+        self._sync_model_dimensions()
+        return {
+            'protein_dim': self._config['protein_dim'],
+            'ligand_dim': self._config['ligand_dim'],
+            'total_dim': self._config['protein_dim'] + self._config['ligand_dim']
+        }
     
     @classmethod
     def from_json(cls, config_file: str) -> 'BuildConfig':
