@@ -12,8 +12,8 @@ from pathlib import Path
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from build.core import BuildConfig
-from build.pipeline import BuildPipeline
+from src.build.core import BuildConfig
+from src.build.pipeline import BuildPipeline
 
 
 def create_example_config(config_path: str = "build_config.json") -> BuildConfig:
@@ -162,7 +162,7 @@ def run_stratification_example():
     })
     
     # Example: Initialize and use stratifier directly
-    from build.stratification import Stratifier, SplitValidator
+    from src.build.stratification import Stratifier, SplitValidator
     
     stratifier = Stratifier(config)
     print(f"Stratifier initialized with algorithm: {stratifier.clustering_algorithm}")

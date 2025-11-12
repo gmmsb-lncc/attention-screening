@@ -2,8 +2,8 @@
 Utilities for embeddings generation.
 """
 
-from build.embeddings.utils.cache import CacheManager
-from build.embeddings.utils.validators import (
+from .embeddings.utils.cache import CacheManager
+from .embeddings.utils.validators import (
     validate_protein_batch,
     validate_smiles_batch
 )

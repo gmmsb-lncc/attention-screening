@@ -11,9 +11,9 @@ from typing import Union, Optional, Tuple, List
 from pathlib import Path
 import logging
 from sklearn.metrics.pairwise import cosine_similarity
-from build.core.base_builder import BaseBuilder
-from build.core.config import BuildConfig
-from build.core.exceptions import BuildException
+from src.build.core.base_builder import BaseBuilder
+from src.build.core.config import BuildConfig
+from src.build.core.exceptions import BuildException
 
 
 class CosineSimilarityCalculator(BaseBuilder):

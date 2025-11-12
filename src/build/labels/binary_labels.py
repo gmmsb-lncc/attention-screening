@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from pathlib import Path
 
-from build.core import BuildConfig
-from build.labels.base_labels import BaseLabels
+from src.build.core import BuildConfig
+from src.build.labels.base_labels import BaseLabels
 
 
 class BinaryLabels(BaseLabels):

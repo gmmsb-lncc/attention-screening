@@ -12,12 +12,12 @@ import shutil
 import sys
 import os
 
-# Add src to path
+# Add project root to path
 current_dir = Path(__file__).parent
 project_root = current_dir.parent
-sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root))
 
-from build.pipeline.split_indices import SplitIndices
+from src.build.pipeline.split_indices import SplitIndices
 
 
 class TestSplitIndicesValidation:
