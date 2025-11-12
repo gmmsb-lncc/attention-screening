@@ -303,6 +303,25 @@ class IntegratedPipeline:
         if not success:
             raise RuntimeError("Build phase failed")
         
+        # Load stratified splits (NEW: use stratification system)
+        from build.pipeline.split_indices import SplitIndices
+        
+        splits_file = self.build_dir / "splits" / "stratified_splits.npz"
+        split_indices = None
+        
+        if splits_file.exists():
+            try:
+                split_indices = SplitIndices.load(str(splits_file))
+                if self.config.verbose:
+                    print(f"✅ Loaded stratified splits from: {splits_file}")
+                    print(f"   Train: {len(split_indices.train_idx)} samples")
+                    print(f"   Val:   {len(split_indices.val_idx)} samples")
+                    print(f"   Test:  {len(split_indices.test_idx)} samples")
+            except Exception as e:
+                if self.config.verbose:
+                    print(f"⚠️  Warning: Could not load stratified splits: {e}")
+                    print("   Pipelines will use default splitting")
+        
         # Coletar paths dos arquivos gerados
         results = {
             'success': True,
@@ -319,7 +338,8 @@ class IntegratedPipeline:
                 'train_indices': str(self.build_dir / "splits" / "train_indices.npy"),
                 'val_indices': str(self.build_dir / "splits" / "val_indices.npy"),
                 'test_indices': str(self.build_dir / "splits" / "test_indices.npy")
-            }
+            },
+            'split_indices': split_indices  # NEW: pass SplitIndices object
         }
         
         if self.config.verbose:
@@ -343,20 +363,22 @@ class IntegratedPipeline:
         # Paths dos dados
         embeddings_path = build_results['embeddings']['concatenated']
         labels_path = build_results['labels']['binary']
+        split_indices = build_results.get('split_indices')  # NEW: get stratified splits
         
         # Escolher pipeline: Multi-modelo ou MLP único
         if self.config.use_multi_model_classification:
-            return self._run_multi_model_classification(embeddings_path, labels_path)
+            return self._run_multi_model_classification(embeddings_path, labels_path, split_indices)
         else:
-            return self._run_mlp_classification(embeddings_path, labels_path)
+            return self._run_mlp_classification(embeddings_path, labels_path, split_indices)
     
-    def _run_mlp_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+    def _run_mlp_classification(self, embeddings_path: str, labels_path: str, split_indices=None) -> Dict[str, Any]:
         """
         Executar classificação com MLP único (modo legado).
         
         Args:
             embeddings_path: Path dos embeddings concatenados
             labels_path: Path dos labels binários
+            split_indices: Optional SplitIndices object for stratified splits
             
         Returns:
             Dict com métricas do MLP
@@ -374,7 +396,8 @@ class IntegratedPipeline:
             val_split=self.config.val_size,
             early_stopping_patience=10,
             model_output=str(self.classifier_dir / "mlp_model.pth"),
-            metrics_output=str(self.classifier_dir / "metrics.json")
+            metrics_output=str(self.classifier_dir / "metrics.json"),
+            split_indices=split_indices  # NEW: pass stratified splits
         )
         
         # Carregar dados
@@ -413,13 +436,14 @@ class IntegratedPipeline:
         
         return results
     
-    def _run_multi_model_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+    def _run_multi_model_classification(self, embeddings_path: str, labels_path: str, split_indices=None) -> Dict[str, Any]:
         """
         Executar classificação com múltiplos modelos sklearn.
         
         Args:
             embeddings_path: Path dos embeddings concatenados
             labels_path: Path dos labels binários
+            split_indices: Optional SplitIndices object for stratified splits
             
         Returns:
             Dict com métricas de todos os modelos
@@ -427,6 +451,11 @@ class IntegratedPipeline:
         from classifier.multi_model_pipeline import MultiModelClassificationPipeline
         
         # Criar pipeline multi-modelo
+        # TODO: Add split_indices support to MultiModelClassificationPipeline
+        if split_indices and self.config.verbose:
+            print("⚠️  Note: MultiModelClassificationPipeline doesn't support split_indices yet")
+            print("   Using automatic stratification within the pipeline")
+        
         pipeline = MultiModelClassificationPipeline(
             embeddings_path=embeddings_path,
             labels_path=labels_path,
@@ -502,6 +531,9 @@ class IntegratedPipeline:
         embeddings_path = build_results['embeddings']['concatenated']
         targets_path = build_results['labels']['regression']
         
+        # Extrair split_indices do build phase
+        split_indices = build_results.get('split_indices')
+        
         # Criar pipeline de regressão
         regression = RegressionPipeline(
             embeddings_path=embeddings_path,
@@ -511,7 +543,8 @@ class IntegratedPipeline:
             test_size=self.config.test_size,
             val_size=self.config.val_size,
             random_state=self.config.random_state,
-            verbose=self.config.verbose
+            verbose=self.config.verbose,
+            split_indices=split_indices
         )
         
         # FASE 1: Carregar dados (com checkpoint)
