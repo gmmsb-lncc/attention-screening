@@ -6,14 +6,14 @@ import os
 from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from build.core import BuildConfig
+    from src.build.core import BuildConfig
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-from build.matrix.base_matrix import BaseMatrix
-from build.core.exceptions import MatrixError
-from build.utils import ProgressLogger, memory_monitor
+from src.build.matrix.base_matrix import BaseMatrix
+from src.build.core.exceptions import MatrixError
+from src.build.utils import ProgressLogger, memory_monitor
 
 class EmbeddingMatrix(BaseMatrix):
     """Construtor de matriz de embeddings concatenados."""

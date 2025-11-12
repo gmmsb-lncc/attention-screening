@@ -11,14 +11,14 @@ import tempfile
 import shutil
 import sys
 
-# Add src to path
+# Add project root to path
 current_dir = Path(__file__).parent
 project_root = current_dir.parent
-sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root))
 
-from build.pipeline.stratification_manager import StratificationManager
-from build.pipeline.split_indices import SplitIndices
-from build.core.config import BuildConfig
+from src.build.pipeline.stratification_manager import StratificationManager
+from src.build.pipeline.split_indices import SplitIndices
+from src.build.core.config import BuildConfig
 
 
 class TestStratificationManagerBasic:

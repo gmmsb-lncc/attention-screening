@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from pathlib import Path
 
-from build.core import BaseBuilder, BuildConfig
+from src.build.core import BaseBuilder, BuildConfig
 
 
 class BaseValidator(BaseBuilder):

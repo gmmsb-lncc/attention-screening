@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 import time
 from functools import wraps
 
-from build.core.exceptions import BuildMemoryError
+from src.build.core.exceptions import BuildMemoryError
 
 logger = logging.getLogger(__name__)
 

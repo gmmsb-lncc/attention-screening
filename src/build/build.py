@@ -17,10 +17,10 @@ def main():
     print("\nFor demonstrations and examples:")
     print("  python build_demo.py")
     print("\nFor production use, import modules directly:")
-    print("  from build.core import BuildConfig")
-    print("  from build.pipeline import BuildPipeline")
-    print("  from build.embeddings import ProteinEmbedding, LigandEmbedding")
-    print("  from build.matrix import EmbeddingMatrix")
+    print("  from src.build.core import BuildConfig")
+    print("  from src.build.pipeline import BuildPipeline")
+    print("  from src.build.embeddings import ProteinEmbedding, LigandEmbedding")
+    print("  from src.build.matrix import EmbeddingMatrix")
     print("\nSystem is ready for production use!")
 
 if __name__ == "__main__":

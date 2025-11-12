@@ -16,9 +16,9 @@ from pathlib import Path
 import numpy as np
 import logging
 
-from build.core.config import BuildConfig
-from build.stratification.stratifier import Stratifier
-from build.pipeline.split_indices import SplitIndices
+from src.build.core.config import BuildConfig
+from src.build.stratification.stratifier import Stratifier
+from src.build.pipeline.split_indices import SplitIndices
 
 
 logger = logging.getLogger(__name__)

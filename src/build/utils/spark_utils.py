@@ -8,8 +8,8 @@ from typing import Dict, Any, Optional
 from pyspark.sql import SparkSession
 from pyspark.conf import SparkConf
 
-from build.utils.memory_utils import get_memory_usage, get_cpu_info
-from build.core.exceptions import ConfigurationError
+from src.build.utils.memory_utils import get_memory_usage, get_cpu_info
+from src.build.core.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
