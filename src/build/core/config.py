@@ -54,7 +54,7 @@ class BuildConfig:
             'batch_size': DEFAULT_BATCH_SIZE,
             
             # Modelos
-            'esm_model': 'esm2_t36_3B_UR50D',
+            'esm_model': 'esm2_t6_8M_UR50D',  # Modelo menor para testes rápidos
             'fm4m_model': 'SMI-TED',
             
             # Sistema

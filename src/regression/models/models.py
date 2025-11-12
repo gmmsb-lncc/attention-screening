@@ -83,14 +83,7 @@ class RegressionModels:
             random_state=random_state
         )
         
-        # 4. Lasso Regression (L1 regularization)
-        models['Lasso'] = Lasso(
-            alpha=1.0,
-            max_iter=10000,  # Aumentado para evitar warnings de convergência
-            random_state=random_state
-        )
-        
-        # 5. ElasticNet (L1 + L2 regularization)
+        # 4. ElasticNet (L1 + L2 regularization)
         models['ElasticNet'] = ElasticNet(
             alpha=1.0,
             l1_ratio=0.5,
@@ -98,7 +91,7 @@ class RegressionModels:
             random_state=random_state
         )
         
-        # 6. Support Vector Regressor
+        # 5. Support Vector Regressor
         models['SVR'] = SVR(
             kernel='rbf',
             C=1.0,
@@ -106,12 +99,15 @@ class RegressionModels:
             cache_size=1000
         )
         
-        # 7. K-Nearest Neighbors Regressor
+                # 6. K-Nearest Neighbors
         models['KNN'] = KNeighborsRegressor(
             n_neighbors=5,
             weights='distance',
+            algorithm='auto',
             n_jobs=-1
         )
+        
+        # 7. Multi-layer Perceptron
         
         # 8. Multi-Layer Perceptron Regressor
         models['MLP'] = MLPRegressor(
