@@ -46,6 +46,7 @@ class IntegratedConfig:
     # Input/Output
     input_tsv: str
     output_dir: str = "results/integrated"
+    use_checkpoints: bool = True  # Usar checkpoints para evitar recálculo
     
     # Build module
     esm_model: str = "esm2_t6_8M_UR50D"
@@ -60,14 +61,14 @@ class IntegratedConfig:
     
     # Classification
     run_classification: bool = True
-    classifier_epochs: int = 50
-    classifier_cv_folds: int = 5
+    use_multi_model_classification: bool = False  # True = 10 modelos, False = MLP apenas
+    classification_models: Optional[List[str]] = None  # None = todos, ou lista específica
+    classifier_epochs: int = 50  # Apenas para MLP
+    classifier_cv_folds: int = 5  # Apenas para MLP
     
     # Regression
     run_regression: bool = True
-    regression_models: List[str] = field(default_factory=lambda: [
-        'Ridge', 'Lasso', 'ElasticNet', 'RandomForest', 'XGBoost'
-    ])
+    regression_models: Optional[List[str]] = None  # None = todos os 10 modelos
     regression_cv_folds: int = 5
     
     # Binary threshold for classification labels
@@ -143,7 +144,17 @@ class IntegratedPipeline:
                 print("PHASE 1: BUILD - Embedding Generation & Matrix Construction")
                 print("="*80)
             
-            build_results = self._run_build_phase()
+            # Tentar carregar checkpoint
+            build_results = self._load_checkpoint('build')
+            
+            if build_results is None:
+                # Executar build phase
+                build_results = self._run_build_phase()
+                self._save_checkpoint('build', build_results)
+            else:
+                if self.config.verbose:
+                    print("📂 Usando checkpoint da fase de Build")
+            
             self.results['build'] = build_results
             
             # Phase 2: Classification (optional)
@@ -153,7 +164,61 @@ class IntegratedPipeline:
                     print("PHASE 2: CLASSIFICATION - Binary Activity Prediction")
                     print("="*80)
                 
-                classifier_results = self._run_classification_phase(build_results)
+                # Tentar carregar checkpoint
+                classifier_results = self._load_checkpoint('classifier')
+                
+                if classifier_results is None:
+                    # Executar classification phase
+                    classifier_results = self._run_classification_phase(build_results)
+                    self._save_checkpoint('classifier', classifier_results)
+                else:
+                    if self.config.verbose:
+                        print("📂 Usando checkpoint da fase de Classification")
+                    
+                    # Se o checkpoint não tem as chaves esperadas, processar
+                    if 'best_model' not in classifier_results:
+                        # Checkpoint antigo - processar para encontrar melhor modelo
+                        best_model_name = None
+                        best_roc_auc = -1.0
+                        best_metrics = {}
+                        individual_results = {}
+                        
+                        for model_name, metrics in classifier_results.items():
+                            if isinstance(metrics, dict):
+                                roc_auc = metrics.get('ROC_AUC', -1.0)
+                                if roc_auc > best_roc_auc:
+                                    best_roc_auc = roc_auc
+                                    best_model_name = model_name
+                                    best_metrics = metrics
+                                
+                                individual_results[model_name] = {
+                                    'roc_auc': float(metrics.get('ROC_AUC', 0)),
+                                    'accuracy': float(metrics.get('Accuracy', 0)),
+                                    'f1': float(metrics.get('F1', 0)),
+                                    'precision': float(metrics.get('Precision', 0)),
+                                    'recall': float(metrics.get('Recall', 0))
+                                }
+                        
+                        # Reconstruir com estrutura esperada
+                        classifier_results = {
+                            'success': True,
+                            'mode': 'MultiModel',
+                            'n_models_trained': len(individual_results),
+                            'best_model': best_model_name,
+                            'best_metrics': {
+                                'ROC_AUC': float(best_metrics.get('ROC_AUC', 0)),
+                                'Accuracy': float(best_metrics.get('Accuracy', 0)),
+                                'F1': float(best_metrics.get('F1', 0)),
+                                'Precision': float(best_metrics.get('Precision', 0)),
+                                'Recall': float(best_metrics.get('Recall', 0))
+                            },
+                            'individual_results': individual_results
+                        }
+                    
+                    if self.config.verbose and classifier_results.get('best_model'):
+                        print(f"   Best model: {classifier_results['best_model']}")
+                        print(f"   Best ROC-AUC: {classifier_results['best_metrics']['ROC_AUC']:.4f}")
+                
                 self.results['classifier'] = classifier_results
             
             # Phase 3: Regression (optional)
@@ -163,7 +228,17 @@ class IntegratedPipeline:
                     print("PHASE 3: REGRESSION - Quantitative Activity Prediction")
                     print("="*80)
                 
-                regression_results = self._run_regression_phase(build_results)
+                # Tentar carregar checkpoint
+                regression_results = self._load_checkpoint('regression')
+                
+                if regression_results is None:
+                    # Executar regression phase
+                    regression_results = self._run_regression_phase(build_results)
+                    self._save_checkpoint('regression', regression_results)
+                else:
+                    if self.config.verbose:
+                        print("📂 Usando checkpoint da fase de Regression")
+                
                 self.results['regression'] = regression_results
             
             # Success
@@ -234,11 +309,11 @@ class IntegratedPipeline:
             'embeddings': {
                 'protein': str(self.build_dir / "embeddings" / "protein_embeddings.npy"),
                 'ligand': str(self.build_dir / "embeddings" / "ligand_embeddings.npy"),
-                'concatenated': str(self.build_dir / "matrix" / "embedding_matrix.npy")
+                'concatenated': str(self.build_dir / "embedding_matrix.npy")
             },
             'labels': {
-                'binary': str(self.build_dir / "labels" / "binary_labels.npy"),
-                'regression': str(self.build_dir / "labels" / "regression_targets.npy")
+                'binary': str(self.build_dir / "binary_labels.npy"),
+                'regression': str(self.build_dir / "interaction_labels.npy")
             },
             'splits': {
                 'train_indices': str(self.build_dir / "splits" / "train_indices.npy"),
@@ -265,11 +340,28 @@ class IntegratedPipeline:
         Returns:
             Dict com métricas do classificador
         """
-        from classifier.modular_pipeline import MLPEmbeddingPipeline
-        
         # Paths dos dados
         embeddings_path = build_results['embeddings']['concatenated']
         labels_path = build_results['labels']['binary']
+        
+        # Escolher pipeline: Multi-modelo ou MLP único
+        if self.config.use_multi_model_classification:
+            return self._run_multi_model_classification(embeddings_path, labels_path)
+        else:
+            return self._run_mlp_classification(embeddings_path, labels_path)
+    
+    def _run_mlp_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+        """
+        Executar classificação com MLP único (modo legado).
+        
+        Args:
+            embeddings_path: Path dos embeddings concatenados
+            labels_path: Path dos labels binários
+            
+        Returns:
+            Dict com métricas do MLP
+        """
+        from classifier.modular_pipeline import MLPEmbeddingPipeline
         
         # Criar pipeline de classificação
         classifier = MLPEmbeddingPipeline(
@@ -302,6 +394,7 @@ class IntegratedPipeline:
         
         results = {
             'success': True,
+            'mode': 'MLP',
             'val_loss': float(val_loss),
             'test_metrics': {
                 'accuracy': float(test_metrics.get('accuracy', 0)),
@@ -318,10 +411,78 @@ class IntegratedPipeline:
             'model_path': str(self.classifier_dir / "mlp_model.pth")
         }
         
+        return results
+    
+    def _run_multi_model_classification(self, embeddings_path: str, labels_path: str) -> Dict[str, Any]:
+        """
+        Executar classificação com múltiplos modelos sklearn.
+        
+        Args:
+            embeddings_path: Path dos embeddings concatenados
+            labels_path: Path dos labels binários
+            
+        Returns:
+            Dict com métricas de todos os modelos
+        """
+        from classifier.multi_model_pipeline import MultiModelClassificationPipeline
+        
+        # Criar pipeline multi-modelo
+        pipeline = MultiModelClassificationPipeline(
+            embeddings_path=embeddings_path,
+            labels_path=labels_path,
+            output_dir=str(self.classifier_dir),
+            models_to_train=self.config.classification_models,  # None = todos
+            test_size=self.config.test_size,
+            val_size=self.config.val_size,
+            random_state=self.config.random_state,
+            verbose=self.config.verbose
+        )
+        
+        # Executar pipeline completo
+        test_metrics = pipeline.run()
+        
+        # Encontrar melhor modelo com base em ROC-AUC
+        best_model_name = None
+        best_roc_auc = -1.0
+        best_metrics = {}
+        
+        for model_name, metrics in test_metrics.items():
+            roc_auc = metrics.get('ROC_AUC', -1.0)
+            if roc_auc > best_roc_auc:
+                best_roc_auc = roc_auc
+                best_model_name = model_name
+                best_metrics = metrics
+        
+        # Compilar resultados
+        results = {
+            'success': True,
+            'mode': 'MultiModel',
+            'n_models_trained': len(test_metrics),
+            'best_model': best_model_name,
+            'best_metrics': {
+                'ROC_AUC': float(best_metrics.get('ROC_AUC', 0)),
+                'Accuracy': float(best_metrics.get('Accuracy', 0)),
+                'F1': float(best_metrics.get('F1', 0)),
+                'Precision': float(best_metrics.get('Precision', 0)),
+                'Recall': float(best_metrics.get('Recall', 0))
+            },
+            'individual_results': {}
+        }
+        
+        # Adicionar métricas individuais
+        for model_name, metrics in test_metrics.items():
+            results['individual_results'][model_name] = {
+                'roc_auc': float(metrics.get('ROC_AUC', 0)),
+                'accuracy': float(metrics.get('Accuracy', 0)),
+                'f1': float(metrics.get('F1', 0)),
+                'precision': float(metrics.get('Precision', 0)),
+                'recall': float(metrics.get('Recall', 0))
+            }
+        
         if self.config.verbose:
             print("✅ Classification phase completed successfully")
-            print(f"   Test ROC-AUC: {results['test_metrics']['roc_auc']:.4f}")
-            print(f"   CV ROC-AUC: {results['cv_results']['mean_roc_auc']:.4f} ± {results['cv_results']['std_roc_auc']:.4f}")
+            print(f"   Best model: {best_model_name}")
+            print(f"   Best ROC-AUC: {best_roc_auc:.4f}")
         
         return results
     
@@ -353,17 +514,66 @@ class IntegratedPipeline:
             verbose=self.config.verbose
         )
         
-        # Carregar dados
-        regression.load_data()
+        # FASE 1: Carregar dados (com checkpoint)
+        data_checkpoint = self._load_checkpoint('regression_data')
+        if data_checkpoint is None:
+            if self.config.verbose:
+                print("📊 Carregando dados de regressão...")
+            regression.load_data()
+            
+            # Salvar checkpoint de dados
+            data_info = {
+                'n_samples': len(regression.y_train) + len(regression.y_val) + len(regression.y_test),
+                'n_train': len(regression.y_train),
+                'n_val': len(regression.y_val),
+                'n_test': len(regression.y_test),
+                'n_features': regression.X_train.shape[1]
+            }
+            self._save_checkpoint('regression_data', data_info)
+        else:
+            if self.config.verbose:
+                print("📂 Checkpoint de dados carregado")
+                print(f"   Samples: {data_checkpoint['n_samples']} ({data_checkpoint['n_train']}/{data_checkpoint['n_val']}/{data_checkpoint['n_test']})")
+            # Recarregar dados
+            regression.load_data()
         
-        # Treinar modelos
-        train_results = regression.train_all_models()
+        # FASE 2: Treinar modelos (com checkpoint)
+        train_checkpoint = self._load_checkpoint('regression_train')
+        if train_checkpoint is None:
+            if self.config.verbose:
+                print("🎯 Treinando modelos de regressão...")
+            train_results = regression.train_models()
+            self._save_checkpoint('regression_train', train_results)
+        else:
+            if self.config.verbose:
+                print("📂 Checkpoint de treinamento carregado")
+            train_results = train_checkpoint
+            # Recarregar modelos treinados no regression pipeline
+            regression.val_metrics = train_results
+        
+        # Encontrar melhor modelo com base em MAE
+        best_model_name = None
+        best_mae = float('inf')
+        best_r2 = -float('inf')
+        
+        for model_name, metrics in train_results.items():
+            mae = metrics.get('MAE', float('inf'))
+            if mae < best_mae:
+                best_mae = mae
+                best_model_name = model_name
+                best_r2 = metrics.get('R2', 0.0)
+        
+        if self.config.verbose and train_checkpoint:
+            print(f"   Best model: {best_model_name}")
+            print(f"   Best MAE: {best_mae:.3f}")
+            print(f"   Best R²: {best_r2:.4f}")
         
         # Cross-validation (opcional, para modelos selecionados)
         from regression.core import quick_cross_validate
         
         cv_results = {}
-        if len(self.config.regression_models) <= 3:  # CV apenas para poucos modelos
+        # CV apenas para poucos modelos (se modelos específicos foram escolhidos)
+        if self.config.regression_models and len(self.config.regression_models) <= 3:
             cv_results = quick_cross_validate(
                 regression.X_train,
                 regression.y_train,
@@ -373,24 +583,23 @@ class IntegratedPipeline:
             )
         
         # Compilar resultados
+        models_trained = len(self.config.regression_models) if self.config.regression_models else len(train_results)
         results = {
             'success': True,
-            'best_model': train_results['best_model'],
-            'best_mae': float(train_results['best_mae']),
-            'best_r2': float(train_results['best_r2']),
-            'models_trained': len(self.config.regression_models),
+            'best_model': best_model_name,
+            'best_mae': float(best_mae),
+            'best_r2': float(best_r2),
+            'models_trained': models_trained,
             'individual_results': {}
         }
         
         # Adicionar métricas individuais
-        for model_name in self.config.regression_models:
-            if model_name in train_results.get('models', {}):
-                model_metrics = train_results['models'][model_name]['test_metrics']
-                results['individual_results'][model_name] = {
-                    'mae': float(model_metrics.get('mae', 0)),
-                    'rmse': float(model_metrics.get('rmse', 0)),
-                    'r2': float(model_metrics.get('r2', 0))
-                }
+        for model_name, metrics in train_results.items():
+            results['individual_results'][model_name] = {
+                'mae': float(metrics.get('MAE', 0)),
+                'rmse': float(metrics.get('RMSE', 0)),
+                'r2': float(metrics.get('R2', 0))
+            }
         
         # Adicionar CV se disponível
         if cv_results:
@@ -433,8 +642,12 @@ class IntegratedPipeline:
         print(f"Random Seed: {self.config.random_state}")
         print("\nModules to run:")
         print(f"  • Build: ✅ (always required)")
-        print(f"  • Classification: {'✅' if self.config.run_classification else '❌'}")
-        print(f"  • Regression: {'✅' if self.config.run_regression else '❌'}")
+        if self.config.run_classification:
+            mode = "Multi-Model (10 models)" if self.config.use_multi_model_classification else "MLP only"
+            print(f"  • Classification: ✅ ({mode})")
+        else:
+            print(f"  • Classification: ❌")
+        print(f"  • Regression: {'✅ (10 models)' if self.config.run_regression else '❌'}")
         print("="*80)
     
     def _print_summary(self) -> None:
@@ -454,9 +667,20 @@ class IntegratedPipeline:
         if self.config.run_classification and self.results.get('classifier', {}).get('success'):
             clf = self.results['classifier']
             print("\n✅ Classification Phase: SUCCESS")
-            print(f"   Test ROC-AUC: {clf['test_metrics']['roc_auc']:.4f}")
-            print(f"   Test Accuracy: {clf['test_metrics']['accuracy']:.4f}")
-            print(f"   CV ROC-AUC: {clf['cv_results']['mean_roc_auc']:.4f} ± {clf['cv_results']['std_roc_auc']:.4f}")
+            
+            # Multi-model mode
+            if clf.get('mode') == 'MultiModel':
+                print(f"   Mode: Multi-Model ({clf.get('n_models_trained', 0)} models)")
+                print(f"   Best model: {clf.get('best_model', 'Unknown')}")
+                if 'best_metrics' in clf:
+                    print(f"   Best ROC-AUC: {clf['best_metrics'].get('ROC_AUC', 0):.4f}")
+                    print(f"   Best F1: {clf['best_metrics'].get('F1', 0):.4f}")
+            # MLP mode
+            else:
+                print(f"   Mode: MLP (single model)")
+                print(f"   Test ROC-AUC: {clf['test_metrics']['roc_auc']:.4f}")
+                print(f"   Test Accuracy: {clf['test_metrics']['accuracy']:.4f}")
+                print(f"   CV ROC-AUC: {clf['cv_results']['mean_roc_auc']:.4f} ± {clf['cv_results']['std_roc_auc']:.4f}")
         
         # Regression results
         if self.config.run_regression and self.results.get('regression', {}).get('success'):
@@ -469,6 +693,59 @@ class IntegratedPipeline:
         print("\n" + "="*80)
         print(f"📁 All results saved to: {self.output_dir}")
         print("="*80 + "\n")
+    
+    def _save_checkpoint(self, phase_name: str, phase_results: Dict[str, Any]) -> None:
+        """
+        Salva checkpoint de uma fase específica.
+        
+        Args:
+            phase_name: Nome da fase ('build', 'classifier', 'regression')
+            phase_results: Resultados da fase
+        """
+        if not self.config.use_checkpoints:
+            return
+        
+        checkpoint_dir = self.output_dir / 'checkpoints'
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        checkpoint_file = checkpoint_dir / f'{phase_name}_checkpoint.json'
+        
+        with open(checkpoint_file, 'w') as f:
+            json.dump(phase_results, f, indent=2)
+        
+        if self.config.verbose:
+            print(f"✅ Checkpoint salvo: {checkpoint_file}")
+    
+    def _load_checkpoint(self, phase_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Carrega checkpoint de uma fase se existir.
+        
+        Args:
+            phase_name: Nome da fase
+            
+        Returns:
+            Resultados da fase ou None se checkpoint não existe
+        """
+        if not self.config.use_checkpoints:
+            return None
+        
+        checkpoint_file = self.output_dir / 'checkpoints' / f'{phase_name}_checkpoint.json'
+        
+        if not checkpoint_file.exists():
+            return None
+        
+        try:
+            with open(checkpoint_file, 'r') as f:
+                checkpoint_data = json.load(f)
+            
+            if self.config.verbose:
+                print(f"📂 Checkpoint carregado: {checkpoint_file}")
+            
+            return checkpoint_data
+        except Exception as e:
+            if self.config.verbose:
+                print(f"⚠️  Erro ao carregar checkpoint: {e}")
+            return None
 
 
 def main():

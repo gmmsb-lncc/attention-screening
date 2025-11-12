@@ -64,8 +64,8 @@ class BuildPipeline(BaseBuilder):
     def _initialize_components(self) -> None:
         """Initialize all pipeline components."""
         try:
-            # Obter configuração de modelos
-            protein_model = self.config.get('protein_model', 'esm2_t36_3B_UR50D')
+            # Obter configuração de modelos (priorizar esm_model sobre protein_model)
+            protein_model = self.config.get('esm_model') or self.config.get('protein_model', 'esm2_t6_8M_UR50D')
             ligand_model = self.config.get('ligand_model', 'fm4m')
             
             self.components = {
