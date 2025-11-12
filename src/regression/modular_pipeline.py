@@ -17,6 +17,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 
+# Import SplitIndices for external stratification
+try:
+    from src.build.pipeline.split_indices import SplitIndices
+except ImportError:
+    SplitIndices = None  # Fallback if not available
+
 # Imports dos módulos modularizados
 try:
     from .core import RegressionEvaluator, DataManager, RegressionTrainer
@@ -57,7 +63,8 @@ class RegressionPipeline:
         test_size: float = 0.2,
         val_size: float = 0.1,
         random_state: int = 42,
-        verbose: bool = True
+        verbose: bool = True,
+        split_indices: Optional['SplitIndices'] = None
     ):
         """
         Inicializar pipeline de regressão.
@@ -71,6 +78,9 @@ class RegressionPipeline:
             val_size: Proporção do conjunto de validação (0.1 = 10%)
             random_state: Seed para reprodutibilidade
             verbose: Mostrar progresso
+            split_indices: Optional SplitIndices object with pre-defined train/val/test splits.
+                          If provided, these indices will be used instead of random splitting.
+                          This ensures consistency with other pipelines (e.g., classification).
         """
         self.embeddings_path = embeddings_path
         self.targets_path = targets_path
@@ -80,6 +90,7 @@ class RegressionPipeline:
         self.val_size = val_size
         self.random_state = random_state
         self.verbose = verbose
+        self.split_indices = split_indices  # Store external splits if provided
         
         # Criar diretórios de saída
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -121,6 +132,10 @@ class RegressionPipeline:
         
         Usa stratified split baseado em bins quantílicos para
         manter distribuição similar em todos os conjuntos.
+        
+        **NEW**: If split_indices was provided during initialization, those indices
+        will be used instead of automatic splitting. This ensures consistent splits
+        across classification and regression pipelines.
         """
         if self.verbose:
             print('📊 ETAPA 1: Carregamento e Divisão de Dados')
@@ -128,13 +143,30 @@ class RegressionPipeline:
         
         start_time = time.time()
         
-        # Carregar e dividir dados
-        self.X_train, self.X_val, self.X_test, \
-        self.y_train, self.y_val, self.y_test = self.data_manager.split_data(
-            test_size=self.test_size,
-            val_size=self.val_size,
-            random_state=self.random_state
-        )
+        # Check if external split indices are provided
+        if self.split_indices is not None:
+            # Use external splits - load data and apply indices
+            if self.verbose:
+                print("   📌 Using external split indices (from stratification)")
+            
+            # Load full data first
+            X, y = self.data_manager.load_data()
+            
+            # Apply external indices
+            self.X_train = X[self.split_indices.train_idx]
+            self.X_val = X[self.split_indices.val_idx]
+            self.X_test = X[self.split_indices.test_idx]
+            self.y_train = y[self.split_indices.train_idx]
+            self.y_val = y[self.split_indices.val_idx]
+            self.y_test = y[self.split_indices.test_idx]
+        else:
+            # Use automatic splitting (default behavior)
+            self.X_train, self.X_val, self.X_test, \
+            self.y_train, self.y_val, self.y_test = self.data_manager.split_data(
+                test_size=self.test_size,
+                val_size=self.val_size,
+                random_state=self.random_state
+            )
         
         # Estatísticas
         stats = self.data_manager.get_stats()
