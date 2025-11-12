@@ -218,18 +218,29 @@ class EmbeddingMatrix(BaseMatrix):
     def _build_matrix(self) -> np.ndarray:
         """Constrói matriz de embeddings concatenados."""
         # Validar colunas necessárias
-        required_columns = ['molregno', 'seq_id']
-        missing_columns = [col for col in required_columns if col not in self.original_data.columns]
+        required_columns = ['seq_id']
+        # Para ligantes, aceitar chembl_id ou molregno
+        if 'chembl_id' not in self.original_data.columns and 'molregno' not in self.original_data.columns:
+            raise MatrixError("TSV deve conter coluna 'chembl_id' ou 'molregno' para identificar ligantes")
         
-        if missing_columns:
-            raise MatrixError(f"Colunas obrigatórias ausentes no TSV: {missing_columns}")
+        if 'seq_id' not in self.original_data.columns:
+            raise MatrixError("TSV deve conter coluna 'seq_id' para identificar proteínas")
         
         # Converter colunas para string para garantir consistência
         df = self.original_data.copy()
-        df['molregno'] = df['molregno'].astype(str)
+        
+        # Preferir chembl_id sobre molregno para ligantes (embeddings são salvos com chembl_id)
+        if 'chembl_id' in df.columns:
+            df['ligand_id'] = df['chembl_id'].astype(str)
+            ligand_id_col = 'chembl_id'
+        else:
+            df['ligand_id'] = df['molregno'].astype(str)
+            ligand_id_col = 'molregno'
+        
         df['seq_id'] = df['seq_id'].astype(str)
         
-        self.logger.info(f"Construindo matriz para {len(df)} pares molregno+seq_id")
+        self.logger.info(f"Construindo matriz para {len(df)} pares ligante+proteína")
+        self.logger.info(f"Usando '{ligand_id_col}' para identificar ligantes")
         self.logger.info(f"Dimensões: ligantes={self.ligand_dim}, proteínas={self.protein_dim}")
         
         # Listas para armazenar dados
@@ -240,17 +251,17 @@ class EmbeddingMatrix(BaseMatrix):
         progress_logger = ProgressLogger(
             self.logger,
             len(df),
-            "Processando pares molregno+seq_id"
+            "Processando pares ligante+proteína"
         )
         
         # Processar cada linha do TSV
         for _, row in df.iterrows():
-            molregno = str(row['molregno'])
+            ligand_id = str(row['ligand_id'])
             seq_id = str(row['seq_id'])
             
-            # Buscar embedding de ligante
+            # Buscar embedding de ligante (usando ligand_id que pode ser chembl_id ou molregno)
             ligand_emb = self._get_cached_embedding(
-                molregno, 
+                ligand_id, 
                 self.ligand_embeddings_dir, 
                 self.ligand_cache,
                 is_protein=False
@@ -268,11 +279,11 @@ class EmbeddingMatrix(BaseMatrix):
             if ligand_emb is None or protein_emb is None:
                 missing_info = []
                 if ligand_emb is None:
-                    missing_info.append(f"ligante:{molregno}")
+                    missing_info.append(f"ligante:{ligand_id}")
                 if protein_emb is None:
                     missing_info.append(f"proteina:{seq_id}")
                 
-                missing_entries.append(f"molregno:{molregno}, seq_id:{seq_id} - Missing: {', '.join(missing_info)}")
+                missing_entries.append(f"ligand_id:{ligand_id}, seq_id:{seq_id} - Missing: {', '.join(missing_info)}")
                 
                 # Usar embeddings zero para entradas ausentes
                 final_embedding = np.zeros(self.protein_dim + self.ligand_dim)
@@ -381,12 +392,14 @@ class EmbeddingMatrix(BaseMatrix):
     
     def get_output_path(self) -> Path:
         """
-        Retorna o caminho do diretório de saída.
+        Retorna o caminho do arquivo da matriz de saída.
         
         Returns:
-            Path do diretório de saída
+            Path do arquivo de matriz (embedding_matrix.npy)
         """
-        return self.output_dir
+        if self._output_path and self._output_path.is_file():
+            return self._output_path
+        return self.output_dir / "embedding_matrix.npy"
 
     
     def build(self) -> Dict[str, Any]:
@@ -450,8 +463,8 @@ class EmbeddingMatrix(BaseMatrix):
             np.save(matrix_file, matrix)
             self.logger.info(f"Matriz salva: {matrix_file} - Shape: {matrix.shape}")
             
-            # Atualizar output path
-            self._output_path = self.output_dir
+            # Atualizar output path com o caminho do ARQUIVO, não do diretório
+            self._output_path = matrix_file
             
             return True
             
