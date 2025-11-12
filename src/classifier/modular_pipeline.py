@@ -26,19 +26,26 @@ except ImportError:
 
 # Imports dos módulos modularizados
 try:
-    from models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
-    from core.evaluator import ModelEvaluator, DataTypeConverter
-    from core.data_loader import DataManager
+    # Primeiro tenta import relativo (correto)
+    from .models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
+    from .core.evaluator import ModelEvaluator, DataTypeConverter
+    from .core.data_loader import DataManager
 except ImportError:
-    # Fallback para execução direta
-    import sys
-    import os
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, current_dir)
-    
-    from models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
-    from core.evaluator import ModelEvaluator, DataTypeConverter
-    from core.data_loader import DataManager
+    try:
+        # Tenta import absoluto
+        from classifier.models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
+        from classifier.core.evaluator import ModelEvaluator, DataTypeConverter
+        from classifier.core.data_loader import DataManager
+    except ImportError:
+        # Fallback para execução direta
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        
+        from models.mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
+        from core.evaluator import ModelEvaluator, DataTypeConverter
+        from core.data_loader import DataManager
 
 logger = logging.getLogger(__name__)
 

@@ -209,16 +209,28 @@ class MatrixValidator(BaseValidator):
         
         # Additional statistics
         if valid:
-            self.validation_results[f"{matrix_name}_data_integrity"] = {
-                'nan_count': int(np.isnan(matrix).sum()),
-                'inf_count': int(np.isinf(matrix).sum()),
-                'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
-                'min_value': float(np.min(matrix)),
-                'max_value': float(np.max(matrix)),
-                'mean_value': float(np.mean(matrix)),
-                'std_value': float(np.std(matrix)),
-                'valid': True
-            }
+            try:
+                # Try to compute statistics - works for numeric types
+                self.validation_results[f"{matrix_name}_data_integrity"] = {
+                    'nan_count': int(np.isnan(matrix).sum()),
+                    'inf_count': int(np.isinf(matrix).sum()),
+                    'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
+                    'min_value': float(np.min(matrix)),
+                    'max_value': float(np.max(matrix)),
+                    'mean_value': float(np.mean(matrix)),
+                    'std_value': float(np.std(matrix)),
+                    'valid': True
+                }
+            except (TypeError, ValueError) as e:
+                # For non-numeric types, store partial statistics
+                self.add_warning(f"{matrix_name} has non-numeric dtype, computing limited statistics")
+                self.validation_results[f"{matrix_name}_data_integrity"] = {
+                    'shape': matrix.shape,
+                    'dtype': str(matrix.dtype),
+                    'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
+                    'valid': True,
+                    'note': f'Limited statistics due to non-numeric dtype: {e}'
+                }
         
         return valid
     

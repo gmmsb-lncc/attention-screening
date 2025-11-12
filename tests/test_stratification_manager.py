@@ -194,6 +194,8 @@ class TestStratificationManagerConfiguration:
     
     def test_custom_clustering_algorithm(self):
         """Test using different clustering algorithms."""
+        import warnings
+        
         config = BuildConfig()
         
         algorithms = ['kmeans', 'hierarchical', 'dbscan', 'random']
@@ -210,11 +212,14 @@ class TestStratificationManagerConfiguration:
             labels = np.random.randint(0, 2, n_samples).astype(np.int32)
             
             # Should work with all algorithms
-            splits = manager.stratify(
-                protein_embeddings=protein_embeddings,
-                ligand_embeddings=ligand_embeddings,
-                labels=labels
-            )
+            # Suppress scipy ClusterWarning for hierarchical clustering with random data
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='.*uncondensed distance matrix.*')
+                splits = manager.stratify(
+                    protein_embeddings=protein_embeddings,
+                    ligand_embeddings=ligand_embeddings,
+                    labels=labels
+                )
             
             assert isinstance(splits, SplitIndices)
             assert len(splits.train_idx) > 0
