@@ -7,9 +7,9 @@ from typing import Dict, Any, Optional, Tuple, List
 import numpy as np
 from pathlib import Path
 
-from build.core.base_builder import BaseBuilder
-from build.core.exceptions import MatrixError, BuildFileNotFoundError
-from build.utils import ProgressLogger, memory_monitor, load_numpy, save_numpy, load_tsv
+from src.build.core.base_builder import BaseBuilder
+from src.build.core.exceptions import MatrixError, BuildFileNotFoundError
+from src.build.utils import ProgressLogger, memory_monitor, load_numpy, save_numpy, load_tsv
 
 class BaseMatrix(BaseBuilder):
     """Classe base abstrata para construção de matrizes."""

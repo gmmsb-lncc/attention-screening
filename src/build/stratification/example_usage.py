@@ -18,9 +18,9 @@ from pathlib import Path
 # Add the src directory to Python path for this example
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from build.core import BuildConfig
-from build.pipeline import BuildPipeline
-from build.stratification import Stratifier, SplitValidator, CosineSimilarityCalculator
+from src.build.core import BuildConfig
+from src.build.pipeline import BuildPipeline
+from src.build.stratification import Stratifier, SplitValidator, CosineSimilarityCalculator
 
 
 def example_basic_stratification():
