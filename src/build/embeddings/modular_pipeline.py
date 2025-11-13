@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, Tuple
 import pandas as pd
 
-from build.embeddings.core import DataManager, ModelManager, EmbeddingGenerator
-from build.embeddings.models import ModelRegistry
-from build.embeddings.utils import CacheManager, validate_protein_batch, validate_smiles_batch
+from src.build.embeddings.core import DataManager, ModelManager, EmbeddingGenerator
+from src.build.embeddings.models import ModelRegistry
+from src.build.embeddings.utils import CacheManager, validate_protein_batch, validate_smiles_batch
 
 
 class EmbeddingPipeline:

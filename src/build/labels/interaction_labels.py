@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from pathlib import Path
 
-from build.core import BuildConfig
-from build.utils import SparkManager
-from build.labels.base_labels import BaseLabels
+from src.build.core import BuildConfig
+from src.build.utils import SparkManager
+from src.build.labels.base_labels import BaseLabels
 
 
 class InteractionLabels(BaseLabels):

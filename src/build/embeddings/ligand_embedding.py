@@ -12,12 +12,12 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 if TYPE_CHECKING:
-    from build.core import BuildConfig
+    from src.build.core import BuildConfig
 
-from build.embeddings.base_embedding import BaseEmbedding
-from build.core.constants import FM4M_MODELS
-from build.core.exceptions import DependencyError, EmbeddingError
-from build.utils import ProgressLogger, ensure_directory, optimize_batch_size, memory_monitor
+from src.build.embeddings.base_embedding import BaseEmbedding
+from src.build.core.constants import FM4M_MODELS
+from src.build.core.exceptions import DependencyError, EmbeddingError
+from src.build.utils import ProgressLogger, ensure_directory, optimize_batch_size, memory_monitor
 
 class LigandEmbedding(BaseEmbedding):
     """Gerador de embeddings de ligantes usando FM4M."""
@@ -471,7 +471,7 @@ class LigandEmbedding(BaseEmbedding):
             True se sucesso
         """
         import pandas as pd
-        from build.utils import ensure_directory
+        from src.build.utils import ensure_directory
         
         try:
             # Garantir que modelo está inicializado
