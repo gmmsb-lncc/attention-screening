@@ -7,8 +7,8 @@ import json
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from build.core.constants import *
-from build.core.exceptions import ConfigurationError
+from src.build.core.constants import *
+from src.build.core.exceptions import ConfigurationError
 
 class BuildConfig:
     """Classe para gerenciar configurações do sistema build."""

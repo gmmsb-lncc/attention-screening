@@ -10,12 +10,14 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
-from build.core import BaseBuilder, BuildConfig
-from build.embeddings import ProteinEmbedding, LigandEmbedding
-from build.matrix import EmbeddingMatrix, KinaseMatrix  
-from build.labels import InteractionLabels, BinaryLabels
-from build.validation import MatrixValidator
-from build.stratification import Stratifier, SplitValidator
+from src.build.core import BaseBuilder, BuildConfig
+from src.build.embeddings import ProteinEmbedding, LigandEmbedding
+from src.build.matrix import EmbeddingMatrix, KinaseMatrix  
+from src.build.labels import InteractionLabels, BinaryLabels
+from src.build.validation import MatrixValidator
+from src.build.stratification import Stratifier, SplitValidator
+from src.build.pipeline.stratification_manager import StratificationManager
+from src.build.pipeline.split_indices import SplitIndices
 
 
 class BuildPipeline(BaseBuilder):
@@ -82,7 +84,14 @@ class BuildPipeline(BaseBuilder):
                 'kinase_matrix': KinaseMatrix(self.config),
                 'matrix_validator': MatrixValidator(self.config),
                 'stratifier': Stratifier(self.config),
-                'split_validator': SplitValidator(self.config)
+                'split_validator': SplitValidator(self.config),
+                'stratification_manager': StratificationManager(
+                    self.config,
+                    clustering_algorithm=self.config.get('stratification_params', {}).get('clustering_algorithm', 'kmeans'),
+                    protein_weight=self.config.get('stratification_params', {}).get('protein_weight', 0.6),
+                    ligand_weight=self.config.get('stratification_params', {}).get('ligand_weight', 0.4),
+                    random_state=self.config.get('random_state', 42)
+                )
             }
             self.logger.info("Initialized all pipeline components")
             
@@ -527,6 +536,23 @@ class BuildPipeline(BaseBuilder):
             self.logger.error(f"Error in stratification: {e}")
             raise
     
+    def get_split_indices(self) -> Optional[SplitIndices]:
+        """
+        Get the split indices from the last stratification.
+        
+        Returns:
+            SplitIndices object if stratification was performed, None otherwise
+        """
+        if 'stratification' not in self.results:
+            return None
+        
+        # Check if we have the new format with splits_file
+        if 'splits_file' in self.results['stratification']:
+            splits_file = self.results['stratification']['splits_file']
+            return SplitIndices.load(splits_file)
+        
+        return None
+    
     def run_complete_pipeline(self,
                             input_tsv_path: Union[str, Path],
                             output_dir: Union[str, Path],
@@ -571,38 +597,70 @@ class BuildPipeline(BaseBuilder):
             if not self.run_label_generation(input_tsv_path, output_dir, binary_threshold):
                 return False
             
-            # Step 4: Optional stratification
+            # Step 4: Optional stratification using StratificationManager
             # Use parameter value if provided, otherwise check config
             perform_stratification = stratify_splits or self.config.get('stratification_enabled', False)
+            split_indices: Optional[SplitIndices] = None
+            
             if perform_stratification:
-                self.logger.info("🟡 Starting stratification phase")
+                self.logger.info("🟡 Starting stratification phase with StratificationManager")
                 
-                # Get paths from previous steps
-                matrix_output_dir = Path(self.results['matrix_construction']['output_path'])
-                matrix_path = str(matrix_output_dir / "embedding_matrix.npy")
-                labels_path = str(Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy'))
+                # Load embeddings from results stored by previous steps
+                import numpy as np
                 
-                # Perform stratified splits
-                stratification_results = self.run_stratification(
-                    concatenated_matrix_path=matrix_path,
-                    labels_path=labels_path,
+                # Get protein embeddings info
+                protein_info = self.results['embedding_generation']['protein_embeddings']
+                protein_emb_dir = output_dir / "protein_embeddings"
+                protein_emb_path = protein_emb_dir / "protein_embeddings.npy"
+                
+                # Get ligand embeddings info
+                ligand_info = self.results['embedding_generation']['ligand_embeddings']
+                ligand_emb_dir = output_dir / "ligand_embeddings"
+                ligand_emb_path = ligand_emb_dir / "ligand_embeddings.npy"
+                
+                # Load embeddings
+                self.logger.info(f"Loading protein embeddings from: {protein_emb_path}")
+                protein_embeddings = np.load(str(protein_emb_path))
+                
+                self.logger.info(f"Loading ligand embeddings from: {ligand_emb_path}")
+                ligand_embeddings = np.load(str(ligand_emb_path))
+                
+                # Load interaction labels (use interaction labels for stratification)
+                labels_path = Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy')
+                self.logger.info(f"Loading labels from: {labels_path}")
+                labels = np.load(str(labels_path))
+                
+                # Perform stratification using StratificationManager
+                stratification_manager = self.components['stratification_manager']
+                split_indices = stratification_manager.stratify(
+                    protein_embeddings=protein_embeddings,
+                    ligand_embeddings=ligand_embeddings,
+                    labels=labels,
                     test_size=test_size,
                     val_size=val_size
                 )
                 
-                # Save split indices
+                # Save splits using SplitIndices
                 splits_output_dir = output_dir / "splits"
                 splits_output_dir.mkdir(exist_ok=True)
+                split_indices.save(str(splits_output_dir / "stratified_splits.npz"))
                 
-                import numpy as np
-                np.save(splits_output_dir / "train_indices.npy", 
-                        np.array(stratification_results['train_indices']))
-                np.save(splits_output_dir / "val_indices.npy", 
-                        np.array(stratification_results['val_indices']))
-                np.save(splits_output_dir / "test_indices.npy", 
-                        np.array(stratification_results['test_indices']))
+                # Also save as individual .npy files for backward compatibility
+                np.save(splits_output_dir / "train_indices.npy", split_indices.train_idx)
+                np.save(splits_output_dir / "val_indices.npy", split_indices.val_idx)
+                np.save(splits_output_dir / "test_indices.npy", split_indices.test_idx)
                 
-                self.logger.info(f"✅ Splits saved to: {splits_output_dir}")
+                # Store results
+                self.results['stratification'] = {
+                    'train_size': len(split_indices.train_idx),
+                    'val_size': len(split_indices.val_idx),
+                    'test_size': len(split_indices.test_idx),
+                    'splits_file': str(splits_output_dir / "stratified_splits.npz"),
+                    'metadata': split_indices.metadata
+                }
+                
+                self.logger.info(f"✅ Stratification complete: {split_indices}")
+                self.logger.info(f"✅ Splits saved to: {splits_output_dir / 'stratified_splits.npz'}")
             
             # Step 5: Optional validation
             if run_validation:

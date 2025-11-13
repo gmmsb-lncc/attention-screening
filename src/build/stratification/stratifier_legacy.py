@@ -15,10 +15,10 @@ from sklearn.preprocessing import LabelEncoder
 from collections import Counter
 import warnings
 
-from build.core.base_builder import BaseBuilder
-from build.core.config import BuildConfig
-from build.core.exceptions import BuildException
-from build.core.constants import (
+from src.build.core.base_builder import BaseBuilder
+from src.build.core.config import BuildConfig
+from src.build.core.exceptions import BuildException
+from src.build.core.constants import (
     STRATIFICATION_DEFAULT_CLUSTERING_ALGORITHM,
     STRATIFICATION_DEFAULT_SIMILARITY_THRESHOLD,
     STRATIFICATION_DEFAULT_CLUSTER_MIN_SIZE,

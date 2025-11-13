@@ -11,16 +11,16 @@ Provides convenient imports for the modular build system components.
 """
 
 # Core components
-from build.core import BuildConfig, BaseBuilder, BuildException
+from .core import BuildConfig, BaseBuilder, BuildException
 
 # Pipeline orchestrator  
-from build.pipeline import BuildPipeline
+from .pipeline import BuildPipeline
 
 # Matrix components - for backward compatibility
-from build.matrix import EmbeddingMatrix
+from .matrix import EmbeddingMatrix
 
 # Stratification components
-from build.stratification import Stratifier, SplitValidator, CosineSimilarityCalculator, ClusterAnalyzer
+from .stratification import Stratifier, SplitValidator, CosineSimilarityCalculator, ClusterAnalyzer
 
 # Backward compatibility aliases
 EmbeddingMatrixReconstructor = EmbeddingMatrix
