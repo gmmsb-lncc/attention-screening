@@ -267,7 +267,7 @@ class RegressionPipeline:
             Dict com métricas de teste de todos os modelos
         """
         if self.verbose:
-            print('📈 ETAPA 3: Avaliação no Conjunto de Teste')
+            print('📈 ETAPA 3: Avaliação no Conjunto de Teste Final')
             print('=' * 70)
         
         for model_name, model in self.trained_models.items():
@@ -287,7 +287,7 @@ class RegressionPipeline:
             self.test_metrics[model_name] = metrics
         
         if self.verbose:
-            print("\n✅ Avaliação completa!")
+            print("\n✅ Avaliação no conjunto de teste completa!")
             print('=' * 70)
             print()
         
@@ -299,7 +299,7 @@ class RegressionPipeline:
             print("⚠️  Nenhum resultado de teste disponível")
             return
         
-        print('📊 RESUMO DOS RESULTADOS')
+        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste Final)')
         print('=' * 80)
         
         # Ordenar por MAE
