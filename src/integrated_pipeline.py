@@ -154,6 +154,19 @@ class IntegratedPipeline:
             else:
                 if self.config.verbose:
                     print("📂 Usando checkpoint da fase de Build")
+                
+                # Atualizar checkpoint antigo se necessário (adicionar n_samples e embedding_dim)
+                if 'n_samples' not in build_results or 'embedding_dim' not in build_results:
+                    import numpy as np
+                    embedding_matrix_path = self.build_dir / "embedding_matrix.npy"
+                    if embedding_matrix_path.exists():
+                        embedding_matrix = np.load(embedding_matrix_path)
+                        build_results['n_samples'] = embedding_matrix.shape[0]
+                        build_results['embedding_dim'] = embedding_matrix.shape[1]
+                        # Salvar checkpoint atualizado
+                        self._save_checkpoint('build', build_results)
+                        if self.config.verbose:
+                            print(f"   Updated checkpoint with statistics: {build_results['n_samples']} samples, {build_results['embedding_dim']} features")
             
             self.results['build'] = build_results
             
@@ -341,6 +354,17 @@ class IntegratedPipeline:
             },
             'split_indices': split_indices  # NEW: pass SplitIndices object
         }
+        
+        # Load embedding matrix to get statistics
+        import numpy as np
+        embedding_matrix_path = self.build_dir / "embedding_matrix.npy"
+        if embedding_matrix_path.exists():
+            embedding_matrix = np.load(embedding_matrix_path)
+            results['n_samples'] = embedding_matrix.shape[0]
+            results['embedding_dim'] = embedding_matrix.shape[1]
+        else:
+            results['n_samples'] = 0
+            results['embedding_dim'] = 0
         
         if self.config.verbose:
             print("✅ Build phase completed successfully")
