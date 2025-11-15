@@ -225,7 +225,7 @@ class MultiModelClassificationPipeline:
         self.val_metrics = trainer.val_results
         
         if self.verbose:
-            print(f"\n✅ Treinamento completo!")
+            print(f"\n✅ Treinamento e validação completos!")
             print(f"   Tempo total: {training_time:.2f}s")
             print(f"   Tempo médio por modelo: {training_time/len(models):.2f}s")
             print('=' * 70)
@@ -271,7 +271,7 @@ class MultiModelClassificationPipeline:
             self.test_metrics[model_name] = metrics
         
         if self.verbose:
-            print("\n✅ Avaliação completa!")
+            print("\n✅ Avaliação no conjunto de teste completa!")
             print('=' * 70)
             print()
         
@@ -283,7 +283,7 @@ class MultiModelClassificationPipeline:
             print("⚠️  Nenhum resultado de teste disponível")
             return
         
-        print('📊 RESUMO DOS RESULTADOS')
+        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste Final)')
         print('=' * 80)
         
         # Ordenar por ROC-AUC
