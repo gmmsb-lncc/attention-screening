@@ -196,41 +196,51 @@ class MatrixValidator(BaseValidator):
         matrix = self.matrices[matrix_name]
         valid = True
         
-        # Check for NaN values
-        if not self.check_no_nan_values(matrix, f"Matrix {matrix_name}"):
-            valid = False
+        # Check if matrix has numeric dtype
+        is_numeric = np.issubdtype(matrix.dtype, np.number)
         
-        # Check for infinite values
-        if not self.check_no_inf_values(matrix, f"Matrix {matrix_name}"):
-            valid = False
-        
-        # Check for all-zero rows (warning only)
-        self.check_all_zeros(matrix, f"Matrix {matrix_name}", axis=1)
-        
-        # Additional statistics
-        if valid:
-            try:
-                # Try to compute statistics - works for numeric types
-                self.validation_results[f"{matrix_name}_data_integrity"] = {
-                    'nan_count': int(np.isnan(matrix).sum()),
-                    'inf_count': int(np.isinf(matrix).sum()),
-                    'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
-                    'min_value': float(np.min(matrix)),
-                    'max_value': float(np.max(matrix)),
-                    'mean_value': float(np.mean(matrix)),
-                    'std_value': float(np.std(matrix)),
-                    'valid': True
-                }
-            except (TypeError, ValueError) as e:
-                # For non-numeric types, store partial statistics
-                self.add_warning(f"{matrix_name} has non-numeric dtype, computing limited statistics")
-                self.validation_results[f"{matrix_name}_data_integrity"] = {
-                    'shape': matrix.shape,
-                    'dtype': str(matrix.dtype),
-                    'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
-                    'valid': True,
-                    'note': f'Limited statistics due to non-numeric dtype: {e}'
-                }
+        if is_numeric:
+            # Check for NaN values (only for numeric types)
+            if not self.check_no_nan_values(matrix, f"Matrix {matrix_name}"):
+                valid = False
+            
+            # Check for infinite values (only for numeric types)
+            if not self.check_no_inf_values(matrix, f"Matrix {matrix_name}"):
+                valid = False
+            
+            # Check for all-zero rows (warning only)
+            self.check_all_zeros(matrix, f"Matrix {matrix_name}", axis=1)
+            
+            # Additional statistics for numeric types
+            if valid:
+                try:
+                    self.validation_results[f"{matrix_name}_data_integrity"] = {
+                        'nan_count': int(np.isnan(matrix).sum()),
+                        'inf_count': int(np.isinf(matrix).sum()),
+                        'zero_rows': int(np.all(matrix == 0, axis=1).sum()),
+                        'min_value': float(np.min(matrix)),
+                        'max_value': float(np.max(matrix)),
+                        'mean_value': float(np.mean(matrix)),
+                        'std_value': float(np.std(matrix)),
+                        'valid': True
+                    }
+                except (TypeError, ValueError) as e:
+                    # Fallback if numeric operations fail
+                    self.validation_results[f"{matrix_name}_data_integrity"] = {
+                        'shape': matrix.shape,
+                        'dtype': str(matrix.dtype),
+                        'valid': True,
+                        'note': f'Error computing statistics: {e}'
+                    }
+        else:
+            # For non-numeric types (e.g., strings), store basic info only
+            self.add_warning(f"{matrix_name} has non-numeric dtype ({matrix.dtype}), skipping numeric integrity checks")
+            self.validation_results[f"{matrix_name}_data_integrity"] = {
+                'shape': matrix.shape,
+                'dtype': str(matrix.dtype),
+                'valid': True,
+                'note': 'Non-numeric dtype - numeric checks skipped'
+            }
         
         return valid
     
