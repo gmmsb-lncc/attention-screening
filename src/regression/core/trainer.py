@@ -83,10 +83,10 @@ class RegressionTrainer:
         if self.verbose:
             print()
             print('='*60)
-            print('✅ TREINAMENTO COMPLETO!')
+            print('✅ TREINAMENTO E VALIDAÇÃO COMPLETOS!')
             print('='*60)
             
-            # Mostrar ranking
+            # Mostrar ranking baseado em validação (para seleção de modelos)
             self._print_validation_ranking()
         
         return self.val_results
@@ -193,7 +193,7 @@ class RegressionTrainer:
         if self.verbose:
             print()
             print('='*60)
-            print('✅ AVALIAÇÃO COMPLETA!')
+            print('✅ AVALIAÇÃO NO CONJUNTO DE TESTE COMPLETA!')
             print('='*60)
             
             # Mostrar ranking no teste
@@ -272,7 +272,7 @@ class RegressionTrainer:
     
     def _print_validation_ranking(self):
         """Imprime ranking de modelos baseado na validação."""
-        print('\n📊 RANKING DE MODELOS (Validação):')
+        print('\n📊 RANKING DE MODELOS (Conjunto de Validação):')
         print('-'*60)
         
         df = RegressionEvaluator.compare_models(self.val_results, metric='MAE')
@@ -298,7 +298,7 @@ class RegressionTrainer:
     
     def _print_test_ranking(self):
         """Imprime ranking de modelos baseado no teste."""
-        print('\n📊 RANKING DE MODELOS (Teste):')
+        print('\n📊 RANKING DE MODELOS (Conjunto de Teste Final):')
         print('-'*60)
         
         df = RegressionEvaluator.compare_models(self.test_results, metric='MAE')
