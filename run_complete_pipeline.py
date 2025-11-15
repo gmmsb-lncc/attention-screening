@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# source env/bin/activate && python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/test_nomenclature_fix_v3 --esm-model esm2_t6_8M_UR50D --seed 42
 """
 DockTKinase - Pipeline Completo Integrado
 =========================================

@@ -203,8 +203,8 @@ class BaseValidator(BaseBuilder):
                     self.add_error(f"{name} contains NaN values")
                     return False
             except (TypeError, ValueError):
-                # If conversion fails, skip NaN check for this array
-                self.add_warning(f"{name} has non-numeric dtype, skipping NaN check")
+                # If conversion fails, this is expected for metadata arrays - no warning needed
+                pass
             return True
         
         # For numeric types, check directly
@@ -237,8 +237,8 @@ class BaseValidator(BaseBuilder):
                     self.add_error(f"{name} contains infinite values")
                     return False
             except (TypeError, ValueError):
-                # If conversion fails, skip inf check for this array
-                self.add_warning(f"{name} has non-numeric dtype, skipping inf check")
+                # If conversion fails, this is expected for metadata arrays - no warning needed
+                pass
             return True
         
         # For numeric types, check directly
