@@ -194,13 +194,9 @@ class BaseValidator(BaseBuilder):
         Returns:
             True if no NaN values, False otherwise
         """
-        try:
-            # Try to check for NaN - works for numeric types
-            if np.isnan(array).any():
-                self.add_error(f"{name} contains NaN values")
-                return False
-        except (TypeError, ValueError):
-            # For non-numeric types (e.g., object dtype), try converting
+        # Check if array has numeric dtype first to avoid warnings
+        if not np.issubdtype(array.dtype, np.number):
+            # For non-numeric types, try converting
             try:
                 array_numeric = array.astype(float)
                 if np.isnan(array_numeric).any():
@@ -209,6 +205,16 @@ class BaseValidator(BaseBuilder):
             except (TypeError, ValueError):
                 # If conversion fails, skip NaN check for this array
                 self.add_warning(f"{name} has non-numeric dtype, skipping NaN check")
+            return True
+        
+        # For numeric types, check directly
+        try:
+            if np.isnan(array).any():
+                self.add_error(f"{name} contains NaN values")
+                return False
+        except (TypeError, ValueError):
+            # Fallback if check fails
+            self.add_warning(f"{name} NaN check failed unexpectedly")
         return True
     
     def check_no_inf_values(self, array: np.ndarray, name: str) -> bool:
@@ -222,12 +228,8 @@ class BaseValidator(BaseBuilder):
         Returns:
             True if no infinite values, False otherwise
         """
-        try:
-            # Try to check for inf - works for numeric types
-            if np.isinf(array).any():
-                self.add_error(f"{name} contains infinite values")
-                return False
-        except (TypeError, ValueError):
+        # Check if array has numeric dtype first to avoid warnings
+        if not np.issubdtype(array.dtype, np.number):
             # For non-numeric types, try converting
             try:
                 array_numeric = array.astype(float)
@@ -237,6 +239,16 @@ class BaseValidator(BaseBuilder):
             except (TypeError, ValueError):
                 # If conversion fails, skip inf check for this array
                 self.add_warning(f"{name} has non-numeric dtype, skipping inf check")
+            return True
+        
+        # For numeric types, check directly
+        try:
+            if np.isinf(array).any():
+                self.add_error(f"{name} contains infinite values")
+                return False
+        except (TypeError, ValueError):
+            # Fallback if check fails
+            self.add_warning(f"{name} inf check failed unexpectedly")
         return True
     
     def check_all_zeros(self, array: np.ndarray, name: str, 

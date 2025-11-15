@@ -231,7 +231,7 @@ class RegressionPipeline:
             print()
         
         # Criar trainer
-        trainer = RegressionTrainer(
+        self.trainer = RegressionTrainer(
             models_dict=models,
             verbose=self.verbose,
             random_state=self.random_state
@@ -239,13 +239,13 @@ class RegressionPipeline:
         
         # Treinar todos
         start_time = time.time()
-        trainer.train_all(self.X_train, self.y_train, self.X_val, self.y_val)
+        self.trainer.train_all(self.X_train, self.y_train, self.X_val, self.y_val)
         training_time = time.time() - start_time
         
         # Armazenar resultados
-        self.trained_models = trainer.trained_models
-        self.train_metrics = trainer.train_results
-        self.val_metrics = trainer.val_results
+        self.trained_models = self.trainer.trained_models
+        self.train_metrics = self.trainer.train_results
+        self.val_metrics = self.trainer.val_results
         
         if self.verbose:
             print(f"\n✅ Treinamento completo!")
@@ -266,30 +266,35 @@ class RegressionPipeline:
         Returns:
             Dict com métricas de teste de todos os modelos
         """
-        if self.verbose:
-            print('📈 ETAPA 3: Avaliação no Conjunto de Teste Final')
-            print('=' * 70)
-        
-        for model_name, model in self.trained_models.items():
+        # Usar o método evaluate_on_test do trainer que já tem o print formatado correto
+        if hasattr(self, 'trainer') and self.trainer:
+            self.test_metrics = self.trainer.evaluate_on_test(self.X_test, self.y_test)
+        else:
+            # Fallback caso o trainer não esteja disponível
             if self.verbose:
-                print(f"   Avaliando {model_name}...")
+                print('📈 ETAPA 3: Avaliação no Conjunto de Teste Final')
+                print('=' * 70)
             
-            # Predições
-            y_pred = model.predict(self.X_test)
+            for model_name, model in self.trained_models.items():
+                if self.verbose:
+                    print(f"   Avaliando {model_name}...")
+                
+                # Predições
+                y_pred = model.predict(self.X_test)
+                
+                # Calcular métricas
+                metrics = self.metrics_calculator.calculate_all_metrics(
+                    self.y_test,
+                    y_pred,
+                    model_name
+                )
+                
+                self.test_metrics[model_name] = metrics
             
-            # Calcular métricas
-            metrics = self.metrics_calculator.calculate_all_metrics(
-                self.y_test,
-                y_pred,
-                model_name
-            )
-            
-            self.test_metrics[model_name] = metrics
-        
-        if self.verbose:
-            print("\n✅ Avaliação no conjunto de teste completa!")
-            print('=' * 70)
-            print()
+            if self.verbose:
+                print("\n✅ Avaliação no conjunto de teste completa!")
+                print('=' * 70)
+                print()
         
         return self.test_metrics
     
