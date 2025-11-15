@@ -233,13 +233,14 @@ class MatrixValidator(BaseValidator):
                         'note': f'Error computing statistics: {e}'
                     }
         else:
-            # For non-numeric types (e.g., strings), store basic info only
-            self.add_warning(f"{matrix_name} has non-numeric dtype ({matrix.dtype}), skipping numeric integrity checks")
+            # For non-numeric types (e.g., strings), store basic info only without warnings
+            # These are expected metadata arrays (like interaction_labels)
+            self.logger.debug(f"Matrix {matrix_name} has non-numeric dtype ({matrix.dtype}), storing metadata info")
             self.validation_results[f"{matrix_name}_data_integrity"] = {
                 'shape': matrix.shape,
                 'dtype': str(matrix.dtype),
                 'valid': True,
-                'note': 'Non-numeric dtype - numeric checks skipped'
+                'note': 'Metadata array - numeric checks not applicable'
             }
         
         return valid
