@@ -608,7 +608,20 @@ class IntegratedPipeline:
             # Recarregar modelos treinados no regression pipeline
             regression.val_metrics = train_results
         
-        # Encontrar melhor modelo com base em MAE
+        # FASE 3: Avaliar no conjunto de teste
+        test_checkpoint = self._load_checkpoint('regression_test')
+        if test_checkpoint is None:
+            if self.config.verbose:
+                print("📊 Avaliando modelos no conjunto de teste...")
+            test_results = regression.evaluate_on_test()
+            self._save_checkpoint('regression_test', test_results)
+        else:
+            if self.config.verbose:
+                print("📂 Checkpoint de teste carregado")
+            test_results = test_checkpoint
+            regression.test_metrics = test_results
+        
+        # Encontrar melhor modelo com base em MAE do conjunto de validação
         best_model_name = None
         best_mae = float('inf')
         best_r2 = -float('inf')
@@ -647,16 +660,27 @@ class IntegratedPipeline:
             'best_mae': float(best_mae),
             'best_r2': float(best_r2),
             'models_trained': models_trained,
-            'individual_results': {}
+            'individual_results': {},
+            'test_results': {}
         }
         
-        # Adicionar métricas individuais
+        # Adicionar métricas individuais de validação
         for model_name, metrics in train_results.items():
             results['individual_results'][model_name] = {
                 'mae': float(metrics.get('MAE', 0)),
                 'rmse': float(metrics.get('RMSE', 0)),
                 'r2': float(metrics.get('R2', 0))
             }
+        
+        # Adicionar métricas de teste
+        if test_results:
+            for model_name, metrics in test_results.items():
+                if metrics:  # Verificar se não é None
+                    results['test_results'][model_name] = {
+                        'mae': float(metrics.get('MAE', 0)),
+                        'rmse': float(metrics.get('RMSE', 0)),
+                        'r2': float(metrics.get('R2', 0))
+                    }
         
         # Adicionar CV se disponível
         if cv_results:
