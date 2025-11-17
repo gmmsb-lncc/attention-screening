@@ -2,9 +2,9 @@
 Core modules for modular embeddings generation.
 """
 
-from .embeddings.core.data_loader import DataManager
-from .embeddings.core.model_manager import ModelManager
-from .embeddings.core.generator import EmbeddingGenerator
+from .data_loader import DataManager
+from .model_manager import ModelManager
+from .generator import EmbeddingGenerator
 
 __all__ = [
     'DataManager',
