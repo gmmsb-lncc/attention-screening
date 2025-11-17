@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# source env/bin/activate && python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/test_nomenclature_fix_v3 --esm-model esm2_t6_8M_UR50D --seed 42
+# source env/bin/activate && python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm_15B_maximum_precision --esm-model esm2_t48_15B_UR50D --seed 42
+
 """
 DockTKinase - Pipeline Completo Integrado
 =========================================
@@ -114,7 +115,7 @@ Dispositivos:
         type=str,
         default='esm2_t6_8M_UR50D',
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
-                 'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D'],
+                 'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D'],
         help='Modelo ESM para embeddings de proteínas (default: esm2_t6_8M_UR50D, 320-dim)'
     )
     
@@ -219,7 +220,8 @@ def main():
         'esm2_t12_35M_UR50D': 480,
         'esm2_t30_150M_UR50D': 640,
         'esm2_t33_650M_UR50D': 1280,
-        'esm2_t36_3B_UR50D': 2560
+        'esm2_t36_3B_UR50D': 2560,
+        'esm2_t48_15B_UR50D': 5120
     }
     esm_dim = esm_dims.get(args.esm_model, 320)
     total_dim = 768 + esm_dim
