@@ -9,6 +9,10 @@
 torch>=2.1.0
 torchvision>=0.16.0
 
+# Memory Optimization (For large models)
+accelerate>=0.20.0  # CPU offloading for large ESM models
+bitsandbytes>=0.41.0  # Optional: 8-bit quantization (CUDA only)
+
 # Data Science
 numpy>=1.26.1,<2.0.0
 pandas>=1.5.3

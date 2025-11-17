@@ -61,7 +61,15 @@ class EmbeddingPipeline:
         
         # Initialize components
         self.data_manager = DataManager(verbose=verbose)
-        self.model_manager = ModelManager(use_gpu=use_gpu, verbose=verbose)
+        
+        # ModelManager with automatic CPU offloading for large models
+        self.model_manager = ModelManager(
+            use_gpu=use_gpu,
+            enable_offload=True,         # ✅ CPU offloading automático
+            use_mixed_precision=False,   # Conservador (pode ativar manualmente)
+            verbose=verbose
+        )
+        
         self.cache_manager = CacheManager(cache_dir=cache_dir, verbose=verbose)
         self.generator = EmbeddingGenerator(
             model_manager=self.model_manager,
