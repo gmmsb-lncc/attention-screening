@@ -290,9 +290,24 @@ class ProteinEmbedding(BaseEmbedding):
                 # TODOS os embeddings terão a MESMA dimensão (5120 para 15B)
                 sequence_embedding = embedding.mean(dim=0)
                 
-            return sequence_embedding.cpu().numpy()
+                # Mover para CPU antes de limpar GPU
+                result = sequence_embedding.cpu().numpy()
+            
+            # CRÍTICO: Limpar memória GPU após cada sequência (especialmente para modelos grandes)
+            # Deletar tensors intermediários
+            del batch_tokens, results, embedding, sequence_embedding
+            
+            # Limpar cache CUDA (essencial com CPU offloading)
+            if str(self.device) == 'cuda':
+                self.torch.cuda.empty_cache()
+                self.torch.cuda.synchronize()  # Garantir que operações GPU terminaram
+                
+            return result
             
         except Exception as e:
+            # Limpar memória mesmo em caso de erro
+            if str(self.device) == 'cuda':
+                self.torch.cuda.empty_cache()
             raise EmbeddingError(f"Erro ao gerar embedding ESM: {e}")
     
     def process_fasta_file(self,
