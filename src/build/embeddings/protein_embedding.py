@@ -5,6 +5,7 @@ Utiliza código fonte local do ESM incluído no repositório.
 
 import os
 import sys
+import gc
 from typing import Dict, Any, List, Tuple, Optional, TYPE_CHECKING, Union
 import numpy as np
 from pathlib import Path
@@ -104,6 +105,10 @@ class ProteinEmbedding(BaseEmbedding):
         cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
         cache_dir.mkdir(parents=True, exist_ok=True)
         os.environ['TORCH_HOME'] = str(cache_dir)
+        
+        # CRÍTICO: Configurar CUDA para evitar fragmentação de memória
+        # Soluciona: "2.58 GiB is reserved by PyTorch but unallocated"
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
         
         # Criar pasta para offload no disco (para modelos grandes)
         offload_folder = cache_dir / "offload"
@@ -294,10 +299,13 @@ class ProteinEmbedding(BaseEmbedding):
                 result = sequence_embedding.cpu().numpy()
             
             # CRÍTICO: Limpar memória GPU após cada sequência (especialmente para modelos grandes)
-            # Deletar tensors intermediários
+            # Deletar tensors intermediários explicitamente
             del batch_tokens, results, embedding, sequence_embedding
             
-            # Limpar cache CUDA (essencial com CPU offloading)
+            # Forçar garbage collection Python (libera referências)
+            gc.collect()
+            
+            # Limpar cache CUDA (essencial com CPU offloading + fragmentação)
             if str(self.device) == 'cuda':
                 self.torch.cuda.empty_cache()
                 self.torch.cuda.synchronize()  # Garantir que operações GPU terminaram
@@ -308,6 +316,7 @@ class ProteinEmbedding(BaseEmbedding):
             # Limpar memória mesmo em caso de erro
             if str(self.device) == 'cuda':
                 self.torch.cuda.empty_cache()
+                gc.collect()
             raise EmbeddingError(f"Erro ao gerar embedding ESM: {e}")
     
     def process_fasta_file(self,
