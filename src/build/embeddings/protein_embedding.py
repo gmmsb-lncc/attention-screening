@@ -252,9 +252,15 @@ class ProteinEmbedding(BaseEmbedding):
         if not clean_sequence:
             raise EmbeddingError("Sequência não contém aminoácidos válidos")
         
-        if len(clean_sequence) > 1024:  # Limite de sequência para evitar problemas de memória
-            self.logger.warning(f"Sequência muito longa ({len(clean_sequence)} aminoácidos), truncando para 1024")
-            clean_sequence = clean_sequence[:1024]
+        # Obter limite de sequência do modelo (2048 para 15B/3B, 1024 para outros)
+        max_len = ESM_MODELS[self.model_name].get('max_len', 1024)
+        
+        if len(clean_sequence) > max_len:
+            self.logger.warning(
+                f"Sequência muito longa ({len(clean_sequence)} aminoácidos) para modelo {self.model_name}. "
+                f"Truncando para {max_len} (limite do modelo)"
+            )
+            clean_sequence = clean_sequence[:max_len]
         
         try:
             # Preparar dados para o modelo
