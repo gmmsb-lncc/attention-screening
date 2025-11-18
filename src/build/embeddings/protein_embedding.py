@@ -99,6 +99,16 @@ class ProteinEmbedding(BaseEmbedding):
         """Carrega modelo ESM com cache local e CPU offloading para modelos grandes."""
         self.logger.info(f"Configurando dispositivo...")
         
+        # Configurar cache local para modelos ESM (definir ANTES de tudo)
+        import os
+        cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        os.environ['TORCH_HOME'] = str(cache_dir)
+        
+        # Criar pasta para offload no disco (para modelos grandes)
+        offload_folder = cache_dir / "offload"
+        offload_folder.mkdir(exist_ok=True)
+        
         # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
         if self.use_gpu:
             if self.torch.cuda.is_available():
@@ -114,48 +124,45 @@ class ProteinEmbedding(BaseEmbedding):
             self.device = self.torch.device("cpu")
             self.logger.info("Usando CPU")
         
-        # Configurar cache local para modelos ESM (definir antes do try para estar disponível no except)
-        import os
-        cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        os.environ['TORCH_HOME'] = str(cache_dir)
+        # Determinar se precisa de CPU offloading (modelos grandes: 3B, 15B)
+        large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
+        needs_offload = self.model_name in large_models and str(self.device) == 'cuda'
         
         # Carregar modelo
         try:
             self.logger.info(f"Carregando modelo ESM: {self.model_name}")
             self.logger.info(f"Cache de modelos: {cache_dir}")
             
-            model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
-            
-            # Determinar se precisa de CPU offloading (modelos grandes: 3B, 15B)
-            large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
-            needs_offload = self.model_name in large_models and str(self.device) == 'cuda'
-            
             if needs_offload:
                 try:
-                    from accelerate import load_checkpoint_and_dispatch, infer_auto_device_map
+                    from accelerate import dispatch_model, infer_auto_device_map
+                    from accelerate.utils import get_balanced_memory
                     
                     self.logger.info(f"🔄 Modelo grande detectado ({self.model_name})")
                     self.logger.info("🔄 Ativando CPU offloading automático...")
                     
-                    # Criar pasta para offload no disco
-                    offload_folder = cache_dir / "offload"
-                    offload_folder.mkdir(exist_ok=True)
+                    # Carregar modelo SEM mover para device ainda
+                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
+                    
+                    # Calcular memória disponível (20GB GPU + 30GB CPU)
+                    max_memory = get_balanced_memory(
+                        model,
+                        max_memory={0: "20GB", "cpu": "30GB"},
+                        no_split_module_classes=["TransformerLayer"]
+                    )
                     
                     # Criar device_map automático
                     device_map = infer_auto_device_map(
                         model,
-                        max_memory={0: "20GB", "cpu": "30GB"},  # RTX 4090 tem 24GB
+                        max_memory=max_memory,
                         no_split_module_classes=["TransformerLayer"]
                     )
                     
-                    # Aplicar device_map com offload_folder
-                    model = load_checkpoint_and_dispatch(
-                        model,
-                        checkpoint=None,  # Modelo já carregado
+                    # Dispatch model para múltiplos devices (GPU + CPU + Disk)
+                    model = dispatch_model(
+                        model, 
                         device_map=device_map,
-                        offload_folder=str(offload_folder),
-                        offload_state_dict=True
+                        offload_dir=str(offload_folder)
                     )
                     
                     self.logger.info("✅ CPU offloading ativado com sucesso")
@@ -165,13 +172,16 @@ class ProteinEmbedding(BaseEmbedding):
                 except ImportError:
                     self.logger.warning("⚠️  accelerate não encontrado. Carregando sem offloading...")
                     self.logger.warning("   Instale com: pip install accelerate")
+                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
                     model = model.to(self.device)
                 except Exception as offload_error:
                     self.logger.warning(f"⚠️  Falha no offloading: {offload_error}")
                     self.logger.warning("   Tentando carregamento padrão...")
+                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
                     model = model.to(self.device)
             else:
                 # Modelos pequenos/médios: carregamento padrão
+                model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
                 model = model.to(self.device)
             
             model = model.eval()
