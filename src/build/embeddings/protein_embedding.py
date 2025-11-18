@@ -138,6 +138,10 @@ class ProteinEmbedding(BaseEmbedding):
                     self.logger.info(f"🔄 Modelo grande detectado ({self.model_name})")
                     self.logger.info("🔄 Ativando CPU offloading automático...")
                     
+                    # Criar pasta para offload no disco
+                    offload_folder = cache_dir / "offload"
+                    offload_folder.mkdir(exist_ok=True)
+                    
                     # Criar device_map automático
                     device_map = infer_auto_device_map(
                         model,
@@ -145,15 +149,18 @@ class ProteinEmbedding(BaseEmbedding):
                         no_split_module_classes=["TransformerLayer"]
                     )
                     
-                    # Aplicar device_map
+                    # Aplicar device_map com offload_folder
                     model = load_checkpoint_and_dispatch(
                         model,
                         checkpoint=None,  # Modelo já carregado
-                        device_map=device_map
+                        device_map=device_map,
+                        offload_folder=str(offload_folder),
+                        offload_state_dict=True
                     )
                     
                     self.logger.info("✅ CPU offloading ativado com sucesso")
                     self.logger.info(f"   Device map: {device_map}")
+                    self.logger.info(f"   Offload folder: {offload_folder}")
                     
                 except ImportError:
                     self.logger.warning("⚠️  accelerate não encontrado. Carregando sem offloading...")
