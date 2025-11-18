@@ -1,6 +1,8 @@
 """
 Geração de embeddings de proteínas usando modelos ESM (Meta AI).
 Utiliza código fonte local do ESM incluído no repositório.
+
+REFATORADO: Agora usa Strategy Pattern para suportar múltiplos modelos.
 """
 
 import os
@@ -23,8 +25,19 @@ from src.build.core.constants import ESM_MODELS, DEFAULT_ESM_MODEL
 from src.build.core.exceptions import DependencyError, EmbeddingError, ModelLoadError
 from src.build.utils import ProgressLogger, ensure_directory
 
+# Importar factory e estratégias
+from src.build.embeddings.factories.protein_model_factory import ProteinModelFactory
+from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStrategy
+
 class ProteinEmbedding(BaseEmbedding):
-    """Gerador de embeddings de proteínas usando ESM."""
+    """
+    Gerador de embeddings de proteínas usando ESM.
+    
+    REFATORADO: Atua como orchestrator que delega para estratégias específicas.
+    - Usa ProteinModelFactory para criar estratégias (ESM2Strategy, ESM3Strategy)
+    - Delega carregamento e inferência para a estratégia
+    - Mantém API pública retrocompatível
+    """
     
     def __init__(self, 
                  config: Optional['BuildConfig'] = None,
@@ -43,11 +56,17 @@ class ProteinEmbedding(BaseEmbedding):
         # Definir atributos antes da inicialização do pai
         self.use_gpu = use_gpu
         self.device = None
-        self.alphabet = None
+        self.alphabet = None  # Será configurado pela estratégia
         self.batch_converter = None
+        self.strategy: Optional[BaseProteinStrategy] = None  # Estratégia de modelo
             
-        super().__init__(model_name=model_name, config=config, **kwargs)        # Verificar dependências
+        super().__init__(model_name=model_name, config=config, **kwargs)
+        
+        # Verificar dependências
         self._check_dependencies()
+        
+        # Criar estratégia apropriada usando factory
+        self._create_strategy()
     
     def _check_dependencies(self) -> None:
         """Verifica se dependências estão disponíveis."""
@@ -71,6 +90,20 @@ class ProteinEmbedding(BaseEmbedding):
                 f"ESM não está disponível no repositório local ({ESM_LOCAL_PATH}). "
                 f"Verifique se a pasta ESM/ existe e contém o código fonte. Erro: {e}"
             )
+    
+    def _create_strategy(self) -> None:
+        """
+        Cria estratégia apropriada usando factory.
+        
+        Raises:
+            ValueError: Se modelo não for suportado
+        """
+        try:
+            factory = ProteinModelFactory()
+            self.strategy = factory.create_strategy(self.model_name)
+            self.logger.info(f"✅ Estratégia criada: {self.strategy.__class__.__name__}")
+        except ValueError as e:
+            raise EmbeddingError(f"Falha ao criar estratégia: {e}")
     
     def _validate_config(self) -> None:
         """Valida configuração específica para embeddings de proteínas."""
@@ -97,22 +130,18 @@ class ProteinEmbedding(BaseEmbedding):
         return ESM_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega modelo ESM com cache local e CPU offloading para modelos grandes."""
+        """
+        Carrega modelo usando estratégia apropriada.
+        
+        REFATORADO: Delega para strategy.load() ao invés de código direto.
+        """
         self.logger.info(f"Configurando dispositivo...")
         
-        # Configurar cache local para modelos ESM (definir ANTES de tudo)
+        # Configurar cache local para modelos ESM
         import os
         cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        os.environ['TORCH_HOME'] = str(cache_dir)
-        
-        # CRÍTICO: Configurar CUDA para evitar fragmentação de memória
-        # Soluciona: "2.58 GiB is reserved by PyTorch but unallocated"
-        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-        
-        # Criar pasta para offload no disco (para modelos grandes)
         offload_folder = cache_dir / "offload"
-        offload_folder.mkdir(exist_ok=True)
         
         # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
         if self.use_gpu:
@@ -129,118 +158,24 @@ class ProteinEmbedding(BaseEmbedding):
             self.device = self.torch.device("cpu")
             self.logger.info("Usando CPU")
         
-        # Determinar se precisa de CPU offloading (modelos grandes: 3B, 15B)
-        large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
-        needs_offload = self.model_name in large_models and str(self.device) == 'cuda'
+        # Delegar carregamento para estratégia
+        model, self.alphabet = self.strategy.load(
+            model_name=self.model_name,
+            device=self.device,
+            offload_folder=str(offload_folder),
+            logger=self.logger
+        )
         
-        # Carregar modelo
-        try:
-            self.logger.info(f"Carregando modelo ESM: {self.model_name}")
-            self.logger.info(f"Cache de modelos: {cache_dir}")
-            
-            if needs_offload:
-                try:
-                    from accelerate import dispatch_model, infer_auto_device_map
-                    from accelerate.utils import get_balanced_memory
-                    
-                    self.logger.info(f"🔄 Modelo grande detectado ({self.model_name})")
-                    self.logger.info("🔄 Ativando CPU offloading automático...")
-                    
-                    # Carregar modelo SEM mover para device ainda
-                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
-                    
-                    # Calcular memória disponível (20GB GPU + 30GB CPU)
-                    max_memory = get_balanced_memory(
-                        model,
-                        max_memory={0: "20GB", "cpu": "30GB"},
-                        no_split_module_classes=["TransformerLayer"]
-                    )
-                    
-                    # Criar device_map automático
-                    device_map = infer_auto_device_map(
-                        model,
-                        max_memory=max_memory,
-                        no_split_module_classes=["TransformerLayer"]
-                    )
-                    
-                    # Dispatch model para múltiplos devices (GPU + CPU + Disk)
-                    model = dispatch_model(
-                        model, 
-                        device_map=device_map,
-                        offload_dir=str(offload_folder)
-                    )
-                    
-                    self.logger.info("✅ CPU offloading ativado com sucesso")
-                    self.logger.info(f"   Device map: {device_map}")
-                    self.logger.info(f"   Offload folder: {offload_folder}")
-                    
-                except ImportError:
-                    self.logger.warning("⚠️  accelerate não encontrado. Carregando sem offloading...")
-                    self.logger.warning("   Instale com: pip install accelerate")
-                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
-                    model = model.to(self.device)
-                except Exception as offload_error:
-                    self.logger.warning(f"⚠️  Falha no offloading: {offload_error}")
-                    self.logger.warning("   Tentando carregamento padrão...")
-                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
-                    model = model.to(self.device)
-            else:
-                # Modelos pequenos/médios: carregamento padrão
-                model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
-                model = model.to(self.device)
-            
-            model = model.eval()
-            
-            # Configurar conversor de batch
-            self.alphabet = alphabet
-            self.batch_converter = alphabet.get_batch_converter()
-            
-            self.logger.info("Modelo ESM carregado com sucesso")
-            return model
-            
-        except Exception as e:
-            # Log detalhado do erro
-            self.logger.error(f"❌ ERRO AO CARREGAR MODELO ESM")
-            self.logger.error(f"   Modelo solicitado: {self.model_name}")
-            self.logger.error(f"   Cache: {cache_dir}")
-            self.logger.error(f"   Dispositivo: {self.device}")
-            self.logger.error(f"   Erro: {type(e).__name__}: {e}")
-            
-            # Verificar se é erro de arquivo não encontrado
-            error_msg = str(e).lower()
-            if "404" in error_msg or "not found" in error_msg or "could not load" in error_msg:
-                raise ModelLoadError(
-                    f"Modelo ESM '{self.model_name}' não está disponível no servidor da Meta.\n"
-                    f"URL esperada: https://dl.fbaipublicfiles.com/fair-esm/models/{self.model_name}.pt\n"
-                    f"Erro: {e}\n\n"
-                    f"POSSÍVEIS SOLUÇÕES:\n"
-                    f"1. Verifique se o nome do modelo está correto\n"
-                    f"2. O modelo 15B pode não estar disponível publicamente\n"
-                    f"3. Use um modelo menor disponível: esm2_t36_3B_UR50D (3B) ou esm2_t33_650M_UR50D (650M)"
-                )
-            
-            # Erro de memória
-            elif "out of memory" in error_msg or "oom" in error_msg:
-                raise ModelLoadError(
-                    f"Memória insuficiente para carregar o modelo '{self.model_name}'.\n"
-                    f"Erro: {e}\n\n"
-                    f"POSSÍVEIS SOLUÇÕES:\n"
-                    f"1. Use um modelo menor\n"
-                    f"2. Aumente a memória disponível\n"
-                    f"3. Habilite CPU offloading (se disponível)"
-                )
-            
-            # Erro genérico
-            else:
-                raise ModelLoadError(
-                    f"Falha ao carregar modelo ESM '{self.model_name}'.\n"
-                    f"Cache: {cache_dir}\n"
-                    f"Erro: {type(e).__name__}: {e}"
-                )
+        # Configurar conversor de batch (compatibilidade retroativa)
+        self.batch_converter = self.alphabet.get_batch_converter()
+        
+        return model
     
     def _generate_single_embedding(self, sequence: str) -> np.ndarray:
         """
         Gera embedding para uma única sequência de proteína.
+        
+        REFATORADO: Delega para strategy.generate() ao invés de código direto.
         
         Args:
             sequence: Sequência de aminoácidos
@@ -248,76 +183,14 @@ class ProteinEmbedding(BaseEmbedding):
         Returns:
             Array NumPy com embedding
         """
-        if not sequence or not sequence.strip():
-            raise EmbeddingError("Sequência vazia")
-        
-        # Limpar sequência (remover caracteres não-aminoácidos)
-        clean_sequence = ''.join(c for c in sequence.upper() if c in 'ACDEFGHIKLMNPQRSTVWY')
-        
-        if not clean_sequence:
-            raise EmbeddingError("Sequência não contém aminoácidos válidos")
-        
-        # Obter limite de sequência do modelo (5120 para 15B, 4096 para 3B, 1024 para outros)
-        # ESM-2 usa rotary embeddings, então não há limite fixo teórico,
-        # mas limitamos para evitar OOM em sequências extremamente longas
-        # 15B com CPU offloading suporta até 5120 tokens
-        max_len = ESM_MODELS[self.model_name].get('max_len', 1024)
-        
-        if len(clean_sequence) > max_len:
-            self.logger.warning(
-                f"Sequência muito longa ({len(clean_sequence)} aminoácidos) para modelo {self.model_name}. "
-                f"Truncando para {max_len} (limite configurado para evitar OOM)"
-            )
-            clean_sequence = clean_sequence[:max_len]
-        
-        try:
-            # Preparar dados para o modelo
-            data = [("sequence", clean_sequence)]
-            batch_labels, batch_strs, batch_tokens = self.batch_converter(data)
-            batch_tokens = batch_tokens.to(self.device)
-            
-            # Gerar embedding
-            with self.torch.no_grad():
-                results = self.model(
-                    batch_tokens, 
-                    repr_layers=[self.model.num_layers], 
-                    return_contacts=False
-                )
-                
-                # Extrair embedding da última camada
-                # Remove tokens especiais: BOS (primeiro) e EOS (último)
-                # Shape: [seq_len, embed_dim] -> cada aminoácido tem vetor de embed_dim
-                embedding = results["representations"][self.model.num_layers][0, 1:-1]
-                
-                # Usar MÉDIA da sequência como representação final (não CLS token!)
-                # Isso resulta em um vetor de dimensão fixa: embed_dim
-                # Para esm2_t48_15B_UR50D: mean([seq_len, 5120]) -> [5120]
-                # TODOS os embeddings terão a MESMA dimensão (5120 para 15B)
-                sequence_embedding = embedding.mean(dim=0)
-                
-                # Mover para CPU antes de limpar GPU
-                result = sequence_embedding.cpu().numpy()
-            
-            # CRÍTICO: Limpar memória GPU após cada sequência (especialmente para modelos grandes)
-            # Deletar tensors intermediários explicitamente
-            del batch_tokens, results, embedding, sequence_embedding
-            
-            # Forçar garbage collection Python (libera referências)
-            gc.collect()
-            
-            # Limpar cache CUDA (essencial com CPU offloading + fragmentação)
-            if str(self.device) == 'cuda':
-                self.torch.cuda.empty_cache()
-                self.torch.cuda.synchronize()  # Garantir que operações GPU terminaram
-                
-            return result
-            
-        except Exception as e:
-            # Limpar memória mesmo em caso de erro
-            if str(self.device) == 'cuda':
-                self.torch.cuda.empty_cache()
-                gc.collect()
-            raise EmbeddingError(f"Erro ao gerar embedding ESM: {e}")
+        # Delegar geração para estratégia
+        return self.strategy.generate(
+            model=self.model,
+            auxiliary_objects=self.alphabet,
+            sequence=sequence,
+            device=self.device,
+            logger=self.logger
+        )
     
     def process_fasta_file(self,
                           fasta_file: Path,
@@ -640,3 +513,15 @@ class ProteinEmbedding(BaseEmbedding):
         })
         
         return result
+    
+    def __del__(self):
+        """
+        Cleanup ao destruir objeto.
+        
+        REFATORADO: Delega para strategy.cleanup() ao invés de código direto.
+        """
+        if hasattr(self, 'strategy') and self.strategy:
+            try:
+                self.strategy.cleanup(self.model, self.alphabet)
+            except:
+                pass  # Ignorar erros no destrutor
