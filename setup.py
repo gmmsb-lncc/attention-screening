@@ -395,6 +395,52 @@ def install_dependencies() -> bool:
     
     return True
 
+def download_model_files() -> bool:
+    """Baixa arquivos de modelos necessários (SMI-TED e ESM)."""
+    print_section("DOWNLOAD DE ARQUIVOS DE MODELOS")
+    
+    # Executável Python do ambiente virtual
+    if platform.system() == "Windows":
+        python_exe = "env/Scripts/python.exe"
+    else:
+        python_exe = "env/bin/python"
+    
+    if not Path(python_exe).exists():
+        print(f"❌ Python não encontrado em {python_exe}")
+        return False
+    
+    # Verificar se post_install.py existe
+    post_install_script = Path("scripts/post_install.py")
+    if not post_install_script.exists():
+        print("⚠️  Script scripts/post_install.py não encontrado")
+        print("   Pulando download de modelos")
+        print("   💡 Baixe manualmente: cd FM4M && python download_model_files.py")
+        return True
+    
+    # Executar post_install.py
+    print("📥 Executando scripts/post_install.py...")
+    print("   Isso vai baixar:")
+    print("   • Modelos SMI-TED (~4.1 GB)")
+    print("   • Modelo ESM (~2.6 GB)")
+    print("   ⏱️  Tempo estimado: 10-15 minutos")
+    print()
+    
+    success, output = run_command([python_exe, str(post_install_script)], 
+                                "Baixando modelos via post_install.py")
+    
+    if success:
+        print("✅ Modelos baixados com sucesso")
+        if output:
+            print(output)
+    else:
+        print("⚠️  Alguns downloads podem ter falhado")
+        print("   💡 Para baixar manualmente:")
+        print("      cd FM4M && python download_model_files.py")
+        print("      python scripts/post_install.py")
+    
+    # Sempre retornar True (modelos são opcionais)
+    return True
+
 def verify_installation() -> bool:
     """Verifica se a instalação está funcionando."""
     print_section("VERIFICAÇÃO DA INSTALAÇÃO")
@@ -707,6 +753,7 @@ def main() -> int:
         ("Verificar requisitos do sistema", check_system_requirements),
         ("Configurar ambiente virtual", setup_virtual_environment),
         ("Instalar dependências", install_dependencies),
+        ("Baixar arquivos de modelos", download_model_files),
         ("Validar dependências de build", validate_build_dependencies),
         ("Verificar instalação", verify_installation),
         ("Criar scripts de inicialização", lambda: (create_startup_scripts(), True)[1])
@@ -732,7 +779,14 @@ def main() -> int:
     print_header("SETUP CONCLUÍDO COM SUCESSO!")
     
     print("🎉 DockTKinase foi configurado com sucesso!")
-    print("\n📋 Próximos passos:")
+    print("\n� Componentes instalados:")
+    print("   ✅ Ambiente virtual Python")
+    print("   ✅ Dependências Python (torch, numpy, pandas, etc.)")
+    print("   ✅ Modelos SMI-TED (ligand embeddings)")
+    print("   ✅ Modelo ESM (protein embeddings)")
+    print("   ✅ Scripts de inicialização")
+    
+    print("\n�📋 Próximos passos:")
     
     if platform.system() != "Windows":
         print("   1. source activate_env.sh")
@@ -744,6 +798,19 @@ def main() -> int:
     print("   pipeline = ModularMLPPipeline()")
     print("   # ou usar interface CLI:")
     print("   python src/classifier/modular_classifier.py --help")
+    
+    print("\n🚀 Para executar o pipeline completo:")
+    print("   python run_complete_pipeline.py --help")
+    print("   python run_complete_pipeline.py \\")
+    print("       --input tests/datasets/kinase_non_human_compounds.tsv \\")
+    print("       --output results/test_run \\")
+    print("       --esm-model esm2_t33_650M_UR50D \\")
+    print("       --seed 42")
+    
+    print("\n💡 Modelos disponíveis:")
+    print("   • SMI-TED: Embeddings de ligantes (FM4M/model_files/)")
+    print("   • ESM-2: Embeddings de proteínas (cache automático)")
+    print("   • 6 variantes ESM-2: 8M, 35M, 150M, 650M, 3B, 15B parâmetros")
     
     return 0
 
