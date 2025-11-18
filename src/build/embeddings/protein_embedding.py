@@ -96,7 +96,7 @@ class ProteinEmbedding(BaseEmbedding):
         return ESM_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega modelo ESM com cache local."""
+        """Carrega modelo ESM com cache local e CPU offloading para modelos grandes."""
         self.logger.info(f"Configurando dispositivo...")
         
         # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
@@ -127,8 +127,47 @@ class ProteinEmbedding(BaseEmbedding):
             
             model, alphabet = self.esm.pretrained.load_model_and_alphabet(self.model_name)
             
-            # Mover para dispositivo e configurar para avaliação
-            model = model.to(self.device).eval()
+            # Determinar se precisa de CPU offloading (modelos grandes: 3B, 15B)
+            large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
+            needs_offload = self.model_name in large_models and str(self.device) == 'cuda'
+            
+            if needs_offload:
+                try:
+                    from accelerate import load_checkpoint_and_dispatch, infer_auto_device_map
+                    
+                    self.logger.info(f"🔄 Modelo grande detectado ({self.model_name})")
+                    self.logger.info("🔄 Ativando CPU offloading automático...")
+                    
+                    # Criar device_map automático
+                    device_map = infer_auto_device_map(
+                        model,
+                        max_memory={0: "20GB", "cpu": "30GB"},  # RTX 4090 tem 24GB
+                        no_split_module_classes=["TransformerLayer"]
+                    )
+                    
+                    # Aplicar device_map
+                    model = load_checkpoint_and_dispatch(
+                        model,
+                        checkpoint=None,  # Modelo já carregado
+                        device_map=device_map
+                    )
+                    
+                    self.logger.info("✅ CPU offloading ativado com sucesso")
+                    self.logger.info(f"   Device map: {device_map}")
+                    
+                except ImportError:
+                    self.logger.warning("⚠️  accelerate não encontrado. Carregando sem offloading...")
+                    self.logger.warning("   Instale com: pip install accelerate")
+                    model = model.to(self.device)
+                except Exception as offload_error:
+                    self.logger.warning(f"⚠️  Falha no offloading: {offload_error}")
+                    self.logger.warning("   Tentando carregamento padrão...")
+                    model = model.to(self.device)
+            else:
+                # Modelos pequenos/médios: carregamento padrão
+                model = model.to(self.device)
+            
+            model = model.eval()
             
             # Configurar conversor de batch
             self.alphabet = alphabet
