@@ -78,6 +78,38 @@ def download_fm4m_model_files():
         print(f"Error during FM4M model file download: {e}")
         return False
 
+def install_torch_nl():
+    """Install torch_nl dependency required for FM4M."""
+    try:
+        print("\nInstalling torch_nl dependency...")
+        
+        # Try to import torch_nl first
+        try:
+            import torch_nl
+            print("✓ torch_nl is already installed")
+            return True
+        except ImportError:
+            pass
+        
+        # Install torch_nl
+        print("Installing torch_nl==0.3...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "torch_nl==0.3"],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            print("✓ Successfully installed torch_nl==0.3")
+            return True
+        else:
+            print(f"✗ Error installing torch_nl: {result.stderr}")
+            return False
+        
+    except Exception as e:
+        print(f"✗ Error installing torch_nl: {e}")
+        return False
+
 def download_esm_model():
     """Download ESM model files by loading the model."""
     try:
@@ -156,13 +188,16 @@ if __name__ == "__main__":
     print("DockTKinase Post-Install Setup")
     print("=" * 40)
     
+    # Install torch_nl dependency
+    torch_nl_success = install_torch_nl()
+    
     # Download FM4M model files
     fm4m_success = download_fm4m_model_files()
     
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if fm4m_success and esm_success:
+    if torch_nl_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
