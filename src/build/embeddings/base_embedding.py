@@ -103,9 +103,25 @@ class BaseEmbedding(BaseBuilder):
         try:
             self.logger.info(f"Carregando modelo: {self.model_name}")
             self.model = self._load_model()
-            self.embedding_dim = supported_models[self.model_name]['dim']
+            
+            # Determinar dimensão do embedding
+            # Prioridade: 1) dimensão customizada via config, 2) dimensão padrão do modelo
+            custom_dim = None
+            if self.config:
+                # Tentar obter dimensão customizada do config
+                if hasattr(self.config, 'get'):
+                    custom_dim = self.config.get('protein_dim') if 'protein' in self.__class__.__name__.lower() else self.config.get('ligand_dim')
+                elif hasattr(self.config, 'protein_dim'):
+                    custom_dim = self.config.protein_dim if 'protein' in self.__class__.__name__.lower() else self.config.ligand_dim
+            
+            if custom_dim is not None:
+                self.embedding_dim = custom_dim
+                self.logger.info(f"Modelo carregado - Dimensão customizada: {self.embedding_dim}")
+            else:
+                self.embedding_dim = supported_models[self.model_name]['dim']
+                self.logger.info(f"Modelo carregado - Dimensão padrão: {self.embedding_dim}")
+            
             self._model_loaded = True
-            self.logger.info(f"Modelo carregado - Dimensão: {self.embedding_dim}")
             
         except Exception as e:
             raise ModelLoadError(f"Erro ao carregar modelo {self.model_name}: {e}")
