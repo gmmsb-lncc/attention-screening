@@ -252,13 +252,16 @@ class ProteinEmbedding(BaseEmbedding):
         if not clean_sequence:
             raise EmbeddingError("Sequência não contém aminoácidos válidos")
         
-        # Obter limite de sequência do modelo (2048 para 15B/3B, 1024 para outros)
+        # Obter limite de sequência do modelo (5120 para 15B, 4096 para 3B, 1024 para outros)
+        # ESM-2 usa rotary embeddings, então não há limite fixo teórico,
+        # mas limitamos para evitar OOM em sequências extremamente longas
+        # 15B com CPU offloading suporta até 5120 tokens
         max_len = ESM_MODELS[self.model_name].get('max_len', 1024)
         
         if len(clean_sequence) > max_len:
             self.logger.warning(
                 f"Sequência muito longa ({len(clean_sequence)} aminoácidos) para modelo {self.model_name}. "
-                f"Truncando para {max_len} (limite do modelo)"
+                f"Truncando para {max_len} (limite configurado para evitar OOM)"
             )
             clean_sequence = clean_sequence[:max_len]
         
@@ -276,11 +279,15 @@ class ProteinEmbedding(BaseEmbedding):
                     return_contacts=False
                 )
                 
-                # Extrair embedding da última camada (representação CLS)
-                # Remove tokens especiais (primeiro e último)
+                # Extrair embedding da última camada
+                # Remove tokens especiais: BOS (primeiro) e EOS (último)
+                # Shape: [seq_len, embed_dim] -> cada aminoácido tem vetor de embed_dim
                 embedding = results["representations"][self.model.num_layers][0, 1:-1]
                 
-                # Usar média da sequência como representação final
+                # Usar MÉDIA da sequência como representação final (não CLS token!)
+                # Isso resulta em um vetor de dimensão fixa: embed_dim
+                # Para esm2_t48_15B_UR50D: mean([seq_len, 5120]) -> [5120]
+                # TODOS os embeddings terão a MESMA dimensão (5120 para 15B)
                 sequence_embedding = embedding.mean(dim=0)
                 
             return sequence_embedding.cpu().numpy()
