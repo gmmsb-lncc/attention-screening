@@ -64,13 +64,14 @@ DEFAULT_ESM_MODEL = BuildConstants.DEFAULT_ESM_MODEL
 DEFAULT_FM4M_MODEL = BuildConstants.DEFAULT_FM4M_MODEL
 
 # Modelos ESM disponíveis
+# max_len: Tamanho máximo de sequência suportado pelo modelo
 ESM_MODELS = {
-    'esm2_t48_15B_UR50D': {'dim': 5120, 'layers': 48},
-    'esm2_t36_3B_UR50D': {'dim': 2560, 'layers': 36},
-    'esm2_t33_650M_UR50D': {'dim': 1280, 'layers': 33},
-    'esm2_t30_150M_UR50D': {'dim': 640, 'layers': 30},
-    'esm2_t12_35M_UR50D': {'dim': 480, 'layers': 12},
-    'esm2_t6_8M_UR50D': {'dim': 320, 'layers': 6}
+    'esm2_t48_15B_UR50D': {'dim': 5120, 'layers': 48, 'max_len': 2048},  # 15B suporta até 2048
+    'esm2_t36_3B_UR50D': {'dim': 2560, 'layers': 36, 'max_len': 2048},   # 3B suporta até 2048
+    'esm2_t33_650M_UR50D': {'dim': 1280, 'layers': 33, 'max_len': 1024}, # 650M suporta até 1024
+    'esm2_t30_150M_UR50D': {'dim': 640, 'layers': 30, 'max_len': 1024},  # 150M suporta até 1024
+    'esm2_t12_35M_UR50D': {'dim': 480, 'layers': 12, 'max_len': 1024},   # 35M suporta até 1024
+    'esm2_t6_8M_UR50D': {'dim': 320, 'layers': 6, 'max_len': 1024}       # 8M suporta até 1024
 }
 
 # Modelos FM4M disponíveis
