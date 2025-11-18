@@ -1,6 +1,6 @@
 """
-Testes Completos: Validação da Refatoração SOLID do ESM-2
-Verifica interface, implementação, factory e integração.
+Complete Tests: SOLID Refactoring Validation for ESM-2
+Verifies interface, implementation, factory and integration.
 """
 
 import pytest
@@ -14,32 +14,32 @@ from src.build.embeddings.protein_embedding import ProteinEmbedding
 
 
 # =============================================================================
-# TESTES 1: VALIDAÇÃO DA INTERFACE (BaseProteinStrategy)
+# TESTS 1: INTERFACE VALIDATION (BaseProteinStrategy)
 # =============================================================================
 
 class TestBaseProteinStrategyInterface:
-    """Valida que a interface abstrata está correta."""
+    """Validates that the abstract interface is correct."""
     
     def test_interface_is_abstract(self):
-        """Teste: BaseProteinStrategy não pode ser instanciada diretamente."""
+        """Test: BaseProteinStrategy não pode ser instanciada diretamente."""
         with pytest.raises(TypeError, match="Can't instantiate abstract class"):
             BaseProteinStrategy()
     
     def test_interface_has_all_abstract_methods(self):
-        """Teste: Interface declara todos os 5 métodos abstratos."""
+        """Test: Interface declara todos os 5 métodos abstratos."""
         abstract_methods = BaseProteinStrategy.__abstractmethods__
         
         expected_methods = {'load', 'generate', 'get_max_length', 'get_embedding_dim', 'cleanup'}
-        assert abstract_methods == expected_methods, f"Métodos esperados: {expected_methods}, encontrados: {abstract_methods}"
+        assert abstract_methods == expected_methods, f"Expected methods: {expected_methods}, found: {abstract_methods}"
     
     def test_interface_inherits_from_abc(self):
-        """Teste: Interface herda de ABC."""
+        """Test: Interface inherits from ABC."""
         assert issubclass(BaseProteinStrategy, ABC)
     
     def test_incomplete_implementation_fails(self):
-        """Teste: Implementação incompleta não pode ser instanciada."""
+        """Test: Incomplete implementation cannot be instantiated."""
         
-        # Implementação incompleta (faltando cleanup)
+        # Incomplete implementation (missing cleanup)
         class IncompleteStrategy(BaseProteinStrategy):
             def load(self, model_name, device, offload_folder=None, **kwargs):
                 return None, None
@@ -53,41 +53,41 @@ class TestBaseProteinStrategyInterface:
             def get_embedding_dim(self, model_name):
                 return 320
             
-            # Faltando cleanup() propositalmente
+            # Missing cleanup() intentionally
         
         with pytest.raises(TypeError, match="Can't instantiate abstract class"):
             IncompleteStrategy()
 
 
 # =============================================================================
-# TESTES 2: VALIDAÇÃO DA IMPLEMENTAÇÃO (ESM2Strategy)
+# TESTS 2: IMPLEMENTATION VALIDATION (ESM2Strategy)
 # =============================================================================
 
 class TestESM2StrategyImplementation:
-    """Valida que ESM2Strategy implementa corretamente a interface."""
+    """Validates that ESM2Strategy correctly implements the interface."""
     
     @pytest.fixture
     def strategy(self):
         return ESM2Strategy()
     
     def test_strategy_is_concrete_class(self, strategy):
-        """Teste: ESM2Strategy pode ser instanciada."""
+        """Test: ESM2Strategy can be instantiated."""
         assert strategy is not None
         assert isinstance(strategy, BaseProteinStrategy)
     
     def test_strategy_implements_all_methods(self, strategy):
-        """Teste: ESM2Strategy implementa todos os métodos abstratos."""
+        """Test: ESM2Strategy implements all abstract methods."""
         assert hasattr(strategy, 'load')
         assert hasattr(strategy, 'generate')
         assert hasattr(strategy, 'get_max_length')
         assert hasattr(strategy, 'get_embedding_dim')
         assert hasattr(strategy, 'cleanup')
         
-        # Verificar que não são abstratos
+        # Verify they are not abstract
         assert not getattr(strategy.load, '__isabstractmethod__', False)
     
     def test_strategy_method_signatures(self, strategy):
-        """Teste: Métodos têm assinaturas corretas."""
+        """Test: Methods have correct signatures."""
         import inspect
         
         # load(model_name, device, offload_folder, **kwargs)
@@ -105,7 +105,7 @@ class TestESM2StrategyImplementation:
 
 
 # =============================================================================
-# TESTES 3: VALIDAÇÃO DA FACTORY (ProteinModelFactory)
+# TESTS 3: FACTORY VALIDATION (ProteinModelFactory)
 # =============================================================================
 
 class TestProteinModelFactory:
@@ -121,13 +121,13 @@ class TestProteinModelFactory:
         "esm1b_t33_650M_UR50S",
     ])
     def test_factory_creates_esm2_strategy(self, model_name):
-        """Teste: Factory cria ESM2Strategy para todos os modelos ESM-2."""
+        """Test: Factory cria ESM2Strategy para todos os modelos ESM-2."""
         strategy = ProteinModelFactory.create_strategy(model_name)
         assert isinstance(strategy, ESM2Strategy)
         assert isinstance(strategy, BaseProteinStrategy)
     
     def test_factory_rejects_invalid_models(self):
-        """Teste: Factory lança erro para modelos inválidos."""
+        """Test: Factory lança erro para modelos inválidos."""
         invalid_models = [
             "gpt4_protein",
             "bert_protein",
@@ -142,7 +142,7 @@ class TestProteinModelFactory:
                 ProteinModelFactory.create_strategy(invalid)
     
     def test_factory_is_stateless(self):
-        """Teste: Factory pode criar múltiplas strategies independentes."""
+        """Test: Factory pode criar múltiplas strategies independentes."""
         strategy1 = ProteinModelFactory.create_strategy("esm2_t6_8M_UR50D")
         strategy2 = ProteinModelFactory.create_strategy("esm2_t33_650M_UR50D")
         
@@ -163,13 +163,13 @@ class TestProteinEmbeddingIntegration:
         return ProteinEmbedding(model_name='esm2_t6_8M_UR50D', use_gpu=False)
     
     def test_embedding_creates_strategy_on_init(self, embedding_gen):
-        """Teste: ProteinEmbedding cria strategy no __init__."""
+        """Test: ProteinEmbedding cria strategy no __init__."""
         assert hasattr(embedding_gen, 'strategy')
         assert embedding_gen.strategy is not None
         assert isinstance(embedding_gen.strategy, BaseProteinStrategy)
     
     def test_embedding_delegates_to_strategy(self, embedding_gen):
-        """Teste: ProteinEmbedding delega para strategy (não tem lógica direta)."""
+        """Test: ProteinEmbedding delega para strategy (não tem lógica direta)."""
         # Verificar que métodos internos são simples delegações
         import inspect
         
@@ -182,7 +182,7 @@ class TestProteinEmbeddingIntegration:
         assert 'strategy.generate' in gen_source
     
     def test_embedding_maintains_backward_compatibility(self, embedding_gen):
-        """Teste: API pública mantida (retrocompatibilidade)."""
+        """Test: Public API maintained (backward compatibility)."""
         # Métodos públicos devem existir
         public_methods = [
             'initialize',
@@ -207,7 +207,7 @@ class TestEndToEndFunctionality:
         return torch.device("cpu")  # Usar CPU para testes rápidos
     
     def test_full_pipeline_8M_model(self, device):
-        """Teste E2E: Pipeline completo com modelo 8M."""
+        """Teste E2E: Complete pipeline with 8M model."""
         # 1. Factory cria strategy
         strategy = ProteinModelFactory.create_strategy("esm2_t6_8M_UR50D")
         
@@ -389,11 +389,11 @@ class TestSOLIDPrinciples:
 
 
 # =============================================================================
-# TESTES 7: TESTES DE ROBUSTEZ E EDGE CASES
+# TESTS 7: ROBUSTNESS AND EDGE CASES TESTS
 # =============================================================================
 
 class TestRobustnessAndEdgeCases:
-    """Testes de casos extremos e robustez."""
+    """Tests edge cases and robustness."""
     
     @pytest.fixture
     def strategy(self):
@@ -404,12 +404,12 @@ class TestRobustnessAndEdgeCases:
         return torch.device("cpu")
     
     def test_strategy_handles_invalid_model_names(self, strategy, device):
-        """Teste: Strategy rejeita modelos inválidos gracefully."""
+        """Test: Strategy rejeita modelos inválidos gracefully."""
         with pytest.raises(ValueError):
             strategy.load("modelo_inexistente_xyz", device)
     
     def test_strategy_configuration_methods_never_fail(self, strategy):
-        """Teste: get_max_length e get_embedding_dim sempre retornam valores."""
+        """Test: get_max_length e get_embedding_dim sempre retornam valores."""
         # Mesmo para modelos desconhecidos, devem retornar defaults
         max_len = strategy.get_max_length("unknown_model")
         assert isinstance(max_len, int)
@@ -420,7 +420,7 @@ class TestRobustnessAndEdgeCases:
         assert dim > 0
     
     def test_cleanup_is_idempotent(self, strategy, device):
-        """Teste: cleanup() pode ser chamado múltiplas vezes."""
+        """Test: cleanup() pode ser chamado múltiplas vezes."""
         model, alphabet = strategy.load("esm2_t6_8M_UR50D", device)
         
         # Chamar cleanup 3 vezes não deve causar erro
@@ -429,7 +429,7 @@ class TestRobustnessAndEdgeCases:
         strategy.cleanup(model, alphabet)
     
     def test_factory_method_names_are_descriptive(self):
-        """Teste: Factory tem métodos auxiliares descritivos."""
+        """Test: Factory tem métodos auxiliares descritivos."""
         factory = ProteinModelFactory()
         
         # Verificar métodos auxiliares existem
@@ -454,7 +454,7 @@ class TestDocumentationAndMaintainability:
     """Valida documentação e manutenibilidade do código."""
     
     def test_all_classes_have_docstrings(self):
-        """Teste: Todas as classes têm docstrings."""
+        """Test: Todas as classes têm docstrings."""
         classes = [
             BaseProteinStrategy,
             ESM2Strategy,
@@ -466,7 +466,7 @@ class TestDocumentationAndMaintainability:
             assert len(cls.__doc__.strip()) > 50, f"{cls.__name__} com docstring muito curta"
     
     def test_all_abstract_methods_have_docstrings(self):
-        """Teste: Métodos abstratos têm docstrings detalhadas."""
+        """Test: Métodos abstratos têm docstrings detalhadas."""
         abstract_methods = ['load', 'generate', 'get_max_length', 'get_embedding_dim', 'cleanup']
         
         for method_name in abstract_methods:
@@ -478,7 +478,7 @@ class TestDocumentationAndMaintainability:
             assert 'Args:' in docstring or 'Returns:' in docstring
     
     def test_strategy_implementation_has_type_hints(self):
-        """Teste: ESM2Strategy usa type hints."""
+        """Test: ESM2Strategy usa type hints."""
         import inspect
         
         strategy = ESM2Strategy()

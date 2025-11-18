@@ -50,6 +50,7 @@ class IntegratedConfig:
     
     # Build module
     esm_model: str = "esm2_t6_8M_UR50D"
+    esm_dim: Optional[int] = None  # None = usar dimensão padrão do modelo
     ligand_model: str = "smi-ted-large"
     batch_size: int = 8
     device: str = "cpu"
@@ -294,6 +295,7 @@ class IntegratedPipeline:
             input_tsv=self.config.input_tsv,
             output_dir=str(self.build_dir),
             esm_model=self.config.esm_model,
+            esm_dim=self.config.esm_dim,  # Dimensão customizada
             ligand_model=self.config.ligand_model,
             batch_size=self.config.batch_size,
             device=self.config.device,
