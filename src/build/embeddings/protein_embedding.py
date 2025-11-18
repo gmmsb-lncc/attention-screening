@@ -114,7 +114,7 @@ class ProteinEmbedding(BaseEmbedding):
             self.device = self.torch.device("cpu")
             self.logger.info("Usando CPU")
         
-        # Configurar cache local para modelos ESM
+        # Configurar cache local para modelos ESM (definir antes do try para estar disponível no except)
         import os
         cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -138,26 +138,44 @@ class ProteinEmbedding(BaseEmbedding):
             return model
             
         except Exception as e:
-            # Tentar modelo menor como fallback para testes
-            if self.model_name != "esm2_t6_8M_UR50D":
-                self.logger.warning(f"Falha ao carregar {self.model_name}, tentando modelo menor...")
-                
-                try:
-                    alternative_model = "esm2_t6_8M_UR50D"  # Modelo PEQUENO para testes
-                    model, alphabet = self.esm.pretrained.load_model_and_alphabet(alternative_model)
-                    model = model.to(self.device).eval()
-                    
-                    self.alphabet = alphabet
-                    self.batch_converter = alphabet.get_batch_converter()
-                    self.model_name = alternative_model  # Atualizar nome do modelo
-                    
-                    self.logger.info(f"Modelo alternativo carregado: {alternative_model}")
-                    return model
-                    
-                except Exception as e2:
-                    raise ModelLoadError(f"Falha ao carregar modelo ESM: {e2}")
+            # Log detalhado do erro
+            self.logger.error(f"❌ ERRO AO CARREGAR MODELO ESM")
+            self.logger.error(f"   Modelo solicitado: {self.model_name}")
+            self.logger.error(f"   Cache: {cache_dir}")
+            self.logger.error(f"   Dispositivo: {self.device}")
+            self.logger.error(f"   Erro: {type(e).__name__}: {e}")
+            
+            # Verificar se é erro de arquivo não encontrado
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg or "could not load" in error_msg:
+                raise ModelLoadError(
+                    f"Modelo ESM '{self.model_name}' não está disponível no servidor da Meta.\n"
+                    f"URL esperada: https://dl.fbaipublicfiles.com/fair-esm/models/{self.model_name}.pt\n"
+                    f"Erro: {e}\n\n"
+                    f"POSSÍVEIS SOLUÇÕES:\n"
+                    f"1. Verifique se o nome do modelo está correto\n"
+                    f"2. O modelo 15B pode não estar disponível publicamente\n"
+                    f"3. Use um modelo menor disponível: esm2_t36_3B_UR50D (3B) ou esm2_t33_650M_UR50D (650M)"
+                )
+            
+            # Erro de memória
+            elif "out of memory" in error_msg or "oom" in error_msg:
+                raise ModelLoadError(
+                    f"Memória insuficiente para carregar o modelo '{self.model_name}'.\n"
+                    f"Erro: {e}\n\n"
+                    f"POSSÍVEIS SOLUÇÕES:\n"
+                    f"1. Use um modelo menor\n"
+                    f"2. Aumente a memória disponível\n"
+                    f"3. Habilite CPU offloading (se disponível)"
+                )
+            
+            # Erro genérico
             else:
-                raise ModelLoadError(f"Falha ao carregar modelo ESM: {e}")
+                raise ModelLoadError(
+                    f"Falha ao carregar modelo ESM '{self.model_name}'.\n"
+                    f"Cache: {cache_dir}\n"
+                    f"Erro: {type(e).__name__}: {e}"
+                )
     
     def _generate_single_embedding(self, sequence: str) -> np.ndarray:
         """
