@@ -67,7 +67,7 @@ DEFAULT_FM4M_MODEL = BuildConstants.DEFAULT_FM4M_MODEL
 # max_len: Tamanho máximo de sequência suportado (conservador para evitar OOM)
 # dim: Dimensão do embedding de SAÍDA (todos os embeddings terão este tamanho fixo)
 ESM_MODELS = {
-    'esm2_t48_15B_UR50D': {'dim': 5120, 'layers': 48, 'max_len': 4096},  # 15B: até 4096 tokens (rotary embeddings)
+    'esm2_t48_15B_UR50D': {'dim': 5120, 'layers': 48, 'max_len': 5120},  # 15B: até 5120 tokens (rotary embeddings + CPU offloading)
     'esm2_t36_3B_UR50D': {'dim': 2560, 'layers': 36, 'max_len': 4096},   # 3B: até 4096 tokens
     'esm2_t33_650M_UR50D': {'dim': 1280, 'layers': 33, 'max_len': 1024}, # 650M: até 1024 tokens
     'esm2_t30_150M_UR50D': {'dim': 640, 'layers': 30, 'max_len': 1024},  # 150M: até 1024 tokens

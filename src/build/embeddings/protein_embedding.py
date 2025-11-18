@@ -252,9 +252,10 @@ class ProteinEmbedding(BaseEmbedding):
         if not clean_sequence:
             raise EmbeddingError("Sequência não contém aminoácidos válidos")
         
-        # Obter limite de sequência do modelo (4096 para 15B/3B, 1024 para outros)
+        # Obter limite de sequência do modelo (5120 para 15B, 4096 para 3B, 1024 para outros)
         # ESM-2 usa rotary embeddings, então não há limite fixo teórico,
         # mas limitamos para evitar OOM em sequências extremamente longas
+        # 15B com CPU offloading suporta até 5120 tokens
         max_len = ESM_MODELS[self.model_name].get('max_len', 1024)
         
         if len(clean_sequence) > max_len:
