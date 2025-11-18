@@ -111,10 +111,18 @@ class BuildConfig:
         
         Se esm_model ou fm4m_model estão configurados, atualiza automaticamente
         protein_dim e ligand_dim para corresponder às dimensões corretas do modelo.
+        
+        Se esm_dim for explicitamente fornecido, ele tem precedência sobre a dimensão padrão do modelo.
         """
         # Sincronizar dimensão de proteína com modelo ESM
         esm_model = self._config.get('esm_model')
-        if esm_model and esm_model in ESM_MODELS:
+        esm_dim_override = self._config.get('esm_dim')  # Dimensão customizada via CLI
+        
+        if esm_dim_override is not None:
+            # Usar dimensão customizada fornecida via --esm-dim
+            self._config['protein_dim'] = esm_dim_override
+        elif esm_model and esm_model in ESM_MODELS:
+            # Usar dimensão padrão do modelo
             model_dim = ESM_MODELS[esm_model]['dim']
             current_dim = self._config.get('protein_dim')
             
