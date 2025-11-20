@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# source env/bin/activate && python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm_15B_maximum_precision --esm-model esm2_t48_15B_UR50D --seed 42
+# ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --esm-model esm2_t48_15B_UR50D --seed 42
+# ESM-C: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --esm-model esmc-600m-2024-12 --seed 42
+# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --esm-model openfold3 --seed 42
+# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --esm-model openfold3 --seed 42
 
 """
 DockTKinase - Pipeline Completo Integrado
@@ -216,12 +219,19 @@ def main():
     
     # Determinar dimensão ESM
     esm_dims = {
+        # ESM-2 models
         'esm2_t6_8M_UR50D': 320,
         'esm2_t12_35M_UR50D': 480,
         'esm2_t30_150M_UR50D': 640,
         'esm2_t33_650M_UR50D': 1280,
         'esm2_t36_3B_UR50D': 2560,
-        'esm2_t48_15B_UR50D': 5120
+        'esm2_t48_15B_UR50D': 5120,
+        # ESM-C models (ESM-3)
+        'esmc-300m-2024-12': 960,
+        'esmc-600m-2024-12': 1152,
+        'esmc-6b-2024-12': 3072,
+        # OpenFold models
+        'openfold3': 384
     }
     esm_dim = esm_dims.get(args.esm_model, 320)
     total_dim = 768 + esm_dim
