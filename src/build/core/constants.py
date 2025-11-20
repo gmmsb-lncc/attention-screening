@@ -67,12 +67,17 @@ DEFAULT_FM4M_MODEL = BuildConstants.DEFAULT_FM4M_MODEL
 # max_len: Tamanho máximo de sequência suportado (conservador para evitar OOM)
 # dim: Dimensão do embedding de SAÍDA (todos os embeddings terão este tamanho fixo)
 ESM_MODELS = {
+    # ESM-2 (Meta AI / Fair-ESM)
     'esm2_t48_15B_UR50D': {'dim': 5120, 'layers': 48, 'max_len': 5120},  # 15B: até 5120 tokens (rotary embeddings + CPU offloading)
     'esm2_t36_3B_UR50D': {'dim': 2560, 'layers': 36, 'max_len': 4096},   # 3B: até 4096 tokens
     'esm2_t33_650M_UR50D': {'dim': 1280, 'layers': 33, 'max_len': 1024}, # 650M: até 1024 tokens
     'esm2_t30_150M_UR50D': {'dim': 640, 'layers': 30, 'max_len': 1024},  # 150M: até 1024 tokens
     'esm2_t12_35M_UR50D': {'dim': 480, 'layers': 12, 'max_len': 1024},   # 35M: até 1024 tokens
-    'esm2_t6_8M_UR50D': {'dim': 320, 'layers': 6, 'max_len': 1024}       # 8M: até 1024 tokens
+    'esm2_t6_8M_UR50D': {'dim': 320, 'layers': 6, 'max_len': 1024},      # 8M: até 1024 tokens
+    
+    # ESM-C (EvolutionaryScale Cambrian) - Fast representation learning
+    'esmc-300m-2024-12': {'dim': 960, 'layers': 30, 'max_len': 2048},    # 300M: 960-dim, mean pooling (PRIORITÁRIO)
+    'esmc-600m-2024-12': {'dim': 1152, 'layers': 36, 'max_len': 2048},   # 600M: 1152-dim, mean pooling
 }
 
 # Modelos FM4M disponíveis
