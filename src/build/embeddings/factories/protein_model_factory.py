@@ -5,6 +5,8 @@ Implementa Factory Pattern para desacoplar criação de objetos.
 
 from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStrategy
 from src.build.embeddings.strategies.esm2_strategy import ESM2Strategy
+from src.build.embeddings.strategies.esmc_strategy import ESMCStrategy
+from src.build.embeddings.strategies.openfold_strategy import OpenFoldStrategy
 
 
 class ProteinModelFactory:
@@ -39,6 +41,18 @@ class ProteinModelFactory:
         'esm1b_t33_650M_UR50S', # ESM-1b (legacy)
     }
     
+    # Modelos ESM-C suportados (EvolutionaryScale Cambrian)
+    ESMC_MODELS = {
+        'esmc-300m-2024-12',    # 300M parâmetros, 960-dim (PRIORITÁRIO)
+        'esmc-600m-2024-12',    # 600M parâmetros, 1152-dim
+        'esmc-6b-2024-12',      # 7B parâmetros, 3072-dim
+    }
+    
+    # Modelos OpenFold suportados (AlphaFold3 reproduction)
+    OPENFOLD_MODELS = {
+        'openfold3',            # OpenFold3 - structure-aware embeddings (384-dim)
+    }
+    
     # Modelos ESM-3 suportados (Meta AI / EvolutionaryScale)
     # FUTURO: Adicionar quando ESM-3 estiver disponível
     ESM3_MODELS = {
@@ -71,17 +85,32 @@ class ProteinModelFactory:
         if model_name in ProteinModelFactory.ESM2_MODELS:
             return ESM2Strategy()
         
+        # Detectar ESM-C
+        if model_name in ProteinModelFactory.ESMC_MODELS:
+            return ESMCStrategy()
+        
+        # Detectar OpenFold
+        if model_name in ProteinModelFactory.OPENFOLD_MODELS:
+            return OpenFoldStrategy()
+        
         # FUTURO: Detectar ESM-3
         # if model_name in ProteinModelFactory.ESM3_MODELS:
         #     from src.build.embeddings.strategies.esm3_strategy import ESM3Strategy
         #     return ESM3Strategy()
         
         # Modelo não suportado
-        supported = sorted(ProteinModelFactory.ESM2_MODELS)
+        supported_esm2 = sorted(ProteinModelFactory.ESM2_MODELS)
+        supported_esmc = sorted(ProteinModelFactory.ESMC_MODELS)
+        supported_openfold = sorted(ProteinModelFactory.OPENFOLD_MODELS)
+        
         raise ValueError(
             f"Modelo de proteína '{model_name}' não é suportado.\n\n"
             f"Modelos ESM-2 disponíveis:\n"
-            + "\n".join(f"  • {m}" for m in supported)
+            + "\n".join(f"  • {m}" for m in supported_esm2)
+            + "\n\nModelos ESM-C disponíveis:\n"
+            + "\n".join(f"  • {m}" for m in supported_esmc)
+            + "\n\nModelos OpenFold disponíveis:\n"
+            + "\n".join(f"  • {m}" for m in supported_openfold)
             + "\n\nPara adicionar novos modelos:\n"
             + "1. Crie uma nova estratégia (ex: ESM3Strategy)\n"
             + "2. Adicione à factory em protein_model_factory.py\n"
@@ -106,6 +135,40 @@ class ProteinModelFactory:
             False
         """
         return model_name in ProteinModelFactory.ESM2_MODELS
+    
+    @staticmethod
+    def is_esmc_model(model_name: str) -> bool:
+        """
+        Verifica se o modelo é ESM-C.
+        
+        Args:
+            model_name: Nome do modelo
+            
+        Returns:
+            True se for ESM-C, False caso contrário
+            
+        Exemplo:
+            >>> ProteinModelFactory.is_esmc_model("esmc-300m-2024-12")
+            True
+        """
+        return model_name in ProteinModelFactory.ESMC_MODELS
+    
+    @staticmethod
+    def is_openfold_model(model_name: str) -> bool:
+        """
+        Verifica se o modelo é OpenFold.
+        
+        Args:
+            model_name: Nome do modelo
+            
+        Returns:
+            True se for OpenFold, False caso contrário
+            
+        Exemplo:
+            >>> ProteinModelFactory.is_openfold_model("openfold3")
+            True
+        """
+        return model_name in ProteinModelFactory.OPENFOLD_MODELS
     
     @staticmethod
     def is_esm3_model(model_name: str) -> bool:
@@ -142,5 +205,7 @@ class ProteinModelFactory:
         """
         return {
             'esm2': sorted(ProteinModelFactory.ESM2_MODELS),
+            'esmc': sorted(ProteinModelFactory.ESMC_MODELS),
+            'openfold': sorted(ProteinModelFactory.OPENFOLD_MODELS),
             'esm3': sorted(ProteinModelFactory.ESM3_MODELS),
         }
