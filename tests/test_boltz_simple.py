@@ -15,6 +15,11 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
+# Add project root to path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -70,7 +75,7 @@ def main():
     try:
         # Import Boltz strategy
         logger.info("\n1. Importing Boltz strategy...")
-        from build.embeddings.strategies.boltz_strategy import BoltzStrategy
+        from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
         logger.info("✓ BoltzStrategy imported")
         
         # Initialize strategy
