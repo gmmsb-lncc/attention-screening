@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_non_human_dataset(max_samples=1):
+def load_non_human_dataset(max_samples=None):
     """Load real non-human kinase dataset from TSV file."""
     logger.info("\n" + "="*70)
     logger.info("Loading Real Non-Human Kinase Dataset")
@@ -103,11 +103,11 @@ def test_boltz_strategy():
         
         logger.info("✓ BoltzStrategy imported")
         
-        # Create strategy instance
+        # Create strategy instance WITHOUT MSA (faster, working)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        strategy = BoltzStrategy(use_msa=False)
+        strategy = BoltzStrategy(use_msa=False)  # Voltar para sem MSA
         
-        logger.info(f"✓ Strategy instance created")
+        logger.info(f"✓ Strategy instance created (MSA disabled)")
         
         # Load the model/CLI environment
         strategy.load('boltz2', device=device)
@@ -122,7 +122,7 @@ def test_boltz_strategy():
         return None
 
 
-def test_embedding_generation(strategy, dataset):
+def test_embedding_generation(strategy, dataset, output_dir=None):
     """Test embedding generation with Boltz-2."""
     logger.info("\n" + "="*70)
     logger.info("Generating Embeddings for All Sequences")
@@ -131,6 +131,15 @@ def test_embedding_generation(strategy, dataset):
     if strategy is None:
         logger.error("❌ Cannot test embeddings without valid strategy")
         return False
+    
+    # Create output directory for embeddings
+    if output_dir is None:
+        output_dir = Path(__file__).parent / "embeddings_output" / "boltz_non_human"
+    else:
+        output_dir = Path(output_dir)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"💾 Saving embeddings to: {output_dir}")
     
     try:
         # Get device
@@ -153,8 +162,8 @@ def test_embedding_generation(strategy, dataset):
             logger.info(f"  seq_id: {seq_id}, length: {len(seq)} AA")
             
             try:
-                # Generate embedding
-                embedding = strategy.generate(None, None, seq, device)
+                # Generate embedding with seq_id
+                embedding = strategy.generate(None, None, seq, device, seq_id=seq_id)
                 
                 # Validate embedding
                 if embedding is None:
@@ -167,10 +176,16 @@ def test_embedding_generation(strategy, dataset):
                 
                 logger.info(f"  ✓ Shape: {embedding.shape}, mean: {embedding.mean():.4f}, std: {embedding.std():.4f}")
                 
+                # Save embedding to file (ESM pattern: {seq_id}_embedding.npy)
+                embedding_file = output_dir / f"{seq_id}_embedding.npy"
+                np.save(embedding_file, embedding)
+                logger.info(f"  💾 Saved: {embedding_file.name}")
+                
                 embeddings.append({
                     'seq_id': seq_id,
                     'organism': organism,
-                    'embedding': embedding
+                    'embedding': embedding,
+                    'file': str(embedding_file)
                 })
                 successful += 1
                 
@@ -180,6 +195,7 @@ def test_embedding_generation(strategy, dataset):
         
         logger.info(f"\n" + "="*70)
         logger.info(f"RESULTS: {successful} successful, {failed} failed out of {total}")
+        logger.info(f"💾 Embeddings saved to: {output_dir}")
         logger.info("="*70)
         
         if successful > 0:
@@ -205,9 +221,9 @@ def main():
     # Track results
     results = {}
     
-    # Step 1: Load real dataset
+    # Step 1: Load real dataset (all sequences)
     try:
-        dataset = load_non_human_dataset(max_samples=1)
+        dataset = load_non_human_dataset(max_samples=None)  # None = todas as sequências
         results['dataset_loading'] = True
     except Exception as e:
         logger.error(f"❌ Failed to load dataset: {e}")

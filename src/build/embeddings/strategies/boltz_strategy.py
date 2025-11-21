@@ -52,7 +52,7 @@ MODEL_SPECS = {
     'boltz2': {
         'dim_single': 384,      # token_s: single representation dimension (per-residue)
         'dim_pair': 128,        # token_z: pair representation dimension
-        'output_dim': 1024,     # Multi-pooling output dimension (mean+max+min truncated)
+        'output_dim': 384,      # Single representation output (mean pooling, padrão)
         'description': 'Boltz-2 - Biomolecular foundation model (structure + affinity)'
     }
 }
@@ -60,8 +60,8 @@ MODEL_SPECS = {
 # Valid pooling strategies for single representations
 VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max', 'multi'}
 
-# Default pooling strategy (multi = mean+max+min truncated to 1024-dim)
-DEFAULT_POOLING = 'multi'
+# Default pooling strategy (mean = 384-dim single representation, padrão)
+DEFAULT_POOLING = 'mean'
 
 # Valid amino acids (standard 20 + special tokens)
 VALID_AMINO_ACIDS = set('ACDEFGHIKLMNPQRSTVWY')
@@ -243,12 +243,13 @@ class BoltzStrategy(BaseProteinStrategy):
         pooling = kwargs.get('pooling', DEFAULT_POOLING)
         recycling_steps = kwargs.get('recycling_steps', DEFAULT_RECYCLING_STEPS)
         sampling_steps = kwargs.get('sampling_steps', DEFAULT_SAMPLING_STEPS)
+        seq_id = kwargs.get('seq_id', None)  # Get seq_id if provided
         
         if pooling not in VALID_POOLING_STRATEGIES:
             raise ValueError(f"Invalid pooling strategy: {pooling}")
         
         # Create YAML input file
-        yaml_path = self._create_yaml_input(sequence)
+        yaml_path = self._create_yaml_input(sequence, seq_id=seq_id)
         
         # Execute Boltz CLI
         self._run_boltz_cli(
@@ -286,7 +287,7 @@ class BoltzStrategy(BaseProteinStrategy):
     # PRIVATE METHODS
     # =========================================================================
     
-    def _create_yaml_input(self, sequence: str) -> Path:
+    def _create_yaml_input(self, sequence: str, seq_id: str = None) -> Path:
         """
         Create YAML input file for Boltz CLI.
         
@@ -295,15 +296,14 @@ class BoltzStrategy(BaseProteinStrategy):
         version: 1
         sequences:
           - protein:
-              id: A
+              id: A  # or seq_id if provided
               sequence: MKFLKFSL...
               msa: path/to/msa.a3m  # Required even if empty
         ```
         
-        Note: Boltz requires single-letter chain IDs (A, B, C, etc.)
-        
         Args:
             sequence: Protein sequence
+            seq_id: Optional sequence ID (defaults to 'A')
         
         Returns:
             Path to YAML file
@@ -316,12 +316,17 @@ class BoltzStrategy(BaseProteinStrategy):
                 # Write minimal A3M format (just the query sequence)
                 f.write(f">query\n{sequence}\n")
         
+        # Use provided seq_id or default to 'A'
+        protein_id = str(seq_id) if seq_id is not None else 'A'
+        
+        self.logger.info(f"Creating YAML input with protein ID: '{protein_id}'")
+        
         yaml_data = {
             'version': 1,
             'sequences': [
                 {
                     'protein': {
-                        'id': 'A',  # Boltz requires single-letter chain IDs
+                        'id': protein_id,
                         'sequence': sequence
                     }
                 }
@@ -336,7 +341,12 @@ class BoltzStrategy(BaseProteinStrategy):
         with open(yaml_path, 'w') as f:
             yaml.dump(yaml_data, f, default_flow_style=False)
         
-        self.logger.debug(f"Created YAML input: {yaml_path}")
+        self.logger.info(f"✓ YAML created: {yaml_path}")
+        self.logger.info(f"  - Protein ID: {protein_id}")
+        self.logger.info(f"  - Sequence length: {len(sequence)} AA")
+        if msa_path:
+            self.logger.info(f"  - MSA file: {msa_path}")
+        
         return yaml_path
     
     def _run_boltz_cli(
@@ -386,19 +396,22 @@ class BoltzStrategy(BaseProteinStrategy):
         
         self.logger.info(f"Executing: {' '.join(cmd)}")
         
+        # Set timeout based on MSA usage
+        timeout = 1200 if self.use_msa else 600  # 20 min with MSA, 10 min without
+        
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,  # 10 minutes timeout
+                timeout=timeout,
                 check=True
             )
             
             self.logger.debug(f"Boltz CLI stdout:\n{result.stdout}")
             
             if result.stderr:
-                self.logger.debug(f"Boltz CLI stderr:\n{result.stderr}")
+                self.logger.info(f"Boltz CLI stderr:\n{result.stderr}")  # Changed to INFO to see MSA errors
         
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
@@ -457,6 +470,9 @@ class BoltzStrategy(BaseProteinStrategy):
         # Find job subdirectories (Boltz may create multiple if batching)
         job_dirs = [d for d in predictions_dir.iterdir() if d.is_dir()]
         
+        self.logger.info(f"🔍 Searching for embeddings in: {predictions_dir}")
+        self.logger.info(f"   Found {len(job_dirs)} job director{'y' if len(job_dirs) == 1 else 'ies'}: {[d.name for d in job_dirs]}")
+        
         if not job_dirs:
             raise RuntimeError(
                 f"No job directories found in: {predictions_dir}\n"
@@ -466,15 +482,19 @@ class BoltzStrategy(BaseProteinStrategy):
         # Use the first job directory (should be only one for single-sequence input)
         protein_dir = job_dirs[0]
         
+        self.logger.info(f"📂 Using job directory: {protein_dir.name}")
+        
         # Try to load embeddings - Boltz uses .npz format with --write_embeddings
         # The file naming pattern is: embeddings_<job_id>.npz or confidences_<job_id>.npz
         embedding_files = list(protein_dir.glob('embeddings*.npz'))
         confidence_files = list(protein_dir.glob('confidences*.npz'))
         
+        self.logger.info(f"   Embedding files found: {[f.name for f in embedding_files]}")
+        
         # Try embeddings first (primary output with --write_embeddings)
         if embedding_files:
             embeddings_npz = embedding_files[0]
-            self.logger.debug(f"Loading embeddings from: {embeddings_npz}")
+            self.logger.info(f"✓ Loading embeddings from: {embeddings_npz.name}")
             try:
                 data = np.load(embeddings_npz)
             except Exception as e:
