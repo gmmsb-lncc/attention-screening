@@ -53,10 +53,10 @@ Mostra:
 - Batch size atual
 - Uso de memória GPU em tempo real
 
-### 5. **PYTORCH_CUDA_ALLOC_CONF Automático**
+### 5. **PYTORCH_ALLOC_CONF Automático**
 
 Se batch=1 ainda falhar, o sistema:
-1. Define `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+1. Define `PYTORCH_ALLOC_CONF=expandable_segments:True`
 2. Recarrega o modelo
 3. Tenta novamente
 
@@ -190,7 +190,7 @@ rm -f tmp/embedding_checkpoint.npz
 
 **Solução**: Definir variável de ambiente **antes** de executar
 ```bash
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda
 ```
 

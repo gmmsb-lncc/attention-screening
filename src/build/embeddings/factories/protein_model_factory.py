@@ -7,6 +7,7 @@ from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStr
 from src.build.embeddings.strategies.esm2_strategy import ESM2Strategy
 from src.build.embeddings.strategies.esmc_strategy import ESMCStrategy
 from src.build.embeddings.strategies.openfold_strategy import OpenFoldStrategy
+from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
 
 
 class ProteinModelFactory:
@@ -53,6 +54,11 @@ class ProteinModelFactory:
         'openfold3',            # OpenFold3 - structure-aware embeddings (384-dim)
     }
     
+    # Modelos Boltz suportados (Biomolecular foundation model)
+    BOLTZ_MODELS = {
+        'boltz2',               # Boltz-2 - structure + affinity prediction (768-dim)
+    }
+    
     # Modelos ESM-3 suportados (Meta AI / EvolutionaryScale)
     # FUTURO: Adicionar quando ESM-3 estiver disponível
     ESM3_MODELS = {
@@ -93,6 +99,10 @@ class ProteinModelFactory:
         if model_name in ProteinModelFactory.OPENFOLD_MODELS:
             return OpenFoldStrategy()
         
+        # Detectar Boltz
+        if model_name in ProteinModelFactory.BOLTZ_MODELS:
+            return BoltzStrategy()
+        
         # FUTURO: Detectar ESM-3
         # if model_name in ProteinModelFactory.ESM3_MODELS:
         #     from src.build.embeddings.strategies.esm3_strategy import ESM3Strategy
@@ -102,6 +112,7 @@ class ProteinModelFactory:
         supported_esm2 = sorted(ProteinModelFactory.ESM2_MODELS)
         supported_esmc = sorted(ProteinModelFactory.ESMC_MODELS)
         supported_openfold = sorted(ProteinModelFactory.OPENFOLD_MODELS)
+        supported_boltz = sorted(ProteinModelFactory.BOLTZ_MODELS)
         
         raise ValueError(
             f"Modelo de proteína '{model_name}' não é suportado.\n\n"
@@ -111,6 +122,8 @@ class ProteinModelFactory:
             + "\n".join(f"  • {m}" for m in supported_esmc)
             + "\n\nModelos OpenFold disponíveis:\n"
             + "\n".join(f"  • {m}" for m in supported_openfold)
+            + "\n\nModelos Boltz disponíveis:\n"
+            + "\n".join(f"  • {m}" for m in supported_boltz)
             + "\n\nPara adicionar novos modelos:\n"
             + "1. Crie uma nova estratégia (ex: ESM3Strategy)\n"
             + "2. Adicione à factory em protein_model_factory.py\n"
@@ -171,6 +184,23 @@ class ProteinModelFactory:
         return model_name in ProteinModelFactory.OPENFOLD_MODELS
     
     @staticmethod
+    def is_boltz_model(model_name: str) -> bool:
+        """
+        Verifica se o modelo é Boltz.
+        
+        Args:
+            model_name: Nome do modelo
+            
+        Returns:
+            True se for Boltz, False caso contrário
+            
+        Exemplo:
+            >>> ProteinModelFactory.is_boltz_model("boltz2")
+            True
+        """
+        return model_name in ProteinModelFactory.BOLTZ_MODELS
+    
+    @staticmethod
     def is_esm3_model(model_name: str) -> bool:
         """
         Verifica se o modelo é ESM-3.
@@ -207,5 +237,6 @@ class ProteinModelFactory:
             'esm2': sorted(ProteinModelFactory.ESM2_MODELS),
             'esmc': sorted(ProteinModelFactory.ESMC_MODELS),
             'openfold': sorted(ProteinModelFactory.OPENFOLD_MODELS),
+            'boltz': sorted(ProteinModelFactory.BOLTZ_MODELS),
             'esm3': sorted(ProteinModelFactory.ESM3_MODELS),
         }

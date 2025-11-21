@@ -49,15 +49,23 @@ transformers>=4.38
 sentencepiece
 
 # OpenFold3 and MSA Dependencies
-gemmi>=0.7.3              # Crystal structure library
-ml-collections>=1.1.0     # Configuration management
-einops>=0.8.0            # Tensor operations
-biopython>=1.86          # Biological sequence analysis
-pydantic>=2.0            # Data validation (for ColabFold API)
-lmdb>=1.7.0              # Database for OpenFold3 data pipeline
-biotite>=1.0             # Bioinformatics toolkit
-memory-profiler>=0.61.0  # Memory profiling
-lightning>=2.0           # PyTorch Lightning framework
+gemmi>=0.7.3              # Crystal structure library (required by OpenFold3)
+ml-collections>=1.1.0     # Configuration management (required by OpenFold3)
+einops>=0.8.0             # Tensor operations (required by OpenFold3)
+biopython>=1.86           # Biological sequence analysis (required by OpenFold3)
+pydantic>=2.0             # Data validation (required by ColabFold API)
+lmdb>=1.7.0               # Database (required by OpenFold3 data pipeline)
+biotite>=1.0              # Bioinformatics toolkit (required by OpenFold3)
+memory-profiler>=0.61.0   # Memory profiling (required by OpenFold3)
+lightning>=2.0            # PyTorch Lightning framework (required by OpenFold3)
+
+# Boltz-2 Dependencies
+einx>=0.3.0                         # Tensor operations extension
+fairscale>=0.4.13                   # Distributed training
+hydra-core>=1.3.2                   # Configuration management
+mashumaro>=3.14                     # Data serialization
+chembl-structure-pipeline>=1.2.2    # Chemical structure processing
+numba>=0.60.0                       # JIT compilation
 
 # Molecular Chemistry
 rdkit>=2024.3.5

@@ -74,8 +74,8 @@ class ESM2Strategy(BaseProteinStrategy):
         # Configurar cache local
         self._setup_cache_dirs(offload_folder)
         
-        # Configurar memória CUDA
-        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+        # Configurar memória CUDA (nova variável desde PyTorch 2.0)
+        os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
         
         # Determinar se precisa de CPU offloading
         large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
