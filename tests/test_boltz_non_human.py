@@ -140,7 +140,7 @@ def test_boltz_strategy():
             sys.path.insert(0, str(src_path))
         
         # Import the Boltz strategy
-        from build.embeddings.strategies.boltz_strategy import BoltzStrategy
+        from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
         
         logger.info("✓ BoltzStrategy imported")
         
@@ -233,8 +233,8 @@ def compare_with_esm2(dataset):
         if str(src_path) not in sys.path:
             sys.path.insert(0, str(src_path))
         
-        from build.embeddings.strategies.esm2_strategy import ESM2Strategy
-        from build.embeddings.strategies.boltz_strategy import BoltzStrategy
+        from src.build.embeddings.strategies.esm2_strategy import ESM2Strategy
+        from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
