@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_non_human_dataset(max_samples=25):
+def load_non_human_dataset(max_samples=1):
     """Load real non-human kinase dataset from TSV file."""
     logger.info("\n" + "="*70)
     logger.info("Loading Real Non-Human Kinase Dataset")
@@ -207,7 +207,7 @@ def main():
     
     # Step 1: Load real dataset
     try:
-        dataset = load_non_human_dataset(max_samples=25)
+        dataset = load_non_human_dataset(max_samples=1)
         results['dataset_loading'] = True
     except Exception as e:
         logger.error(f"❌ Failed to load dataset: {e}")

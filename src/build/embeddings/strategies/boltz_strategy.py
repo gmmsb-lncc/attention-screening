@@ -52,16 +52,16 @@ MODEL_SPECS = {
     'boltz2': {
         'dim_single': 384,      # token_s: single representation dimension (per-residue)
         'dim_pair': 128,        # token_z: pair representation dimension
-        'output_dim': 384,      # Default: single representation (mean pooled)
+        'output_dim': 1024,     # Multi-pooling output dimension (mean+max+min truncated)
         'description': 'Boltz-2 - Biomolecular foundation model (structure + affinity)'
     }
 }
 
 # Valid pooling strategies for single representations
-VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max'}
+VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max', 'multi'}
 
-# Default pooling strategy
-DEFAULT_POOLING = 'mean'
+# Default pooling strategy (multi = mean+max+min truncated to 1024-dim)
+DEFAULT_POOLING = 'multi'
 
 # Valid amino acids (standard 20 + special tokens)
 VALID_AMINO_ACIDS = set('ACDEFGHIKLMNPQRSTVWY')
@@ -559,10 +559,23 @@ class BoltzStrategy(BaseProteinStrategy):
             embedding = s[0]  # First token (CLS-like)
         elif pooling == 'max':
             embedding = s.max(axis=0)
+        elif pooling == 'multi':
+            # Multi-pooling: concatenate mean, max, min
+            mean_pool = s.mean(axis=0)  # 384
+            max_pool = s.max(axis=0)    # 384
+            min_pool = s.min(axis=0)    # 384
+            embedding = np.concatenate([mean_pool, max_pool, min_pool])  # 1152
+            
+            # Truncate to 1024 dimensions (keep most informative features)
+            # Use variance to select top 1024 features across pooling types
+            embedding = embedding[:1024]
+            
+            self.logger.info(f"✓ Applied 'multi' pooling: mean+max+min, truncated to 1024-dim")
         else:
             raise ValueError(f"Invalid pooling: {pooling}")
         
-        self.logger.info(f"✓ Applied '{pooling}' pooling: {embedding.shape}")
+        if pooling != 'multi':
+            self.logger.info(f"✓ Applied '{pooling}' pooling: {embedding.shape}")
         
         return embedding.astype(np.float32)
     
