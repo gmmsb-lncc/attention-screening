@@ -167,7 +167,12 @@ class ProteinEmbedding(BaseEmbedding):
         )
         
         # Configurar conversor de batch (compatibilidade retroativa)
-        self.batch_converter = self.alphabet.get_batch_converter()
+        # NOTE: CLI-based strategies (e.g., Boltz) return (None, None) - skip batch_converter
+        if self.alphabet is not None:
+            self.batch_converter = self.alphabet.get_batch_converter()
+        else:
+            self.batch_converter = None
+            self.logger.info("Estratégia CLI-based detectada (sem model/tokenizer em memória)")
         
         return model
     
@@ -184,9 +189,12 @@ class ProteinEmbedding(BaseEmbedding):
             Array NumPy com embedding
         """
         # Delegar geração para estratégia
+        # NOTE: Strategy signature is (model, tokenizer, sequence, device, **kwargs)
+        # - ESM strategies: tokenizer = alphabet (batch converter)
+        # - CLI strategies (Boltz): tokenizer = None (CLI-based, no tokenizer needed)
         return self.strategy.generate(
             model=self.model,
-            auxiliary_objects=self.alphabet,
+            tokenizer=self.alphabet,
             sequence=sequence,
             device=self.device,
             logger=self.logger
