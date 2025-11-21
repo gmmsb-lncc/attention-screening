@@ -2,7 +2,7 @@
 # ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --esm-model esm2_t48_15B_UR50D --seed 42
 # ESM-C: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --esm-model esmc-600m-2024-12 --seed 42
 # OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --esm-model openfold3 --seed 42
-# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --esm-model openfold3 --seed 42
+# Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --esm-model boltz2 --seed 42
 
 """
 DockTKinase - Pipeline Completo Integrado
@@ -238,7 +238,9 @@ def main():
         'esmc-600m-2024-12': 1152,
         'esmc-6b-2024-12': 3072,
         # OpenFold models
-        'openfold3': 384
+        'openfold3': 384,
+        # Boltz models
+        'boltz2': 768
     }
     
     # Usar dimensão customizada se fornecida, senão usar padrão do modelo
