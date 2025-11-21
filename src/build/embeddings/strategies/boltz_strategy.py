@@ -356,7 +356,9 @@ class BoltzStrategy(BaseProteinStrategy):
             '--out_dir', str(self.output_dir),
             '--recycling_steps', str(recycling_steps),
             '--sampling_steps', str(sampling_steps),
-            '--checkpoint', 'boltz2_conf'  # Use confidence checkpoint
+            '--model', 'boltz2',  # Use Boltz-2 model
+            '--write_embeddings',  # Write embeddings to npz file
+            '--accelerator', 'cpu' if self.device.type == 'cpu' else 'gpu'
         ]
         
         # Add MSA server if enabled
@@ -492,7 +494,7 @@ class BoltzStrategy(BaseProteinStrategy):
                 f"Failed to extract embeddings from {confidences_pkl}: {e}"
             ) from e
     
-    def get_embedding_dimension(self, model_name: str) -> int:
+    def get_embedding_dim(self, model_name: str) -> int:
         """
         Get the embedding dimension for a Boltz model.
         
@@ -512,6 +514,31 @@ class BoltzStrategy(BaseProteinStrategy):
             )
         
         return MODEL_SPECS[model_name]['output_dim']
+    
+    def get_max_length(self, model_name: str) -> int:
+        """
+        Get the maximum sequence length supported by a Boltz model.
+        
+        Boltz-2 doesn't have a hard limit like ESM models, but for practical
+        purposes we set a reasonable limit based on computational constraints.
+        
+        Args:
+            model_name: Name of the model (should be 'boltz2')
+        
+        Returns:
+            Maximum sequence length (10000 for Boltz-2)
+        
+        Raises:
+            ValueError: If model_name is not supported
+        """
+        if model_name not in MODEL_SPECS:
+            raise ValueError(
+                f"Model '{model_name}' not supported. "
+                f"Supported models: {list(MODEL_SPECS.keys())}"
+            )
+        
+        # Boltz-2 can handle long sequences but we set practical limit
+        return 10000
 
 
 # =============================================================================
