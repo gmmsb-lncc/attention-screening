@@ -164,8 +164,10 @@ FM4M/examples/*.ipynb
 *.svg
 FM4M/img/test.py
 
-# ESM - exclude downloaded models
-ESM/
+# ESM - exclude downloaded models but keep source code
+ESM/*
+!ESM/esm-3/
+!ESM/.gitkeep
 
 # Model caches
 models_cache/
