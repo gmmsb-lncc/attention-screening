@@ -78,36 +78,66 @@ def download_fm4m_model_files():
         print(f"Error during FM4M model file download: {e}")
         return False
 
-def install_torch_nl():
-    """Install torch_nl dependency required for FM4M."""
+def install_fm4m_dependencies():
+    """Install FM4M dependencies (torch_nl and ase)."""
     try:
-        print("\nInstalling torch_nl dependency...")
+        print("\nInstalling FM4M dependencies...")
         
-        # Try to import torch_nl first
-        try:
-            import torch_nl
-            print("✓ torch_nl is already installed")
-            return True
-        except ImportError:
-            pass
+        # List of required packages for FM4M
+        required_packages = [
+            ("torch_nl", "0.3"),  # Neural network layers
+            ("ase", None),        # Atomic Simulation Environment
+        ]
         
-        # Install torch_nl
-        print("Installing torch_nl==0.3...")
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "torch_nl==0.3"],
-            capture_output=True,
-            text=True
-        )
+        installed_packages = []
+        failed_packages = []
         
-        if result.returncode == 0:
-            print("✓ Successfully installed torch_nl==0.3")
-            return True
-        else:
-            print(f"✗ Error installing torch_nl: {result.stderr}")
-            return False
+        for package_name, version in required_packages:
+            try:
+                # Try to import the package first
+                try:
+                    __import__(package_name)
+                    print(f"✓ {package_name} is already installed")
+                    installed_packages.append(package_name)
+                    continue
+                except ImportError:
+                    pass
+                
+                # Install the package
+                package_spec = f"{package_name}=={version}" if version else package_name
+                print(f"Installing {package_spec}...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package_spec],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout per package
+                )
+                
+                if result.returncode == 0:
+                    print(f"✓ Successfully installed {package_spec}")
+                    installed_packages.append(package_name)
+                else:
+                    print(f"✗ Error installing {package_spec}: {result.stderr}")
+                    failed_packages.append(package_name)
+                    
+            except subprocess.TimeoutExpired:
+                print(f"✗ Timeout installing {package_name}")
+                failed_packages.append(package_name)
+            except Exception as e:
+                print(f"✗ Error installing {package_name}: {e}")
+                failed_packages.append(package_name)
+        
+        # Print summary
+        print(f"\nFM4M dependencies installation summary:")
+        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
+        if failed_packages:
+            print(f"  Failed: {', '.join(failed_packages)}")
+        
+        # Return success if all packages were installed
+        return len(failed_packages) == 0
         
     except Exception as e:
-        print(f"✗ Error installing torch_nl: {e}")
+        print(f"✗ Error installing FM4M dependencies: {e}")
         return False
 
 
@@ -335,8 +365,8 @@ if __name__ == "__main__":
     print("DockTKinase Post-Install Setup")
     print("=" * 40)
     
-    # Install torch_nl dependency
-    torch_nl_success = install_torch_nl()
+    # Install FM4M dependencies (torch_nl and ase)
+    fm4m_deps_success = install_fm4m_dependencies()
     
     # Install OpenFold3 and MSA dependencies
     openfold_success = install_openfold_dependencies()
@@ -350,7 +380,7 @@ if __name__ == "__main__":
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if torch_nl_success and openfold_success and boltz_success and fm4m_success and esm_success:
+    if fm4m_deps_success and openfold_success and boltz_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
@@ -359,7 +389,7 @@ if __name__ == "__main__":
             print("✅ Post-install setup completed successfully!")
             print("DockTKinase is ready to use.")
             print("\nInstalled components:")
-            print("  ✓ torch_nl (FM4M dependency)")
+            print("  ✓ FM4M dependencies (torch_nl, ase)")
             print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
             print("  ✓ FM4M model files")
@@ -376,8 +406,8 @@ if __name__ == "__main__":
         print("❌ Post-install setup failed!")
         print("Please check your internet connection and try again.")
         print("\nFailed components:")
-        if not torch_nl_success:
-            print("  ✗ torch_nl")
+        if not fm4m_deps_success:
+            print("  ✗ FM4M dependencies (torch_nl, ase)")
         if not openfold_success:
             print("  ✗ OpenFold3 dependencies")
         if not boltz_success:
@@ -387,8 +417,8 @@ if __name__ == "__main__":
         if not esm_success:
             print("  ✗ ESM model files")
         print("\nYou can try installing failed components manually:")
-        if not torch_nl_success:
-            print("  pip install torch_nl==0.3")
+        if not fm4m_deps_success:
+            print("  pip install torch_nl==0.3 ase")
         if not openfold_success:
             print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
         if not boltz_success:
