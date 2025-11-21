@@ -48,6 +48,17 @@ ipykernel
 transformers>=4.38
 sentencepiece
 
+# OpenFold3 and MSA Dependencies
+gemmi>=0.7.3              # Crystal structure library
+ml-collections>=1.1.0     # Configuration management
+einops>=0.8.0            # Tensor operations
+biopython>=1.86          # Biological sequence analysis
+pydantic>=2.0            # Data validation (for ColabFold API)
+lmdb>=1.7.0              # Database for OpenFold3 data pipeline
+biotite>=1.0             # Bioinformatics toolkit
+memory-profiler>=0.61.0  # Memory profiling
+lightning>=2.0           # PyTorch Lightning framework
+
 # Molecular Chemistry
 rdkit>=2024.3.5
 selfies>=2.1.0
