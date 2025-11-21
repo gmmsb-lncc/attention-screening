@@ -1,6 +1,6 @@
 # Modules
 
-**Last Updated**: October 28, 2025  
+**Last Updated**: November 18, 2025  
 **Section**: Chapter 04  
 **Audience**: Developers
 
@@ -44,6 +44,24 @@ Detailed documentation for each module in the DockTKinase project.
    - FM4M protein features
    - Feature extraction
    - Model integration
+
+### 🆕 Protein Embedding System (NEW!)
+
+7. **[PROTEIN_EMBEDDING_API.md](PROTEIN_EMBEDDING_API.md)** 🎯 **← START HERE**
+   - **Complete API Reference** (11,500+ lines)
+   - Architecture overview with diagrams
+   - Integration guide for ESM-3, OpenFold, custom models
+   - Memory management & best practices
+   - Testing & troubleshooting guide
+   - **Essential for model integration**
+
+8. **[INTEGRATION_EXAMPLES.md](INTEGRATION_EXAMPLES.md)** 🚀
+   - **Copy-paste ready code** (3,500+ lines)
+   - Complete ESM-3 integration example
+   - Complete OpenFold integration template
+   - ProtTrans integration pattern
+   - Test suite templates
+   - **Essential for implementation**
 
 ---
 

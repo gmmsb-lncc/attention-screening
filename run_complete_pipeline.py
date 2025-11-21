@@ -122,6 +122,13 @@ Dispositivos:
         help='Modelo ESM para embeddings de proteínas (default: esm2_t6_8M_UR50D, 320-dim)'
     )
     
+    parser.add_argument(
+        '--esm-dim',
+        type=int,
+        default=None,
+        help='Dimensão customizada para embeddings ESM (default: automática baseada no modelo)'
+    )
+    
     # Classification (Fase 2)
     parser.add_argument(
         '--no-classification',
@@ -233,11 +240,19 @@ def main():
         # OpenFold models
         'openfold3': 384
     }
-    esm_dim = esm_dims.get(args.esm_model, 320)
+    
+    # Usar dimensão customizada se fornecida, senão usar padrão do modelo
+    if args.esm_dim is not None:
+        esm_dim = args.esm_dim
+        dim_source = 'customizada'
+    else:
+        esm_dim = esm_dims.get(args.esm_model, 320)
+        dim_source = 'padrão'
+    
     total_dim = 768 + esm_dim
     
-    print(f'   ESM Model: {args.esm_model} ({esm_dim}-dim)')
-    print(f'   Total Embedding: {total_dim}-dim')
+    print(f'   ESM Model: {args.esm_model} ({esm_dim}-dim {dim_source})')
+    print(f'   Total Embedding: {total_dim}-dim)')
     print(f'   Device: {args.device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
     print()
@@ -273,6 +288,7 @@ def main():
         # Build (Fase 1)
         ligand_model=args.ligand_model,
         esm_model=args.esm_model,
+        esm_dim=args.esm_dim,  # Dimensão customizada (None = usar padrão)
         
         # Classification (Fase 2)
         run_classification=run_classification,
