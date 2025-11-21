@@ -50,9 +50,9 @@ from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStr
 # Boltz-2 model specifications
 MODEL_SPECS = {
     'boltz2': {
-        'dim_single': 768,      # token_s: single representation dimension
+        'dim_single': 384,      # token_s: single representation dimension (per-residue)
         'dim_pair': 128,        # token_z: pair representation dimension
-        'output_dim': 768,      # Default: single representation (mean pooled)
+        'output_dim': 384,      # Default: single representation (mean pooled)
         'description': 'Boltz-2 - Biomolecular foundation model (structure + affinity)'
     }
 }
@@ -328,9 +328,9 @@ class BoltzStrategy(BaseProteinStrategy):
             ]
         }
         
-        # Add MSA path if created
+        # Add MSA path if created (must be absolute path)
         if msa_path:
-            yaml_data['sequences'][0]['protein']['msa'] = str(msa_path)
+            yaml_data['sequences'][0]['protein']['msa'] = str(msa_path.absolute())
         
         yaml_path = self.output_dir / 'input.yaml'
         with open(yaml_path, 'w') as f:
@@ -373,7 +373,8 @@ class BoltzStrategy(BaseProteinStrategy):
             '--sampling_steps', str(sampling_steps),
             '--model', 'boltz2',  # Use Boltz-2 model
             '--write_embeddings',  # Write embeddings to npz file
-            '--accelerator', 'cpu' if self.device.type == 'cpu' else 'gpu'
+            '--accelerator', 'cpu' if self.device.type == 'cpu' else 'gpu',
+            '--no_kernels'  # Disable CUDA kernels (avoids cuequivariance-ops-torch dependency)
         ]
         
         # Add MSA server if enabled
@@ -466,38 +467,58 @@ class BoltzStrategy(BaseProteinStrategy):
         protein_dir = job_dirs[0]
         
         # Try to load embeddings - Boltz uses .npz format with --write_embeddings
-        embeddings_npz = protein_dir / 'embeddings.npz'
-        confidences_npz = protein_dir / 'confidences.npz'
+        # The file naming pattern is: embeddings_<job_id>.npz or confidences_<job_id>.npz
+        embedding_files = list(protein_dir.glob('embeddings*.npz'))
+        confidence_files = list(protein_dir.glob('confidences*.npz'))
         
-        # Try embeddings.npz first (primary output with --write_embeddings)
-        if embeddings_npz.exists():
+        # Try embeddings first (primary output with --write_embeddings)
+        if embedding_files:
+            embeddings_npz = embedding_files[0]
             self.logger.debug(f"Loading embeddings from: {embeddings_npz}")
             try:
                 data = np.load(embeddings_npz)
             except Exception as e:
                 raise RuntimeError(f"Failed to load {embeddings_npz}: {e}") from e
-        # Fall back to confidences.npz
-        elif confidences_npz.exists():
+        # Fall back to confidences
+        elif confidence_files:
+            confidences_npz = confidence_files[0]
             self.logger.debug(f"Loading embeddings from: {confidences_npz}")
             try:
                 data = np.load(confidences_npz)
             except Exception as e:
                 raise RuntimeError(f"Failed to load {confidences_npz}: {e}") from e
         else:
+            # List all files in directory for debugging
+            all_files = list(protein_dir.iterdir())
             raise RuntimeError(
                 f"No embedding files found in {protein_dir}\n"
-                f"Expected: {embeddings_npz} or {confidences_npz}\n"
+                f"Files present: {[f.name for f in all_files]}\n"
                 f"Boltz may have failed to generate embeddings."
             )
         
-        # Extract 's' (single representation)
-        if 's' not in data:
+        # Extract 's' (single representation) - try different keys
+        # Boltz may use 's', 's_trunk', or other variants
+        available_keys = list(data.keys())
+        self.logger.debug(f"Available keys in embedding file: {available_keys}")
+        
+        # Try different possible keys for embeddings
+        possible_keys = ['s_trunk', 's', 'single']
+        s = None
+        used_key = None
+        
+        for key in possible_keys:
+            if key in data:
+                s = data[key]
+                used_key = key
+                break
+        
+        if s is None:
             raise RuntimeError(
-                f"'s' key not found in embedding file. "
-                f"Available keys: {list(data.keys())}"
+                f"No valid embedding key found in file. "
+                f"Available keys: {available_keys}"
             )
         
-        s = data['s']  # Shape: [N_tokens, 768]
+        self.logger.debug(f"Using embedding key: '{used_key}' with shape: {s.shape}")
         
         # Validate shape
         if not isinstance(s, (np.ndarray, torch.Tensor)):
@@ -507,9 +528,19 @@ class BoltzStrategy(BaseProteinStrategy):
         if isinstance(s, torch.Tensor):
             s = s.cpu().numpy()
         
+        # Handle batch dimension if present
+        if s.ndim == 3:
+            # Shape: [batch, N_tokens, dim] -> squeeze batch dimension
+            if s.shape[0] != 1:
+                raise RuntimeError(
+                    f"Unexpected batch size: {s.shape[0]} (expected 1 for single sequence)"
+                )
+            s = s.squeeze(0)  # Now [N_tokens, dim]
+            self.logger.debug(f"Squeezed batch dimension: {s.shape}")
+        
         # Validate dimensions
         if s.ndim != 2:
-            raise RuntimeError(f"Invalid 's' shape: {s.shape} (expected 2D)")
+            raise RuntimeError(f"Invalid 's' shape: {s.shape} (expected 2D after batch squeeze)")
         
         n_tokens, dim = s.shape
         
