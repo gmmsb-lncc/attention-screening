@@ -110,6 +110,81 @@ def install_torch_nl():
         print(f"✗ Error installing torch_nl: {e}")
         return False
 
+
+def install_openfold_dependencies():
+    """Install OpenFold3 and MSA dependencies."""
+    try:
+        print("\nInstalling OpenFold3 and MSA dependencies...")
+        
+        # List of required packages for OpenFold3 + MSA
+        required_packages = [
+            "gemmi",              # Crystal structure library (required by OpenFold3)
+            "ml-collections",     # Configuration management (required by OpenFold3)
+            "einops",            # Tensor operations (required by OpenFold3)
+            "biopython",         # Biological sequence analysis (required by OpenFold3)
+            "pydantic",          # Data validation (required by ColabFold API)
+            "lmdb",              # Database (required by OpenFold3 data pipeline)
+            "biotite",           # Bioinformatics toolkit (required by OpenFold3)
+            "memory_profiler",   # Memory profiling (required by OpenFold3)
+            "lightning",         # PyTorch Lightning (required by OpenFold3 training)
+        ]
+        
+        installed_packages = []
+        failed_packages = []
+        
+        for package in required_packages:
+            try:
+                # Try to import the package first
+                try:
+                    if package == "ml-collections":
+                        import ml_collections
+                    elif package == "memory_profiler":
+                        import memory_profiler
+                    else:
+                        __import__(package)
+                    print(f"✓ {package} is already installed")
+                    installed_packages.append(package)
+                    continue
+                except ImportError:
+                    pass
+                
+                # Install the package
+                print(f"Installing {package}...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout per package
+                )
+                
+                if result.returncode == 0:
+                    print(f"✓ Successfully installed {package}")
+                    installed_packages.append(package)
+                else:
+                    print(f"✗ Error installing {package}: {result.stderr}")
+                    failed_packages.append(package)
+                    
+            except subprocess.TimeoutExpired:
+                print(f"✗ Timeout installing {package}")
+                failed_packages.append(package)
+            except Exception as e:
+                print(f"✗ Error installing {package}: {e}")
+                failed_packages.append(package)
+        
+        # Print summary
+        print(f"\nOpenFold3 dependencies installation summary:")
+        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
+        if failed_packages:
+            print(f"  Failed: {', '.join(failed_packages)}")
+        
+        # Return success if all packages were installed
+        return len(failed_packages) == 0
+        
+    except Exception as e:
+        print(f"✗ Error installing OpenFold3 dependencies: {e}")
+        return False
+
+
 def install_boltz_dependencies():
     """Install Boltz-2 specific dependencies."""
     try:
@@ -318,8 +393,4 @@ if __name__ == "__main__":
             print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
         if not boltz_success:
             print("  pip install einx fairscale hydra-core mashumaro chembl-structure-pipeline numba")
-        sys.exit(1)
-        print("\n" + "=" * 40)
-        print("❌ Post-install setup failed!")
-        print("Please check your internet connection and try again.")
         sys.exit(1)
