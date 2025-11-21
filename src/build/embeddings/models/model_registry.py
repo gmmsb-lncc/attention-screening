@@ -87,6 +87,34 @@ class ModelRegistry:
             description='ESM-1b 650M parameters (legacy)',
             default_layer=33,
             requires_gpu=False
+        ),
+        'esmc-300m-2024-12': ModelInfo(
+            name='esmc-300m-2024-12',
+            type='esm',
+            embedding_dim=960,
+            description='ESM-C 300M parameters (ESM-3 Cambrian)',
+            requires_gpu=False
+        ),
+        'esmc-600m-2024-12': ModelInfo(
+            name='esmc-600m-2024-12',
+            type='esm',
+            embedding_dim=1152,
+            description='ESM-C 600M parameters (ESM-3 Cambrian)',
+            requires_gpu=True
+        ),
+        'openfold3': ModelInfo(
+            name='openfold3',
+            type='esm',
+            embedding_dim=384,
+            description='OpenFold3 - structure-aware embeddings',
+            requires_gpu=True
+        ),
+        'boltz2': ModelInfo(
+            name='boltz2',
+            type='esm',
+            embedding_dim=384,
+            description='Boltz-2 - structure + affinity prediction (single representation)',
+            requires_gpu=True
         )
     }
     
