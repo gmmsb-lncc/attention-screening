@@ -110,6 +110,78 @@ def install_torch_nl():
         print(f"✗ Error installing torch_nl: {e}")
         return False
 
+def install_boltz_dependencies():
+    """Install Boltz-2 specific dependencies."""
+    try:
+        print("\nInstalling Boltz-2 dependencies...")
+        
+        # List of required packages for Boltz-2
+        required_packages = [
+            "einx",                    # Tensor operations extension
+            "fairscale",               # Distributed training
+            "hydra-core",              # Configuration management
+            "omegaconf",               # Config files (installed with hydra)
+            "mashumaro",               # Data serialization
+            "chembl-structure-pipeline",  # Chemical structure processing
+            "numba",                   # JIT compilation
+        ]
+        
+        installed_packages = []
+        failed_packages = []
+        
+        for package in required_packages:
+            try:
+                # Try to import the package first
+                try:
+                    if package == "hydra-core":
+                        import hydra
+                    elif package == "chembl-structure-pipeline":
+                        import chembl_structure_pipeline
+                    else:
+                        __import__(package.replace("-", "_"))
+                    print(f"✓ {package} is already installed")
+                    installed_packages.append(package)
+                    continue
+                except ImportError:
+                    pass
+                
+                # Install the package
+                print(f"Installing {package}...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout per package
+                )
+                
+                if result.returncode == 0:
+                    print(f"✓ Successfully installed {package}")
+                    installed_packages.append(package)
+                else:
+                    print(f"✗ Error installing {package}: {result.stderr}")
+                    failed_packages.append(package)
+                    
+            except subprocess.TimeoutExpired:
+                print(f"✗ Timeout installing {package}")
+                failed_packages.append(package)
+            except Exception as e:
+                print(f"✗ Error installing {package}: {e}")
+                failed_packages.append(package)
+        
+        # Print summary
+        print(f"\nBoltz-2 dependencies installation summary:")
+        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
+        if failed_packages:
+            print(f"  Failed: {', '.join(failed_packages)}")
+        
+        # Return success if all packages were installed
+        return len(failed_packages) == 0
+        
+    except Exception as e:
+        print(f"✗ Error installing Boltz-2 dependencies: {e}")
+        return False
+
+
 def download_esm_model():
     """Download ESM model files by loading the model."""
     try:
@@ -191,13 +263,19 @@ if __name__ == "__main__":
     # Install torch_nl dependency
     torch_nl_success = install_torch_nl()
     
+    # Install OpenFold3 and MSA dependencies
+    openfold_success = install_openfold_dependencies()
+    
+    # Install Boltz-2 dependencies
+    boltz_success = install_boltz_dependencies()
+    
     # Download FM4M model files
     fm4m_success = download_fm4m_model_files()
     
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if torch_nl_success and fm4m_success and esm_success:
+    if torch_nl_success and openfold_success and boltz_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
@@ -205,6 +283,12 @@ if __name__ == "__main__":
             print("\n" + "=" * 40)
             print("✅ Post-install setup completed successfully!")
             print("DockTKinase is ready to use.")
+            print("\nInstalled components:")
+            print("  ✓ torch_nl (FM4M dependency)")
+            print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
+            print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
+            print("  ✓ FM4M model files")
+            print("  ✓ ESM model files")
             sys.exit(0)
         else:
             print("\n" + "=" * 40)
@@ -213,6 +297,28 @@ if __name__ == "__main__":
             # Exit with success code since downloading was successful
             sys.exit(0)
     else:
+        print("\n" + "=" * 40)
+        print("❌ Post-install setup failed!")
+        print("Please check your internet connection and try again.")
+        print("\nFailed components:")
+        if not torch_nl_success:
+            print("  ✗ torch_nl")
+        if not openfold_success:
+            print("  ✗ OpenFold3 dependencies")
+        if not boltz_success:
+            print("  ✗ Boltz-2 dependencies")
+        if not fm4m_success:
+            print("  ✗ FM4M model files")
+        if not esm_success:
+            print("  ✗ ESM model files")
+        print("\nYou can try installing failed components manually:")
+        if not torch_nl_success:
+            print("  pip install torch_nl==0.3")
+        if not openfold_success:
+            print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
+        if not boltz_success:
+            print("  pip install einx fairscale hydra-core mashumaro chembl-structure-pipeline numba")
+        sys.exit(1)
         print("\n" + "=" * 40)
         print("❌ Post-install setup failed!")
         print("Please check your internet connection and try again.")
