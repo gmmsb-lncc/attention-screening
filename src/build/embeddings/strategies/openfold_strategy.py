@@ -1,15 +1,94 @@
 """
-OpenFold3 Strategy for Protein Embeddings
+OpenFold3 Strategy for Protein Embeddings with MSA Support
 
+OVERVIEW:
+=========
 This strategy integrates OpenFold3 (AlphaFold3 reproduction) to generate protein embeddings
 from sequences. Unlike ESM-2/ESM-C which focus on sequence embeddings, OpenFold3 provides
 structure-aware representations through its Pairformer and single/pair representation modules.
 
+ARCHITECTURE:
+=============
+OpenFold3 uses a transformer-based architecture with:
+1. Input Embedders: Convert sequences + MSAs into initial representations
+2. Evoformer/Pairformer: Process single (s) and pair (z) representations
+3. Structure Module: Generate 3D coordinates (we skip this for embeddings)
+4. Output: Extract single representations (s) before structure prediction
+
+For embedding extraction, we use model.run_trunk() which executes only steps 1-2,
+bypassing the expensive structure prediction step.
+
+MSA INTEGRATION:
+===============
+This strategy supports ColabFold MSA server for enhanced embedding quality:
+- Main MSA mode: Recommended for 700+ sequences (3-5 min)
+- No MSA mode: Fastest, sequence-only (instant)
+- Paired MSA: For protein complexes (not recommended for large batches)
+
+MSA enrichment improves embedding quality by incorporating evolutionary information,
+which is especially valuable for:
+- Remote homology detection
+- Protein function prediction
+- Structure-aware embeddings
+
+COMPARISON WITH OTHER MODELS:
+=============================
++--------------+---------------+------------------+------------------+
+| Model        | Type          | MSA Required     | Best For         |
++--------------+---------------+------------------+------------------+
+| ESM-2        | Language      | No               | Fast, sequence   |
+| ESM-C        | Language      | No               | Fast, optimized  |
+| OpenFold3    | Structure     | Optional         | Structure-aware  |
+| Boltz-2      | Structure     | Optional         | Biomolecules     |
+| AlphaFold3   | Structure     | Required         | Full prediction  |
++--------------+---------------+------------------+------------------+
+
+FUTURE EXTENSIBILITY (Boltz-2):
+===============================
+This strategy provides a template for Boltz-2 integration:
+
+Key similarities between OpenFold3 and Boltz-2:
+1. Both use ColabFold MSA server (same MsaConfig)
+2. Both extract embeddings from trunk modules
+3. Both use similar batch preparation
+4. Both support namespace isolation
+
+To add Boltz-2, create `boltz2_strategy.py` following this structure:
+1. Copy this file as template
+2. Update imports to use Boltz-2 modules
+3. Modify _load_model_from_local() for Boltz-2 model loading
+4. Adjust _prepare_batch() for Boltz-2 input format
+5. Update generate() to call Boltz-2's embedding extraction method
+6. Reuse MsaConfig without modification
+
+DESIGN PATTERNS:
+===============
+1. Strategy Pattern: Implements BaseProteinStrategy interface
+2. Dependency Injection: Logger and MsaConfig injected at construction
+3. Factory Pattern: MsaConfig factory methods (for_production, etc.)
+4. Template Method: generate() provides extraction algorithm structure
+5. Adapter Pattern: colabfold_settings adapts config to ColabFold API
+
+NAMESPACE ISOLATION:
+===================
+OpenFold3 has potential conflicts with ESM-2/ESM-C due to shared dependencies.
+This strategy implements namespace isolation similar to ESMCStrategy:
+
+1. Save original sys.path before import
+2. Add OPENFOLD-3/ to sys.path with priority
+3. Clear any cached openfold3 modules
+4. Import openfold3
+5. Restore original sys.path in cleanup()
+
+This allows OpenFold3 and ESM models to coexist in the same process.
+
 Key Features:
 - Extracts single representations (s) and pair representations (z) from OpenFold3
-- Uses local OpenFold-3 installation from repository root
+- Uses local OPENFOLD-3 installation from repository root
 - Compatible with DockTKinase embedding concatenation pipeline
 - Follows SOLID principles and matches ESM-2/ESM-C patterns
+- Supports multiple pooling strategies (mean, cls, max)
+- MSA-enhanced embeddings via ColabFold integration
 
 Architecture:
 - Single representations (s): [N_tokens, c_s=384] - token-level features
@@ -30,6 +109,7 @@ import torch
 import numpy as np
 
 from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStrategy
+from src.build.embeddings.config.msa_config import MsaConfig, MsaMode
 
 
 # =============================================================================
@@ -37,22 +117,38 @@ from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStr
 # =============================================================================
 
 # OpenFold3 model specifications
+# These dimensions are fixed by the OpenFold3 architecture and should not be changed
+# Boltz-2 may have different dimensions - check model specs when implementing
 MODEL_SPECS = {
     'openfold3': {
-        'dim_single': 384,      # c_s: single representation dimension
-        'dim_pair': 128,        # c_z: pair representation dimension
+        'dim_single': 384,      # c_s: single representation dimension (per-token features)
+        'dim_pair': 128,        # c_z: pair representation dimension (token-pair features)
         'output_dim': 384,      # Default: single representation (mean pooled)
         'description': 'OpenFold3 - AlphaFold3 reproduction (structure-aware embeddings)'
     }
+    # Future: Add Boltz-2 specifications here
+    # 'boltz2': {
+    #     'dim_single': ???,  # Check Boltz-2 model architecture
+    #     'dim_pair': ???,
+    #     'output_dim': ???,
+    #     'description': 'Boltz-2 - Biomolecular structure prediction'
+    # }
 }
 
 # Valid pooling strategies for single representations
+# These determine how to aggregate token-level embeddings into a single vector
+# - mean: Average across all tokens (good for global properties)
+# - cls: Use first token only (if model has CLS token like BERT)
+# - max: Maximum across tokens (captures most salient features)
 VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max'}
 
 # Default pooling strategy
+# 'mean' is recommended for protein embeddings as it captures global sequence properties
 DEFAULT_POOLING = 'mean'
 
 # Valid amino acids (standard 20 + special tokens)
+# Used for sequence validation before processing
+# Note: OpenFold3 and Boltz-2 may support additional tokens (gaps, unknown, etc.)
 VALID_AMINO_ACIDS = set('ACDEFGHIKLMNPQRSTVWY')
 
 
@@ -82,12 +178,30 @@ class OpenFoldStrategy(BaseProteinStrategy):
         >>> strategy.cleanup(strategy.model, None)
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        logger: Optional[logging.Logger] = None,
+        msa_config: Optional[MsaConfig] = None
+    ):
         """
         Initialize OpenFold strategy with dependency injection.
         
         Args:
             logger: Optional logger instance. If None, creates default logger.
+            msa_config: Optional MSA configuration. If None, uses production defaults.
+                       For embedding extraction with 700+ sequences, Main MSA mode
+                       is recommended over Paired MSA.
+        
+        Example:
+            >>> # Use default production config (recommended for 700+ sequences)
+            >>> strategy = OpenFoldStrategy()
+            >>> 
+            >>> # Use fast development config
+            >>> from src.build.embeddings.config.msa_config import MsaConfig
+            >>> strategy = OpenFoldStrategy(msa_config=MsaConfig.for_development())
+            >>> 
+            >>> # Disable MSA (fastest, lower quality)
+            >>> strategy = OpenFoldStrategy(msa_config=MsaConfig.no_msa())
         """
         super().__init__()
         self.logger = logger or logging.getLogger(__name__)
@@ -95,6 +209,10 @@ class OpenFoldStrategy(BaseProteinStrategy):
         self.config = None
         self.device = None
         self._original_sys_path = None
+        
+        # MSA configuration (optimized for large-scale embedding extraction)
+        self.msa_config = msa_config or MsaConfig.for_production()
+        self.logger.info(f"OpenFold MSA mode: {self.msa_config.mode}")
     
     def load(
         self,
@@ -152,7 +270,8 @@ class OpenFoldStrategy(BaseProteinStrategy):
             f"   - Single dim: {spec['dim_single']}\n"
             f"   - Pair dim: {spec['dim_pair']}\n"
             f"   - Output dim: {spec['output_dim']}\n"
-            f"   - Device: {device}"
+            f"   - Device: {device}\n"
+            f"   - MSA mode: {self.msa_config.mode} ({self.msa_config._estimate_time()} for 700 seqs)"
         )
         
         return self.model, None
@@ -196,9 +315,9 @@ class OpenFoldStrategy(BaseProteinStrategy):
         # Save original sys.path for cleanup
         self._original_sys_path = sys.path.copy()
         
-        # Find openfold-3/ directory (should be in repository root)
+        # Find OPENFOLD-3/ directory (should be in repository root)
         repo_root = Path(__file__).resolve().parents[4]  # Go up from src/build/embeddings/strategies/
-        openfold_path = repo_root / 'openfold-3'
+        openfold_path = repo_root / 'OPENFOLD-3'
         
         if not openfold_path.exists():
             raise FileNotFoundError(

@@ -10,9 +10,76 @@
 
 DockTKinase is a **production-grade computational pipeline** for generating molecular embeddings of kinase inhibitors and their target proteins, with an integrated **machine learning classification system** for activity prediction. Specifically designed for non-human kinases, the pipeline combines state-of-the-art foundation models with high-performance ML classifiers to create complete drug discovery workflows.
 
-**Recent Achievement**: **Modular architecture** with integrated pipeline orchestrator - complete end-to-end automation! 🚀
+**Latest Updates (Nov 2025)**: 
+- ✅ **OpenFold3 Integration**: Structure-aware protein embeddings with MSA support
+- ✅ **ColabFold MSA Server**: Automated evolutionary analysis via API
+- ✅ **Enhanced Dependencies**: Complete OpenFold3 stack auto-installation
+- 🚀 **Modular Architecture**: Integrated pipeline orchestrator with end-to-end automation
 
 This tool is particularly valuable for researchers working on neglected tropical diseases, veterinary medicine, or comparative studies between human and non-human kinases, where traditional drug discovery approaches may be limited by data availability.
+
+## 🆕 Recent Updates (November 2025)
+
+### OpenFold3 + MSA Integration
+
+**New Capabilities:**
+- **OpenFold3 Strategy**: Complete implementation for structure-aware protein embeddings (384-dim)
+- **MSA Support**: Multiple Sequence Alignment via ColabFold server integration
+- **MSA Modes**: 
+  - `MAIN_STANDARD`: Production (3-5 min for 700 sequences)
+  - `MAIN_FAST`: Development (1-2 min, optimized for testing)
+  - `MAIN_HIGH_QUALITY`: Research (5-10 min, maximum quality)
+  - `PAIRED`: Complex interactions
+  - `NONE`: Sequence-only (instant)
+- **Smart Caching**: Automatic MSA reuse with sequence hashing
+- **Factory Pattern**: `MsaConfig.for_production()`, `for_development()`, `for_research()`
+
+**Technical Details:**
+- Embedding extraction: `model.run_trunk()` → (s_input, s, z) representations
+- Output: 384-dimensional single representation (mean pooling over tokens)
+- Namespace isolation: No conflicts with ESM-2/ESM-C/ESM-3
+- Architecture: Strategy + Factory + Adapter patterns
+
+**Documentation:**
+- Configuration: [`src/build/embeddings/config/msa_config.py`](src/build/embeddings/config/msa_config.py) (615 lines)
+- Strategy: [`src/build/embeddings/strategies/openfold_strategy.py`](src/build/embeddings/strategies/openfold_strategy.py) (684 lines)
+- Examples: [`examples/openfold_msa_embedding_extraction.py`](examples/openfold_msa_embedding_extraction.py) (447 lines)
+- Guide: [`docs/04-modules/OPENFOLD_MSA_GUIDE.md`](docs/04-modules/OPENFOLD_MSA_GUIDE.md)
+
+**Auto-Installation:**
+All OpenFold3 dependencies now installed automatically via `scripts/post_install.py`:
+```
+gemmi>=0.7.3              # Crystal structure library
+ml-collections>=1.1.0     # Configuration management
+einops>=0.8.0             # Tensor operations
+biopython>=1.86           # Biological sequence analysis
+pydantic>=2.0             # Data validation (ColabFold API)
+lmdb>=1.7.0               # Database (OpenFold3 data pipeline)
+biotite>=1.0              # Bioinformatics toolkit
+memory-profiler>=0.61.0   # Memory profiling
+lightning>=2.0            # PyTorch Lightning framework
+```
+
+**Usage Example:**
+```python
+from src.build.embeddings.strategies.openfold_strategy import OpenFoldStrategy
+from src.build.embeddings.config.msa_config import MsaConfig
+
+# Production mode (recommended for 700+ sequences)
+msa_config = MsaConfig.for_production()
+strategy = OpenFoldStrategy(msa_config=msa_config)
+
+# Load model and generate embeddings
+model, _ = strategy.load('openfold3', device=device)
+embedding = strategy.generate(model, None, sequence, device)
+# Output: numpy array [384]
+```
+
+**Performance:**
+- First run (no cache): 3-5 minutes for 700 sequences
+- Cached runs: < 1 minute
+- Memory: ~4-6 GB GPU (CPU compatible)
+- Throughput: ~8-14 sequences/second (cached)
 
 ## 🚀 Key Features
 
