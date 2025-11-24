@@ -107,10 +107,12 @@ config = BuildConfig({
     'output_dir': 'custom_output',
     
     # Models
-    'esm_model': 'esm2_t36_3B_UR50D',    # ESM-2 modelo mais recente (3B params)
-    'esm_model_path': '../ESM',          # Caminho do código ESM local
+    'esm_model': 'esm2_t36_3B_UR50D',    # ESM-2 latest model (3B params)
+    'boltz2_enabled': True,              # 🆕 Enable Boltz-2 integration (384-dim)
+    'boltz2_pooling': 'multi',           # 🆕 Pooling: 'multi', 'cls', 'mean', 'max'
+    'esm_model_path': '../ESM',          # Path to local ESM code
     'fm4m_model': 'SELFIES-TED',         # Alternative ligand model
-    'fm4m_model_path': '../FM4M',        # Caminho do código FM4M local
+    'fm4m_model_path': '../FM4M',        # Path to local FM4M code
     
     # Performance
     'batch_size': 16,
