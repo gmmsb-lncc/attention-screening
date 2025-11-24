@@ -118,8 +118,10 @@ Dispositivos:
         type=str,
         default='esm2_t6_8M_UR50D',
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
-                 'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D'],
-        help='Modelo ESM para embeddings de proteínas (default: esm2_t6_8M_UR50D, 320-dim)'
+                 'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D',
+                 'esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12',
+                 'openfold3', 'boltz2'],
+        help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D, 320-dim)'
     )
     
     parser.add_argument(
@@ -224,37 +226,38 @@ def main():
     print(f'   Output: {args.output}')
     print(f'   Ligand Model: {args.ligand_model} (768-dim)')
     
-    # Determinar dimensão ESM
-    esm_dims = {
-        # ESM-2 models
+    # Determinar dimensão do modelo de proteína (single representation)
+    protein_dims = {
+        # ESM-2 models (mean pooling)
         'esm2_t6_8M_UR50D': 320,
         'esm2_t12_35M_UR50D': 480,
         'esm2_t30_150M_UR50D': 640,
         'esm2_t33_650M_UR50D': 1280,
         'esm2_t36_3B_UR50D': 2560,
         'esm2_t48_15B_UR50D': 5120,
-        # ESM-C models (ESM-3)
+        # ESM-C models (ESM-3, CLS token)
         'esmc-300m-2024-12': 960,
         'esmc-600m-2024-12': 1152,
         'esmc-6b-2024-12': 3072,
-        # OpenFold models
+        # OpenFold3 (single representation)
         'openfold3': 384,
-        # Boltz models
-        'boltz2': 768
+        # Boltz-2 (single representation, mean pooling)
+        'boltz2': 384
     }
     
     # Usar dimensão customizada se fornecida, senão usar padrão do modelo
     if args.esm_dim is not None:
-        esm_dim = args.esm_dim
+        protein_dim = args.esm_dim
         dim_source = 'customizada'
     else:
-        esm_dim = esm_dims.get(args.esm_model, 320)
+        protein_dim = protein_dims.get(args.esm_model, 320)
         dim_source = 'padrão'
     
-    total_dim = 768 + esm_dim
+    ligand_dim = 768  # FM4M SMI-TED fixo
+    total_dim = ligand_dim + protein_dim
     
-    print(f'   ESM Model: {args.esm_model} ({esm_dim}-dim {dim_source})')
-    print(f'   Total Embedding: {total_dim}-dim)')
+    print(f'   Protein Model: {args.esm_model} ({protein_dim}-dim {dim_source})')
+    print(f'   Total Embedding: {total_dim}-dim (Ligand: {ligand_dim} + Protein: {protein_dim})')
     print(f'   Device: {args.device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
     print()

@@ -1,6 +1,6 @@
 # Changelogs
 
-**Last Updated**: October 28, 2025  
+**Last Updated**: November 24, 2025  
 **Section**: Chapter 09  
 **Audience**: All Users
 
@@ -10,38 +10,40 @@ Historical record of changes, updates, and improvements to DockTKinase.
 
 ## 📚 Contents
 
+### Version Releases
+
+1. **[v2.0 - November 2025](v2.0-november-2025.md)** 🆕
+   - Boltz-2 integration
+   - Multi-model protein embeddings
+   - Architecture enhancements
+   - Documentation overhaul
+
 ### Module Changelogs
 
-1. **[ESM Changelog](esm-changelog.md)** 🧬
+2. **[ESM Changelog](esm-changelog.md)** 🧬
    - ESM-2 integration history
    - Version updates
    - Feature additions
-
-2. **[Regression Changelog](regression-changelog.md)** 📊
-   - Regression module changes
-   - New models added
-   - Performance improvements
-
-3. **[Project Changelog](project-changelog.md)** 📝
-   - Overall project history
-   - Major milestones
-   - Breaking changes
 
 ---
 
 ## 🎯 Version History
 
-### Current Version (Latest)
-- **Classification**: 6 models operational
-- **Regression**: 11 models operational
-- **Build System**: 100% automated
-- **Documentation**: Fully reorganized (Oct 2025)
+### Current Version: v2.0 (November 2025)
+- **Protein Models**: Boltz-2, ESM-2, ESM-C, OpenFold3
+- **Ligand Model**: FM4M SMI-TED (768-dim)
+- **Classification**: 10 models operational
+- **Regression**: 10 models operational
+- **Build System**: 100% automated with checkpointing
+- **Documentation**: Concise, production-focused (Nov 2025)
 
 ### Recent Updates
+- ✅ **Boltz-2 Integration** (Nov 20-24, 2025)
+- ✅ **Strategy Pattern Architecture** (Nov 21, 2025)
+- ✅ **Documentation Overhaul** (Nov 24, 2025)
 - ✅ Documentation reorganization (Oct 28, 2025)
 - ✅ Regression pipeline completion (Oct 2025)
 - ✅ ESM-2 integration optimization (2025)
-- ✅ Modularization completion (2025)
 
 ---
 
