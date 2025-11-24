@@ -47,7 +47,16 @@ Detailed documentation for each module in the DockTKinase project.
 
 ### 🆕 Protein Embedding System (NEW!)
 
-7. **[PROTEIN_EMBEDDING_API.md](PROTEIN_EMBEDDING_API.md)** 🎯 **← START HERE**
+7. **[BOLTZ_STRATEGY_GUIDE.md](BOLTZ_STRATEGY_GUIDE.md)** ⚡ **← LATEST**
+   - **Boltz-2 Integration Guide** (350+ lines)
+   - Multi-pooling strategy (CLS + mean + max)
+   - 384-dim single representation
+   - Performance benchmarks vs ESM-2/ESMFold
+   - Memory optimization strategies
+   - Complete API reference & examples
+   - **Recommended for production workflows**
+
+8. **[PROTEIN_EMBEDDING_API.md](PROTEIN_EMBEDDING_API.md)** 🎯
    - **Complete API Reference** (11,500+ lines)
    - Architecture overview with diagrams
    - Integration guide for ESM-3, OpenFold, custom models
@@ -55,7 +64,7 @@ Detailed documentation for each module in the DockTKinase project.
    - Testing & troubleshooting guide
    - **Essential for model integration**
 
-8. **[INTEGRATION_EXAMPLES.md](INTEGRATION_EXAMPLES.md)** 🚀
+9. **[INTEGRATION_EXAMPLES.md](INTEGRATION_EXAMPLES.md)** 🚀
    - **Copy-paste ready code** (3,500+ lines)
    - Complete ESM-3 integration example
    - Complete OpenFold integration template
