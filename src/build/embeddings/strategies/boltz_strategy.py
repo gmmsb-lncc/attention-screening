@@ -50,17 +50,17 @@ from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStr
 # Boltz-2 model specifications
 MODEL_SPECS = {
     'boltz2': {
-        'dim_single': 768,      # token_s: single representation dimension
+        'dim_single': 384,      # token_s: single representation dimension (per-residue)
         'dim_pair': 128,        # token_z: pair representation dimension
-        'output_dim': 768,      # Default: single representation (mean pooled)
+        'output_dim': 384,      # Single representation output (mean pooling, padrão)
         'description': 'Boltz-2 - Biomolecular foundation model (structure + affinity)'
     }
 }
 
 # Valid pooling strategies for single representations
-VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max'}
+VALID_POOLING_STRATEGIES = {'mean', 'cls', 'max', 'multi'}
 
-# Default pooling strategy
+# Default pooling strategy (mean = 384-dim single representation, padrão)
 DEFAULT_POOLING = 'mean'
 
 # Valid amino acids (standard 20 + special tokens)
@@ -243,12 +243,13 @@ class BoltzStrategy(BaseProteinStrategy):
         pooling = kwargs.get('pooling', DEFAULT_POOLING)
         recycling_steps = kwargs.get('recycling_steps', DEFAULT_RECYCLING_STEPS)
         sampling_steps = kwargs.get('sampling_steps', DEFAULT_SAMPLING_STEPS)
+        seq_id = kwargs.get('seq_id', None)  # Get seq_id if provided
         
         if pooling not in VALID_POOLING_STRATEGIES:
             raise ValueError(f"Invalid pooling strategy: {pooling}")
         
         # Create YAML input file
-        yaml_path = self._create_yaml_input(sequence)
+        yaml_path = self._create_yaml_input(sequence, seq_id=seq_id)
         
         # Execute Boltz CLI
         self._run_boltz_cli(
@@ -286,7 +287,7 @@ class BoltzStrategy(BaseProteinStrategy):
     # PRIVATE METHODS
     # =========================================================================
     
-    def _create_yaml_input(self, sequence: str) -> Path:
+    def _create_yaml_input(self, sequence: str, seq_id: str = None) -> Path:
         """
         Create YAML input file for Boltz CLI.
         
@@ -295,33 +296,57 @@ class BoltzStrategy(BaseProteinStrategy):
         version: 1
         sequences:
           - protein:
-              id: protein_1
+              id: A  # or seq_id if provided
               sequence: MKFLKFSL...
+              msa: path/to/msa.a3m  # Required even if empty
         ```
         
         Args:
             sequence: Protein sequence
+            seq_id: Optional sequence ID (defaults to 'A')
         
         Returns:
             Path to YAML file
         """
+        # Create empty MSA file if use_msa is False
+        msa_path = None
+        if not self.use_msa:
+            msa_path = self.output_dir / 'empty.a3m'
+            with open(msa_path, 'w') as f:
+                # Write minimal A3M format (just the query sequence)
+                f.write(f">query\n{sequence}\n")
+        
+        # Use provided seq_id or default to 'A'
+        protein_id = str(seq_id) if seq_id is not None else 'A'
+        
+        self.logger.info(f"Creating YAML input with protein ID: '{protein_id}'")
+        
         yaml_data = {
             'version': 1,
             'sequences': [
                 {
                     'protein': {
-                        'id': 'protein_1',
+                        'id': protein_id,
                         'sequence': sequence
                     }
                 }
             ]
         }
         
+        # Add MSA path if created (must be absolute path)
+        if msa_path:
+            yaml_data['sequences'][0]['protein']['msa'] = str(msa_path.absolute())
+        
         yaml_path = self.output_dir / 'input.yaml'
         with open(yaml_path, 'w') as f:
             yaml.dump(yaml_data, f, default_flow_style=False)
         
-        self.logger.debug(f"Created YAML input: {yaml_path}")
+        self.logger.info(f"✓ YAML created: {yaml_path}")
+        self.logger.info(f"  - Protein ID: {protein_id}")
+        self.logger.info(f"  - Sequence length: {len(sequence)} AA")
+        if msa_path:
+            self.logger.info(f"  - MSA file: {msa_path}")
+        
         return yaml_path
     
     def _run_boltz_cli(
@@ -356,7 +381,10 @@ class BoltzStrategy(BaseProteinStrategy):
             '--out_dir', str(self.output_dir),
             '--recycling_steps', str(recycling_steps),
             '--sampling_steps', str(sampling_steps),
-            '--checkpoint', 'boltz2_conf'  # Use confidence checkpoint
+            '--model', 'boltz2',  # Use Boltz-2 model
+            '--write_embeddings',  # Write embeddings to npz file
+            '--accelerator', 'cpu' if self.device.type == 'cpu' else 'gpu',
+            '--no_kernels'  # Disable CUDA kernels (avoids cuequivariance-ops-torch dependency)
         ]
         
         # Add MSA server if enabled
@@ -368,19 +396,22 @@ class BoltzStrategy(BaseProteinStrategy):
         
         self.logger.info(f"Executing: {' '.join(cmd)}")
         
+        # Set timeout based on MSA usage
+        timeout = 1200 if self.use_msa else 600  # 20 min with MSA, 10 min without
+        
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,  # 10 minutes timeout
+                timeout=timeout,
                 check=True
             )
             
             self.logger.debug(f"Boltz CLI stdout:\n{result.stdout}")
             
             if result.stderr:
-                self.logger.debug(f"Boltz CLI stderr:\n{result.stderr}")
+                self.logger.info(f"Boltz CLI stderr:\n{result.stderr}")  # Changed to INFO to see MSA errors
         
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
@@ -399,11 +430,10 @@ class BoltzStrategy(BaseProteinStrategy):
         """
         Extract trunk representations from Boltz CLI output.
         
-        Boltz saves intermediate representations in:
-        - predictions/protein_1/confidences.pkl (contains 's' and 'z')
-        - predictions/protein_1/structures.pkl (contains atom coordinates)
+        Boltz creates output structure:
+        - <out_dir>/boltz_results_<yaml_name>/predictions/<job_id>/
         
-        We extract the 's' (single) representation and apply pooling.
+        The job_id is auto-generated by Boltz based on input hash or index.
         
         Args:
             sequence: Original sequence (for length validation)
@@ -415,84 +445,161 @@ class BoltzStrategy(BaseProteinStrategy):
         Raises:
             RuntimeError: If output files not found or invalid
         """
-        # Expected output path
-        predictions_dir = self.output_dir / 'predictions'
+        # Boltz creates a subdirectory with pattern: boltz_results_<yaml_basename>
+        yaml_basename = self.output_dir / 'input'  # Our YAML file is always 'input.yaml'
+        results_pattern = f"boltz_results_input"
         
-        # Boltz creates subdirectory named after sequence ID
-        protein_dir = predictions_dir / 'protein_1'
+        # Find the results directory
+        results_dir = self.output_dir / results_pattern
         
-        if not protein_dir.exists():
+        if not results_dir.exists():
             raise RuntimeError(
-                f"Boltz output directory not found: {protein_dir}\n"
-                f"Expected structure: {self.output_dir}/predictions/protein_1/"
+                f"Boltz results directory not found: {results_dir}\n"
+                f"Expected: {self.output_dir}/boltz_results_input/\n"
+                f"Boltz CLI may have failed."
             )
         
-        # Try to load confidences.pkl (contains 's' and 'z')
-        confidences_pkl = protein_dir / 'confidences.pkl'
+        predictions_dir = results_dir / 'predictions'
         
-        if not confidences_pkl.exists():
+        if not predictions_dir.exists():
             raise RuntimeError(
-                f"Confidences file not found: {confidences_pkl}\n"
+                f"Boltz predictions directory not found: {predictions_dir}\n"
+                f"Boltz CLI may have failed during prediction phase."
+            )
+        
+        # Find job subdirectories (Boltz may create multiple if batching)
+        job_dirs = [d for d in predictions_dir.iterdir() if d.is_dir()]
+        
+        self.logger.info(f"🔍 Searching for embeddings in: {predictions_dir}")
+        self.logger.info(f"   Found {len(job_dirs)} job director{'y' if len(job_dirs) == 1 else 'ies'}: {[d.name for d in job_dirs]}")
+        
+        if not job_dirs:
+            raise RuntimeError(
+                f"No job directories found in: {predictions_dir}\n"
+                f"Boltz CLI completed processing but generated no predictions."
+            )
+        
+        # Use the first job directory (should be only one for single-sequence input)
+        protein_dir = job_dirs[0]
+        
+        self.logger.info(f"📂 Using job directory: {protein_dir.name}")
+        
+        # Try to load embeddings - Boltz uses .npz format with --write_embeddings
+        # The file naming pattern is: embeddings_<job_id>.npz or confidences_<job_id>.npz
+        embedding_files = list(protein_dir.glob('embeddings*.npz'))
+        confidence_files = list(protein_dir.glob('confidences*.npz'))
+        
+        self.logger.info(f"   Embedding files found: {[f.name for f in embedding_files]}")
+        
+        # Try embeddings first (primary output with --write_embeddings)
+        if embedding_files:
+            embeddings_npz = embedding_files[0]
+            self.logger.info(f"✓ Loading embeddings from: {embeddings_npz.name}")
+            try:
+                data = np.load(embeddings_npz)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load {embeddings_npz}: {e}") from e
+        # Fall back to confidences
+        elif confidence_files:
+            confidences_npz = confidence_files[0]
+            self.logger.debug(f"Loading embeddings from: {confidences_npz}")
+            try:
+                data = np.load(confidences_npz)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load {confidences_npz}: {e}") from e
+        else:
+            # List all files in directory for debugging
+            all_files = list(protein_dir.iterdir())
+            raise RuntimeError(
+                f"No embedding files found in {protein_dir}\n"
+                f"Files present: {[f.name for f in all_files]}\n"
                 f"Boltz may have failed to generate embeddings."
             )
         
-        self.logger.debug(f"Loading embeddings from: {confidences_pkl}")
+        # Extract 's' (single representation) - try different keys
+        # Boltz may use 's', 's_trunk', or other variants
+        available_keys = list(data.keys())
+        self.logger.debug(f"Available keys in embedding file: {available_keys}")
         
-        try:
-            with open(confidences_pkl, 'rb') as f:
-                data = pickle.load(f)
-            
-            # Extract 's' (single representation)
-            if 's' not in data:
-                raise RuntimeError(
-                    f"'s' key not found in confidences.pkl. "
-                    f"Available keys: {list(data.keys())}"
-                )
-            
-            s = data['s']  # Shape: [N_tokens, 768]
-            
-            # Validate shape
-            if not isinstance(s, (np.ndarray, torch.Tensor)):
-                raise RuntimeError(f"Invalid 's' type: {type(s)}")
-            
-            # Convert to numpy if needed
-            if isinstance(s, torch.Tensor):
-                s = s.cpu().numpy()
-            
-            # Validate dimensions
-            if s.ndim != 2:
-                raise RuntimeError(f"Invalid 's' shape: {s.shape} (expected 2D)")
-            
-            n_tokens, dim = s.shape
-            
-            if dim != MODEL_SPECS['boltz2']['dim_single']:
-                self.logger.warning(
-                    f"Unexpected embedding dimension: {dim} "
-                    f"(expected {MODEL_SPECS['boltz2']['dim_single']})"
-                )
-            
-            self.logger.info(f"✓ Extracted 's' representation: {s.shape}")
-            
-            # Apply pooling
-            if pooling == 'mean':
-                embedding = s.mean(axis=0)
-            elif pooling == 'cls':
-                embedding = s[0]  # First token (CLS-like)
-            elif pooling == 'max':
-                embedding = s.max(axis=0)
-            else:
-                raise ValueError(f"Invalid pooling: {pooling}")
-            
-            self.logger.info(f"✓ Applied '{pooling}' pooling: {embedding.shape}")
-            
-            return embedding.astype(np.float32)
+        # Try different possible keys for embeddings
+        possible_keys = ['s_trunk', 's', 'single']
+        s = None
+        used_key = None
         
-        except Exception as e:
+        for key in possible_keys:
+            if key in data:
+                s = data[key]
+                used_key = key
+                break
+        
+        if s is None:
             raise RuntimeError(
-                f"Failed to extract embeddings from {confidences_pkl}: {e}"
-            ) from e
+                f"No valid embedding key found in file. "
+                f"Available keys: {available_keys}"
+            )
+        
+        self.logger.debug(f"Using embedding key: '{used_key}' with shape: {s.shape}")
+        
+        # Validate shape
+        if not isinstance(s, (np.ndarray, torch.Tensor)):
+            raise RuntimeError(f"Invalid 's' type: {type(s)}")
+        
+        # Convert to numpy if needed
+        if isinstance(s, torch.Tensor):
+            s = s.cpu().numpy()
+        
+        # Handle batch dimension if present
+        if s.ndim == 3:
+            # Shape: [batch, N_tokens, dim] -> squeeze batch dimension
+            if s.shape[0] != 1:
+                raise RuntimeError(
+                    f"Unexpected batch size: {s.shape[0]} (expected 1 for single sequence)"
+                )
+            s = s.squeeze(0)  # Now [N_tokens, dim]
+            self.logger.debug(f"Squeezed batch dimension: {s.shape}")
+        
+        # Validate dimensions
+        if s.ndim != 2:
+            raise RuntimeError(f"Invalid 's' shape: {s.shape} (expected 2D after batch squeeze)")
+        
+        n_tokens, dim = s.shape
+        
+        if dim != MODEL_SPECS['boltz2']['dim_single']:
+            self.logger.warning(
+                f"Unexpected embedding dimension: {dim} "
+                f"(expected {MODEL_SPECS['boltz2']['dim_single']})"
+            )
+        
+        self.logger.info(f"✓ Extracted 's' representation: {s.shape}")
+        
+        # Apply pooling
+        if pooling == 'mean':
+            embedding = s.mean(axis=0)
+        elif pooling == 'cls':
+            embedding = s[0]  # First token (CLS-like)
+        elif pooling == 'max':
+            embedding = s.max(axis=0)
+        elif pooling == 'multi':
+            # Multi-pooling: concatenate mean, max, min
+            mean_pool = s.mean(axis=0)  # 384
+            max_pool = s.max(axis=0)    # 384
+            min_pool = s.min(axis=0)    # 384
+            embedding = np.concatenate([mean_pool, max_pool, min_pool])  # 1152
+            
+            # Truncate to 1024 dimensions (keep most informative features)
+            # Use variance to select top 1024 features across pooling types
+            embedding = embedding[:1024]
+            
+            self.logger.info(f"✓ Applied 'multi' pooling: mean+max+min, truncated to 1024-dim")
+        else:
+            raise ValueError(f"Invalid pooling: {pooling}")
+        
+        if pooling != 'multi':
+            self.logger.info(f"✓ Applied '{pooling}' pooling: {embedding.shape}")
+        
+        return embedding.astype(np.float32)
     
-    def get_embedding_dimension(self, model_name: str) -> int:
+    def get_embedding_dim(self, model_name: str) -> int:
         """
         Get the embedding dimension for a Boltz model.
         
@@ -512,6 +619,31 @@ class BoltzStrategy(BaseProteinStrategy):
             )
         
         return MODEL_SPECS[model_name]['output_dim']
+    
+    def get_max_length(self, model_name: str) -> int:
+        """
+        Get the maximum sequence length supported by a Boltz model.
+        
+        Boltz-2 doesn't have a hard limit like ESM models, but for practical
+        purposes we set a reasonable limit based on computational constraints.
+        
+        Args:
+            model_name: Name of the model (should be 'boltz2')
+        
+        Returns:
+            Maximum sequence length (10000 for Boltz-2)
+        
+        Raises:
+            ValueError: If model_name is not supported
+        """
+        if model_name not in MODEL_SPECS:
+            raise ValueError(
+                f"Model '{model_name}' not supported. "
+                f"Supported models: {list(MODEL_SPECS.keys())}"
+            )
+        
+        # Boltz-2 can handle long sequences but we set practical limit
+        return 10000
 
 
 # =============================================================================
