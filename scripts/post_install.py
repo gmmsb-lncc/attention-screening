@@ -79,7 +79,7 @@ def download_fm4m_model_files():
         return False
 
 def install_fm4m_dependencies():
-    """Install FM4M dependencies (torch_nl and ase)."""
+    """Install FM4M dependencies (torch_nl, ase, and torch-scatter)."""
     try:
         print("\nInstalling FM4M dependencies...")
         
@@ -127,9 +127,41 @@ def install_fm4m_dependencies():
                 print(f"✗ Error installing {package_name}: {e}")
                 failed_packages.append(package_name)
         
+        # Install torch-scatter (PyTorch Geometric extension)
+        try:
+            import torch_scatter
+            print("✓ torch-scatter is already installed")
+            installed_packages.append("torch-scatter")
+        except ImportError:
+            print("Installing torch-scatter...")
+            # Get PyTorch version to match torch-scatter wheel
+            try:
+                import torch
+                torch_version = torch.__version__.split("+")[0]  # e.g., "2.5.0"
+                cuda_version = torch.version.cuda.replace(".", "")  # e.g., "121" for CUDA 12.1
+                
+                # Install torch-scatter from PyG wheel index
+                wheel_url = f"https://data.pyg.org/whl/torch-{torch_version}+cu{cuda_version}.html"
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "torch-scatter", "-f", wheel_url],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode == 0:
+                    print("✓ Successfully installed torch-scatter")
+                    installed_packages.append("torch-scatter")
+                else:
+                    print(f"✗ Error installing torch-scatter: {result.stderr}")
+                    failed_packages.append("torch-scatter")
+            except Exception as e:
+                print(f"✗ Error installing torch-scatter: {e}")
+                failed_packages.append("torch-scatter")
+        
         # Print summary
         print(f"\nFM4M dependencies installation summary:")
-        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
+        print(f"  Installed: {len(installed_packages)}/{len(required_packages) + 1}")  # +1 for torch-scatter
         if failed_packages:
             print(f"  Failed: {', '.join(failed_packages)}")
         
@@ -389,7 +421,7 @@ if __name__ == "__main__":
             print("✅ Post-install setup completed successfully!")
             print("DockTKinase is ready to use.")
             print("\nInstalled components:")
-            print("  ✓ FM4M dependencies (torch_nl, ase)")
+            print("  ✓ FM4M dependencies (torch_nl, ase, torch-scatter)")
             print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
             print("  ✓ FM4M model files")
@@ -407,7 +439,7 @@ if __name__ == "__main__":
         print("Please check your internet connection and try again.")
         print("\nFailed components:")
         if not fm4m_deps_success:
-            print("  ✗ FM4M dependencies (torch_nl, ase)")
+            print("  ✗ FM4M dependencies (torch_nl, ase, torch-scatter)")
         if not openfold_success:
             print("  ✗ OpenFold3 dependencies")
         if not boltz_success:
@@ -419,6 +451,7 @@ if __name__ == "__main__":
         print("\nYou can try installing failed components manually:")
         if not fm4m_deps_success:
             print("  pip install torch_nl==0.3 ase")
+            print("  pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+cu121.html")
         if not openfold_success:
             print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
         if not boltz_success:
