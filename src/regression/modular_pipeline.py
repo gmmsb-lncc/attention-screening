@@ -272,7 +272,7 @@ class RegressionPipeline:
         else:
             # Fallback caso o trainer não esteja disponível
             if self.verbose:
-                print('📈 ETAPA 3: Avaliação no Conjunto de Teste Final')
+                print('📈 ETAPA 3: Avaliação no Conjunto de Teste')
                 print('=' * 70)
             
             for model_name, model in self.trained_models.items():
@@ -304,7 +304,7 @@ class RegressionPipeline:
             print("⚠️  Nenhum resultado de teste disponível")
             return
         
-        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste Final)')
+        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste)')
         print('=' * 80)
         
         # Ordenar por MAE
