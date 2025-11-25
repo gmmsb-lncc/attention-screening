@@ -157,7 +157,7 @@ def main():
         '--cache-dir',
         type=str,
         default=None,
-        help='Cache directory for models (default: ./models_cache/ESM3)'
+        help='Cache directory for models (default: ./llm/models_cache/ESM3)'
     )
     parser.add_argument(
         '--device',
@@ -186,7 +186,7 @@ def main():
     if args.cache_dir:
         cache_dir = Path(args.cache_dir).resolve()
     else:
-        cache_dir = workspace_root / 'models_cache' / 'ESM3'
+        cache_dir = workspace_root / 'llm' / 'models_cache' / 'ESM3'
     
     # Create cache directory if needed
     cache_dir.mkdir(parents=True, exist_ok=True)

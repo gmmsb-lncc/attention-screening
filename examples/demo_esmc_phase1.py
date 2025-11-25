@@ -50,7 +50,7 @@ def demo_esmc_basic():
     
     print(f"\n✓ Device: {device}")
     print(f"✓ Model: esmc-300m-2024-12 (300M params, 960-dim)")
-    print(f"✓ Cache: models_cache/ESM3/")
+    print(f"✓ Cache: llm/models_cache/ESM3/")
     
     # Inicializar ProteinEmbedding com ESM-C
     protein_emb = ProteinEmbedding(
@@ -303,7 +303,7 @@ def demo_esmc_integration():
     print("\n✅ Benefícios da Integração:")
     print("   • Backward compatible (código ESM-2 continua funcionando)")
     print("   • Strategy Pattern (fácil adicionar novos modelos)")
-    print("   • Cache local automático (models_cache/ESM3/)")
+    print("   • Cache local automático (llm/models_cache/ESM3/)")
     print("   • Mean pooling (melhor representação da sequência)")
     print("   • Flash Attention support (quando disponível)")
     print("   • Sequências mais longas (até 2048 tokens vs 1024)")
@@ -324,7 +324,7 @@ def main():
     print("\nNovos recursos:")
     print("  • Modelo: esmc-300m-2024-12 (300M params, 960-dim)")
     print("  • Pooling: Mean pooling sobre sequência")
-    print("  • Cache: models_cache/ESM3/ (local)")
+    print("  • Cache: llm/models_cache/ESM3/ (local)")
     print("  • Max length: 2048 tokens (2x ESM-2)")
     
     try:

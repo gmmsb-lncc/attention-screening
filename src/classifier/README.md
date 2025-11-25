@@ -5,26 +5,30 @@ Pipeline modular de classificação binária para predição de atividade de com
 ## 🎯 Funcionalidades
 
 ### Pipeline Multi-Modelo
-- **10 algoritmos de classificação** testados simultaneamente
+- **13 algoritmos de classificação** (10 base + 3 opcionais)
+- XGBoost é obrigatório e deve estar instalado
 - Seleção automática do melhor modelo baseado em ROC-AUC
 - Métricas completas: Accuracy, Precision, Recall, F1, ROC-AUC, MCC, etc.
 - Divisão estratificada em treino/validação/teste
 
 ### Modelos Suportados
 
-#### Modelos Base (7):
+#### Modelos Base (10 - sempre disponíveis):
 1. **RandomForest** - Random Forest com balanceamento de classes
 2. **GradientBoosting** - Gradient Boosting sequencial
 3. **LogisticRegression** - Baseline linear com regularização L2
-4. **SVC** - Support Vector Classifier com kernel RBF
-5. **KNN** - K-Nearest Neighbors com distância ponderada
-6. **MLP** - Multi-Layer Perceptron (sklearn)
-7. **NaiveBayes** - Gaussian Naive Bayes
+4. **LinearSVC** - Linear Support Vector Classifier (100-1000x mais rápido que SVC-RBF)
+5. **ExtraTrees** - Extremely Randomized Trees (mais rápido que Random Forest)
+6. **KNN** - K-Nearest Neighbors com distância ponderada
+7. **MLP** - Multi-Layer Perceptron (sklearn)
+8. **NaiveBayes** - Gaussian Naive Bayes
+9. **DecisionTree** - Árvore de decisão única (baseline interpretável)
+10. **AdaBoost** - Adaptive Boosting (boosting clássico)
 
-#### Modelos de Gradient Boosting (3):
-8. **XGBoost** - Extreme Gradient Boosting
-9. **LightGBM** - Light Gradient Boosting Machine
-10. **CatBoost** - Categorical Boosting
+#### Modelos de Gradient Boosting:
+11. **XGBoost** - Extreme Gradient Boosting (⚠️ OBRIGATÓRIO - deve estar instalado)
+12. **LightGBM** - Light Gradient Boosting Machine (opcional)
+13. **CatBoost** - Categorical Boosting (opcional)
 
 ## 📦 Uso
 
@@ -45,7 +49,7 @@ pipeline = MultiModelClassificationPipeline(
 results = pipeline.run()
 
 # Resultados automáticos:
-# - Treinamento de 10 modelos
+# - Treinamento de 13 modelos (10 base + XGBoost obrigatório + 2 opcionais)
 # - Avaliação em validação e teste
 # - Seleção do melhor modelo
 # - Métricas salvas em JSON

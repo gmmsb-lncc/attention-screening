@@ -85,9 +85,7 @@ class RegressionTrainer:
             print('='*60)
             print('✅ TREINAMENTO E VALIDAÇÃO COMPLETOS!')
             print('='*60)
-            
-            # Mostrar ranking baseado em validação (para seleção de modelos)
-            self._print_validation_ranking()
+            print()
         
         return self.val_results
     
@@ -270,55 +268,41 @@ class RegressionTrainer:
             if self.verbose:
                 print(f'   ⚠️  Erro ao salvar melhor modelo: {e}')
     
-    def _print_validation_ranking(self):
-        """Imprime ranking de modelos baseado na validação."""
-        print('\n📊 RANKING DE MODELOS (Conjunto de Validação):')
-        print('-'*60)
-        
-        df = RegressionEvaluator.compare_models(self.val_results, metric='MAE')
-        
-        for idx, (model_name, row) in enumerate(df.iterrows(), 1):
-            mae = row['MAE'] if row['MAE'] is not None else float('inf')
-            r2 = row['R2'] if row['R2'] is not None else float('-inf')
-            rmse = row['RMSE'] if row['RMSE'] is not None else float('inf')
-            time_taken = self.training_times.get(model_name, 0)
-            
-            medal = '🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else '  '
-            
-            # Formatar valores com tratamento para inf
-            mae_str = f'{mae:7.2f}' if mae != float('inf') else '    N/A'
-            rmse_str = f'{rmse:7.2f}' if rmse != float('inf') else '    N/A'
-            r2_str = f'{r2:6.4f}' if r2 != float('-inf') else '   N/A'
-            time_str = f'{time_taken:6.2f}s' if time_taken is not None else '   N/A'
-            
-            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae_str} | '
-                  f'RMSE: {rmse_str} | R²: {r2_str} | Tempo: {time_str}')
-        
-        print('-'*60)
-    
     def _print_test_ranking(self):
-        """Imprime ranking de modelos baseado no teste."""
-        print('\n📊 RANKING DE MODELOS (Conjunto de Teste Final):')
-        print('-'*60)
+        """Imprime ranking de modelos baseado no teste (formato tabela)."""
+        print('\n📊 RESUMO DOS RESULTADOS (Conjunto de Teste)')
+        print('=' * 80)
         
         df = RegressionEvaluator.compare_models(self.test_results, metric='MAE')
         
+        # Cabeçalho
+        header = f"{'Modelo':<20} {'MAE':>12} {'RMSE':>12} {'R²':>10}"
+        print(header)
+        print('-' * 80)
+        
         for idx, (model_name, row) in enumerate(df.iterrows(), 1):
             mae = row['MAE'] if row['MAE'] is not None else float('inf')
             r2 = row['R2'] if row['R2'] is not None else float('-inf')
             rmse = row['RMSE'] if row['RMSE'] is not None else float('inf')
             
-            medal = '🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else '  '
-            
             # Formatar valores com tratamento para inf
-            mae_str = f'{mae:7.2f}' if mae != float('inf') else '    N/A'
-            rmse_str = f'{rmse:7.2f}' if rmse != float('inf') else '    N/A'
-            r2_str = f'{r2:6.4f}' if r2 != float('-inf') else '   N/A'
+            mae_str = f'{mae:>12.2f}' if mae != float('inf') else '         N/A'
+            rmse_str = f'{rmse:>12.2f}' if rmse != float('inf') else '         N/A'
+            r2_str = f'{r2:>10.4f}' if r2 != float('-inf') else '       N/A'
             
-            print(f'{medal} {idx}. {model_name:20s} | MAE: {mae_str} | '
-                  f'RMSE: {rmse_str} | R²: {r2_str}')
+            row_str = f"{model_name:<20} {mae_str} {rmse_str} {r2_str}"
+            
+            # Destacar top 3
+            if idx == 1:
+                print(f'🥇 {row_str}')
+            elif idx == 2:
+                print(f'🥈 {row_str}')
+            elif idx == 3:
+                print(f'🥉 {row_str}')
+            else:
+                print(f'   {row_str}')
         
-        print('-'*60)
+        print('=' * 80)
 
 
 if __name__ == '__main__':

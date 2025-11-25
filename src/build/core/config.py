@@ -35,6 +35,9 @@ class BuildConfig:
         # Override with kwargs
         self._config.update(kwargs)
         
+        # Converter device para use_gpu (para compatibilidade com IntegratedConfig)
+        self._sync_device_to_use_gpu()
+        
         # Sincronizar dimensões após carregar todas as configurações
         self._sync_model_dimensions()
     
@@ -104,6 +107,27 @@ class BuildConfig:
                 self._config.update(file_config)
         except (json.JSONDecodeError, IOError) as e:
             raise ConfigurationError(f"Erro ao carregar arquivo de configuração {config_file}: {e}")
+    
+    def _sync_device_to_use_gpu(self) -> None:
+        """
+        Converte parâmetro 'device' para 'use_gpu'.
+        
+        Esta conversão é necessária para compatibilidade com IntegratedConfig
+        que usa 'device' (auto, cuda, mps, cpu) enquanto BuildConfig usa 'use_gpu' (bool).
+        
+        Mapping:
+          - 'auto': Detecta automaticamente (use_gpu=True, deixa ProteinEmbedding decidir)
+          - 'cuda': Força GPU CUDA (use_gpu=True)
+          - 'mps': Força GPU MPS (use_gpu=True)
+          - 'cpu': Força CPU (use_gpu=False)
+        """
+        device = self._config.get('device', 'auto')
+        
+        if device == 'cpu':
+            self._config['use_gpu'] = False
+        elif device in ('auto', 'cuda', 'mps'):
+            self._config['use_gpu'] = True
+        # Se não especificado, mantém use_gpu padrão (True)
     
     def _sync_model_dimensions(self) -> None:
         """
