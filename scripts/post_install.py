@@ -252,11 +252,14 @@ def install_ml_dependencies():
     try:
         print("\nInstalling machine learning dependencies...")
         
-        # List of required ML packages
+        # List of required ML packages for Classification & Regression
         required_packages = [
             "lightgbm",                # LightGBM gradient boosting
             "xgboost",                 # XGBoost gradient boosting  
             "catboost",                # CatBoost gradient boosting
+            "optuna",                  # Hyperparameter optimization
+            "imbalanced-learn",        # Handling imbalanced datasets (SMOTE, etc.)
+            "shap",                    # Model interpretability (SHAP values)
         ]
         
         installed_packages = []
@@ -266,7 +269,11 @@ def install_ml_dependencies():
             try:
                 # Try to import the package first
                 try:
-                    __import__(package)
+                    # Handle packages with different import names
+                    if package == "imbalanced-learn":
+                        import imblearn
+                    else:
+                        __import__(package)
                     print(f"✓ {package} is already installed")
                     installed_packages.append(package)
                     continue
