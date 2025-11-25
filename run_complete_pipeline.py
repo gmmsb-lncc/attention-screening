@@ -290,6 +290,22 @@ Dispositivos:
         help='Random seed para reprodutibilidade (default: 42)'
     )
     
+    # Stratification options
+    parser.add_argument(
+        '--stratifier-threshold',
+        type=float,
+        default=None,
+        help='Threshold manual para clustering de estratificação (0.0-1.0). Se não especificado, usa auto-threshold.'
+    )
+    
+    parser.add_argument(
+        '--stratifier-method',
+        type=str,
+        default='target',
+        choices=['silhouette', 'elbow', 'target', 'percentile'],
+        help='Método para determinar threshold automático (default: target). Ignorado se --stratifier-threshold for especificado.'
+    )
+    
     parser.add_argument(
         '--no-checkpoints',
         action='store_true',
@@ -372,6 +388,12 @@ def main():
     print(f'   Device: {args.device} → {detected_device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
     
+    # Stratification settings
+    if args.stratifier_threshold is not None:
+        print(f'   Stratification: Manual threshold = {args.stratifier_threshold}')
+    else:
+        print(f'   Stratification: Auto-threshold (method={args.stratifier_method})')
+    
     # Validar API key para modelos que requerem Forge API (ESM-C 6B)
     if args.protein_model in FORGE_API_MODELS:
         print(f'   ⚠️  Modelo requer API: Forge API (EvolutionaryScale)')
@@ -417,6 +439,11 @@ def main():
         ligand_model=args.ligand_model,
         esm_model=args.protein_model,
         esm_dim=args.protein_dim,  # Dimensão customizada (None = usar padrão do modelo)
+        
+        # Stratification settings
+        stratifier_auto_threshold=args.stratifier_threshold is None,
+        stratifier_threshold=args.stratifier_threshold,
+        stratifier_method=args.stratifier_method,
         
         # Classification (Fase 2)
         run_classification=run_classification,

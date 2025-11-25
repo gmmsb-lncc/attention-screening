@@ -9,10 +9,14 @@ from .cosine_similarity_calculator import CosineSimilarityCalculator
 from .stratifier import Stratifier
 from .validator import SplitValidator
 from .cluster_analyzer import ClusterAnalyzer
+from .adaptive_clustering import AdaptiveClustering, AdaptiveClusteringStrategy, ClusteringMetrics
 
 __all__ = [
     'CosineSimilarityCalculator',
     'Stratifier',
     'SplitValidator',
-    'ClusterAnalyzer'
+    'ClusterAnalyzer',
+    'AdaptiveClustering',
+    'AdaptiveClusteringStrategy',
+    'ClusteringMetrics'
 ]
