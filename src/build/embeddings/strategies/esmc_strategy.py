@@ -375,8 +375,8 @@ class ESMCStrategy(BaseProteinStrategy):
         # Set environment variable for ESM data root
         os.environ['ESM_DATA_ROOT'] = str(self._cache_dir)
         
-        # ESM-3 source path
-        self._esm3_path = Path(__file__).parent.parent.parent.parent.parent / "ESM" / "esm-3" / "esm-main"
+        # ESM-3 source path (inside llm/ESM/esm-3/esm-main)
+        self._esm3_path = Path(__file__).parent.parent.parent.parent.parent / "llm" / "ESM" / "esm-3" / "esm-main"
         
         # Add ESM-3 to Python path if not already there
         import sys
