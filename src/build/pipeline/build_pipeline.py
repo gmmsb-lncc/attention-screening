@@ -16,6 +16,7 @@ from src.build.matrix import EmbeddingMatrix, KinaseMatrix
 from src.build.labels import InteractionLabels, BinaryLabels
 from src.build.validation import MatrixValidator
 from src.build.stratification import Stratifier, SplitValidator
+from src.build.stratification.cluster_analyzer import ClusterAnalyzer
 from src.build.pipeline.stratification_manager import StratificationManager
 from src.build.pipeline.split_indices import SplitIndices
 
@@ -428,7 +429,9 @@ class BuildPipeline(BaseBuilder):
                           test_size: float = 0.2,
                           val_size: float = 0.1,
                           clustering_algorithm: Optional[str] = None,
-                          similarity_threshold: Optional[float] = None) -> Dict[str, Any]:
+                          similarity_threshold: Optional[float] = None,
+                          output_dir: Optional[Union[str, Path]] = None,
+                          create_visualizations: bool = True) -> Dict[str, Any]:
         """
         Run stratification to create train/test/validation splits.
         
@@ -441,6 +444,8 @@ class BuildPipeline(BaseBuilder):
             val_size: Proportion of validation set
             clustering_algorithm: Algorithm for clustering ('dbscan', 'hierarchical', 'kmeans', 'random')
             similarity_threshold: Similarity threshold for clustering
+            output_dir: Directory for saving visualizations and cluster data
+            create_visualizations: Whether to generate PCA/clustering visualizations
             
         Returns:
             Dictionary with split information and validation results
@@ -526,6 +531,57 @@ class BuildPipeline(BaseBuilder):
                 },
                 'validation_report': validation_report
             }
+            
+            # Generate cluster visualizations if requested
+            if create_visualizations and stratifier.cluster_labels is not None:
+                import numpy as np
+                try:
+                    cluster_labels = stratifier.cluster_labels
+                    cluster_analyzer = ClusterAnalyzer(self.config)
+                    
+                    # Calculate clustering metrics
+                    cluster_metrics = cluster_analyzer.calculate_clustering_metrics(
+                        concatenated_embeddings, cluster_labels
+                    )
+                    stratification_results['cluster_metrics'] = cluster_metrics
+                    
+                    # Analyze cluster distribution
+                    cluster_distribution = cluster_analyzer.analyze_cluster_distribution(
+                        cluster_labels, labels
+                    )
+                    stratification_results['cluster_distribution'] = cluster_distribution
+                    
+                    self.logger.info(f"📊 Cluster metrics: Silhouette={cluster_metrics.get('silhouette_score', 'N/A'):.4f}, n_clusters={cluster_metrics.get('n_clusters', 0)}")
+                    
+                    # Save cluster labels and generate visualizations if output_dir is provided
+                    if output_dir is not None:
+                        output_path = Path(output_dir)
+                        stratification_dir = output_path / 'stratification'
+                        stratification_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        # Save cluster labels
+                        cluster_labels_path = stratification_dir / 'cluster_labels.npy'
+                        np.save(cluster_labels_path, cluster_labels)
+                        stratification_results['cluster_labels_path'] = str(cluster_labels_path)
+                        
+                        # Save labels
+                        labels_save_path = stratification_dir / 'labels.npy'
+                        np.save(labels_save_path, labels)
+                        
+                        # Generate PCA visualization
+                        pca_plot_path = stratification_dir / 'cluster_pca.png'
+                        cluster_analyzer.visualize_clusters(
+                            embeddings=concatenated_embeddings,
+                            cluster_labels=cluster_labels,
+                            labels=labels,
+                            output_path=str(pca_plot_path)
+                        )
+                        stratification_results['pca_visualization_path'] = str(pca_plot_path)
+                        
+                        self.logger.info(f"📈 Cluster visualizations saved to: {stratification_dir}")
+                        
+                except Exception as viz_error:
+                    self.logger.warning(f"Could not generate cluster visualizations: {viz_error}")
             
             self.results['stratification'] = stratification_results
             self.logger.info(f"✅ Stratification completed: {len(train_idx)} train, {len(val_idx)} val, {len(test_idx)} test samples")
