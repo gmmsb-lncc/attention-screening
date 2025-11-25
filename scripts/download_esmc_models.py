@@ -34,7 +34,7 @@ def setup_esm3_environment():
     # Get workspace root
     script_dir = Path(__file__).resolve().parent
     workspace_root = script_dir.parent
-    esm3_path = workspace_root / 'ESM' / 'esm-3' / 'esm-main'
+    esm3_path = workspace_root / 'llm' / 'ESM' / 'esm-3' / 'esm-main'
     
     if not esm3_path.exists():
         print(f"❌ ESM-3 not found at: {esm3_path}")
