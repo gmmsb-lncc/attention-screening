@@ -1,6 +1,6 @@
 # Modules
 
-**Last Updated**: November 18, 2025  
+**Last Updated**: November 25, 2025  
 **Section**: Chapter 04  
 **Audience**: Developers
 
@@ -19,12 +19,12 @@ Detailed documentation for each module in the DockTKinase project.
 
 2. **[Classifier Module](classifier-module.md)** 🎯
    - `src/classifier/` documentation
-   - 6 classification models
+   - 10 classification models
    - Training and prediction
 
 3. **[Regression Module](regression-module.md)** 📊
    - `src/regression/` documentation
-   - 11 regression models
+   - 10 regression models
    - Validation strategies
 
 4. **[Utils Module](utils-module.md)** 🛠️
@@ -45,9 +45,24 @@ Detailed documentation for each module in the DockTKinase project.
    - Feature extraction
    - Model integration
 
-### 🆕 Protein Embedding System (NEW!)
+### 🆕 Stratification System (NEW - November 2025!)
 
-7. **[BOLTZ_STRATEGY_GUIDE.md](BOLTZ_STRATEGY_GUIDE.md)** ⚡ **← LATEST**
+7. **[ADAPTIVE_CLUSTERING_GUIDE.md](ADAPTIVE_CLUSTERING_GUIDE.md)** 🎯 **← LATEST**
+   - **Automatic threshold detection** for homogeneous embeddings
+   - 5 optimization methods: silhouette, elbow, target, percentile, manual
+   - JSON metrics export (clustering_metrics.json, split_info.json)
+   - CLI options: `--stratifier-threshold`, `--stratifier-method`
+   - Complete API reference & examples
+
+8. **[MULTI_VIEW_STRATIFICATION.md](MULTI_VIEW_STRATIFICATION.md)** ⚖️
+   - **Multi-view similarity calculation**
+   - Protein/ligand weight balancing (α=0.6, β=0.4)
+   - Biologically coherent clustering
+   - Data leakage prevention
+
+### 🆕 Protein Embedding System
+
+9. **[BOLTZ_STRATEGY_GUIDE.md](BOLTZ_STRATEGY_GUIDE.md)** ⚡
    - **Boltz-2 Integration Guide** (350+ lines)
    - Multi-pooling strategy (CLS + mean + max)
    - 384-dim single representation
@@ -56,21 +71,21 @@ Detailed documentation for each module in the DockTKinase project.
    - Complete API reference & examples
    - **Recommended for production workflows**
 
-8. **[PROTEIN_EMBEDDING_API.md](PROTEIN_EMBEDDING_API.md)** 🎯
-   - **Complete API Reference** (11,500+ lines)
-   - Architecture overview with diagrams
-   - Integration guide for ESM-3, OpenFold, custom models
-   - Memory management & best practices
-   - Testing & troubleshooting guide
-   - **Essential for model integration**
+10. **[PROTEIN_EMBEDDING_API.md](PROTEIN_EMBEDDING_API.md)** 🎯
+    - **Complete API Reference** (11,500+ lines)
+    - Architecture overview with diagrams
+    - Integration guide for ESM-3, OpenFold, custom models
+    - Memory management & best practices
+    - Testing & troubleshooting guide
+    - **Essential for model integration**
 
-9. **[INTEGRATION_EXAMPLES.md](INTEGRATION_EXAMPLES.md)** 🚀
-   - **Copy-paste ready code** (3,500+ lines)
-   - Complete ESM-3 integration example
-   - Complete OpenFold integration template
-   - ProtTrans integration pattern
-   - Test suite templates
-   - **Essential for implementation**
+11. **[INTEGRATION_EXAMPLES.md](INTEGRATION_EXAMPLES.md)** 🚀
+    - **Copy-paste ready code** (3,500+ lines)
+    - Complete ESM-3 integration example
+    - Complete OpenFold integration template
+    - ProtTrans integration pattern
+    - Test suite templates
+    - **Essential for implementation**
 
 ---
 
