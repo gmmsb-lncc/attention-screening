@@ -86,25 +86,59 @@ CC(=O)Oc1ccccc1C(=O)O	MKTAYIAK...	1	10.5	25.3	100.0
 python run_complete_pipeline.py \
     --input src/database/your_file.tsv \
     --output results/my_experiment \
-    --model esm2_t36_3B_UR50D \
+    --protein-model esm2_t36_3B_UR50D \
     --device cuda
 ```
 
 **Steps executed:**
-1. ✅ Protein embeddings (ESM-2)
+1. ✅ Protein embeddings (ESM-2/Boltz-2/OpenFold3)
 2. ✅ Ligand embeddings (FM4M)
 3. ✅ Matrix construction
 4. ✅ Binary labels
-5. ✅ Stratification (80/10/10)
-6. ✅ Train 6 classification models
+5. ✅ **Adaptive Stratification** (auto-threshold detection)
+6. ✅ Train classification models
 
-### **3A.2 Classification Models (6)**
+### **3A.2 Stratification Options**
+
+```bash
+# Auto threshold (default - target method)
+python run_complete_pipeline.py \
+    --input data.tsv \
+    --output results/auto_strat
+
+# Manual threshold
+python run_complete_pipeline.py \
+    --input data.tsv \
+    --output results/manual_strat \
+    --stratifier-threshold 0.95
+
+# Custom auto-threshold method
+python run_complete_pipeline.py \
+    --input data.tsv \
+    --output results/silhouette_strat \
+    --stratifier-method silhouette
+```
+
+**Stratification Methods:**
+| Method | Description |
+|--------|-------------|
+| `target` | Binary search for ~1% clusters (default) |
+| `silhouette` | Maximize silhouette score |
+| `elbow` | Elbow method for K-means |
+| `percentile` | Use similarity percentile |
+| `manual` | Use --stratifier-threshold value |
+
+### **3A.3 Classification Models (10)**
 - RandomForest
 - XGBoost
 - GradientBoosting
+- LightGBM
+- CatBoost
 - SVM
 - KNN
 - MLP
+- LogisticRegression
+- ExtraTrees
 
 ---
 
@@ -217,17 +251,27 @@ trainer.train_all_models()
 
 ```
 results/my_experiment/
-├── embeddings/
-│   ├── proteins/                # ESM-2 embeddings
-│   └── ligands/                 # FM4M embeddings
-├── matrix/
-│   └── embedding_matrix.npz     # Combined matrix
-├── labels/
-│   └── binary_labels.csv        # Labels
-├── models/                      # Classification models
-│   ├── RandomForest.pkl
-│   └── XGBoost.pkl
-└── regression/                  # Regression results
+├── build/
+│   ├── embeddings/
+│   │   ├── protein_embeddings.npy  # Protein embeddings
+│   │   └── ligand_embeddings.npy   # FM4M embeddings
+│   ├── embedding_matrix.npy        # Combined matrix
+│   └── stratification/
+│       ├── stratification_clustering_metrics.json  # Clustering metrics
+│       ├── stratification_split_info.json          # Split statistics
+│       └── cluster_labels.npy                      # Cluster assignments
+├── splits/
+│   ├── stratified_splits.npz       # Train/val/test indices
+│   ├── train_indices.npy
+│   ├── val_indices.npy
+│   └── test_indices.npy
+├── classifier/                     # Classification results
+│   ├── models/
+│   │   ├── RandomForest.pkl
+│   │   └── XGBoost.pkl
+│   └── metrics/
+│       └── test_metrics.json
+└── regression/                     # Regression results
     ├── models/
     │   ├── LinearRegression.pkl
     │   └── RandomForest.pkl

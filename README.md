@@ -18,6 +18,13 @@ A production-grade computational pipeline for molecular property prediction in d
 
 ## 🆕 Latest Updates (November 2025)
 
+### Adaptive Stratification (NEW)
+- **Automatic Threshold Detection**: Solves homogeneous embeddings problem
+- **5 Optimization Methods**: silhouette, elbow, target, percentile, manual
+- **Target Cluster Ratio**: Default 1% of samples as clusters
+- **JSON Metrics Export**: `clustering_metrics.json` and `split_info.json`
+- **CLI Support**: `--stratifier-threshold` and `--stratifier-method` options
+
 ### Boltz-2 Integration
 - **Structure + Affinity Prediction**: Unique biomolecular foundation model
 - **384-dim Single Representation**: Mean-pooled token embeddings (default)
@@ -64,20 +71,34 @@ python scripts/post_install.py
 python run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/boltz2_run \
-    --esm-model boltz2 \
+    --protein-model boltz2 \
     --seed 42
 
 # Use ESM-2 instead
 python run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/esm2_run \
-    --esm-model esm2_t33_650M_UR50D
+    --protein-model esm2_t33_650M_UR50D
 
 # OpenFold3 with MSA
 python run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/openfold_run \
-    --esm-model openfold3
+    --protein-model openfold3
+
+# With manual stratification threshold
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/custom_strat \
+    --protein-model boltz2 \
+    --stratifier-threshold 0.95
+
+# With custom auto-threshold method
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/silhouette_strat \
+    --protein-model boltz2 \
+    --stratifier-method silhouette
 ```
 
 ## 🏗️ Architecture
@@ -91,11 +112,13 @@ graph TB
     B --> B2[Ligand Embeddings]
     B1 --> C[Concatenation]
     B2 --> C
-    C --> D[Stratified Splits]
-    D --> E[Classification]
-    D --> F[Regression]
-    E --> G[Results & Metrics]
-    F --> G
+    C --> D[Adaptive Clustering]
+    D --> D1[Auto/Manual Threshold]
+    D1 --> E[Stratified Splits]
+    E --> F[Classification]
+    E --> G[Regression]
+    F --> H[Results & Metrics]
+    G --> H
 ```
 
 ### Protein Embedding Models
@@ -145,8 +168,19 @@ python run_complete_pipeline.py \
 ### Pipeline Phases
 
 1. **Build**: Generate embeddings and construct feature matrices
-2. **Classification**: Train binary activity classifiers (active/inactive)
-3. **Regression**: Predict continuous IC50/Ki values
+2. **Stratification**: Adaptive clustering with automatic threshold detection
+3. **Classification**: Train binary activity classifiers (active/inactive)
+4. **Regression**: Predict continuous IC50/Ki values
+
+### Stratification Methods
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `target` | Binary search for target cluster count (1% of samples) | Default, works for most datasets |
+| `silhouette` | Maximize silhouette score via grid search | Optimizing cluster quality |
+| `elbow` | Find optimal k for K-means using curvature | When cluster count matters |
+| `percentile` | Use similarity percentile based on homogeneity | Highly homogeneous data |
+| `manual` | User-specified threshold | When you know the optimal threshold |
 
 ## 📊 Model Comparison
 
@@ -328,6 +362,8 @@ embedding = strategy.generate(model, None, sequence, device)
 - **[Modules](docs/04-modules/)** - Detailed component documentation
   - [Boltz-2 Strategy Guide](docs/04-modules/BOLTZ_STRATEGY_GUIDE.md)
   - [OpenFold MSA Guide](docs/04-modules/OPENFOLD_MSA_GUIDE.md)
+  - [Multi-View Stratification](docs/04-modules/MULTI_VIEW_STRATIFICATION.md)
+  - [Adaptive Clustering Guide](docs/04-modules/ADAPTIVE_CLUSTERING_GUIDE.md)
 - **[Development](docs/05-development/)** - Contributing guidelines
 - **[Validation Reports](docs/06-validation-reports/)** - Performance benchmarks
 
