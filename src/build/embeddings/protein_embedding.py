@@ -167,12 +167,18 @@ class ProteinEmbedding(BaseEmbedding):
         )
         
         # Configurar conversor de batch (compatibilidade retroativa)
-        # NOTE: CLI-based strategies (e.g., Boltz) return (None, None) - skip batch_converter
-        if self.alphabet is not None:
+        # NOTE: ESM-C and CLI-based strategies don't use batch_converter
+        # - ESM-2: alphabet has get_batch_converter() method
+        # - ESM-C: tokenizer is HuggingFace EsmSequenceTokenizer (no batch_converter)
+        # - CLI strategies (Boltz, OpenFold): return (None, None)
+        if self.alphabet is not None and hasattr(self.alphabet, 'get_batch_converter'):
             self.batch_converter = self.alphabet.get_batch_converter()
         else:
             self.batch_converter = None
-            self.logger.info("Estratégia CLI-based detectada (sem model/tokenizer em memória)")
+            if self.alphabet is not None:
+                self.logger.info("Estratégia ESM-C detectada (tokenizer HuggingFace, sem batch_converter)")
+            else:
+                self.logger.info("Estratégia CLI-based detectada (sem model/tokenizer em memória)")
         
         return model
     
