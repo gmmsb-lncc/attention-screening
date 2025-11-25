@@ -227,7 +227,7 @@ class ESM2Strategy(BaseProteinStrategy):
     def _setup_cache_dirs(self, offload_folder: Optional[str] = None) -> None:
         """Configura diretórios de cache e offload."""
         # Cache principal
-        self._cache_dir = Path(__file__).parent.parent.parent.parent.parent / "models_cache" / "ESM"
+        self._cache_dir = Path(__file__).parent.parent.parent.parent.parent / "llm" / "models_cache" / "ESM"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         os.environ['TORCH_HOME'] = str(self._cache_dir)
         

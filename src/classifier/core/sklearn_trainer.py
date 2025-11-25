@@ -284,21 +284,31 @@ class SklearnClassificationTrainer:
         
         return summary
     
-    def print_summary(self, top_n: int = None):
+    def print_summary(self, top_n: int = None, use_test: bool = True):
         """
-        Imprime resumo dos resultados.
+        Imprime resumo dos resultados (deprecated - use print_results_summary no pipeline).
         
         Args:
             top_n: Número de top modelos a mostrar (None = todos)
+            use_test: Se True, usa resultados de teste (default). Se False, usa validação.
         """
-        results = self.val_results if self.val_results else self.train_results
+        # Por padrão, usar resultados de teste se disponíveis
+        if use_test and self.test_results:
+            results = self.test_results
+            result_type = "Teste"
+        elif self.val_results:
+            results = self.val_results
+            result_type = "Validação"
+        else:
+            results = self.train_results
+            result_type = "Treino"
         
         if not results:
             print('⚠️  Nenhum modelo treinado')
             return
         
         print('\n' + '=' * 80)
-        print('📊 RESUMO DOS MODELOS DE CLASSIFICAÇÃO')
+        print(f'📊 RESUMO DOS RESULTADOS (Conjunto de {result_type})')
         print('=' * 80)
         
         # Ordenar por ROC-AUC
