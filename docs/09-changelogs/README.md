@@ -30,10 +30,10 @@ Historical record of changes, updates, and improvements to DockTKinase.
 ## 🎯 Version History
 
 ### Current Version: v2.0 (November 2025)
-- **Protein Models**: Boltz-2, ESM-2, ESM-C, OpenFold3
+- **Protein Models**: Boltz-2, ESM-2, ESM-C
 - **Ligand Model**: FM4M SMI-TED (768-dim)
-- **Classification**: 10 models operational
-- **Regression**: 10 models operational
+- **Classification**: 12 models operational
+- **Regression**: 12 models operational
 - **Build System**: 100% automated with checkpointing
 - **Documentation**: Concise, production-focused (Nov 2025)
 

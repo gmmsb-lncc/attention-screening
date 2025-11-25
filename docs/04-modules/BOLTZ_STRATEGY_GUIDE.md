@@ -226,18 +226,6 @@ results = pipeline.run()
 | **MSA** | Optional | No |
 | **Use Case** | Binding prediction | General embeddings |
 
-### vs. OpenFold3
-
-| Aspect | Boltz-2 | OpenFold3 |
-|--------|---------|-----------|
-| **Speed** | 18 min | 45 min* |
-| **Dimension** | 384 (384/1024) | 384 |
-| **Affinity** | Yes | No |
-| **MSA** | Optional | Required |
-| **Complexity** | Medium | High |
-
-*With MSA generation
-
 ## Advanced Configuration
 
 ### Custom Pooling Strategy

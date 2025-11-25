@@ -2,7 +2,6 @@
 # ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
 # ESM-C (local): python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
 # ESM-C 6B (API): ESM_API_KEY="sua_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
-# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --protein-model openfold3 --seed 42
 # Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
 """
@@ -212,7 +211,7 @@ Dispositivos:
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
                  'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D',
                  'esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12',
-                 'openfold3', 'boltz2'],
+                 'boltz2'],
         help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D). esmc-6b requer ESM_API_KEY.'
     )
     
@@ -369,8 +368,6 @@ def main():
         'esmc-300m-2024-12': 960,
         'esmc-600m-2024-12': 1152,
         'esmc-6b-2024-12': 3072,
-        # OpenFold3 (single representation)
-        'openfold3': 384,
         # Boltz-2 (single representation, mean pooling)
         'boltz2': 384
     }

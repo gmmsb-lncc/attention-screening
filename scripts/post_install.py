@@ -173,80 +173,6 @@ def install_fm4m_dependencies():
         return False
 
 
-def install_openfold_dependencies():
-    """Install OpenFold3 and MSA dependencies."""
-    try:
-        print("\nInstalling OpenFold3 and MSA dependencies...")
-        
-        # List of required packages for OpenFold3 + MSA
-        required_packages = [
-            "gemmi",              # Crystal structure library (required by OpenFold3)
-            "ml-collections",     # Configuration management (required by OpenFold3)
-            "einops",            # Tensor operations (required by OpenFold3)
-            "biopython",         # Biological sequence analysis (required by OpenFold3)
-            "pydantic",          # Data validation (required by ColabFold API)
-            "lmdb",              # Database (required by OpenFold3 data pipeline)
-            "biotite",           # Bioinformatics toolkit (required by OpenFold3)
-            "memory_profiler",   # Memory profiling (required by OpenFold3)
-            "lightning",         # PyTorch Lightning (required by OpenFold3 training)
-        ]
-        
-        installed_packages = []
-        failed_packages = []
-        
-        for package in required_packages:
-            try:
-                # Try to import the package first
-                try:
-                    if package == "ml-collections":
-                        import ml_collections
-                    elif package == "memory_profiler":
-                        import memory_profiler
-                    else:
-                        __import__(package)
-                    print(f"✓ {package} is already installed")
-                    installed_packages.append(package)
-                    continue
-                except ImportError:
-                    pass
-                
-                # Install the package
-                print(f"Installing {package}...")
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", package],
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 minutes timeout per package
-                )
-                
-                if result.returncode == 0:
-                    print(f"✓ Successfully installed {package}")
-                    installed_packages.append(package)
-                else:
-                    print(f"✗ Error installing {package}: {result.stderr}")
-                    failed_packages.append(package)
-                    
-            except subprocess.TimeoutExpired:
-                print(f"✗ Timeout installing {package}")
-                failed_packages.append(package)
-            except Exception as e:
-                print(f"✗ Error installing {package}: {e}")
-                failed_packages.append(package)
-        
-        # Print summary
-        print(f"\nOpenFold3 dependencies installation summary:")
-        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
-        if failed_packages:
-            print(f"  Failed: {', '.join(failed_packages)}")
-        
-        # Return success if all packages were installed
-        return len(failed_packages) == 0
-        
-    except Exception as e:
-        print(f"✗ Error installing OpenFold3 dependencies: {e}")
-        return False
-
-
 def install_ml_dependencies():
     """Install machine learning dependencies (XGBoost, LightGBM, CatBoost, etc.)."""
     try:
@@ -536,9 +462,6 @@ if __name__ == "__main__":
     # Install FM4M dependencies (torch_nl and ase)
     fm4m_deps_success = install_fm4m_dependencies()
     
-    # Install OpenFold3 and MSA dependencies
-    openfold_success = install_openfold_dependencies()
-    
     # Install Boltz-2 dependencies
     boltz_success = install_boltz_dependencies()
     
@@ -551,7 +474,7 @@ if __name__ == "__main__":
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if ml_deps_success and fm4m_deps_success and openfold_success and boltz_success and fm4m_success and esm_success:
+    if ml_deps_success and fm4m_deps_success and boltz_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
@@ -562,7 +485,6 @@ if __name__ == "__main__":
             print("\nInstalled components:")
             print("  ✓ ML dependencies (lightgbm, xgboost, catboost)")
             print("  ✓ FM4M dependencies (torch_nl, ase, torch-scatter)")
-            print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
             if esm3_success:
                 print("  ✓ ESM-3 (ESM-C) - esmc-300m, esmc-600m, esmc-6b models")
@@ -586,8 +508,6 @@ if __name__ == "__main__":
             print("  ✗ ML dependencies (lightgbm, xgboost, catboost)")
         if not fm4m_deps_success:
             print("  ✗ FM4M dependencies (torch_nl, ase, torch-scatter)")
-        if not openfold_success:
-            print("  ✗ OpenFold3 dependencies")
         if not boltz_success:
             print("  ✗ Boltz-2 dependencies")
         if not esm3_success:
@@ -602,8 +522,6 @@ if __name__ == "__main__":
         if not fm4m_deps_success:
             print("  pip install torch_nl==0.3 ase")
             print("  pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+cu121.html")
-        if not openfold_success:
-            print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
         if not esm3_success:
             print("  cd llm/ESM/esm-3/esm-main && pip install -e .")
         if not boltz_success:
