@@ -4,10 +4,11 @@ ESM-C strategy implementation (EvolutionaryScale Cambrian).
 ESM-C is a protein representation learning model optimized for embeddings.
 It provides a simpler, more efficient alternative to ESM-3 for representation tasks.
 
-Models:
+Models (locally available):
 - esmc-300m-2024-12: 300M params, 960-dim, 30 layers
 - esmc-600m-2024-12: 600M params, 1152-dim, 36 layers
-- esmc-6b-2024-12: 6B params, 3072-dim, 56 layers (requires GPU >= 48GB)
+
+Note: esmc-6b-2024-12 requires EvolutionaryScale Forge API (paid subscription)
 
 Key Features:
 - Fast inference (optimized for embeddings)
@@ -34,10 +35,11 @@ class ESMCStrategy(BaseProteinStrategy):
     ESM-C is designed for fast, high-quality protein embeddings.
     Similar to ESM-2 but with improved architecture and performance.
     
-    Supported models:
+    Supported models (locally available):
     - esmc-300m-2024-12 (300M parameters, 960-dim)
     - esmc-600m-2024-12 (600M parameters, 1152-dim)
-    - esmc-6b-2024-12 (6B parameters, 3072-dim, requires GPU >= 48GB)
+    
+    Note: esmc-6b requires EvolutionaryScale Forge API (paid)
     """
     
     # Constants - Extract magic strings to avoid repetition
@@ -45,7 +47,7 @@ class ESMCStrategy(BaseProteinStrategy):
     VALID_POOLING_STRATEGIES = {'mean', 'cls'}
     VALID_AMINO_ACIDS = 'ACDEFGHIKLMNPQRSTVWY'
     
-    # Model specifications
+    # Model specifications (only locally available models)
     MODEL_SPECS = {
         'esmc-300m-2024-12': {
             'dim': 960, 
@@ -59,12 +61,7 @@ class ESMCStrategy(BaseProteinStrategy):
             'max_len': 2048,
             'registry_name': 'esmc_600m',
         },
-        'esmc-6b-2024-12': {
-            'dim': 3072,
-            'layers': 56,
-            'max_len': 2048,
-            'registry_name': 'esmc_6b',
-        },
+        # esmc-6b-2024-12 requires Forge API - not locally available
     }
     
     def __init__(self, logger=None):
