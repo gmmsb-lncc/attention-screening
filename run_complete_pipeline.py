@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --esm-model esm2_t48_15B_UR50D --seed 42
-# ESM-C: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --esm-model esmc-600m-2024-12 --seed 42
-# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --esm-model openfold3 --seed 42
-# Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --esm-model boltz2 --seed 42
+# ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
+# ESM-C: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
+# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --protein-model openfold3 --seed 42
+# Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
 """
 DockTKinase - Pipeline Completo Integrado
@@ -114,7 +114,7 @@ Dispositivos:
     )
     
     parser.add_argument(
-        '--esm-model',
+        '--protein-model',
         type=str,
         default='esm2_t6_8M_UR50D',
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
@@ -125,10 +125,10 @@ Dispositivos:
     )
     
     parser.add_argument(
-        '--esm-dim',
+        '--protein-dim',
         type=int,
         default=None,
-        help='Dimensão customizada para embeddings ESM (default: automática baseada no modelo)'
+        help='Dimensão do embedding de proteína (ex: 320, 384, 480, 640, 1280). Default: automática baseada no modelo'
     )
     
     # Classification (Fase 2)
@@ -246,19 +246,31 @@ def main():
     }
     
     # Usar dimensão customizada se fornecida, senão usar padrão do modelo
-    if args.esm_dim is not None:
-        protein_dim = args.esm_dim
+    if args.protein_dim is not None:
+        protein_dim = args.protein_dim
         dim_source = 'customizada'
     else:
-        protein_dim = protein_dims.get(args.esm_model, 320)
+        protein_dim = protein_dims.get(args.protein_model, 320)
         dim_source = 'padrão'
     
     ligand_dim = 768  # FM4M SMI-TED fixo
     total_dim = ligand_dim + protein_dim
     
-    print(f'   Protein Model: {args.esm_model} ({protein_dim}-dim {dim_source})')
+    # Detectar dispositivo real
+    import torch
+    if args.device == 'auto':
+        if torch.cuda.is_available():
+            detected_device = f"cuda ({torch.cuda.get_device_name()})"
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            detected_device = "mps (Apple Silicon GPU)"
+        else:
+            detected_device = "cpu"
+    else:
+        detected_device = args.device
+    
+    print(f'   Protein Model: {args.protein_model} ({protein_dim}-dim {dim_source})')
     print(f'   Total Embedding: {total_dim}-dim (Ligand: {ligand_dim} + Protein: {protein_dim})')
-    print(f'   Device: {args.device}')
+    print(f'   Device: {args.device} → {detected_device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
     print()
     
@@ -292,8 +304,8 @@ def main():
         
         # Build (Fase 1)
         ligand_model=args.ligand_model,
-        esm_model=args.esm_model,
-        esm_dim=args.esm_dim,  # Dimensão customizada (None = usar padrão)
+        esm_model=args.protein_model,
+        esm_dim=args.protein_dim,  # Dimensão customizada (None = usar padrão do modelo)
         
         # Classification (Fase 2)
         run_classification=run_classification,

@@ -100,7 +100,14 @@ class MLPEmbeddingPipeline:
         # Os parâmetros test_split e val_split não serão usados diretamente,
         # pois a divisão será feita estratificadamente para garantir a proporção exata.
         
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
+        
         self.input_dim = self.get_embedding_dim()
         
         # Componentes modularizados
