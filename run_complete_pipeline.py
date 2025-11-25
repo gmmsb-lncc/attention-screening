@@ -318,6 +318,21 @@ Dispositivos:
         help='Modo silencioso (menos output)'
     )
     
+    # Embedding directories (reutilização de embeddings pré-computados)
+    parser.add_argument(
+        '--protein-embeddings-dir',
+        type=str,
+        default=None,
+        help='Diretório com embeddings de proteínas pré-computados. Se especificado e existir, pula geração.'
+    )
+    
+    parser.add_argument(
+        '--ligand-embeddings-dir',
+        type=str,
+        default=None,
+        help='Diretório com embeddings de ligantes pré-computados. Pode ser compartilhado entre experimentos com diferentes modelos de proteína.'
+    )
+    
     return parser.parse_args()
 
 
@@ -388,6 +403,12 @@ def main():
     print(f'   Device: {args.device} → {detected_device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
     
+    # Embedding directories (reutilização)
+    if args.protein_embeddings_dir:
+        print(f'   📂 Protein Embeddings: {args.protein_embeddings_dir} (pré-computados)')
+    if args.ligand_embeddings_dir:
+        print(f'   📂 Ligand Embeddings: {args.ligand_embeddings_dir} (pré-computados/compartilhados)')
+    
     # Stratification settings
     if args.stratifier_threshold is not None:
         print(f'   Stratification: Manual threshold = {args.stratifier_threshold}')
@@ -439,6 +460,10 @@ def main():
         ligand_model=args.ligand_model,
         esm_model=args.protein_model,
         esm_dim=args.protein_dim,  # Dimensão customizada (None = usar padrão do modelo)
+        
+        # Embedding directories (reutilização)
+        protein_embeddings_dir=args.protein_embeddings_dir,
+        ligand_embeddings_dir=args.ligand_embeddings_dir,
         
         # Stratification settings
         stratifier_auto_threshold=args.stratifier_threshold is None,
