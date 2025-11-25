@@ -78,6 +78,7 @@ ESM_MODELS = {
     # ESM-C (EvolutionaryScale Cambrian) - Fast representation learning
     'esmc-300m-2024-12': {'dim': 960, 'layers': 30, 'max_len': 2048},    # 300M: 960-dim, mean pooling (PRIORITÁRIO)
     'esmc-600m-2024-12': {'dim': 1152, 'layers': 36, 'max_len': 2048},   # 600M: 1152-dim, mean pooling
+    'esmc-6b-2024-12': {'dim': 3072, 'layers': 56, 'max_len': 2048},     # 6B: 3072-dim, mean pooling (requer GPU >= 48GB)
     
     # OpenFold3 (AlphaFold3 reproduction) - Structure-aware embeddings
     'openfold3': {'dim': 384, 'layers': 48, 'max_len': 2048},            # OpenFold3: 384-dim single representation
