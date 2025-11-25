@@ -7,6 +7,7 @@ It provides a simpler, more efficient alternative to ESM-3 for representation ta
 Models:
 - esmc-300m-2024-12: 300M params, 960-dim, 30 layers
 - esmc-600m-2024-12: 600M params, 1152-dim, 36 layers
+- esmc-6b-2024-12: 6B params, 3072-dim, 56 layers (requires GPU >= 48GB)
 
 Key Features:
 - Fast inference (optimized for embeddings)
@@ -36,7 +37,7 @@ class ESMCStrategy(BaseProteinStrategy):
     Supported models:
     - esmc-300m-2024-12 (300M parameters, 960-dim)
     - esmc-600m-2024-12 (600M parameters, 1152-dim)
-    - esmc-6b-2024-12 (7B parameters, 3072-dim)
+    - esmc-6b-2024-12 (6B parameters, 3072-dim, requires GPU >= 48GB)
     """
     
     # Constants - Extract magic strings to avoid repetition
@@ -60,7 +61,7 @@ class ESMCStrategy(BaseProteinStrategy):
         },
         'esmc-6b-2024-12': {
             'dim': 3072,
-            'layers': 48,
+            'layers': 56,
             'max_len': 2048,
             'registry_name': 'esmc_6b',
         },
