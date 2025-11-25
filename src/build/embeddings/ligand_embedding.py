@@ -88,41 +88,43 @@ class LigandEmbedding(BaseEmbedding):
     
     def _setup_fm4m_path(self) -> None:
         """Configura caminho para FM4M."""
-        # Adicionar FM4M ao path se necessário
+        # Adicionar FM4M ao path se necessário - usar insert(0) para prioridade
         current_dir = Path(__file__).parent.parent.parent.parent  # Volta para raiz
-        fm4m_path = current_dir / "FM4M"
+        fm4m_path = current_dir / "llm" / "FM4M"
         
         if fm4m_path.exists():
             fm4m_str = str(fm4m_path)
             models_path = str(fm4m_path / "models")
             
-            if fm4m_str not in sys.path:
-                sys.path.append(fm4m_str)
+            # Usar insert(0) para garantir prioridade sobre outros módulos 'models'
             if models_path not in sys.path:
-                sys.path.append(models_path)
+                sys.path.insert(0, models_path)
+            if fm4m_str not in sys.path:
+                sys.path.insert(0, fm4m_str)
     
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
         """Retorna modelos FM4M suportados."""
         return FM4M_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega módulo FM4M e pré-carrega o modelo SMI-TED."""
+        """Carrega modelo SMI-TED diretamente (evita fm4m.py que tem bug)."""
         try:
-            import models.fm4m as fm4m
-            self.fm4m = fm4m
+            # NOTA: Não importar models.fm4m diretamente pois causa crash
+            # Importar apenas o modelo específico necessário
+            self.fm4m = None  # Não usar fm4m.py genérico
             self.fm4m_available = True
             
-            self.logger.info(f"Módulo FM4M carregado para modelo: {self.model_name}")
+            self.logger.info(f"Carregando modelo: {self.model_name}")
             
-            # Pré-carregar modelo SMI-TED se for o modelo escolhido
+            # Carregar modelo SMI-TED diretamente
             if self.model_name == "SMI-TED":
                 import os
                 import torch
-                from models.smi_ted.smi_ted_light.load import load_smi_ted
+                from smi_ted.smi_ted_light.load import load_smi_ted
                 
                 # Localizar arquivos do modelo
                 materials_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                model_files_path = os.path.join(materials_path, "FM4M", "model_files")
+                model_files_path = os.path.join(materials_path, "llm", "FM4M", "model_files")
                 
                 self.logger.info(f"Pré-carregando modelo SMI-TED de: {model_files_path}")
                 
@@ -133,18 +135,26 @@ class LigandEmbedding(BaseEmbedding):
                 if not os.path.exists(vocab_file) or not os.path.exists(ckpt_file):
                     raise DependencyError(
                         f"SMI-TED model files not found at {model_files_path}. "
-                        f"Please run: cd FM4M && python download_model_files.py"
+                        f"Please run: cd llm/FM4M && python download_model_files.py"
                     )
                 
                 # Carregar modelo UMA VEZ e cachear
                 self._smited_model = load_smi_ted(folder=model_files_path, ckpt_filename='smi-ted-Light_40.pt')
                 self._smited_model_loaded = True
                 self.logger.info("✅ Modelo SMI-TED pré-carregado e cacheado!")
+                
+                return self._smited_model
             else:
+                # Para outros modelos, tentar importar fm4m (pode falhar)
+                try:
+                    import models.fm4m as fm4m
+                    self.fm4m = fm4m
+                except ImportError:
+                    raise DependencyError(f"Modelo {self.model_name} requer fm4m que não está disponível")
+                
                 self._smited_model = None
                 self._smited_model_loaded = False
-            
-            return fm4m
+                return self.fm4m
             
         except ImportError as e:
             raise DependencyError(
@@ -196,7 +206,7 @@ class LigandEmbedding(BaseEmbedding):
     
     def _generate_batch_embeddings(self, smiles_list: List[str]) -> List[np.ndarray]:
         """
-        Gera embeddings para batch de SMILES com retry logic.
+        Gera embeddings para batch de SMILES com retry logic e processamento individual.
         
         Args:
             smiles_list: Lista de strings SMILES
@@ -216,17 +226,31 @@ class LigandEmbedding(BaseEmbedding):
             # Se modelo está cacheado (SMI-TED), usar diretamente
             if self._smited_model_loaded and self.model_name == "SMI-TED":
                 import torch
-                with torch.no_grad():
-                    # Usar modelo cacheado ao invés de recarregar
-                    representations = self._smited_model.encode(valid_smiles, return_torch=False)
+                
+                # Para SMI-TED, processar individualmente para evitar crashes do C++
+                embeddings = []
+                for smiles in valid_smiles:
+                    try:
+                        with torch.no_grad():
+                            # Processar SMILES individualmente
+                            representation = self._smited_model.encode([smiles], return_torch=False)
+                            
+                            # Converter para array numpy
+                            if hasattr(representation, 'values'):
+                                embedding = representation.values[0]
+                            else:
+                                embedding = np.array(representation[0])
+                            
+                            embeddings.append(embedding)
                     
-                    # Converter para lista de arrays numpy
-                    if hasattr(representations, 'values'):
-                        embeddings = [representations.values[i] for i in range(len(representations.values))]
-                    else:
-                        embeddings = [np.array(row) for row in representations]
-                    
-                    return embeddings
+                    except Exception as e:
+                        # Log erro mas não falhe todo o batch
+                        if self.logger:
+                            self.logger.warning(f"Falha ao processar SMILES '{smiles[:50]}...': {e}")
+                        # Re-raise para SMILES individual (será capturado no nível superior)
+                        raise EmbeddingError(f"Erro ao processar SMILES: {e}")
+                
+                return embeddings
             else:
                 # Fallback: usar método original (para outros modelos)
                 representations = self._get_representation_with_retry(valid_smiles)
@@ -474,12 +498,7 @@ class LigandEmbedding(BaseEmbedding):
         from src.build.utils import ensure_directory
         
         try:
-            # Garantir que modelo está inicializado
-            if not self._model_loaded:
-                self.logger.info("Inicializando modelo FM4M...")
-                self._do_initialize()
-            
-            # Determinar diretório de saída
+            # Determinar diretório de saída ANTES de carregar modelo
             if output_dir is None:
                 output_dir = Path(self.get_config('ligand_output_dir', 'ligand_embeddings'))
             
@@ -493,6 +512,57 @@ class LigandEmbedding(BaseEmbedding):
             # Verificar colunas obrigatórias
             if 'chembl_id' not in df.columns or 'canonical_smiles' not in df.columns:
                 raise EmbeddingError("TSV deve conter colunas 'chembl_id' e 'canonical_smiles'")
+            
+            # Obter ligantes únicos
+            unique_smiles = df.groupby('chembl_id')['canonical_smiles'].first()
+            
+            # Verificar quantos embeddings já existem (procura também em ligand_embeddings global)
+            import shutil
+            existing_embeddings = []
+            missing_embeddings = []
+
+            # Diretório global de embeddings (workaround para testes)
+            global_embeddings_dir = Path(__file__).resolve().parents[3] / 'ligand_embeddings'
+
+            for chembl_id in unique_smiles.index:
+                filename = f"{chembl_id}_embedding.npy"
+                output_file = output_dir / filename
+
+                # Se já existe no output do run, conta como existente
+                if output_file.exists():
+                    existing_embeddings.append(chembl_id)
+                    continue
+
+                # Se existe no diretório global de embeddings, copie para o output e conte como existente
+                global_file = global_embeddings_dir / filename
+                if global_file.exists():
+                    try:
+                        shutil.copy(str(global_file), str(output_file))
+                        existing_embeddings.append(chembl_id)
+                        if self.logger:
+                            self.logger.info(f"Copiado embedding global para output: {filename}")
+                        continue
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.warning(f"Falha ao copiar embedding global {filename}: {e}")
+
+                # Caso contrário, está faltando
+                missing_embeddings.append(chembl_id)
+            
+            # Se TODOS os embeddings já existem, pular inicialização do modelo
+            if len(missing_embeddings) == 0:
+                self.logger.info(f"✅ Todos os {len(existing_embeddings)} embeddings já existem - pulando geração")
+                self._output_path = output_dir
+                self.logger.info(f"Embeddings de ligantes: {len(existing_embeddings)} sucessos, 0 falhas")
+                return True
+            
+            # Se há embeddings faltando, inicializar modelo
+            self.logger.info(f"Embeddings existentes: {len(existing_embeddings)}/{len(unique_smiles)}")
+            self.logger.info(f"Embeddings faltando: {len(missing_embeddings)}")
+            
+            if not self._model_loaded:
+                self.logger.info("Inicializando modelo FM4M...")
+                self._do_initialize()
             
             # Obter SMILES únicos
             unique_smiles = df.groupby('chembl_id')['canonical_smiles'].first()

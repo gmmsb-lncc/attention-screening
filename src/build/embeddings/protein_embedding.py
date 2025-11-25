@@ -139,7 +139,7 @@ class ProteinEmbedding(BaseEmbedding):
         
         # Configurar cache local para modelos ESM
         import os
-        cache_dir = Path(__file__).parent.parent.parent.parent / "models_cache" / "ESM"
+        cache_dir = Path(__file__).parent.parent.parent.parent / "llm" / "models_cache" / "ESM"
         cache_dir.mkdir(parents=True, exist_ok=True)
         offload_folder = cache_dir / "offload"
         
@@ -189,12 +189,12 @@ class ProteinEmbedding(BaseEmbedding):
             Array NumPy com embedding
         """
         # Delegar geração para estratégia
-        # NOTE: Strategy signature is (model, tokenizer, sequence, device, **kwargs)
-        # - ESM strategies: tokenizer = alphabet (batch converter)
-        # - CLI strategies (Boltz): tokenizer = None (CLI-based, no tokenizer needed)
+        # NOTE: Strategy signature is (model, auxiliary_objects, sequence, device, **kwargs)
+        # - ESM strategies: auxiliary_objects = alphabet (batch converter)
+        # - CLI strategies (Boltz): auxiliary_objects = None (CLI-based, no tokenizer needed)
         return self.strategy.generate(
             model=self.model,
-            tokenizer=self.alphabet,
+            auxiliary_objects=self.alphabet,
             sequence=sequence,
             device=self.device,
             logger=self.logger

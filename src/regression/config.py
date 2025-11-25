@@ -93,7 +93,7 @@ class RegressionConfig:
     
     # Cache
     use_embeddings_cache: bool = True
-    cache_dir: Path = field(default_factory=lambda: Path('models_cache/embeddings'))
+    cache_dir: Path = field(default_factory=lambda: Path('llm/models_cache/embeddings'))
     
     def __post_init__(self):
         """Validação e conversões pós-inicialização."""
