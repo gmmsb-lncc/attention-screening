@@ -2,7 +2,7 @@
 """
 Download ESM-C models for DockTKinase
 
-This script downloads ESM-C models (esmc-300m-2024-12 and esmc-600m-2024-12)
+This script downloads ESM-C models (esmc-300m-2024-12, esmc-600m-2024-12, esmc-6b-2024-12)
 to the local model cache, resolving the namespace conflict between fair-esm and ESM-3.
 
 Usage:
@@ -149,9 +149,9 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        choices=['esmc-300m-2024-12', 'esmc-600m-2024-12', 'both'],
-        default='both',
-        help='Model to download (default: both)'
+        choices=['esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12', 'all'],
+        default='esmc-300m-2024-12',
+        help='Model to download (default: esmc-300m-2024-12). Use "all" to download all models.'
     )
     parser.add_argument(
         '--cache-dir',
@@ -194,8 +194,8 @@ def main():
     print()
     
     # Determine which models to download
-    if args.model == 'both':
-        models = ['esmc-300m-2024-12', 'esmc-600m-2024-12']
+    if args.model == 'all':
+        models = ['esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12']
     else:
         models = [args.model]
     
