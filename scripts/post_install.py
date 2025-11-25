@@ -319,6 +319,70 @@ def install_boltz_dependencies():
         return False
 
 
+def install_esm3_dependencies():
+    """Install ESM-3 (ESM-C) from local repository."""
+    try:
+        print("\nInstalling ESM-3 (ESM-C) dependencies...")
+        
+        # Get ESM-3 path
+        script_dir = Path(__file__).parent.absolute()
+        project_dir = script_dir.parent
+        esm3_path = project_dir / "llm" / "ESM" / "esm-3" / "esm-main"
+        
+        if not esm3_path.exists():
+            print(f"⚠️  ESM-3 not found at: {esm3_path}")
+            print("   ESM-C models will not be available.")
+            print("   To install ESM-3, run:")
+            print(f"   mkdir -p {esm3_path.parent}")
+            print(f"   git clone https://github.com/evolutionaryscale/esm.git {esm3_path}")
+            print(f"   cd {esm3_path} && pip install -e .")
+            return False
+        
+        # Check if already installed by trying to import
+        try:
+            # Clear any cached esm modules
+            import sys as sys_module
+            esm_modules = [k for k in list(sys_module.modules.keys()) if k.startswith('esm')]
+            for mod in esm_modules:
+                del sys_module.modules[mod]
+            
+            # Temporarily add ESM-3 to path
+            sys_module.path.insert(0, str(esm3_path))
+            from esm.models.esmc import ESMC
+            print("✓ ESM-3 (ESM-C) is already installed")
+            return True
+        except ImportError:
+            pass
+        
+        # Install ESM-3 in editable mode
+        print(f"Installing ESM-3 from {esm3_path}...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", str(esm3_path)],
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minutes timeout
+            cwd=str(esm3_path)
+        )
+        
+        if result.returncode == 0:
+            print("✓ Successfully installed ESM-3 (ESM-C)")
+            return True
+        else:
+            print(f"✗ Error installing ESM-3: {result.stderr}")
+            # Try to provide more helpful error message
+            if "einops" in result.stderr.lower():
+                print("   Missing dependency: einops")
+                print("   Run: pip install einops")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("✗ Timeout installing ESM-3")
+        return False
+    except Exception as e:
+        print(f"✗ Error installing ESM-3: {e}")
+        return False
+
+
 def download_esm_model():
     """Download ESM model files by loading the model."""
     try:
@@ -406,6 +470,9 @@ if __name__ == "__main__":
     # Install Boltz-2 dependencies
     boltz_success = install_boltz_dependencies()
     
+    # Install ESM-3 (ESM-C) dependencies
+    esm3_success = install_esm3_dependencies()
+    
     # Download FM4M model files
     fm4m_success = download_fm4m_model_files()
     
@@ -424,6 +491,10 @@ if __name__ == "__main__":
             print("  ✓ FM4M dependencies (torch_nl, ase, torch-scatter)")
             print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
+            if esm3_success:
+                print("  ✓ ESM-3 (ESM-C) - esmc-300m, esmc-600m, esmc-6b models")
+            else:
+                print("  ⚠️  ESM-3 (ESM-C) - not installed (ESM-C models unavailable)")
             print("  ✓ FM4M model files")
             print("  ✓ ESM model files")
             sys.exit(0)
@@ -444,6 +515,8 @@ if __name__ == "__main__":
             print("  ✗ OpenFold3 dependencies")
         if not boltz_success:
             print("  ✗ Boltz-2 dependencies")
+        if not esm3_success:
+            print("  ✗ ESM-3 (ESM-C) dependencies")
         if not fm4m_success:
             print("  ✗ FM4M model files")
         if not esm_success:
@@ -454,6 +527,8 @@ if __name__ == "__main__":
             print("  pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+cu121.html")
         if not openfold_success:
             print("  pip install gemmi ml-collections einops biopython pydantic lmdb biotite memory-profiler lightning")
+        if not esm3_success:
+            print("  cd llm/ESM/esm-3/esm-main && pip install -e .")
         if not boltz_success:
             print("  pip install einx fairscale hydra-core mashumaro chembl-structure-pipeline numba")
         sys.exit(1)
