@@ -55,6 +55,10 @@ class IntegratedConfig:
     batch_size: int = 8
     device: str = "cpu"
     
+    # Embedding directories (reutilização de embeddings pré-computados)
+    protein_embeddings_dir: Optional[str] = None  # Se especificado, usa embeddings existentes
+    ligand_embeddings_dir: Optional[str] = None   # Se especificado, usa embeddings existentes (compartilhável)
+    
     # Data split
     test_size: float = 0.2
     val_size: float = 0.1
@@ -307,7 +311,10 @@ class IntegratedPipeline:
             binary_threshold=self.config.binary_threshold,
             test_size=self.config.test_size,
             val_size=self.config.val_size,
-            random_state=self.config.random_state
+            random_state=self.config.random_state,
+            # Diretórios de embeddings pré-existentes (reutilização)
+            protein_embeddings_dir=self.config.protein_embeddings_dir,
+            ligand_embeddings_dir=self.config.ligand_embeddings_dir
         )
         
         # Executar build pipeline
