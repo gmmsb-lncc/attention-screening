@@ -48,7 +48,7 @@ ESM2_MODELS=(
 ESMC_MODELS=(
     "esmc-300m-2024-12"     # 960-dim, ~300M params
     "esmc-600m-2024-12"     # 1152-dim, ~600M params
-    "esmc-6b-2024-12"       # 4096-dim, ~6B params (API only)
+    # "esmc-6b-2024-12"       # 4096-dim, ~6B params (API only)
 )
 
 # Structure-based Models (2 models)
