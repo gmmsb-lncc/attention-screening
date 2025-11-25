@@ -30,7 +30,7 @@ pyspark>=3.0.0
 # EMBEDDINGS - GPU Acelerado
 # ==============================================================================
 
-# fair-esm - REMOVIDO (ESM incluído localmente em ESM/)
+fair-esm>=2.0.0  # Meta AI ESM-2 models for protein embeddings
 transformers>=4.38
 sentencepiece
 accelerate  # Para acelerar transformers com GPU

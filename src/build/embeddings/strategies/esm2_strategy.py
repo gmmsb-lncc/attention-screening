@@ -86,8 +86,8 @@ class ESM2Strategy(BaseProteinStrategy):
                 self.logger.info(f"Carregando modelo ESM-2: {model_name}")
                 self.logger.info(f"Cache de modelos: {self._cache_dir}")
             
-            # Importar ESM (pode estar em código local)
-            import esm
+            # Importar ESM - tentar local primeiro, depois instalado
+            esm = self._import_esm()
             
             if needs_offload:
                 model, alphabet = self._load_with_offloading(esm, model_name, device)
@@ -237,6 +237,67 @@ class ESM2Strategy(BaseProteinStrategy):
         else:
             self._offload_folder = self._cache_dir / "offload"
         self._offload_folder.mkdir(parents=True, exist_ok=True)
+    
+    def _import_esm(self) -> Any:
+        """
+        Importa módulo ESM com fallback automático.
+        
+        Ordem de tentativa:
+        1. ESM instalado via pip (fair-esm) - preferido para reprodutibilidade
+        2. ESM local em llm/ESM (fallback para desenvolvimento)
+        
+        Returns:
+            Módulo ESM importado
+            
+        Raises:
+            ModelLoadError: Se ESM não estiver disponível
+        """
+        import sys
+        
+        # Tentativa 1: ESM instalado via pip (preferido para reprodutibilidade)
+        try:
+            import esm
+            if hasattr(esm, 'pretrained'):
+                if self.logger:
+                    self.logger.info("✅ ESM loaded from pip package (fair-esm)")
+                return esm
+        except ImportError:
+            pass
+        
+        # Tentativa 2: ESM local em llm/ESM (fallback)
+        # Calcula caminho relativo ao projeto (funciona em qualquer máquina)
+        project_root = Path(__file__).parent.parent.parent.parent.parent
+        esm_local_path = project_root / "llm" / "ESM"
+        
+        if esm_local_path.exists():
+            esm_str = str(esm_local_path)
+            if esm_str not in sys.path:
+                sys.path.insert(0, esm_str)
+            
+            # Forçar reimportação após modificar sys.path
+            if 'esm' in sys.modules:
+                del sys.modules['esm']
+            
+            try:
+                import esm
+                if hasattr(esm, 'pretrained'):
+                    if self.logger:
+                        self.logger.info(f"✅ ESM loaded from local: {esm_local_path}")
+                    return esm
+            except ImportError as e:
+                if self.logger:
+                    self.logger.warning(f"⚠️ Failed to load local ESM: {e}")
+        
+        # Nenhum ESM disponível - instruções claras para o usuário
+        raise ModelLoadError(
+            "ESM module not available.\n\n"
+            "SOLUTIONS:\n"
+            "1. Install via pip (RECOMMENDED):\n"
+            "   pip install fair-esm\n\n"
+            "2. Or clone the ESM repository:\n"
+            "   git clone https://github.com/facebookresearch/esm.git llm/ESM\n\n"
+            "For more info: https://github.com/facebookresearch/esm"
+        )
     
     def _load_with_offloading(
         self, 
