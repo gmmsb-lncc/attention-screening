@@ -1,8 +1,15 @@
-# Estratificação Avançada Multi-View
+# Advanced Multi-View Stratification
 
-## 📋 Visão Geral
+## 📋 Overview
 
-A estratificação multi-view é uma técnica robusta que considera simultaneamente a similaridade de **proteínas** e **ligantes** para criar splits de dados biologicamente coerentes em train/validation/test.
+Multi-view stratification is a robust technique that simultaneously considers **protein** and **ligand** similarity to create biologically coherent train/validation/test splits.
+
+### Key Features (November 2025)
+
+- **Adaptive Clustering**: Automatic threshold detection for homogeneous data
+- **5 Optimization Methods**: silhouette, elbow, target, percentile, manual
+- **JSON Metrics Export**: Complete clustering and split statistics
+- **CLI Support**: `--stratifier-threshold` and `--stratifier-method` options
 
 ## 🎯 O Problema
 
@@ -175,21 +182,55 @@ Test:  Cluster 1 (20%), Cluster 2 (20%), Cluster 3 (20%)
 | **Protein-only** | 1.0 | 0.0 | Ignorar similaridade de ligantes |
 | **Ligand-only** | 0.0 | 1.0 | Ignorar similaridade de proteínas |
 
-## 🔧 Uso no DockTKinase
+## 🔧 Usage in DockTKinase
 
-### Configuração (src/build/stratification/stratifier.py)
+### CLI Options
+
+```bash
+# Auto threshold with target method (default)
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/auto_strat
+
+# Manual threshold
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/manual_strat \
+    --stratifier-threshold 0.95
+
+# Custom auto-threshold method
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/silhouette_strat \
+    --stratifier-method silhouette
+```
+
+### Python Configuration (src/build/stratification/stratifier.py)
 
 ```python
+from src.build.stratification import Stratifier
+
+# Auto threshold with adaptive clustering (default)
 stratifier = Stratifier(
     config=config,
-    clustering_algorithm='hierarchical',  # ou 'dbscan', 'kmeans'
-    similarity_threshold=0.7,
-    protein_weight=0.6,  # α
-    ligand_weight=0.4    # β
+    clustering_algorithm='adaptive',  # Uses adaptive threshold detection
+    adaptive_method='target',         # Binary search for target cluster count
+    target_cluster_ratio=0.01,        # 1% of samples as clusters
+    protein_weight=0.6,               # α
+    ligand_weight=0.4                 # β
+)
+
+# Manual threshold
+stratifier = Stratifier(
+    config=config,
+    clustering_algorithm='adaptive',
+    similarity_threshold=0.95,        # Triggers 'manual' mode
+    protein_weight=0.6,
+    ligand_weight=0.4
 )
 ```
 
-### Execução
+### Execution
 
 ```python
 train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
@@ -199,42 +240,60 @@ train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
     test_size=0.2,
     val_size=0.1,
     protein_weight=0.6,
-    ligand_weight=0.4
+    ligand_weight=0.4,
+    output_dir='results/stratification'  # Saves metrics JSON
 )
 ```
 
-### Resultado
+### Result
 
 ```python
 {
-    'train_indices': [0, 2, 4, ...],  # 70% das amostras
-    'val_indices': [1, 5, 8, ...],    # 10% das amostras
-    'test_indices': [3, 6, 9, ...],   # 20% das amostras
-    'n_clusters': 15,
+    'train_indices': [0, 2, 4, ...],  # 70% of samples
+    'val_indices': [1, 5, 8, ...],    # 10% of samples
+    'test_indices': [3, 6, 9, ...],   # 20% of samples
+    'n_clusters': 134,
     'cluster_sizes': {0: 1200, 1: 850, ...}
 }
 ```
 
-## 📈 Benefícios
+### Output Files
 
-### 1. Train/Val/Test Mais Realistas
+After stratification with `output_dir` specified:
 
-- **Evita data leakage molecular**: Proteínas/ligantes similares ficam no mesmo cluster
-- **Distribui clusters balanceadamente**: Cada split tem amostras de todos os clusters
+```
+results/stratification/
+├── stratification_clustering_metrics.json  # Clustering quality metrics
+├── stratification_split_info.json          # Split statistics
+└── cluster_labels.npy                      # Cluster assignments
+```
 
-### 2. Clusters Biologicamente Coerentes
+## 📈 Benefits
 
-- **Agrupa pares similares**: Mesma proteína + ligantes similares
-- **Respeita hierarquia biológica**: Famílias de kinases, classes de compostos
+### 1. More Realistic Train/Val/Test Splits
 
-### 3. Melhor Generalização
+- **Avoids molecular data leakage**: Similar proteins/ligands stay in the same cluster
+- **Balanced cluster distribution**: Each split has samples from all clusters
 
-- **Modelo aprende padrões robustos**: Não memoriza combinações específicas
-- **Predições mais confiáveis**: Funciona em novos pares proteína-ligante
+### 2. Biologically Coherent Clusters
 
-## 📊 Validação
+- **Groups similar pairs**: Same protein + similar ligands
+- **Respects biological hierarchy**: Kinase families, compound classes
 
-### Métricas de Qualidade
+### 3. Better Generalization
+
+- **Model learns robust patterns**: Doesn't memorize specific combinations
+- **More reliable predictions**: Works on new protein-ligand pairs
+
+### 4. Adaptive Threshold Detection (NEW)
+
+- **Handles homogeneous data**: Automatically adjusts threshold for similar embeddings
+- **Multiple optimization methods**: Choose the best approach for your dataset
+- **JSON metrics export**: Track clustering quality and split statistics
+
+## 📊 Validation
+
+### Quality Metrics
 
 ```python
 validation_report = split_validator.validate_splits_comprehensively(
@@ -246,34 +305,29 @@ validation_report = split_validator.validate_splits_comprehensively(
 )
 ```
 
-**Métricas retornadas:**
-- **Label balance**: Distribuição de classes ativa/inativa
-- **Cluster distribution**: Representação de cada cluster nos splits
-- **Similarity statistics**: Similaridade intra/inter-cluster
-- **Leakage detection**: Verifica se há sobreposição molecular
+**Metrics returned:**
+- **Label balance**: Active/inactive class distribution
+- **Cluster distribution**: Representation of each cluster in splits
+- **Similarity statistics**: Intra/inter-cluster similarity
+- **Leakage detection**: Checks for molecular overlap
 
-## 🎓 Resumo
+### Clustering Metrics (from JSON)
 
-### O que são os pesos?
+- **Silhouette score**: Cluster quality (-1 to 1, higher is better)
+- **Calinski-Harabasz score**: Cluster separation
+- **Davies-Bouldin score**: Cluster similarity (lower is better)
+- **Threshold used**: Automatically determined or manual
 
-- **Coeficientes de importância relativa** (α e β)
-- Controlam quanto cada "visão" (proteína vs ligante) contribui para similaridade total
+## 🔗 Related Documentation
 
-### Por que α=0.6 e β=0.4?
-
-- Reflete **importância biológica**: proteína determina mais a atividade
-- Balanceia **dimensionalidade**: proteína tem menos features mas mais relevantes
-- **Validado empiricamente**: funciona bem em benchmarks de drug discovery
-
-### Como afeta os resultados?
-
-- **Train/Val/Test mais realistas**: evita data leakage molecular
-- **Clusters biologicamente coerentes**: agrupa pares proteína-ligante similares
-- **Melhor generalização**: modelo aprende padrões robustos
+- **[Adaptive Clustering Guide](ADAPTIVE_CLUSTERING_GUIDE.md)** - Detailed threshold optimization methods
+- **[Cluster PCA Visualization](../../scripts/visualize_cluster_pca.py)** - Visualization script
 
 ---
 
-**Referências**:
+**References**:
 - ESM-2: Protein Language Model (Lin et al., 2022)
 - SMI-TED: Molecular Transformer (Honda et al., 2019)
 - Cosine Similarity in Drug Discovery (Muegge & Oloff, 2006)
+
+**Last Updated**: November 25, 2025
