@@ -6,6 +6,7 @@ Implementa Factory Pattern para desacoplar criação de objetos.
 from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStrategy
 from src.build.embeddings.strategies.esm2_strategy import ESM2Strategy
 from src.build.embeddings.strategies.esmc_strategy import ESMCStrategy
+from src.build.embeddings.strategies.esmc_forge_strategy import ESMCForgeStrategy
 from src.build.embeddings.strategies.openfold_strategy import OpenFoldStrategy
 from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
 
@@ -42,11 +43,15 @@ class ProteinModelFactory:
         'esm1b_t33_650M_UR50S', # ESM-1b (legacy)
     }
     
-    # Modelos ESM-C suportados (EvolutionaryScale Cambrian)
+    # Modelos ESM-C suportados localmente (EvolutionaryScale Cambrian)
     ESMC_MODELS = {
         'esmc-300m-2024-12',    # 300M parâmetros, 960-dim (PRIORITÁRIO)
         'esmc-600m-2024-12',    # 600M parâmetros, 1152-dim
-        'esmc-6b-2024-12',      # 7B parâmetros, 3072-dim
+    }
+    
+    # Modelos ESM-C via Forge API (requer ESM_API_KEY)
+    ESMC_FORGE_MODELS = {
+        'esmc-6b-2024-12',      # 6B parâmetros, 3072-dim (via API)
     }
     
     # Modelos OpenFold suportados (AlphaFold3 reproduction)
@@ -91,9 +96,13 @@ class ProteinModelFactory:
         if model_name in ProteinModelFactory.ESM2_MODELS:
             return ESM2Strategy()
         
-        # Detectar ESM-C
+        # Detectar ESM-C (local)
         if model_name in ProteinModelFactory.ESMC_MODELS:
             return ESMCStrategy()
+        
+        # Detectar ESM-C Forge (API - 6B model)
+        if model_name in ProteinModelFactory.ESMC_FORGE_MODELS:
+            return ESMCForgeStrategy()
         
         # Detectar OpenFold
         if model_name in ProteinModelFactory.OPENFOLD_MODELS:
@@ -111,6 +120,7 @@ class ProteinModelFactory:
         # Modelo não suportado
         supported_esm2 = sorted(ProteinModelFactory.ESM2_MODELS)
         supported_esmc = sorted(ProteinModelFactory.ESMC_MODELS)
+        supported_esmc_forge = sorted(ProteinModelFactory.ESMC_FORGE_MODELS)
         supported_openfold = sorted(ProteinModelFactory.OPENFOLD_MODELS)
         supported_boltz = sorted(ProteinModelFactory.BOLTZ_MODELS)
         
@@ -118,8 +128,10 @@ class ProteinModelFactory:
             f"Modelo de proteína '{model_name}' não é suportado.\n\n"
             f"Modelos ESM-2 disponíveis:\n"
             + "\n".join(f"  • {m}" for m in supported_esm2)
-            + "\n\nModelos ESM-C disponíveis:\n"
+            + "\n\nModelos ESM-C disponíveis (local):\n"
             + "\n".join(f"  • {m}" for m in supported_esmc)
+            + "\n\nModelos ESM-C disponíveis (via Forge API - requer ESM_API_KEY):\n"
+            + "\n".join(f"  • {m}" for m in supported_esmc_forge)
             + "\n\nModelos OpenFold disponíveis:\n"
             + "\n".join(f"  • {m}" for m in supported_openfold)
             + "\n\nModelos Boltz disponíveis:\n"
