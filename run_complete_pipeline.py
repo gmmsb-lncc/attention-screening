@@ -50,6 +50,7 @@ import sys
 import time
 import argparse
 from pathlib import Path
+from typing import Optional
 
 # Adicionar path do projeto
 project_root = Path(__file__).parent
@@ -62,12 +63,13 @@ sys.path.insert(0, str(project_root / 'src'))
 FORGE_API_MODELS = {'esmc-6b-2024-12'}
 
 
-def validate_forge_api_key(model_name: str) -> bool:
+def validate_forge_api_key(model_name: str, api_key: Optional[str] = None) -> bool:
     """
     Valida se a API key do Forge está configurada para modelos que requerem acesso remoto.
     
     Args:
         model_name: Nome do modelo selecionado
+        api_key: API key passada via --api (opcional)
         
     Returns:
         True se a API key está válida ou não é necessária, False caso contrário
@@ -90,11 +92,18 @@ def validate_forge_api_key(model_name: str) -> bool:
     print('   4. Gere uma nova API key')
     print()
     
-    # Verificar se já está configurada via variável de ambiente
-    api_key = os.environ.get('ESM_API_KEY', '').strip()
-    
+    # Prioridade: 1) --api parameter, 2) ESM_API_KEY env var
     if api_key:
-        print(f'✅ ESM_API_KEY encontrada no ambiente (***{api_key[-4:]})')
+        os.environ['ESM_API_KEY'] = api_key
+        print(f'✅ API key fornecida via --api (***{api_key[-4:]})')
+        print()
+        return True
+    
+    # Verificar se já está configurada via variável de ambiente
+    env_key = os.environ.get('ESM_API_KEY', '').strip()
+    
+    if env_key:
+        print(f'✅ ESM_API_KEY encontrada no ambiente (***{env_key[-4:]})')
         print()
         return True
     
@@ -212,6 +221,13 @@ Dispositivos:
         type=int,
         default=None,
         help='Dimensão do embedding de proteína (ex: 320, 384, 480, 640, 1280). Default: automática baseada no modelo'
+    )
+    
+    parser.add_argument(
+        '--api',
+        type=str,
+        default=None,
+        help='API key para modelos que requerem acesso remoto (ex: ESM-C 6B via Forge API)'
     )
     
     # Classification (Fase 2)
@@ -359,9 +375,11 @@ def main():
     # Validar API key para modelos que requerem Forge API (ESM-C 6B)
     if args.protein_model in FORGE_API_MODELS:
         print(f'   ⚠️  Modelo requer API: Forge API (EvolutionaryScale)')
+        if args.api:
+            print(f'   🔑 API key: fornecida via --api')
     print()
     
-    if not validate_forge_api_key(args.protein_model):
+    if not validate_forge_api_key(args.protein_model, args.api):
         print()
         print('❌ Pipeline cancelado: API key não fornecida para modelo ESM-C 6B.')
         print('   Use --protein-model com outro modelo disponível localmente.')
