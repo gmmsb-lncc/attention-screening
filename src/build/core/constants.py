@@ -76,9 +76,9 @@ ESM_MODELS = {
     'esm2_t6_8M_UR50D': {'dim': 320, 'layers': 6, 'max_len': 1024},      # 8M: até 1024 tokens
     
     # ESM-C (EvolutionaryScale Cambrian) - Fast representation learning
-    'esmc-300m-2024-12': {'dim': 960, 'layers': 30, 'max_len': 2048},    # 300M: 960-dim, mean pooling (PRIORITÁRIO)
-    'esmc-600m-2024-12': {'dim': 1152, 'layers': 36, 'max_len': 2048},   # 600M: 1152-dim, mean pooling
-    # NOTE: esmc-6b-2024-12 requires EvolutionaryScale Forge API (paid subscription)
+    'esmc-300m-2024-12': {'dim': 960, 'layers': 30, 'max_len': 2048},    # 300M: 960-dim, mean pooling (local)
+    'esmc-600m-2024-12': {'dim': 1152, 'layers': 36, 'max_len': 2048},   # 600M: 1152-dim, mean pooling (local)
+    'esmc-6b-2024-12': {'dim': 3072, 'layers': 56, 'max_len': 2048},     # 6B: 3072-dim, via Forge API (requer ESM_API_KEY)
     
     # OpenFold3 (AlphaFold3 reproduction) - Structure-aware embeddings
     'openfold3': {'dim': 384, 'layers': 48, 'max_len': 2048},            # OpenFold3: 384-dim single representation

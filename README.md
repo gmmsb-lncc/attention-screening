@@ -100,13 +100,47 @@ graph TB
 
 ### Protein Embedding Models
 
-| Model | Dimension | Type | Features |
-|-------|-----------|------|----------|
-| **Boltz-2** | 384 (default) | Structure + Affinity | Mean pooling, CLI-based |
-| **Boltz-2** | 1024 (multi) | Structure + Affinity | CLS + Mean + Max pooling |
-| **ESM-2** | 320-1280 | Sequence | Multiple model sizes |
-| **ESM-C** | 960-3072 | Sequence | Latest Cambrian models |
-| **OpenFold3** | 384 | Structure + MSA | Evolutionary context |
+| Model | Dimension | Type | Features | Acesso |
+|-------|-----------|------|----------|--------|
+| **Boltz-2** | 384 (default) | Structure + Affinity | Mean pooling, CLI-based | Local |
+| **Boltz-2** | 1024 (multi) | Structure + Affinity | CLS + Mean + Max pooling | Local |
+| **ESM-2** | 320-5120 | Sequence | Multiple model sizes (8M-15B) | Local |
+| **ESM-C 300M/600M** | 960-1152 | Sequence | Latest Cambrian models | Local |
+| **ESM-C 6B** | 3072 | Sequence | Largest Cambrian model | ⚠️ **Forge API** |
+| **OpenFold3** | 384 | Structure + MSA | Evolutionary context | Local |
+
+### 🔐 ESM-C 6B - Forge API Required
+
+O modelo **ESM-C 6B** (esmc-6b-2024-12) requer acesso à **EvolutionaryScale Forge API** devido ao seu tamanho (6 bilhões de parâmetros). Este modelo NÃO está disponível para execução local.
+
+**Para usar o ESM-C 6B:**
+
+1. Acesse [https://forge.evolutionaryscale.ai](https://forge.evolutionaryscale.ai)
+2. Crie uma conta ou faça login
+3. Navegue até **Settings > API Keys**
+4. Gere uma nova API key
+5. Configure a variável de ambiente:
+
+```bash
+export ESM_API_KEY="sua_api_key_aqui"
+```
+
+**Uso:**
+```bash
+# Com API key no ambiente
+export ESM_API_KEY="sua_api_key"
+python run_complete_pipeline.py \
+    --input data/kinase_compounds.tsv \
+    --output results/esmc_6b_run \
+    --protein-model esmc-6b-2024-12
+
+# O pipeline solicitará a API key interativamente se não estiver configurada
+```
+
+**Alternativas locais (sem API):**
+- `esmc-600m-2024-12` (1152-dim) - Melhor opção local ESM-C
+- `esm2_t33_650M_UR50D` (1280-dim) - ESM-2 recomendado
+- `esm2_t48_15B_UR50D` (5120-dim) - Maior modelo ESM-2 local
 
 ### Pipeline Phases
 
