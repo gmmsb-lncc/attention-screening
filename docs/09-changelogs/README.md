@@ -38,6 +38,9 @@ Historical record of changes, updates, and improvements to DockTKinase.
 - **Documentation**: Concise, production-focused (Nov 2025)
 
 ### Recent Updates
+- ✅ **Adaptive Clustering Stratification** (Nov 25, 2025)
+- ✅ **Auto/Manual Threshold Detection** (Nov 25, 2025)
+- ✅ **Cluster PCA Visualization** (Nov 25, 2025)
 - ✅ **Boltz-2 Integration** (Nov 20-24, 2025)
 - ✅ **Strategy Pattern Architecture** (Nov 21, 2025)
 - ✅ **Documentation Overhaul** (Nov 24, 2025)
