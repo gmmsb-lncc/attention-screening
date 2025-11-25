@@ -60,6 +60,11 @@ class IntegratedConfig:
     val_size: float = 0.1
     random_state: int = 42
     
+    # Stratification settings
+    stratifier_auto_threshold: bool = True  # Use automatic threshold detection
+    stratifier_threshold: Optional[float] = None  # Manual threshold (0.0-1.0) - overrides auto
+    stratifier_method: str = 'target'  # Auto-threshold method: silhouette, elbow, target, percentile
+    
     # Classification
     run_classification: bool = True
     use_multi_model_classification: bool = False  # True = 10 modelos, False = MLP apenas

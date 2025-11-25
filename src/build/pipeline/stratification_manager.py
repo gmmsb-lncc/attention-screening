@@ -18,6 +18,7 @@ import logging
 
 from src.build.core.config import BuildConfig
 from src.build.stratification.stratifier import Stratifier
+from src.build.stratification.cluster_analyzer import ClusterAnalyzer
 from src.build.pipeline.split_indices import SplitIndices
 
 
@@ -349,6 +350,91 @@ class StratificationManager:
         """Clear cached splits."""
         self._cached_splits = None
         logger.debug("Splits cache cleared")
+    
+    def generate_cluster_visualization(
+        self,
+        protein_embeddings: np.ndarray,
+        ligand_embeddings: np.ndarray,
+        labels: np.ndarray,
+        output_dir: str,
+        prefix: str = 'cluster'
+    ) -> Dict[str, Any]:
+        """
+        Generate cluster visualizations using PCA.
+        
+        Args:
+            protein_embeddings: Protein embeddings (n_samples, protein_dim)
+            ligand_embeddings: Ligand embeddings (n_samples, ligand_dim)
+            labels: Original labels for coloring
+            output_dir: Directory to save visualizations
+            prefix: Prefix for output files
+        
+        Returns:
+            Dictionary with paths to generated files and metrics
+        
+        Example:
+            >>> result = manager.generate_cluster_visualization(
+            ...     protein_emb, ligand_emb, labels, 'results/stratification'
+            ... )
+        """
+        if self._stratifier is None or self._stratifier.cluster_labels is None:
+            raise RuntimeError(
+                "No cluster labels available. Call stratify() first."
+            )
+        
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # Get cluster labels from stratifier
+        cluster_labels = self._stratifier.cluster_labels
+        
+        # Concatenate embeddings
+        combined_embeddings = np.concatenate(
+            [protein_embeddings, ligand_embeddings], axis=1
+        )
+        
+        # Initialize ClusterAnalyzer
+        analyzer = ClusterAnalyzer(self.config)
+        
+        result = {}
+        
+        try:
+            # Calculate clustering metrics
+            metrics = analyzer.calculate_clustering_metrics(
+                combined_embeddings, cluster_labels
+            )
+            result['metrics'] = metrics
+            logger.info(
+                f"Cluster metrics: silhouette={metrics.get('silhouette_score', 'N/A'):.4f}, "
+                f"n_clusters={metrics.get('n_clusters', 0)}"
+            )
+            
+            # Analyze cluster distribution
+            distribution = analyzer.analyze_cluster_distribution(cluster_labels, labels)
+            result['distribution'] = distribution
+            
+            # Save cluster labels
+            cluster_labels_path = output_path / f'{prefix}_labels.npy'
+            np.save(cluster_labels_path, cluster_labels)
+            result['cluster_labels_path'] = str(cluster_labels_path)
+            
+            # Generate main visualization
+            pca_plot_path = output_path / f'{prefix}_pca.png'
+            analyzer.visualize_clusters(
+                embeddings=combined_embeddings,
+                cluster_labels=cluster_labels,
+                labels=labels,
+                output_path=str(pca_plot_path)
+            )
+            result['pca_visualization_path'] = str(pca_plot_path)
+            
+            logger.info(f"Cluster visualizations saved to: {output_path}")
+            
+        except Exception as e:
+            logger.warning(f"Could not generate cluster visualization: {e}")
+            result['error'] = str(e)
+        
+        return result
     
     def __repr__(self) -> str:
         """String representation."""
