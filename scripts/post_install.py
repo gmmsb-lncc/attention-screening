@@ -247,6 +247,68 @@ def install_openfold_dependencies():
         return False
 
 
+def install_ml_dependencies():
+    """Install machine learning dependencies (XGBoost, LightGBM, CatBoost, etc.)."""
+    try:
+        print("\nInstalling machine learning dependencies...")
+        
+        # List of required ML packages
+        required_packages = [
+            "lightgbm",                # LightGBM gradient boosting
+            "xgboost",                 # XGBoost gradient boosting  
+            "catboost",                # CatBoost gradient boosting
+        ]
+        
+        installed_packages = []
+        failed_packages = []
+        
+        for package in required_packages:
+            try:
+                # Try to import the package first
+                try:
+                    __import__(package)
+                    print(f"✓ {package} is already installed")
+                    installed_packages.append(package)
+                    continue
+                except ImportError:
+                    pass
+                
+                # Install the package
+                print(f"Installing {package}...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes timeout per package
+                )
+                
+                if result.returncode == 0:
+                    print(f"✓ Successfully installed {package}")
+                    installed_packages.append(package)
+                else:
+                    print(f"✗ Error installing {package}: {result.stderr}")
+                    failed_packages.append(package)
+                    
+            except subprocess.TimeoutExpired:
+                print(f"✗ Timeout installing {package}")
+                failed_packages.append(package)
+            except Exception as e:
+                print(f"✗ Error installing {package}: {e}")
+                failed_packages.append(package)
+        
+        # Print summary
+        print(f"\nML dependencies installation summary:")
+        print(f"  Installed: {len(installed_packages)}/{len(required_packages)}")
+        if failed_packages:
+            print(f"  Failed: {', '.join(failed_packages)}")
+        
+        return len(failed_packages) == 0
+        
+    except Exception as e:
+        print(f"✗ Error installing ML dependencies: {e}")
+        return False
+
+
 def install_boltz_dependencies():
     """Install Boltz-2 specific dependencies."""
     try:
@@ -461,6 +523,9 @@ if __name__ == "__main__":
     print("DockTKinase Post-Install Setup")
     print("=" * 40)
     
+    # Install ML dependencies (lightgbm, xgboost, catboost)
+    ml_deps_success = install_ml_dependencies()
+    
     # Install FM4M dependencies (torch_nl and ase)
     fm4m_deps_success = install_fm4m_dependencies()
     
@@ -479,7 +544,7 @@ if __name__ == "__main__":
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if fm4m_deps_success and openfold_success and boltz_success and fm4m_success and esm_success:
+    if ml_deps_success and fm4m_deps_success and openfold_success and boltz_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
@@ -488,6 +553,7 @@ if __name__ == "__main__":
             print("✅ Post-install setup completed successfully!")
             print("DockTKinase is ready to use.")
             print("\nInstalled components:")
+            print("  ✓ ML dependencies (lightgbm, xgboost, catboost)")
             print("  ✓ FM4M dependencies (torch_nl, ase, torch-scatter)")
             print("  ✓ OpenFold3 dependencies (gemmi, ml-collections, einops, etc.)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
@@ -509,6 +575,8 @@ if __name__ == "__main__":
         print("❌ Post-install setup failed!")
         print("Please check your internet connection and try again.")
         print("\nFailed components:")
+        if not ml_deps_success:
+            print("  ✗ ML dependencies (lightgbm, xgboost, catboost)")
         if not fm4m_deps_success:
             print("  ✗ FM4M dependencies (torch_nl, ase, torch-scatter)")
         if not openfold_success:
@@ -522,6 +590,8 @@ if __name__ == "__main__":
         if not esm_success:
             print("  ✗ ESM model files")
         print("\nYou can try installing failed components manually:")
+        if not ml_deps_success:
+            print("  pip install lightgbm xgboost catboost")
         if not fm4m_deps_success:
             print("  pip install torch_nl==0.3 ase")
             print("  pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+cu121.html")
