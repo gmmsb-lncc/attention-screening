@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
-# ESM-C: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
+# ESM-C (local): python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
+# ESM-C 6B (API): ESM_API_KEY="sua_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
 # OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --protein-model openfold3 --seed 42
 # Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
@@ -28,6 +29,12 @@ Uso:
     python run_complete_pipeline.py \\
         --input data.tsv \\
         --no-classification
+    
+    # ESM-C 6B (requer API key do EvolutionaryScale Forge)
+    export ESM_API_KEY="sua_api_key"
+    python run_complete_pipeline.py \\
+        --input data.tsv \\
+        --protein-model esmc-6b-2024-12
 
 Features:
     • Sistema de checkpoints automático (evita recálculo)
@@ -35,8 +42,10 @@ Features:
     • Multi-modelo para classificação E regressão
     • Validação robusta com 3 splits (train/val/test)
     • Métricas completas e visualizações
+    • ESM-C 6B via Forge API (solicita key interativamente se não configurada)
 """
 
+import os
 import sys
 import time
 import argparse
@@ -45,6 +54,80 @@ from pathlib import Path
 # Adicionar path do projeto
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / 'src'))
+
+
+# =============================================================================
+# Modelos que requerem API externa (Forge API)
+# =============================================================================
+FORGE_API_MODELS = {'esmc-6b-2024-12'}
+
+
+def validate_forge_api_key(model_name: str) -> bool:
+    """
+    Valida se a API key do Forge está configurada para modelos que requerem acesso remoto.
+    
+    Args:
+        model_name: Nome do modelo selecionado
+        
+    Returns:
+        True se a API key está válida ou não é necessária, False caso contrário
+    """
+    if model_name not in FORGE_API_MODELS:
+        return True
+    
+    print()
+    print('=' * 80)
+    print('🔐 AUTENTICAÇÃO REQUERIDA - ESM-C 6B (EvolutionaryScale Forge API)')
+    print('=' * 80)
+    print()
+    print('O modelo ESM-C 6B (esmc-6b-2024-12) requer acesso à API do EvolutionaryScale Forge.')
+    print('Este modelo NÃO está disponível localmente devido ao seu tamanho (6 bilhões de parâmetros).')
+    print()
+    print('📋 Para obter sua API key:')
+    print('   1. Acesse: https://forge.evolutionaryscale.ai')
+    print('   2. Crie uma conta ou faça login')
+    print('   3. Navegue até Settings > API Keys')
+    print('   4. Gere uma nova API key')
+    print()
+    
+    # Verificar se já está configurada via variável de ambiente
+    api_key = os.environ.get('ESM_API_KEY', '').strip()
+    
+    if api_key:
+        print(f'✅ ESM_API_KEY encontrada no ambiente (***{api_key[-4:]})')
+        print()
+        return True
+    
+    # Solicitar API key interativamente
+    print('⚠️  ESM_API_KEY não encontrada no ambiente.')
+    print()
+    print('Opções:')
+    print('   1. Digite sua API key agora (será usada apenas nesta sessão)')
+    print('   2. Configure permanentemente: export ESM_API_KEY="sua_api_key"')
+    print('   3. Pressione Enter para cancelar e usar outro modelo')
+    print()
+    
+    try:
+        user_input = input('🔑 Cole sua API key (ou Enter para cancelar): ').strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print('❌ Operação cancelada pelo usuário.')
+        return False
+    
+    if not user_input:
+        print()
+        print('❌ API key não fornecida.')
+        print('💡 Dica: Use --protein-model esmc-600m-2024-12 para a versão local (1152-dim)')
+        print('         ou --protein-model esm2_t33_650M_UR50D para ESM-2 (1280-dim)')
+        return False
+    
+    # Configurar API key para esta sessão
+    os.environ['ESM_API_KEY'] = user_input
+    print()
+    print(f'✅ API key configurada para esta sessão (***{user_input[-4:]})')
+    print()
+    
+    return True
 
 from integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
@@ -119,9 +202,9 @@ Dispositivos:
         default='esm2_t6_8M_UR50D',
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
                  'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D',
-                 'esmc-300m-2024-12', 'esmc-600m-2024-12',
+                 'esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12',
                  'openfold3', 'boltz2'],
-        help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D, 320-dim)'
+        help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D). esmc-6b requer ESM_API_KEY.'
     )
     
     parser.add_argument(
@@ -272,7 +355,17 @@ def main():
     print(f'   Total Embedding: {total_dim}-dim (Ligand: {ligand_dim} + Protein: {protein_dim})')
     print(f'   Device: {args.device} → {detected_device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
+    
+    # Validar API key para modelos que requerem Forge API (ESM-C 6B)
+    if args.protein_model in FORGE_API_MODELS:
+        print(f'   ⚠️  Modelo requer API: Forge API (EvolutionaryScale)')
     print()
+    
+    if not validate_forge_api_key(args.protein_model):
+        print()
+        print('❌ Pipeline cancelado: API key não fornecida para modelo ESM-C 6B.')
+        print('   Use --protein-model com outro modelo disponível localmente.')
+        return 1
     
     # Determinar quais fases executar
     run_classification = not args.no_classification
