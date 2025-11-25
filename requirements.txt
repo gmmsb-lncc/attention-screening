@@ -43,8 +43,8 @@ ipykernel
 # EMBEDDINGS - Proteínas e Ligantes
 # ==============================================================================
 
-# Protein Embeddings (ESM) - Código incluído localmente em ESM/
-# fair-esm - REMOVIDO (usamos código fonte local)
+# Protein Embeddings (ESM-2)
+fair-esm>=2.0.0  # Meta AI ESM-2 models for protein embeddings
 transformers>=4.38
 sentencepiece
 

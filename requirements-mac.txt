@@ -21,7 +21,7 @@ pyarrow>=14.0.1
 # EMBEDDINGS
 # ==============================================================================
 
-# fair-esm - REMOVIDO (ESM incluído localmente em ESM/)
+fair-esm>=2.0.0  # Meta AI ESM-2 models for protein embeddings
 transformers>=4.38
 sentencepiece
 
