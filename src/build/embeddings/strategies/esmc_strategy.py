@@ -93,7 +93,7 @@ class ESMCStrategy(BaseProteinStrategy):
         Load ESM-C model and tokenizer.
         
         Args:
-            model_name: Model identifier ('esmc-300m-2024-12' or 'esmc-600m-2024-12')
+            model_name: Model identifier ('esmc-300m-2024-12', 'esmc-600m-2024-12', or 'esmc-6b-2024-12')
             device: PyTorch device (cuda/cpu/mps)
             offload_folder: CPU offloading directory (optional, not used for ESM-C)
             **kwargs: Additional parameters (logger, etc.)
