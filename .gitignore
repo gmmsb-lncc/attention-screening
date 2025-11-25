@@ -98,9 +98,9 @@ wheels/
 # ============================================
 # Model Caches
 # ============================================
-models_cache/*               # Ignorar todo o conteúdo
-!models_cache/README.md      # Exceto README
-!models_cache/ESM/           # Permitir pasta ESM (para README futuro)
+llm/models_cache/*           # Ignorar todo o conteúdo da pasta llm
+!llm/models_cache/README.md  # Exceto README
+!llm/models_cache/ESM/       # Permitir pasta ESM (para README futuro)
 
 .cache/
 FM4M/models/*/model_files/
@@ -113,10 +113,10 @@ catboost_info/
 
 # ESM model weights (downloaded via torch.hub)
 # Código fonte em ESM/ é versionado, mas modelos baixados não
-models_cache/ESM/*.pt
-models_cache/ESM/*.bin
-models_cache/ESM/checkpoints/
-models_cache/ESM/hub/
+llm/models_cache/ESM/*.pt
+llm/models_cache/ESM/*.bin
+llm/models_cache/ESM/checkpoints/
+llm/models_cache/ESM/hub/
 *.pt  # PyTorch model weights
 *.bin  # Binary model files
 
@@ -169,8 +169,13 @@ ESM/*
 !ESM/esm-3/
 !ESM/.gitkeep
 
-# Model caches
-models_cache/
+# LLM folder - ignorar apenas arquivos de modelo, não código fonte
+llm/models_cache/**/*.pt
+llm/models_cache/**/*.bin
+llm/models_cache/**/*.ckpt
+llm/FM4M/model_files/*.pt
+llm/FM4M/model_files/*.bin
+llm/FM4M/data/
 
 # Results and outputs
 results/

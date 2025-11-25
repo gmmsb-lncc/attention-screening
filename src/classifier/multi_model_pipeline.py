@@ -46,8 +46,9 @@ class MultiModelClassificationPipeline:
     
     Modelos suportados:
     - RandomForest, GradientBoosting, LogisticRegression
-    - SVC, KNN, MLP, NaiveBayes
-    - XGBoost, LightGBM, CatBoost (opcionais)
+    - LinearSVC, ExtraTrees, KNN, MLP, NaiveBayes
+    - DecisionTree, AdaBoost
+    - XGBoost (OBRIGATÓRIO), LightGBM, CatBoost (opcionais)
     """
     
     def __init__(
@@ -283,7 +284,7 @@ class MultiModelClassificationPipeline:
             print("⚠️  Nenhum resultado de teste disponível")
             return
         
-        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste Final)')
+        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste)')
         print('=' * 80)
         
         # Ordenar por ROC-AUC

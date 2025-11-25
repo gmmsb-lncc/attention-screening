@@ -9,39 +9,38 @@ Equivalente ao models.py de regressão, mas para classificação binária.
 
 from sklearn.ensemble import (
     RandomForestClassifier,
-    GradientBoostingClassifier
+    GradientBoostingClassifier,
+    ExtraTreesClassifier,
+    AdaBoostClassifier
 )
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.naive_bayes import GaussianNB
-
-# Modelos opcionais (podem não estar instalados)
-try:
-    from xgboost import XGBClassifier
-    XGBOOST_AVAILABLE = True
-except ImportError:
-    XGBOOST_AVAILABLE = False
-
-try:
-    from lightgbm import LGBMClassifier
-    LIGHTGBM_AVAILABLE = True
-except ImportError:
-    LIGHTGBM_AVAILABLE = False
-
-try:
-    from catboost import CatBoostClassifier
-    CATBOOST_AVAILABLE = True
-except ImportError:
-    CATBOOST_AVAILABLE = False
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 
 
 class ClassificationModels:
     """
     Factory para criação de modelos de classificação binária.
     
-    Suporta 11+ algoritmos diferentes de classificação.
+    Suporta 12 algoritmos de classificação (ordenados do mais rápido ao mais lento):
+    1. NaiveBayes (~2s) - Muito rápido, baseline probabilístico
+    2. DecisionTree (~5s) - Rápido, interpretável
+    3. LogisticRegression (~10s) - Baseline linear
+    4. LinearSVC (~15s) - SVM linear, escalável
+    5. LightGBM (~20s) - Gradient boosting otimizado
+    6. XGBoost (~25s) - State-of-art gradient boosting
+    7. ExtraTrees (~40s) - Ensemble rápido
+    8. RandomForest (~60s) - Ensemble robusto
+    9. AdaBoost (~80s) - Boosting clássico
+    10. KNN (~120s) - Instance-based
+    11. GradientBoosting (~180s) - Sklearn boosting
+    12. MLP (~300s) - Rede neural
+    
     Equivalente ao RegressionModels, mas para classificação.
     """
     
@@ -49,6 +48,7 @@ class ClassificationModels:
     def get_all_models(random_state=42, verbose=False):
         """
         Retorna dicionário com todos os modelos disponíveis.
+        Ordenados do mais rápido ao mais lento.
         
         Args:
             random_state: Seed para reprodutibilidade
@@ -59,29 +59,19 @@ class ClassificationModels:
         """
         models = {}
         
-        # 1. Random Forest Classifier
-        models['RandomForest'] = RandomForestClassifier(
-            n_estimators=100,
+        # 1. Naive Bayes (~2s) - O mais rápido
+        models['NaiveBayes'] = GaussianNB()
+        
+        # 2. Decision Tree (~5s) - Muito rápido
+        models['DecisionTree'] = DecisionTreeClassifier(
             max_depth=20,
             min_samples_split=5,
             min_samples_leaf=2,
-            class_weight='balanced',  # Para lidar com desbalanceamento
-            n_jobs=-1,
-            random_state=random_state,
-            verbose=0
+            class_weight='balanced',
+            random_state=random_state
         )
         
-        # 2. Gradient Boosting Classifier
-        models['GradientBoosting'] = GradientBoostingClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
-            subsample=0.8,
-            random_state=random_state,
-            verbose=0
-        )
-        
-        # 3. Logistic Regression (baseline linear)
+        # 3. Logistic Regression (~10s) - Baseline linear rápido
         models['LogisticRegression'] = LogisticRegression(
             C=1.0,
             penalty='l2',
@@ -91,24 +81,92 @@ class ClassificationModels:
             random_state=random_state
         )
         
-        # 4. Support Vector Classifier
-        models['SVC'] = SVC(
-            kernel='rbf',
+        # 4. Linear SVC (~15s) - SVM linear escalável
+        models['LinearSVC'] = LinearSVC(
             C=1.0,
-            probability=True,  # Necessário para ROC-AUC
+            max_iter=2000,
             class_weight='balanced',
-            cache_size=1000,
+            dual='auto',
             random_state=random_state
         )
         
-        # 5. K-Nearest Neighbors Classifier
+        # 5. LightGBM (~20s) - Gradient boosting muito otimizado
+        models['LightGBM'] = LGBMClassifier(
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            class_weight='balanced',
+            n_jobs=-1,
+            random_state=random_state,
+            verbose=-1
+        )
+        
+        # 6. XGBoost (~25s) - State-of-art gradient boosting
+        models['XGBoost'] = XGBClassifier(
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            scale_pos_weight=1,
+            n_jobs=-1,
+            random_state=random_state,
+            verbosity=0,
+            eval_metric='logloss'
+        )
+        
+        # 7. Extra Trees (~40s) - Ensemble rápido
+        models['ExtraTrees'] = ExtraTreesClassifier(
+            n_estimators=100,
+            max_depth=20,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            class_weight='balanced',
+            n_jobs=-1,
+            random_state=random_state,
+            verbose=0
+        )
+        
+        # 8. Random Forest (~60s) - Ensemble robusto
+        models['RandomForest'] = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=20,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            class_weight='balanced',
+            n_jobs=-1,
+            random_state=random_state,
+            verbose=0
+        )
+        
+        # 9. AdaBoost (~80s) - Boosting clássico
+        models['AdaBoost'] = AdaBoostClassifier(
+            n_estimators=100,
+            learning_rate=0.5,
+            random_state=random_state,
+            algorithm='SAMME'
+        )
+        
+        # 10. KNN (~120s) - Instance-based, lento na predição
         models['KNN'] = KNeighborsClassifier(
             n_neighbors=5,
             weights='distance',
             n_jobs=-1
         )
         
-        # 6. Multi-Layer Perceptron Classifier (sklearn)
+        # 11. Gradient Boosting (~180s) - Sklearn boosting sequencial
+        models['GradientBoosting'] = GradientBoostingClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            subsample=0.8,
+            random_state=random_state,
+            verbose=0
+        )
+        
+        # 12. MLP (~300s) - Rede neural, o mais lento
         models['MLP'] = MLPClassifier(
             hidden_layer_sizes=(100, 50),
             activation='relu',
@@ -119,49 +177,6 @@ class ClassificationModels:
             random_state=random_state,
             verbose=False
         )
-        
-        # 7. Naive Bayes
-        models['NaiveBayes'] = GaussianNB()
-        
-        # 8. XGBoost Classifier (se disponível)
-        if XGBOOST_AVAILABLE:
-            models['XGBoost'] = XGBClassifier(
-                n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                scale_pos_weight=1,  # Ajustar se houver desbalanceamento
-                n_jobs=-1,
-                random_state=random_state,
-                verbosity=0,
-                eval_metric='logloss'
-            )
-        
-        # 9. LightGBM Classifier (se disponível)
-        if LIGHTGBM_AVAILABLE:
-            models['LightGBM'] = LGBMClassifier(
-                n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                class_weight='balanced',
-                n_jobs=-1,
-                random_state=random_state,
-                verbose=-1
-            )
-        
-        # 10. CatBoost Classifier (se disponível)
-        if CATBOOST_AVAILABLE:
-            models['CatBoost'] = CatBoostClassifier(
-                iterations=100,
-                depth=6,
-                learning_rate=0.1,
-                auto_class_weights='Balanced',
-                random_state=random_state,
-                verbose=False
-            )
         
         return models
     
@@ -208,35 +223,31 @@ class ClassificationModels:
     
     @staticmethod
     def print_available_models():
-        """Imprime lista de modelos disponíveis com status."""
-        print('Modelos de Classificação Disponíveis:')
-        print('=' * 50)
+        """Imprime lista de modelos disponíveis com status (ordenados por velocidade)."""
+        print('Modelos de Classificação Disponíveis (mais rápido → mais lento):')
+        print('=' * 60)
         
-        base_models = [
-            'RandomForest', 'GradientBoosting', 'LogisticRegression',
-            'SVC', 'KNN', 'MLP', 'NaiveBayes'
+        # Ordenados do mais rápido ao mais lento
+        models_ordered = [
+            ('NaiveBayes', '~2s'),
+            ('DecisionTree', '~5s'),
+            ('LogisticRegression', '~10s'),
+            ('LinearSVC', '~15s'),
+            ('LightGBM', '~20s'),
+            ('XGBoost', '~25s'),
+            ('ExtraTrees', '~40s'),
+            ('RandomForest', '~60s'),
+            ('AdaBoost', '~80s'),
+            ('KNN', '~120s'),
+            ('GradientBoosting', '~180s'),
+            ('MLP', '~300s')
         ]
         
-        for model in base_models:
-            print(f'  ✅ {model}')
+        for i, (model, time) in enumerate(models_ordered, 1):
+            print(f'  {i:2d}. ✅ {model:<20} {time}')
         
-        # Opcionais
-        if XGBOOST_AVAILABLE:
-            print(f'  ✅ XGBoost')
-        else:
-            print(f'  ⚠️  XGBoost (não instalado)')
-        
-        if LIGHTGBM_AVAILABLE:
-            print(f'  ✅ LightGBM')
-        else:
-            print(f'  ⚠️  LightGBM (não instalado)')
-        
-        if CATBOOST_AVAILABLE:
-            print(f'  ✅ CatBoost')
-        else:
-            print(f'  ⚠️  CatBoost (não instalado)')
-        
-        print('=' * 50)
+        print('=' * 60)
+        print(f'Total: 12 modelos')
     
     @staticmethod
     def get_model_info():
@@ -265,11 +276,29 @@ class ClassificationModels:
                 'strengths': 'Rápido, interpretável, bom baseline',
                 'weaknesses': 'Assume relações lineares'
             },
-            'SVC': {
-                'type': 'kernel',
-                'description': 'Support Vector Classifier com kernel RBF',
-                'strengths': 'Bom para espaços de alta dimensão',
-                'weaknesses': 'Lento em datasets grandes, requer normalização'
+            'LinearSVC': {
+                'type': 'linear',
+                'description': 'Linear Support Vector Classifier (100-1000x mais rápido que SVC-RBF)',
+                'strengths': 'Muito rápido, bom para alta dimensão, escalável',
+                'weaknesses': 'Não captura não-linearidades complexas'
+            },
+            'ExtraTrees': {
+                'type': 'ensemble',
+                'description': 'Extremely Randomized Trees (mais rápido que Random Forest)',
+                'strengths': 'Muito rápido, reduz variância, robusto',
+                'weaknesses': 'Pode ter acurácia ligeiramente menor que RF'
+            },
+            'DecisionTree': {
+                'type': 'tree',
+                'description': 'Árvore de decisão única (baseline simples)',
+                'strengths': 'Muito interpretável, rápido, não requer normalização',
+                'weaknesses': 'Tende a overfit, instável'
+            },
+            'AdaBoost': {
+                'type': 'ensemble',
+                'description': 'Adaptive Boosting (boosting clássico)',
+                'strengths': 'Simples, robusto, bom com weak learners',
+                'weaknesses': 'Sensível a outliers, mais lento que alguns ensemble'
             },
             'KNN': {
                 'type': 'instance-based',
@@ -300,12 +329,6 @@ class ClassificationModels:
                 'description': 'Light Gradient Boosting Machine',
                 'strengths': 'Muito rápido, eficiente em memória',
                 'weaknesses': 'Pode overfit em datasets pequenos'
-            },
-            'CatBoost': {
-                'type': 'ensemble',
-                'description': 'Categorical Boosting',
-                'strengths': 'Lida bem com categóricas, robusto',
-                'weaknesses': 'Mais lento que LightGBM'
             }
         }
 

@@ -368,7 +368,7 @@ class ESMCStrategy(BaseProteinStrategy):
     def _setup_cache_and_paths(self) -> None:
         """Setup cache directories and ESM-3 path."""
         # Cache directory for ESM-C models
-        self._cache_dir = Path(__file__).parent.parent.parent.parent.parent / "models_cache" / "ESM3"
+        self._cache_dir = Path(__file__).parent.parent.parent.parent.parent / "llm" / "models_cache" / "ESM3"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Set environment variable for ESM data root
