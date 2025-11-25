@@ -32,7 +32,9 @@ DEVICE="auto"  # Options: auto, cpu, cuda, mps
 SEED=42
 
 # Available protein models (ordered by size: smallest to largest)
-# ESM-2 Local Models
+# Total: 11 models
+
+# ESM-2 Local Models (6 models)
 ESM2_MODELS=(
     "esm2_t6_8M_UR50D"      # 320-dim, ~8M params
     "esm2_t12_35M_UR50D"    # 480-dim, ~35M params
@@ -42,35 +44,34 @@ ESM2_MODELS=(
     "esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
 )
 
-# ESM-C API Models (require ESM_API_KEY)
+# ESM-C API Models (3 models - require ESM_API_KEY)
 ESMC_MODELS=(
-    "esmc-300m-2024-12"     # 300M params
-    "esmc-600m-2024-12"     # 600M params
-    "esmc-6b-2024-12"       # 6B params (API only)
+    "esmc-300m-2024-12"     # 960-dim, ~300M params
+    "esmc-600m-2024-12"     # 1152-dim, ~600M params
+    "esmc-6b-2024-12"       # 4096-dim, ~6B params (API only)
 )
 
-# Structure-based Models
+# Structure-based Models (2 models)
 STRUCTURE_MODELS=(
-    "openfold3"             # Structure prediction
-    "boltz2"                # Boltz-2 embeddings (384-dim)
+    "openfold3"             # 1536-dim, Structure prediction
+    "boltz2"                # 384-dim, Boltz-2 embeddings
 )
 
 # =============================================================================
 # Select which models to run (uncomment/modify as needed)
 # =============================================================================
 
-# Option 1: Run only ESM-2 local models (no API key required)
-MODELS_TO_RUN=("${ESM2_MODELS[@]}")
+# Option 1: Run ALL 11 models (ESM-2 + ESM-C + Structure)
+MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
-# Option 2: Run all models including API-based (uncomment below)
-# MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+# Option 2: Run only ESM-2 local models (no API key required) - uncomment below
+# MODELS_TO_RUN=("${ESM2_MODELS[@]}")
 
-# Option 3: Run specific models (uncomment and modify below)
-# MODELS_TO_RUN=(
-#     "esm2_t33_650M_UR50D"
-#     "esm2_t48_15B_UR50D"
-#     "boltz2"
-# )
+# Option 3: Run only ESM-C API models (require ESM_API_KEY) - uncomment below
+# MODELS_TO_RUN=("${ESMC_MODELS[@]}")
+
+# Option 4: Run only structure-based models - uncomment below
+# MODELS_TO_RUN=("${STRUCTURE_MODELS[@]}")
 
 # =============================================================================
 # Logging Configuration
