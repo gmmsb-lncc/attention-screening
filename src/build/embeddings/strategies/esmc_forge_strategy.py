@@ -257,11 +257,15 @@ class ESMCForgeStrategy(BaseProteinStrategy):
             if output.mean_embedding is None:
                 raise EmbeddingError("Forge API returned no embedding")
             
-            # Convert to numpy
+            # Convert to numpy - handle bfloat16 conversion
             if isinstance(output.mean_embedding, torch.Tensor):
-                result = output.mean_embedding.cpu().numpy()
+                # Convert bfloat16 to float32 before numpy conversion
+                embedding_tensor = output.mean_embedding
+                if embedding_tensor.dtype == torch.bfloat16:
+                    embedding_tensor = embedding_tensor.to(torch.float32)
+                result = embedding_tensor.cpu().numpy()
             else:
-                result = np.array(output.mean_embedding)
+                result = np.array(output.mean_embedding, dtype=np.float32)
             
             # Ensure correct shape
             if result.ndim > 1:
