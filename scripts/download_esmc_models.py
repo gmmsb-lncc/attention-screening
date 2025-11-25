@@ -149,9 +149,9 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        choices=['esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12', 'all'],
+        choices=['esmc-300m-2024-12', 'esmc-600m-2024-12', 'all'],
         default='esmc-300m-2024-12',
-        help='Model to download (default: esmc-300m-2024-12). Use "all" to download all models.'
+        help='Model to download (default: esmc-300m-2024-12). Note: esmc-6b requires Forge API.'
     )
     parser.add_argument(
         '--cache-dir',
@@ -195,7 +195,7 @@ def main():
     
     # Determine which models to download
     if args.model == 'all':
-        models = ['esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12']
+        models = ['esmc-300m-2024-12', 'esmc-600m-2024-12']
     else:
         models = [args.model]
     
