@@ -91,7 +91,7 @@ python run_complete_pipeline.py \
 ```
 
 **Steps executed:**
-1. ✅ Protein embeddings (ESM-2/Boltz-2/OpenFold3)
+1. ✅ Protein embeddings (ESM-2/Boltz-2)
 2. ✅ Ligand embeddings (FM4M)
 3. ✅ Matrix construction
 4. ✅ Binary labels
