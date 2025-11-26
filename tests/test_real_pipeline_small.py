@@ -132,7 +132,7 @@ try:
         
 except Exception as e:
     print(f"   ❌ Erro: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # 2.2: Embeddings de Ligantes
 print("\n🔹 Gerando embeddings de ligantes (SMI-TED)...")
@@ -157,7 +157,7 @@ try:
         
 except Exception as e:
     print(f"   ❌ Erro: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # FASE 3: Construir Matriz de Features
 print("\n" + "=" * 80)
@@ -196,7 +196,7 @@ except Exception as e:
     print(f"   ❌ Erro: {e}")
     import traceback
     traceback.print_exc()
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # FASE 4: Classificação
 print("\n" + "=" * 80)

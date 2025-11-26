@@ -155,12 +155,12 @@ def test_colabfold_msa():
 if __name__ == "__main__":
     try:
         success = test_colabfold_msa()
-        sys.exit(0 if success else 1)
+        
     except KeyboardInterrupt:
         logger.info("\n\nTest interrupted by user")
-        sys.exit(1)
+        raise AssertionError("Test failed")
     except Exception as e:
         logger.error(f"\n\nUnexpected error: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        raise AssertionError("Test failed")

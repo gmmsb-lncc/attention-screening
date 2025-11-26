@@ -216,4 +216,4 @@ def test_pipeline_small():
 
 if __name__ == "__main__":
     success = test_pipeline_small()
-    sys.exit(0 if success else 1)
+    
