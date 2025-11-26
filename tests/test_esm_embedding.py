@@ -142,16 +142,16 @@ try:
         print(f'\nPróximo passo:')
         print(f'  • Testar com modelo maior (esm2_t36_3B_UR50D)')
         print(f'  • Integrar com pipeline completo')
-        sys.exit(0)
+        pass  # Success
     else:
         print('⚠️  TESTE PASSOU COM RESSALVAS')
         print('='*60)
         print(f'Algumas validações falharam. Revisar resultados.')
-        sys.exit(1)
+        raise AssertionError("Test failed")
     
 except Exception as e:
     print(f'\n❌ ERRO durante geração de embedding:')
     print(f'   {e}')
     import traceback
     traceback.print_exc()
-    sys.exit(1)
+    raise AssertionError("Test failed")

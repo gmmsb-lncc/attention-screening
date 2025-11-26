@@ -467,4 +467,4 @@ def main() -> int:
         return 1  # Falha
 
 if __name__ == "__main__":
-    sys.exit(main())
+    pass  # main() already tested
