@@ -259,11 +259,12 @@ class RegressionTrainer:
         # Salvar melhor modelo
         try:
             best_name, best_model, _ = self.get_best_model(metric='MAE', dataset='val')
-            best_path = output_dir / 'best_model.pkl'
+            best_filename = f'{best_name}_best_model.pkl'
+            best_path = output_dir / best_filename
             joblib.dump(best_model, best_path)
             
             if self.verbose:
-                print(f'   ⭐ Melhor modelo salvo: {best_name} → best_model.pkl')
+                print(f'   ⭐ Melhor modelo salvo: {best_name} → {best_filename}')
         except Exception as e:
             if self.verbose:
                 print(f'   ⚠️  Erro ao salvar melhor modelo: {e}')

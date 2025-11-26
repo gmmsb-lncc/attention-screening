@@ -69,75 +69,70 @@ class EmbeddingQuantizer:
         self.zero_points: Dict[str, int] = {}
         self.is_calibrated = False
 
+    def _to_numpy(self, data: Any) -> Any:
+        """Convert any data format to numpy array."""
+        try:
+            import numpy as np
+            if isinstance(data, np.ndarray):
+                return data
+            if isinstance(data, (list, tuple)):
+                return np.array(data, dtype=np.float32)
+        except ImportError:
+            pass
+        return data
+
     def quantize_fp16(self, embeddings: Any) -> Any:
         """
         Convert embeddings from FP32 to FP16.
-
-        Speedup: ~2x
-        Accuracy loss: <1%
+        Speedup: ~2x, Accuracy loss: <1%
 
         Args:
-            embeddings: Input embeddings (any numerical type)
+            embeddings: Input embeddings
 
         Returns:
-            Quantized embeddings
+            Quantized embeddings in FP16
         """
         try:
-            # Try numpy conversion
             import numpy as np
-
-            if isinstance(embeddings, np.ndarray):
-                return embeddings.astype(np.float16)
+            arr = self._to_numpy(embeddings)
+            if isinstance(arr, np.ndarray):
+                return arr.astype(np.float16)
         except ImportError:
             pass
-
-        # Fallback: scale down by bit representation
-        if isinstance(embeddings, list):
-            return [min(abs(x) / 65504, 1.0) if x != 0 else 0 for x in embeddings]
-
         return embeddings
 
-    def quantize_int8(
-        self, embeddings: Any, scale_factor: Optional[float] = None
-    ) -> Any:
+    def quantize_int8(self, embeddings: Any, scale_factor: Optional[float] = None) -> Any:
         """
         Convert embeddings from FP32 to INT8.
-
-        Speedup: ~4x
-        Accuracy loss: 1-2% (with proper calibration)
+        Speedup: ~4x, Accuracy loss: 1-2% (with calibration)
 
         Args:
             embeddings: Input embeddings
             scale_factor: Scaling factor (auto-computed if None)
 
         Returns:
-            Quantized embeddings (INT8)
+            Tuple of (quantized embeddings INT8, scale_factor)
         """
         try:
             import numpy as np
-
-            if isinstance(embeddings, np.ndarray):
+            arr = self._to_numpy(embeddings)
+            if isinstance(arr, np.ndarray):
                 if scale_factor is None:
-                    # Auto-compute scale factor from range
-                    max_val = np.max(np.abs(embeddings))
+                    max_val = np.max(np.abs(arr))
                     scale_factor = 127.0 / max_val if max_val != 0 else 1.0
-
-                # Quantize to INT8 range [-128, 127]
-                quantized = np.clip(
-                    np.round(embeddings * scale_factor), -128, 127
-                ).astype(np.int8)
-
+                quantized = np.clip(np.round(arr * scale_factor), -128, 127).astype(np.int8)
                 return quantized, scale_factor
-
         except ImportError:
             pass
-
-        # Fallback: simple scaling
-        max_val = max(abs(x) for x in (embeddings if isinstance(embeddings, list) else [embeddings]))
-        scale = 127.0 / max_val if max_val != 0 else 1.0
-        quantized = [int(x * scale) for x in (embeddings if isinstance(embeddings, list) else [embeddings])]
-
-        return quantized, scale
+        
+        # Fallback for simple data
+        if isinstance(embeddings, (list, tuple)):
+            max_val = max(abs(x) for x in embeddings)
+            scale = 127.0 / max_val if max_val != 0 else 1.0
+            quantized = [int(np.clip(x * scale, -128, 127)) for x in embeddings]
+            return quantized, scale
+        
+        return embeddings, 1.0
 
     def dequantize_int8(self, quantized: Any, scale_factor: float) -> Any:
         """
@@ -152,45 +147,37 @@ class EmbeddingQuantizer:
         """
         try:
             import numpy as np
-
-            if isinstance(quantized, np.ndarray):
-                return quantized.astype(np.float32) / scale_factor
-
+            arr = self._to_numpy(quantized)
+            if isinstance(arr, np.ndarray):
+                return arr.astype(np.float32) / scale_factor
         except ImportError:
             pass
-
-        # Fallback
-        if isinstance(quantized, list):
+        
+        if isinstance(quantized, (list, tuple)):
             return [x / scale_factor for x in quantized]
-
+        
         return quantized / scale_factor
 
     def calibrate_int8(self, sample_embeddings: List[Any]) -> None:
         """
         Calibrate INT8 quantization using sample embeddings.
 
-        Computes optimal scale factors for each layer.
-
         Args:
             sample_embeddings: List of sample embeddings for calibration
         """
         try:
             import numpy as np
-
             for i, emb in enumerate(sample_embeddings[: self.config.calibration_samples]):
-                if isinstance(emb, (list, np.ndarray)):
-                    max_val = (
-                        float(np.max(np.abs(emb)))
-                        if isinstance(emb, np.ndarray)
-                        else max(abs(x) for x in emb)
-                    )
-                    if max_val > 0:
-                        self.scale_factors[f"layer_{i}"] = 127.0 / max_val
-
+                arr = self._to_numpy(emb)
+                if isinstance(arr, np.ndarray):
+                    max_val = float(np.max(np.abs(arr)))
+                else:
+                    max_val = max(abs(x) for x in emb) if isinstance(emb, (list, tuple)) else 0
+                
+                if max_val > 0:
+                    self.scale_factors[f"layer_{i}"] = 127.0 / max_val
             self.is_calibrated = True
-
-        except (ImportError, ValueError):
-            # If calibration fails, use default scale
+        except (ImportError, (ValueError, TypeError)):
             self.is_calibrated = False
 
     def get_optimization_stats(self) -> Dict[str, float]:
