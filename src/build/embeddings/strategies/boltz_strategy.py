@@ -197,7 +197,7 @@ class BoltzStrategy(BaseProteinStrategy):
     def generate(
         self,
         model: None,
-        tokenizer: None,
+        auxiliary_objects: None,
         sequence: str,
         device: torch.device,
         **kwargs
@@ -209,11 +209,11 @@ class BoltzStrategy(BaseProteinStrategy):
         1. Creates YAML input file with sequence
         2. Executes `boltz predict` via subprocess
         3. Extracts trunk representations (s) from output
-        4. Returns mean-pooled embedding (768-dim)
+        4. Returns mean-pooled embedding (384-dim)
         
         Args:
             model: Unused (CLI-based approach)
-            tokenizer: Unused (CLI-based approach)
+            auxiliary_objects: Unused (CLI-based approach, matches BaseProteinStrategy interface)
             sequence: Protein sequence (single letter amino acid codes)
             device: Device for computation (auto-detected by Boltz CLI)
             **kwargs: Additional arguments:
@@ -222,7 +222,7 @@ class BoltzStrategy(BaseProteinStrategy):
                 - sampling_steps: Number of sampling steps (default: 200)
         
         Returns:
-            Mean-pooled embedding as numpy array [768]
+            Mean-pooled embedding as numpy array [384]
         
         Raises:
             ValueError: If sequence is invalid or empty
@@ -263,7 +263,7 @@ class BoltzStrategy(BaseProteinStrategy):
         
         return embedding
     
-    def cleanup(self, model: None, tokenizer: None) -> None:
+    def cleanup(self, model: None, auxiliary_objects: None) -> None:
         """
         Cleanup Boltz-2 temporary files and directories.
         
@@ -271,7 +271,7 @@ class BoltzStrategy(BaseProteinStrategy):
         
         Args:
             model: Unused (CLI-based approach)
-            tokenizer: Unused (CLI-based approach)
+            auxiliary_objects: Unused (CLI-based approach, matches BaseProteinStrategy interface)
         """
         if self.output_dir and self.output_dir.exists():
             try:
