@@ -533,9 +533,15 @@ def main():
                     print('📈 REGRESSION:')
                     print(f'   ✅ Modelos treinados: {reg.get("models_trained", 0)}')
                     if 'best_model' in reg:
-                        print(f'   🏆 Melhor modelo: {reg["best_model"]}')
-                        print(f'      MAE: {reg.get("best_mae", 0):.2f} nM')
-                        print(f'      R²: {reg.get("best_r2", 0):.4f}')
+                        print(f'   🏆 Melhor modelo: {reg["best_model"]} (selecionado pela validação)')
+                        # Mostrar métricas de validação e teste separadamente
+                        if 'best_val_mae' in reg:
+                            print(f'      📊 Validação: MAE={reg.get("best_val_mae", 0):.2f} nM, R²={reg.get("best_val_r2", 0):.4f}')
+                            print(f'      🎯 Teste:     MAE={reg.get("best_test_mae", 0):.2f} nM, R²={reg.get("best_test_r2", 0):.4f}')
+                        else:
+                            # Fallback para formato antigo
+                            print(f'      MAE: {reg.get("best_mae", 0):.2f} nM')
+                            print(f'      R²: {reg.get("best_r2", 0):.4f}')
                     print()
         
         print(f'📁 Resultados salvos em: {args.output}')

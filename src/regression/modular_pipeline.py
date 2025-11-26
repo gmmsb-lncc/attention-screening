@@ -342,7 +342,7 @@ class RegressionPipeline:
         print()
     
     def save_results(self) -> None:
-        """Salvar métricas e estatísticas em arquivos JSON."""
+        """Salvar métricas, modelos e estatísticas em arquivos."""
         if self.verbose:
             print('💾 ETAPA 4: Salvando Resultados')
             print('=' * 70)
@@ -353,7 +353,7 @@ class RegressionPipeline:
             json.dump(self.test_metrics, f, indent=2)
         
         if self.verbose:
-            print(f"   ✅ Métricas salvas: {metrics_file}")
+            print(f"   ✅ Métricas de teste salvas: {metrics_file}")
         
         # Salvar métricas de validação
         val_metrics_file = self.output_dir / 'metrics' / 'validation_metrics.json'
@@ -363,12 +363,19 @@ class RegressionPipeline:
         if self.verbose:
             print(f"   ✅ Métricas de validação salvas: {val_metrics_file}")
         
+        # Salvar modelos treinados (se o trainer estiver disponível)
+        if hasattr(self, 'trainer') and self.trainer and hasattr(self.trainer, 'save_models'):
+            models_dir = self.output_dir / 'models'
+            self.trainer.save_models(str(models_dir), save_all=True)
+            if self.verbose:
+                print(f"   ✅ Modelos salvos: {models_dir}")
+        
         # Salvar stats do pipeline
         stats_file = self.output_dir / 'pipeline_stats.json'
         self.stats['test_metrics_summary'] = {
-            'best_model': min(self.test_metrics.items(), key=lambda x: x[1]['MAE'])[0],
-            'best_mae': min(m['MAE'] for m in self.test_metrics.values()),
-            'best_r2': max(m['R2'] for m in self.test_metrics.values())
+            'best_model': min(self.test_metrics.items(), key=lambda x: x[1]['MAE'])[0] if self.test_metrics else None,
+            'best_mae': min(m['MAE'] for m in self.test_metrics.values()) if self.test_metrics else None,
+            'best_r2': max(m['R2'] for m in self.test_metrics.values()) if self.test_metrics else None
         }
         
         with open(stats_file, 'w') as f:
