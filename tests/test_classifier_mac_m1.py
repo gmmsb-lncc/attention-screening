@@ -30,7 +30,7 @@ except Exception as e:
     print(f"   ❌ ERRO ao importar módulos: {e}")
     import traceback
     traceback.print_exc()
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Test 2: Check device (Mac M1 - MPS support)
 print("\n✅ Teste 2: Verificando dispositivo...")
@@ -78,7 +78,7 @@ if test_dataset.exists():
     print(f"   ✓ Colunas: {list(df.columns)[:5]}...")
 else:
     print(f"   ❌ Dataset não encontrado: {test_dataset}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Test 4: Test BuildConfig
 print("\n✅ Teste 4: Testando BuildConfig...")
@@ -107,7 +107,7 @@ try:
     print("   ℹ️  Pronto para carregar dados e avaliar modelos")
 except Exception as e:
     print(f"   ❌ ERRO: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Test 6: Check classifier models availability
 print("\n✅ Teste 6: Verificando disponibilidade dos modelos...")
@@ -152,7 +152,7 @@ try:
         
 except Exception as e:
     print(f"   ❌ ERRO ao carregar dados: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Test 8: Memory check
 print("\n✅ Teste 8: Verificando memória disponível...")
