@@ -358,11 +358,15 @@ class MLPEmbeddingPipeline:
         assert not set(val_idx) & set(test_idx), "Validação e teste se sobrepõem!"
 
         pin = self.device.type == "cuda"
+        import os
+        # Auto-detect CPU count if num_workers not explicitly set
+        n_workers = self.num_workers if self.num_workers > 0 else min(4, os.cpu_count() or 1)
         common_kwargs = dict(
             batch_size=self.batch_size,
             pin_memory=pin,
-            num_workers=self.num_workers,
+            num_workers=n_workers,
             persistent_workers=False,  # ← impede vazamento de FDs
+            prefetch_factor=2 if n_workers > 0 else 1,  # ← Otimização de I/O
         )
         self.train_loader = DataLoader(Subset(dataset, train_idx), shuffle=True, **common_kwargs)
         self.val_loader = DataLoader(Subset(dataset, val_idx), shuffle=False, **common_kwargs)

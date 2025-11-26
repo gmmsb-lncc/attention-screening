@@ -157,6 +157,11 @@ class ModelTrainer:
         if self.config.amp_enabled:
             self.scaler = torch.cuda.amp.GradScaler()
         
+        # Otimização de GPU: habilitar cudnn.benchmark
+        if self.device.type == "cuda":
+            torch.backends.cudnn.benchmark = True
+            logger.debug("cudnn.benchmark ativado para otimização de GPU")
+        
         logger.info(f"Trainer inicializado - Device: {self.device}, AMP: {self.config.amp_enabled}")
     
     def setup_training(
