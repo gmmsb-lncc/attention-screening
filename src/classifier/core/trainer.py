@@ -45,6 +45,12 @@ class TrainingConfig:
     amp_enabled: bool = False
     amp_dtype: Optional[torch.dtype] = torch.float16  # torch.float16 ou torch.bfloat16
     
+    # Gradient accumulation (Tier 2 optimization)
+    # Permite treinar com batch size efetivo maior sem OOM
+    # effective_batch = batch_size × accumulation_steps
+    use_gradient_accumulation: bool = False
+    accumulation_steps: int = 4  # Effective batch = 4x larger
+    
     # Gradient clipping
     gradient_clip_value: Optional[float] = None
     gradient_clip_norm: Optional[float] = None
@@ -156,6 +162,11 @@ class ModelTrainer:
         # Configuração de AMP
         if self.config.amp_enabled:
             self.scaler = torch.cuda.amp.GradScaler()
+        
+        # Otimização de GPU: habilitar cudnn.benchmark
+        if self.device.type == "cuda":
+            torch.backends.cudnn.benchmark = True
+            logger.debug("cudnn.benchmark ativado para otimização de GPU")
         
         logger.info(f"Trainer inicializado - Device: {self.device}, AMP: {self.config.amp_enabled}")
     
