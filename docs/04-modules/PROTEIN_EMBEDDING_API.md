@@ -1,6 +1,6 @@
 # Protein Embedding API Documentation
 
-Complete API documentation for the protein embedding system, designed to facilitate integration with ESM-3, OpenFold, and other future protein language models.
+Complete API documentation for the protein embedding system, designed to facilitate integration with ESM-2, ESM-C, Boltz-2, and other future protein language models.
 
 ## Table of Contents
 
@@ -52,8 +52,8 @@ The protein embedding system follows **SOLID principles** using the **Strategy P
           ┌───────────────┼───────────────┐
           │               │               │
 ┌─────────────────┐ ┌─────────────┐ ┌─────────────┐
-│  ESM2Strategy   │ │ ESM3Strategy│ │OpenFoldStrat│
-│  (Implemented)  │ │  (Future)   │ │  (Future)   │
+│  ESM2Strategy   │ │ESMCStrategy │ │BoltzStrategy│
+│  (Implemented)  │ │(Implemented)│ │(Implemented)│
 └─────────────────┘ └─────────────┘ └─────────────┘
 ```
 
@@ -203,8 +203,8 @@ def get_max_length(self, model_name: str) -> int:
 
 **Typical Values:**
 - ESM-2: 1024, 4096, or 5120 depending on model
-- ESM-3: 4096 or 8192
-- OpenFold: 2048
+- ESM-C: 4096 or 8192
+- Boltz-2: No limit (CLI-based)
 
 ##### 4. get_embedding_dim()
 
@@ -234,8 +234,8 @@ def get_embedding_dim(self, model_name: str) -> int:
 - ESM-2 650M: 1280
 - ESM-2 3B: 2560
 - ESM-2 15B: 5120
-- ESM-3: 2560 or higher
-- OpenFold: 384
+- ESM-C: 960, 1152, or 3072
+- Boltz-2: 384
 
 ##### 5. cleanup()
 
@@ -729,16 +729,6 @@ def test_esm3_end_to_end():
 #### Step 5: Update Documentation
 
 Update this file and README with new model support.
-
-### Adding OpenFold Support
-
-Similar process, but with key differences:
-
-1. **OpenFold uses different architecture**: MSA-based vs sequence-only
-2. **Different inputs**: May require MSA generation
-3. **Different outputs**: Structure + embeddings
-
-Create `/src/build/embeddings/strategies/openfold_strategy.py` following the same pattern.
 
 ---
 
