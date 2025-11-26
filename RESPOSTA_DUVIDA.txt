@@ -1,0 +1,135 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║                    RESPOSTA À SUA DÚVIDA SOBRE EMBEDDINGS                   ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📌 SUA PERGUNTA:
+   "Ao utilizar o Boltz, o modelo concatena (embedding_dim) esm+boltz+ibm 
+    ou concatena apenas boltz+ibm?"
+
+✅ RESPOSTA DIRETA:
+   Concatena APENAS Boltz + FM4M (IBM = FM4M)
+   
+   ❌ NÃO concatena ESM quando você usa Boltz
+   ❌ NÃO é multi-modelo no nível de embedding
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 DIMENSÕES:
+
+   ┌────────────────────────────────────┐
+   │  Boltz (384-dim) + FM4M (768-dim)  │
+   │         = 1152-dim Total           │
+   └────────────────────────────────────┘
+
+   Detalhamento:
+   • Proteína (Boltz): 384 dimensões
+   • Ligante (FM4M):   768 dimensões
+   • Concatenado:      1152 dimensões
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 COMO FUNCIONA:
+
+   INPUT
+      ↓
+      ├─ Proteína (FASTA) ──→ Boltz-2 ──→ 384-dim
+      │
+      └─ SMILES (Ligante)  ──→ FM4M    ──→ 768-dim
+      
+         ↓
+      Concatenate([384-dim, 768-dim])
+      
+         ↓
+      Output: 1152-dim vector
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ O QUE NÃO ACONTECE:
+
+   Você NÃO terá:
+   • ESM + Boltz + FM4M (3 modelos)
+   • X-dim onde X = (ESM-dim + Boltz-dim + FM4M-dim)
+   
+   Porque:
+   • Você escolhe UM modelo de proteína (Boltz OU ESM, nunca ambos)
+   • O pipeline é single-model no nível de proteína
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 EXEMPLO:
+
+   COMANDO:
+   $ python run_complete_pipeline.py \
+       --protein-model boltz2 \
+       --input data.tsv
+   
+   RESULTADO:
+   ✅ Usa Boltz para proteínas (384-dim)
+   ✅ Usa FM4M para ligantes (768-dim)
+   ✅ Concatena os dois: 1152-dim
+   ❌ NÃO usa ESM em lugar nenhum
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 COMPARAÇÃO COM OUTROS MODELOS:
+
+   Se tivesse usado ESM-2 t33:
+   ─────────────────────────────
+   ESM-2 t33 (1280-dim) + FM4M (768-dim) = 2048-dim
+   
+   Se tivesse usado ESM-C 600M:
+   ─────────────────────────────
+   ESMC 600M (1152-dim) + FM4M (768-dim) = 1920-dim
+   
+   Usando Boltz (seu caso):
+   ─────────────────────────────
+   Boltz (384-dim) + FM4M (768-dim) = 1152-dim ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 VANTAGENS DO BOLTZ:
+
+   ✅ Mais rápido (384-dim é compacto)
+   ✅ Menos memória (1152-dim < 2048-dim ESM)
+   ✅ Igualmente efetivo para binding prediction
+   ✅ Mais leve para deployment em produção
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 CÓDIGO-FONTE:
+
+   Verificação teórica:
+   • run_complete_pipeline.py (linha 365-375)
+   • src/build/matrix/embedding_matrix.py (linha 289-305)
+   
+   Leia: "final_embedding = np.concatenate([protein_emb, ligand_emb])"
+   
+   Só dois vetores sendo concatenados! ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DOCUMENTAÇÃO COMPLETA GERADA:
+
+   1. EMBEDDING_CONCATENATION_EXPLAINED.md
+      → Explicação visual detalhada
+   
+   2. EMBEDDING_CONCATENATION_DETAILED.md
+      → Diagramas de fluxo e comparações
+   
+   3. EMBEDDING_VERIFICATION_GUIDE.md
+      → Como verificar na prática
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 CONCLUSÃO:
+
+   ✅ APENAS Boltz + FM4M
+   ❌ NÃO ESM + Boltz + FM4M
+   
+   Seu pipeline está correto!
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     ✅ DÚVIDA ESCLARECIDA ✅                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝

@@ -635,22 +635,37 @@ class IntegratedPipeline:
             test_results = test_checkpoint
             regression.test_metrics = test_results
         
+        # FASE 4: Salvar resultados em arquivos JSON
+        # Garantir que val_metrics e test_metrics estão preenchidos antes de salvar
+        regression.val_metrics = train_results
+        regression.test_metrics = test_results
+        regression.save_results()
+        
         # Encontrar melhor modelo com base em MAE do conjunto de validação
         best_model_name = None
-        best_mae = float('inf')
-        best_r2 = -float('inf')
+        best_val_mae = float('inf')
+        best_val_r2 = -float('inf')
         
         for model_name, metrics in train_results.items():
             mae = metrics.get('MAE', float('inf'))
-            if mae < best_mae:
-                best_mae = mae
+            if mae < best_val_mae:
+                best_val_mae = mae
                 best_model_name = model_name
-                best_r2 = metrics.get('R2', 0.0)
+                best_val_r2 = metrics.get('R2', 0.0)
+        
+        # Obter métricas de TESTE do melhor modelo (selecionado pela validação)
+        best_test_mae = best_val_mae  # fallback
+        best_test_r2 = best_val_r2    # fallback
+        if test_results and best_model_name in test_results:
+            test_metrics = test_results[best_model_name]
+            if test_metrics:
+                best_test_mae = test_metrics.get('MAE', best_val_mae)
+                best_test_r2 = test_metrics.get('R2', best_val_r2)
         
         if self.config.verbose and train_checkpoint:
             print(f"   Best model: {best_model_name}")
-            print(f"   Best MAE: {best_mae:.3f}")
-            print(f"   Best R²: {best_r2:.4f}")
+            print(f"   Val MAE: {best_val_mae:.3f}, Test MAE: {best_test_mae:.3f}")
+            print(f"   Val R²: {best_val_r2:.4f}, Test R²: {best_test_r2:.4f}")
         
         # Cross-validation (opcional, para modelos selecionados)
         from regression.core import quick_cross_validate
@@ -671,8 +686,13 @@ class IntegratedPipeline:
         results = {
             'success': True,
             'best_model': best_model_name,
-            'best_mae': float(best_mae),
-            'best_r2': float(best_r2),
+            'best_val_mae': float(best_val_mae),
+            'best_val_r2': float(best_val_r2),
+            'best_test_mae': float(best_test_mae),
+            'best_test_r2': float(best_test_r2),
+            # Para compatibilidade com código existente, manter best_mae/best_r2 como TEST
+            'best_mae': float(best_test_mae),
+            'best_r2': float(best_test_r2),
             'models_trained': models_trained,
             'individual_results': {},
             'test_results': {}
@@ -709,9 +729,9 @@ class IntegratedPipeline:
         
         if self.config.verbose:
             print("✅ Regression phase completed successfully")
-            print(f"   Best model: {results['best_model']}")
-            print(f"   Best MAE: {results['best_mae']:.3f}")
-            print(f"   Best R²: {results['best_r2']:.4f}")
+            print(f"   Best model: {results['best_model']} (selected by validation)")
+            print(f"   📊 Validation: MAE={results['best_val_mae']:.2f} nM, R²={results['best_val_r2']:.4f}")
+            print(f"   🎯 Test:       MAE={results['best_test_mae']:.2f} nM, R²={results['best_test_r2']:.4f}")
         
         return results
     

@@ -11,6 +11,7 @@ Esta implementação treina 10-11 modelos diferentes e seleciona o melhor.
 
 import time
 import json
+import joblib
 import numpy as np
 from pathlib import Path
 from datetime import datetime
@@ -335,7 +336,7 @@ class MultiModelClassificationPipeline:
         print()
     
     def save_results(self) -> None:
-        """Salvar métricas e estatísticas em arquivos JSON."""
+        """Salvar métricas, modelos e estatísticas."""
         if self.verbose:
             print('💾 ETAPA 4: Salvando Resultados')
             print('=' * 70)
@@ -356,17 +357,37 @@ class MultiModelClassificationPipeline:
         if self.verbose:
             print(f"   ✅ Métricas de validação salvas: {val_metrics_file}")
         
+        # Salvar modelos treinados
+        models_dir = self.output_dir / 'models'
+        models_dir.mkdir(exist_ok=True)
+        
+        for model_name, model in self.trained_models.items():
+            if model is not None:
+                model_path = models_dir / f'{model_name}.pkl'
+                joblib.dump(model, model_path)
+                if self.verbose:
+                    print(f"   💾 Modelo salvo: {model_path.name}")
+        
         # Salvar stats do pipeline
         stats_file = self.output_dir / 'pipeline_stats.json'
         
-        # Encontrar melhor modelo
-        best_model = max(self.test_metrics.items(), key=lambda x: x[1]['ROC_AUC'])
+        # Encontrar melhor modelo (baseado em validação, reportar teste)
+        best_model_name = max(self.val_metrics.items(), key=lambda x: x[1]['ROC_AUC'])[0]
+        best_test_metrics = self.test_metrics[best_model_name]
+        
+        # Salvar melhor modelo com nome
+        best_filename = f'{best_model_name}_best_model.pkl'
+        best_model_path = models_dir / best_filename
+        joblib.dump(self.trained_models[best_model_name], best_model_path)
+        
+        if self.verbose:
+            print(f"   ⭐ Melhor modelo salvo: {best_model_name} → {best_filename}")
         
         self.stats['test_metrics_summary'] = {
-            'best_model': best_model[0],
-            'best_roc_auc': best_model[1]['ROC_AUC'],
-            'best_f1': best_model[1]['F1'],
-            'best_accuracy': best_model[1]['Accuracy']
+            'best_model': best_model_name,
+            'best_roc_auc': best_test_metrics['ROC_AUC'],
+            'best_f1': best_test_metrics['F1'],
+            'best_accuracy': best_test_metrics['Accuracy']
         }
         
         with open(stats_file, 'w') as f:
