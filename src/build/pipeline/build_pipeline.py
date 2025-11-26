@@ -18,6 +18,7 @@ from src.build.validation import MatrixValidator
 from src.build.stratification import Stratifier, SplitValidator
 from src.build.stratification.cluster_analyzer import ClusterAnalyzer
 from src.build.pipeline.stratification_manager import StratificationManager
+from src.utils.embedding_cache import EmbeddingCache
 from src.build.pipeline.split_indices import SplitIndices
 
 
@@ -29,6 +30,9 @@ class BuildPipeline(BaseBuilder):
         super().__init__(config)
         self.results: Dict[str, Any] = {}
         self.components: Dict[str, BaseBuilder] = {}
+        
+        # Initialize embedding cache
+        self.embedding_cache = EmbeddingCache()
         
         # Initialize components
         self._initialize_components()
