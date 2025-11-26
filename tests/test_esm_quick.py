@@ -21,7 +21,7 @@ try:
     print(f'  ✅ ESM {esm.__version__} de {Path(esm.__file__).parent}')
 except Exception as e:
     print(f'  ❌ ERRO: {e}')
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Teste 2: Constantes
 print('\n✓ Teste 2: Constantes')
@@ -37,7 +37,7 @@ try:
         print(f'  ⚠️  Modelo padrão inesperado: {DEFAULT_ESM_MODEL}')
 except Exception as e:
     print(f'  ❌ ERRO: {e}')
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Teste 3: Dependências principais
 print('\n✓ Teste 3: Dependências')
@@ -61,7 +61,7 @@ try:
         
 except ImportError as e:
     print(f'  ❌ Dependência faltando: {e}')
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Teste 4: Configurações
 print('\n✓ Teste 4: Arquivo de configuração')
@@ -83,7 +83,7 @@ try:
         
 except Exception as e:
     print(f'  ❌ ERRO: {e}')
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Teste 5: .gitignore
 print('\n✓ Teste 5: .gitignore')

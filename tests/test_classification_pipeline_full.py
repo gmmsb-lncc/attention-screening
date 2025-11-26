@@ -50,7 +50,7 @@ if dataset_file is None:
     print("Datasets procurados:")
     for path in dataset_paths:
         print(f"  - {path}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 # Verificar estrutura do dataset
 print(f"\n📊 Analisando dataset...")
@@ -127,14 +127,14 @@ try:
     print("✓ Módulos build importados")
 except Exception as e:
     print(f"❌ Erro ao importar módulos build: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from classifier.core import DataManager, ModelEvaluator
     print("✓ Módulos classifier importados")
 except Exception as e:
     print(f"❌ Erro ao importar módulos classifier: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import torch
@@ -228,7 +228,7 @@ try:
     
 except KeyboardInterrupt:
     print("\n\n⚠️  Processo interrompido pelo usuário")
-    sys.exit(0)
+    pass  # Success
 except Exception as e:
     print(f"\n❌ Erro no build pipeline: {e}")
     import traceback
@@ -247,7 +247,7 @@ matrix_files = list(matrix_dir.glob("*.npz")) if matrix_dir.exists() else []
 if not matrix_files:
     print("❌ Matriz de features não encontrada - não é possível treinar")
     print("   O build pipeline precisa ter sucesso primeiro")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 matrix_file = matrix_files[0]
 print(f"✓ Matriz encontrada: {matrix_file.name}")

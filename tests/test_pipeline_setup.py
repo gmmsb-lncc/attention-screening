@@ -24,14 +24,14 @@ try:
     print(f"     CUDA disponível: {torch.cuda.is_available()}")
 except ImportError as e:
     print(f"  ❌ PyTorch não instalado: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import transformers
     print(f"  ✅ Transformers {transformers.__version__}")
 except ImportError as e:
     print(f"  ❌ Transformers não instalado: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import esm
@@ -39,28 +39,28 @@ try:
 except ImportError as e:
     print(f"  ❌ ESM não instalado: {e}")
     print(f"     Execute: pip install fair-esm")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import sklearn
     print(f"  ✅ scikit-learn {sklearn.__version__}")
 except ImportError as e:
     print(f"  ❌ scikit-learn não instalado: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import numpy as np
     print(f"  ✅ numpy {np.__version__}")
 except ImportError as e:
     print(f"  ❌ numpy não instalado: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     import pandas as pd
     print(f"  ✅ pandas {pd.__version__}")
 except ImportError as e:
     print(f"  ❌ pandas não instalado: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 print()
 print("=" * 80)
@@ -74,42 +74,42 @@ try:
     print("  ✅ build.core.BuildConfig")
 except ImportError as e:
     print(f"  ❌ Erro ao importar BuildConfig: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from build.pipeline import BuildPipeline
     print("  ✅ build.pipeline.BuildPipeline")
 except ImportError as e:
     print(f"  ❌ Erro ao importar BuildPipeline: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from build.embeddings import ProteinEmbedding, LigandEmbedding
     print("  ✅ build.embeddings (ProteinEmbedding, LigandEmbedding)")
 except ImportError as e:
     print(f"  ❌ Erro ao importar embeddings: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from build.stratification import Stratifier, SplitValidator
     print("  ✅ build.stratification (Stratifier, SplitValidator)")
 except ImportError as e:
     print(f"  ❌ Erro ao importar stratification: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from build.matrix import EmbeddingMatrix
     print("  ✅ build.matrix.EmbeddingMatrix")
 except ImportError as e:
     print(f"  ❌ Erro ao importar EmbeddingMatrix: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 try:
     from build.labels import InteractionLabels, BinaryLabels
     print("  ✅ build.labels (InteractionLabels, BinaryLabels)")
 except ImportError as e:
     print(f"  ❌ Erro ao importar labels: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 print()
 print("=" * 80)
@@ -167,7 +167,7 @@ try:
     print(f"     Estratificação: {config.get('stratification_enabled')}")
 except Exception as e:
     print(f"  ❌ Erro ao criar BuildConfig: {e}")
-    sys.exit(1)
+    raise AssertionError("Test failed")
 
 print()
 print("=" * 80)
