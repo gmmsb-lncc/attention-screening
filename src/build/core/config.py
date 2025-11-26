@@ -53,6 +53,10 @@ class BuildConfig:
             'matrix_output_dir': DEFAULT_MATRIX_OUTPUT_DIR,
             'concatenated_output_dir': DEFAULT_CONCATENATED_OUTPUT_DIR,
             
+            # Diretórios de embeddings pré-existentes (reutilização)
+            'protein_embeddings_dir': None,  # Se None, gera novos
+            'ligand_embeddings_dir': None,   # Se None, gera novos (compartilhável entre experimentos)
+            
             # Embeddings
             'embedding_type': DEFAULT_EMBEDDING_TYPE,
             'ligand_dim': DEFAULT_LIGAND_DIM,

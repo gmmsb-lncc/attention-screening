@@ -2,7 +2,6 @@
 # ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
 # ESM-C (local): python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
 # ESM-C 6B (API): ESM_API_KEY="sua_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
-# OpenFold3: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/openfold3_test --protein-model openfold3 --seed 42
 # Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
 """
@@ -212,7 +211,7 @@ Dispositivos:
         choices=['esm2_t6_8M_UR50D', 'esm2_t12_35M_UR50D', 'esm2_t30_150M_UR50D',
                  'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D',
                  'esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12',
-                 'openfold3', 'boltz2'],
+                 'boltz2'],
         help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D). esmc-6b requer ESM_API_KEY.'
     )
     
@@ -318,6 +317,21 @@ Dispositivos:
         help='Modo silencioso (menos output)'
     )
     
+    # Embedding directories (reutilização de embeddings pré-computados)
+    parser.add_argument(
+        '--protein-embeddings-dir',
+        type=str,
+        default=None,
+        help='Diretório com embeddings de proteínas pré-computados. Se especificado e existir, pula geração.'
+    )
+    
+    parser.add_argument(
+        '--ligand-embeddings-dir',
+        type=str,
+        default=None,
+        help='Diretório com embeddings de ligantes pré-computados. Pode ser compartilhado entre experimentos com diferentes modelos de proteína.'
+    )
+    
     return parser.parse_args()
 
 
@@ -354,8 +368,6 @@ def main():
         'esmc-300m-2024-12': 960,
         'esmc-600m-2024-12': 1152,
         'esmc-6b-2024-12': 3072,
-        # OpenFold3 (single representation)
-        'openfold3': 384,
         # Boltz-2 (single representation, mean pooling)
         'boltz2': 384
     }
@@ -387,6 +399,12 @@ def main():
     print(f'   Total Embedding: {total_dim}-dim (Ligand: {ligand_dim} + Protein: {protein_dim})')
     print(f'   Device: {args.device} → {detected_device}')
     print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
+    
+    # Embedding directories (reutilização)
+    if args.protein_embeddings_dir:
+        print(f'   📂 Protein Embeddings: {args.protein_embeddings_dir} (pré-computados)')
+    if args.ligand_embeddings_dir:
+        print(f'   📂 Ligand Embeddings: {args.ligand_embeddings_dir} (pré-computados/compartilhados)')
     
     # Stratification settings
     if args.stratifier_threshold is not None:
@@ -439,6 +457,10 @@ def main():
         ligand_model=args.ligand_model,
         esm_model=args.protein_model,
         esm_dim=args.protein_dim,  # Dimensão customizada (None = usar padrão do modelo)
+        
+        # Embedding directories (reutilização)
+        protein_embeddings_dir=args.protein_embeddings_dir,
+        ligand_embeddings_dir=args.ligand_embeddings_dir,
         
         # Stratification settings
         stratifier_auto_threshold=args.stratifier_threshold is None,

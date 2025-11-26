@@ -315,14 +315,27 @@ class OpenFoldStrategy(BaseProteinStrategy):
         # Save original sys.path for cleanup
         self._original_sys_path = sys.path.copy()
         
-        # Find OPENFOLD-3/ directory (should be in repository root)
+        # Find OPENFOLD-3/ directory (check multiple possible locations)
         repo_root = Path(__file__).resolve().parents[4]  # Go up from src/build/embeddings/strategies/
-        openfold_path = repo_root / 'OPENFOLD-3'
         
-        if not openfold_path.exists():
+        # Possible paths for OPENFOLD-3
+        possible_paths = [
+            repo_root / 'OPENFOLD-3',           # Root level
+            repo_root / 'llm' / 'OPENFOLD-3',   # Inside llm/ directory
+            repo_root / 'openfold-3',           # Lowercase variant
+            repo_root / 'llm' / 'openfold-3',   # Lowercase in llm/
+        ]
+        
+        openfold_path = None
+        for path in possible_paths:
+            if path.exists():
+                openfold_path = path
+                break
+        
+        if openfold_path is None:
             raise FileNotFoundError(
-                f"OpenFold-3 directory not found at {openfold_path}. "
-                f"Please ensure openfold-3/ is in the repository root."
+                f"OpenFold-3 directory not found. Searched in: {[str(p) for p in possible_paths]}. "
+                f"Please ensure OPENFOLD-3/ is in the repository root or llm/ directory."
             )
         
         # Add OpenFold path with priority (like ESM-C strategy)

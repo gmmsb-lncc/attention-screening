@@ -106,6 +106,11 @@ class BuildPipeline(BaseBuilder):
         """
         Run embedding generation for proteins and ligands.
         
+        Supports pre-existing embedding directories to avoid regeneration:
+        - If protein_embeddings_dir is set in config, uses that directory
+        - If ligand_embeddings_dir is set in config, uses that directory
+        - This allows sharing ligand embeddings between experiments with different protein models
+        
         Args:
             input_tsv_path: Path to input TSV file
             output_dir: Output directory (optional)
@@ -122,12 +127,36 @@ class BuildPipeline(BaseBuilder):
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
             
+            # Determine protein embedding directory
+            # Priority: config.protein_embeddings_dir > output_dir/proteins
+            protein_embeddings_config = self.config.get('protein_embeddings_dir')
+            if protein_embeddings_config:
+                protein_output_dir = Path(protein_embeddings_config)
+                self.logger.info(f"📂 Using pre-configured protein embeddings dir: {protein_output_dir}")
+            else:
+                protein_output_dir = output_dir / "proteins" if output_dir else None
+            
+            # Determine ligand embedding directory
+            # Priority: config.ligand_embeddings_dir > output_dir/ligands
+            ligand_embeddings_config = self.config.get('ligand_embeddings_dir')
+            if ligand_embeddings_config:
+                ligand_output_dir = Path(ligand_embeddings_config)
+                self.logger.info(f"📂 Using pre-configured ligand embeddings dir: {ligand_output_dir}")
+            else:
+                ligand_output_dir = output_dir / "ligands" if output_dir else None
+            
+            # Create output directories if they don't exist
+            if protein_output_dir:
+                protein_output_dir.mkdir(parents=True, exist_ok=True)
+            if ligand_output_dir:
+                ligand_output_dir.mkdir(parents=True, exist_ok=True)
+            
             # Generate protein embeddings
             self.logger.info("Generating protein embeddings...")
             protein_embedding = self.components['protein_embedding']
             protein_success = protein_embedding.generate_embeddings(
                 tsv_path=input_tsv_path,
-                output_dir=output_dir
+                output_dir=protein_output_dir
             )
             
             if not protein_success:
@@ -139,7 +168,7 @@ class BuildPipeline(BaseBuilder):
             ligand_embedding = self.components['ligand_embedding']
             ligand_success = ligand_embedding.generate_embeddings(
                 tsv_path=input_tsv_path,
-                output_dir=output_dir
+                output_dir=ligand_output_dir
             )
             
             if not ligand_success:
@@ -150,6 +179,8 @@ class BuildPipeline(BaseBuilder):
             self.results['embedding_generation'] = {
                 'protein_embeddings': protein_embedding.get_embeddings_info(),
                 'ligand_embeddings': ligand_embedding.get_embeddings_info(),
+                'protein_dir': str(protein_output_dir) if protein_output_dir else None,
+                'ligand_dir': str(ligand_output_dir) if ligand_output_dir else None,
                 'success': True
             }
             

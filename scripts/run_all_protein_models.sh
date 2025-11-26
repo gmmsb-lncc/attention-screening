@@ -62,7 +62,7 @@ STRUCTURE_MODELS=(
 # =============================================================================
 
 # Option 1: Run ALL 11 models (ESM-2 + ESM-C + Structure)
-MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+# MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
 # Option 2: Run only ESM-2 local models (no API key required) - uncomment below
 # MODELS_TO_RUN=("${ESM2_MODELS[@]}")
@@ -72,6 +72,9 @@ MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
 # Option 4: Run only structure-based models - uncomment below
 # MODELS_TO_RUN=("${STRUCTURE_MODELS[@]}")
+
+# Option 5: Run only ESM-2 15B + Boltz-2
+MODELS_TO_RUN=("esm2_t48_15B_UR50D" "boltz2")
 
 # =============================================================================
 # Logging Configuration
