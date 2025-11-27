@@ -6,13 +6,17 @@
 # When one model finishes, the next one starts automatically.
 #
 # Usage:
-#   ./scripts/run_all_protein_models.sh [input_file] [output_base_dir]
+#   ./scripts/run_all_protein_models.sh [input_file] [output_base_dir] [ligand_embeddings_dir]
 #
-# Example:
-#   ./scripts/run_all_protein_models.sh tests/datasets/kinase_non_human_compounds.tsv results/benchmark
+# Examples:
+#   # Basic usage
+#   ./scripts/run_all_protein_models.sh tests/datasets/kinase_human_compounds.tsv results/benchmark
+#
+#   # With pre-computed ligand embeddings (much faster!)
+#   ./scripts/run_all_protein_models.sh tests/datasets/kinase_human_compounds.tsv results/benchmark results/esm2-8m_complete_test/build/ligands
 #
 # Author: DockTKinase Team
-# Date: November 25, 2025
+# Date: November 2025
 # =============================================================================
 
 set -e  # Exit on error
@@ -22,11 +26,12 @@ set -e  # Exit on error
 # =============================================================================
 
 # Default paths (can be overridden via command line)
-INPUT_FILE="${1:-tests/datasets/kinase_non_human_compounds.tsv}"
-OUTPUT_BASE="${2:-results/protein_model_benchmark}"
+INPUT_FILE="${1:-tests/datasets/kinase_human_compounds.tsv}"
+OUTPUT_BASE="${2:-results/protein_model_benchmark_human}"
+LIGAND_EMBEDDINGS_DIR="${3:-}"  # Optional: pre-computed ligand embeddings directory
 
 # Device configuration
-DEVICE="auto"  # Options: auto, cpu, cuda, mps
+DEVICE="cuda"  # Options: auto, cpu, cuda, mps
 
 # Seed for reproducibility
 SEED=42
@@ -48,7 +53,7 @@ ESM2_MODELS=(
 ESMC_MODELS=(
     "esmc-300m-2024-12"     # 960-dim, ~300M params
     "esmc-600m-2024-12"     # 1152-dim, ~600M params
-    # "esmc-6b-2024-12"       # 4096-dim, ~6B params (API only)
+    # "esmc-6b-2024-12"       # 3072-dim, ~6B params (API only)
 )
 
 # Structure-based Models (2 models)
@@ -120,7 +125,7 @@ get_model_dim() {
         "esm2_t48_15B_UR50D")   echo "5120" ;;
         "esmc-300m-2024-12")    echo "960" ;;
         "esmc-600m-2024-12")    echo "1152" ;;
-        "esmc-6b-2024-12")      echo "4096" ;;
+        "esmc-6b-2024-12")      echo "3072" ;;
         "openfold3")            echo "1536" ;;
         "boltz2")               echo "384" ;;
         *)                      echo "unknown" ;;
@@ -148,6 +153,11 @@ echo "   Device:        ${DEVICE}"
 echo "   Seed:          ${SEED}"
 echo "   Models:        ${#MODELS_TO_RUN[@]}"
 echo "   Log Directory: ${LOG_DIR}"
+if [ -n "$LIGAND_EMBEDDINGS_DIR" ] && [ -d "$LIGAND_EMBEDDINGS_DIR" ]; then
+    echo "   Ligand Emb.:   ${LIGAND_EMBEDDINGS_DIR} (pre-computed ✅)"
+else
+    echo "   Ligand Emb.:   Will be computed for each model"
+fi
 echo ""
 
 # Check if input file exists
@@ -239,6 +249,11 @@ for i in "${!MODELS_TO_RUN[@]}"; do
     CMD+=" --protein-model ${MODEL}"
     CMD+=" --device ${DEVICE}"
     CMD+=" --seed ${SEED}"
+    
+    # Add ligand embeddings directory if specified (saves time by reusing pre-computed embeddings)
+    if [ -n "$LIGAND_EMBEDDINGS_DIR" ] && [ -d "$LIGAND_EMBEDDINGS_DIR" ]; then
+        CMD+=" --ligand-embeddings-dir ${LIGAND_EMBEDDINGS_DIR}"
+    fi
     
     # Add API key if available and model requires it
     if [[ $MODEL == esmc-* ]] && [ -n "$ESM_API_KEY" ]; then
