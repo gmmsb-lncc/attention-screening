@@ -118,7 +118,8 @@ class BaseProteinStrategy(ABC):
     
         from accelerate import dispatch_model, infer_auto_device_map
         device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "30GiB"})
-        model = dispatch_model(model, device_map=device_map, offload_folder=offload_folder)
+        # NOTE: offload_folder renamed to offload_dir in accelerate >= 1.0
+        model = dispatch_model(model, device_map=device_map, offload_dir=offload_folder)
     
     ERROR HANDLING:
     ---------------
