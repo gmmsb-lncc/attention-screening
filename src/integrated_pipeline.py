@@ -60,7 +60,7 @@ class IntegratedConfig:
     ligand_embeddings_dir: Optional[str] = None   # Se especificado, usa embeddings existentes (compartilhável)
     
     # Data split
-    test_size: float = 0.2
+    test_size: float = 0.1
     val_size: float = 0.1
     random_state: int = 42
     
