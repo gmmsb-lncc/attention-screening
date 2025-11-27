@@ -342,11 +342,20 @@ class ESM2Strategy(BaseProteinStrategy):
             )
             
             # Dispatch para múltiplos devices
-            model = dispatch_model(
-                model,
-                device_map=device_map,
-                offload_folder=str(self._offload_folder)
-            )
+            # NOTE: offload_folder foi removido do dispatch_model em versões recentes do accelerate
+            # Usamos offload_state_dict separadamente se necessário
+            try:
+                model = dispatch_model(
+                    model,
+                    device_map=device_map,
+                    offload_folder=str(self._offload_folder)
+                )
+            except TypeError:
+                # Versão mais recente do accelerate sem offload_folder
+                model = dispatch_model(
+                    model,
+                    device_map=device_map
+                )
             
             if self.logger:
                 self.logger.info("✅ CPU offloading ativado")
