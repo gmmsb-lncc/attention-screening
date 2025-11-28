@@ -40,8 +40,8 @@ def example_basic_stratification():
     train_idx, val_idx, test_idx = stratifier.stratified_split(
         embeddings=embeddings,
         labels=labels,
-        test_size=0.2,  # 20% for test
-        val_size=0.1   # 10% for validation
+        test_size=0.1,  # 10% for test
+        val_size=0.1    # 10% for validation (80% for train)
     )
     
     print(f"Split sizes:")
@@ -97,7 +97,7 @@ def example_configured_stratification():
         protein_embeddings=protein_embeddings,
         ligand_embeddings=ligand_embeddings,
         labels=labels,
-        test_size=0.2,
+        test_size=0.1,
         val_size=0.1
     )
     
@@ -206,7 +206,7 @@ def example_custom_stratification_workflow():
             train_idx, val_idx, test_idx = stratifier.stratified_split(
                 embeddings=embeddings,
                 labels=labels,
-                test_size=0.2,
+                test_size=0.1,
                 val_size=0.1
             )
             

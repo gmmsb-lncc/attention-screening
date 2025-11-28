@@ -105,7 +105,7 @@ class StratificationManager:
         protein_embeddings: np.ndarray,
         ligand_embeddings: np.ndarray,
         labels: np.ndarray,
-        test_size: float = 0.2,
+        test_size: float = 0.1,
         val_size: float = 0.1
     ) -> SplitIndices:
         """
