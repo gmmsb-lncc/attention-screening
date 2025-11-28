@@ -67,7 +67,7 @@ class IntegratedConfig:
     # Stratification settings
     stratifier_auto_threshold: bool = True  # Use automatic threshold detection
     stratifier_threshold: Optional[float] = None  # Manual threshold (0.0-1.0) - overrides auto
-    stratifier_method: str = 'target'  # Auto-threshold method: silhouette, elbow, target, percentile
+    stratifier_method: str = 'target'  # Auto-threshold method: silhouette, elbow, target, percentile, leakage_aware
     
     # Classification
     run_classification: bool = True
@@ -314,7 +314,18 @@ class IntegratedPipeline:
             random_state=self.config.random_state,
             # Diretórios de embeddings pré-existentes (reutilização)
             protein_embeddings_dir=self.config.protein_embeddings_dir,
-            ligand_embeddings_dir=self.config.ligand_embeddings_dir
+            ligand_embeddings_dir=self.config.ligand_embeddings_dir,
+            # Stratification settings
+            stratification_enabled=True,
+            stratification_params={
+                'clustering_algorithm': 'adaptive',
+                'similarity_threshold': self.config.stratifier_threshold,
+                'adaptive_method': self.config.stratifier_method,
+                'cluster_min_size': 3,
+                'stratify_by': 'both',
+                'protein_weight': 0.6,
+                'ligand_weight': 0.4
+            }
         )
         
         # Executar build pipeline

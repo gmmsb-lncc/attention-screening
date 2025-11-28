@@ -236,7 +236,7 @@ class SplitIndices:
         
         Example:
             >>> splits.get_split_proportions()
-            {'train': 0.7, 'val': 0.1, 'test': 0.2}
+            {'train': 0.8, 'val': 0.1, 'test': 0.1}
         """
         total = self.metadata['total_size']
         return {
