@@ -54,6 +54,8 @@ class Stratifier(BaseBuilder):
                  adaptive_method: str = 'target',
                  target_cluster_ratio: float = 0.01,
                  output_dir: Optional[str] = None,
+                 test_size: float = 0.1,
+                 val_size: float = 0.1,
                  **kwargs):
         """
         Initialize stratifier.
@@ -65,9 +67,11 @@ class Stratifier(BaseBuilder):
                                  For non-adaptive methods, defaults to 0.7.
                                  For adaptive methods, if provided, uses 'manual' mode.
             cluster_min_size: Minimum cluster size
-            adaptive_method: Method for adaptive clustering ('silhouette', 'elbow', 'target', 'percentile', 'manual')
+            adaptive_method: Method for adaptive clustering ('silhouette', 'elbow', 'target', 'percentile', 'manual', 'leakage_aware')
             target_cluster_ratio: Target clusters as ratio of samples (for adaptive 'target' method)
             output_dir: Directory to save clustering metrics JSON
+            test_size: Proportion for test set (for 'leakage_aware' method)
+            val_size: Proportion for validation set (for 'leakage_aware' method)
         """
         self.clustering_algorithm = clustering_algorithm or STRATIFICATION_DEFAULT_CLUSTERING_ALGORITHM
         
@@ -87,6 +91,8 @@ class Stratifier(BaseBuilder):
         self.cluster_min_size = cluster_min_size or STRATIFICATION_DEFAULT_CLUSTER_MIN_SIZE
         self.target_cluster_ratio = target_cluster_ratio
         self.output_dir = output_dir
+        self.test_size = test_size
+        self.val_size = val_size
         
         # Multi-view weights
         self.protein_weight = 0.6
@@ -108,7 +114,7 @@ class Stratifier(BaseBuilder):
         if self.clustering_algorithm not in valid_algorithms:
             raise BuildException(f"Algorithm must be one of {valid_algorithms}")
         
-        valid_adaptive_methods = ['silhouette', 'elbow', 'target', 'percentile', 'manual']
+        valid_adaptive_methods = ['silhouette', 'elbow', 'target', 'percentile', 'manual', 'leakage_aware']
         if self.adaptive_method not in valid_adaptive_methods:
             raise BuildException(f"Adaptive method must be one of {valid_adaptive_methods}")
         
@@ -152,6 +158,8 @@ class Stratifier(BaseBuilder):
                 target_cluster_ratio=self.target_cluster_ratio,
                 auto_threshold=self.auto_threshold,
                 manual_threshold=manual_threshold,
+                test_size=self.test_size,
+                val_size=self.val_size,
                 logger=self.logger
             )
             return AdaptiveClusteringStrategy(
@@ -175,7 +183,7 @@ class Stratifier(BaseBuilder):
     def stratified_split(self, 
                         embeddings: np.ndarray, 
                         labels: np.ndarray,
-                        test_size: float = 0.2,
+                        test_size: float = 0.1,
                         val_size: float = 0.1,
                         output_dir: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -200,6 +208,11 @@ class Stratifier(BaseBuilder):
         # For adaptive clustering, we need to use the AdaptiveClustering directly
         if self.clustering_algorithm == 'adaptive':
             self.logger.info(f"Adaptive clustering with method='{self.adaptive_method}'")
+            
+            # For leakage_aware method, pass target labels
+            if self.adaptive_method == 'leakage_aware':
+                self.adaptive_clustering.set_target_labels(labels)
+            
             self.cluster_labels = self.adaptive_clustering.cluster(embeddings)
             self.clustering_metrics = self.adaptive_clustering.metrics
             
@@ -229,7 +242,7 @@ class Stratifier(BaseBuilder):
                                    protein_embeddings: np.ndarray,
                                    ligand_embeddings: np.ndarray,
                                    labels: np.ndarray,
-                                   test_size: float = 0.2,
+                                   test_size: float = 0.1,
                                    val_size: float = 0.1,
                                    protein_weight: float = 0.6,
                                    ligand_weight: float = 0.4,
@@ -274,6 +287,10 @@ class Stratifier(BaseBuilder):
                 protein_norm * np.sqrt(protein_weight),
                 ligand_norm * np.sqrt(ligand_weight)
             ])
+            
+            # For leakage_aware method, pass target labels
+            if self.adaptive_method == 'leakage_aware':
+                self.adaptive_clustering.set_target_labels(labels)
             
             self.cluster_labels = self.adaptive_clustering.cluster(combined)
             self.clustering_metrics = self.adaptive_clustering.metrics

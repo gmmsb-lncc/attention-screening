@@ -15,7 +15,7 @@ class ClusterSplitter:
     Single Responsibility: Handle the distribution of clusters into splits.
     """
     
-    def __init__(self, test_size: float = 0.2, val_size: float = 0.1, random_state: int = 42):
+    def __init__(self, test_size: float = 0.1, val_size: float = 0.1, random_state: int = 42):
         """
         Initialize splitter.
         

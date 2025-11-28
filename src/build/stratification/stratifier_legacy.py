@@ -276,7 +276,7 @@ class Stratifier(BaseBuilder):
     def _balance_clusters_for_split(self, 
                                    cluster_labels: np.ndarray, 
                                    labels: np.ndarray,
-                                   test_size: float = 0.2,
+                                   test_size: float = 0.1,
                                    val_size: float = 0.1) -> Tuple[List[int], List[int], List[int]]:
         """
         Create balanced splits ensuring each cluster is properly distributed.
@@ -408,7 +408,7 @@ class Stratifier(BaseBuilder):
     def stratified_split(self, 
                         embeddings: np.ndarray, 
                         labels: np.ndarray,
-                        test_size: float = 0.2,
+                        test_size: float = 0.1,
                         val_size: float = 0.1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Perform stratified split using clustering of embeddings.
@@ -433,7 +433,7 @@ class Stratifier(BaseBuilder):
                                    protein_embeddings: np.ndarray,
                                    ligand_embeddings: np.ndarray,
                                    labels: np.ndarray,
-                                   test_size: float = 0.2,
+                                   test_size: float = 0.1,
                                    val_size: float = 0.1,
                                    protein_weight: float = 0.6,
                                    ligand_weight: float = 0.4) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

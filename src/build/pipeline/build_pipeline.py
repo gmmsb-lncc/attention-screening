@@ -461,7 +461,7 @@ class BuildPipeline(BaseBuilder):
                           ligand_embeddings_path: Optional[Union[str, Path]] = None,
                           concatenated_matrix_path: Optional[Union[str, Path]] = None,
                           labels_path: Optional[Union[str, Path]] = None,
-                          test_size: float = 0.2,
+                          test_size: float = 0.1,
                           val_size: float = 0.1,
                           clustering_algorithm: Optional[str] = None,
                           similarity_threshold: Optional[float] = None,
@@ -651,7 +651,7 @@ class BuildPipeline(BaseBuilder):
                             binary_threshold: float = 1000.0,
                             run_validation: bool = True,
                             stratify_splits: bool = False,
-                            test_size: float = 0.2,
+                            test_size: float = 0.1,
                             val_size: float = 0.1) -> bool:
         """
         Run the complete build pipeline.
