@@ -5,15 +5,23 @@
 # This script runs the complete pipeline sequentially for each protein model.
 # When one model finishes, the next one starts automatically.
 #
+# KEY FEATURE: Ligand embeddings are computed ONCE and reused for all models!
+# This dramatically reduces execution time when testing multiple protein models.
+#
 # Usage:
 #   ./scripts/run_all_protein_models.sh [input_file] [output_base_dir] [ligand_embeddings_dir]
 #
 # Examples:
-#   # Basic usage
+#   # Basic usage (ligand embeddings computed on first model, reused for others)
 #   ./scripts/run_all_protein_models.sh tests/datasets/kinase_human_compounds.tsv results/benchmark
 #
-#   # With pre-computed ligand embeddings (much faster!)
-#   ./scripts/run_all_protein_models.sh tests/datasets/kinase_human_compounds.tsv results/benchmark results/esm2-8m_complete_test/build/ligands
+#   # With pre-computed ligand embeddings (skip ligand computation entirely)
+#   ./scripts/run_all_protein_models.sh tests/datasets/kinase_human_compounds.tsv results/benchmark path/to/ligand/embeddings
+#
+# Workflow:
+#   1. First protein model: Generate protein + ligand embeddings
+#   2. Save ligand embeddings to shared directory
+#   3. Subsequent models: Generate only protein embeddings, reuse ligand embeddings
 #
 # Author: DockTKinase Team
 # Date: November 2025
@@ -28,13 +36,22 @@ set -e  # Exit on error
 # Default paths (can be overridden via command line)
 INPUT_FILE="${1:-tests/datasets/kinase_human_compounds.tsv}"
 OUTPUT_BASE="${2:-results/protein_model_benchmark_human}"
-LIGAND_EMBEDDINGS_DIR="${3:-}"  # Optional: pre-computed ligand embeddings directory
+
+# Shared ligand embeddings directory (compute once, reuse for all protein models)
+# This saves significant time as ligand embeddings are identical across protein models
+SHARED_LIGAND_DIR="${OUTPUT_BASE}/shared_ligand_embeddings"
+
+# Optional: Override with pre-computed ligand embeddings from command line
+LIGAND_EMBEDDINGS_DIR="${3:-${SHARED_LIGAND_DIR}}"
 
 # Device configuration
 DEVICE="cuda"  # Options: auto, cpu, cuda, mps
 
 # Seed for reproducibility
 SEED=42
+
+# Flag to track if ligand embeddings have been generated
+LIGAND_EMBEDDINGS_GENERATED=false
 
 # Available protein models (ordered by size: smallest to largest)
 # Total: 11 models
@@ -153,10 +170,16 @@ echo "   Device:        ${DEVICE}"
 echo "   Seed:          ${SEED}"
 echo "   Models:        ${#MODELS_TO_RUN[@]}"
 echo "   Log Directory: ${LOG_DIR}"
-if [ -n "$LIGAND_EMBEDDINGS_DIR" ] && [ -d "$LIGAND_EMBEDDINGS_DIR" ]; then
-    echo "   Ligand Emb.:   ${LIGAND_EMBEDDINGS_DIR} (pre-computed ✅)"
+echo ""
+echo "🧬 Ligand Embeddings Strategy:"
+if [ -d "$LIGAND_EMBEDDINGS_DIR" ] && [ "$(ls -A $LIGAND_EMBEDDINGS_DIR 2>/dev/null)" ]; then
+    echo "   Directory:     ${LIGAND_EMBEDDINGS_DIR}"
+    echo "   Status:        Pre-computed ✅ (will reuse)"
+    LIGAND_EMBEDDINGS_GENERATED=true
 else
-    echo "   Ligand Emb.:   Will be computed for each model"
+    echo "   Directory:     ${SHARED_LIGAND_DIR}"
+    echo "   Status:        Will compute on first model, then reuse for all others"
+    LIGAND_EMBEDDINGS_GENERATED=false
 fi
 echo ""
 
@@ -233,6 +256,13 @@ for i in "${!MODELS_TO_RUN[@]}"; do
     echo "   Embedding Dim: ${MODEL_DIM}"
     echo "   Output Dir:    ${OUTPUT_DIR}"
     echo "   Log File:      ${LOG_FILE}"
+    
+    # Show ligand embeddings status
+    if [ "$LIGAND_EMBEDDINGS_GENERATED" = true ]; then
+        echo "   Ligand Emb.:   Reusing from ${LIGAND_EMBEDDINGS_DIR} ✅"
+    else
+        echo "   Ligand Emb.:   Will generate and save to ${SHARED_LIGAND_DIR}"
+    fi
     echo ""
     
     # Record start time
@@ -250,8 +280,9 @@ for i in "${!MODELS_TO_RUN[@]}"; do
     CMD+=" --device ${DEVICE}"
     CMD+=" --seed ${SEED}"
     
-    # Add ligand embeddings directory if specified (saves time by reusing pre-computed embeddings)
-    if [ -n "$LIGAND_EMBEDDINGS_DIR" ] && [ -d "$LIGAND_EMBEDDINGS_DIR" ]; then
+    # Add ligand embeddings directory (reuse if available, otherwise will be generated)
+    if [ "$LIGAND_EMBEDDINGS_GENERATED" = true ] && [ -d "$LIGAND_EMBEDDINGS_DIR" ]; then
+        # Reuse existing ligand embeddings
         CMD+=" --ligand-embeddings-dir ${LIGAND_EMBEDDINGS_DIR}"
     fi
     
@@ -272,6 +303,21 @@ for i in "${!MODELS_TO_RUN[@]}"; do
         echo ""
         echo "✅ Model ${MODEL} completed successfully!"
         echo "   Duration: ${DURATION_FMT}"
+        
+        # After first successful run, copy ligand embeddings to shared directory
+        if [ "$LIGAND_EMBEDDINGS_GENERATED" = false ]; then
+            FIRST_MODEL_LIGAND_DIR="${OUTPUT_DIR}/build/ligands"
+            if [ -d "$FIRST_MODEL_LIGAND_DIR" ]; then
+                echo ""
+                echo "📦 Saving ligand embeddings to shared directory for reuse..."
+                mkdir -p "${SHARED_LIGAND_DIR}"
+                cp -r "${FIRST_MODEL_LIGAND_DIR}"/* "${SHARED_LIGAND_DIR}/"
+                LIGAND_EMBEDDINGS_DIR="${SHARED_LIGAND_DIR}"
+                LIGAND_EMBEDDINGS_GENERATED=true
+                echo "   ✅ Ligand embeddings saved to: ${SHARED_LIGAND_DIR}"
+                echo "   📝 All subsequent models will reuse these embeddings"
+            fi
+        fi
         echo ""
         
         SUCCESSFUL=$((SUCCESSFUL + 1))
