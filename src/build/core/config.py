@@ -94,12 +94,13 @@ class BuildConfig:
             # Estratificação
             'stratification_enabled': False,
             'stratification_params': {
-                'clustering_algorithm': 'dbscan',
-                'similarity_threshold': 0.8,
-                'cluster_min_size': 5,
+                'clustering_algorithm': 'adaptive',
+                'similarity_threshold': None,  # None = auto-threshold
+                'cluster_min_size': 3,
                 'stratify_by': 'both',
                 'protein_weight': 0.6,
-                'ligand_weight': 0.4
+                'ligand_weight': 0.4,
+                'adaptive_method': 'target'  # silhouette, elbow, target, percentile, leakage_aware
             }
         }
     

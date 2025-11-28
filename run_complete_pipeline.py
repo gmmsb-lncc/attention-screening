@@ -271,8 +271,8 @@ Dispositivos:
     parser.add_argument(
         '--test-size',
         type=float,
-        default=0.2,
-        help='Proporção do conjunto de teste (default: 0.2 = 20%%)'
+        default=0.1,
+        help='Proporção do conjunto de teste (default: 0.1 = 10%%)'
     )
     
     parser.add_argument(
@@ -301,8 +301,8 @@ Dispositivos:
         '--stratifier-method',
         type=str,
         default='target',
-        choices=['silhouette', 'elbow', 'target', 'percentile'],
-        help='Método para determinar threshold automático (default: target). Ignorado se --stratifier-threshold for especificado.'
+        choices=['silhouette', 'elbow', 'target', 'percentile', 'leakage_aware'],
+        help='Método para determinar threshold automático (default: target). leakage_aware otimiza separação train/val/test. Ignorado se --stratifier-threshold for especificado.'
     )
     
     parser.add_argument(
