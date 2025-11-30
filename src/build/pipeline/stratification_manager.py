@@ -208,6 +208,9 @@ class StratificationManager:
         """
         Fallback to random stratified splitting.
         
+        If stratification fails (e.g., classes with only 1 member), 
+        falls back to purely random splitting without stratification.
+        
         Args:
             n_samples: Total number of samples
             labels: Labels for stratification
@@ -218,36 +221,83 @@ class StratificationManager:
             SplitIndices with random splits
         """
         from sklearn.model_selection import train_test_split
+        from collections import Counter
         
-        # First split: train+val vs test
-        train_val_idx, test_idx = train_test_split(
-            np.arange(n_samples),
-            test_size=test_size,
-            stratify=labels,
-            random_state=self.random_state
-        )
+        # Check if stratification is possible
+        # Each class needs at least 2 samples for train_test_split with stratify
+        label_counts = Counter(labels)
+        min_samples_per_class = min(label_counts.values())
+        can_stratify = min_samples_per_class >= 2
         
-        # Second split: train vs val
-        if val_size > 0:
-            val_size_adjusted = val_size / (1 - test_size)
-            train_idx, val_idx = train_test_split(
-                train_val_idx,
-                test_size=val_size_adjusted,
-                stratify=labels[train_val_idx],
+        if not can_stratify:
+            logger.warning(
+                f"Cannot stratify: {sum(1 for c in label_counts.values() if c < 2)} classes "
+                f"have fewer than 2 samples (min={min_samples_per_class}). "
+                f"Using pure random splitting."
+            )
+        
+        try:
+            if can_stratify:
+                # First split: train+val vs test
+                train_val_idx, test_idx = train_test_split(
+                    np.arange(n_samples),
+                    test_size=test_size,
+                    stratify=labels,
+                    random_state=self.random_state
+                )
+                
+                # Second split: train vs val
+                if val_size > 0:
+                    val_size_adjusted = val_size / (1 - test_size)
+                    train_idx, val_idx = train_test_split(
+                        train_val_idx,
+                        test_size=val_size_adjusted,
+                        stratify=labels[train_val_idx],
+                        random_state=self.random_state
+                    )
+                else:
+                    train_idx = train_val_idx
+                    val_idx = np.array([], dtype=np.int32)
+                    
+                stratify_method = 'random_stratified'
+            else:
+                raise ValueError("Insufficient samples per class for stratification")
+                
+        except Exception as e:
+            # Final fallback: pure random splitting (no stratification)
+            logger.warning(f"Stratified split failed: {e}. Using pure random split.")
+            
+            # Pure random split without stratification
+            train_val_idx, test_idx = train_test_split(
+                np.arange(n_samples),
+                test_size=test_size,
+                stratify=None,  # No stratification
                 random_state=self.random_state
             )
-        else:
-            train_idx = train_val_idx
-            val_idx = np.array([], dtype=np.int32)
+            
+            if val_size > 0:
+                val_size_adjusted = val_size / (1 - test_size)
+                train_idx, val_idx = train_test_split(
+                    train_val_idx,
+                    test_size=val_size_adjusted,
+                    stratify=None,  # No stratification
+                    random_state=self.random_state
+                )
+            else:
+                train_idx = train_val_idx
+                val_idx = np.array([], dtype=np.int32)
+                
+            stratify_method = 'pure_random'
         
         # Create metadata
         metadata = {
-            'clustering_algorithm': 'random',
+            'clustering_algorithm': stratify_method,
             'test_size': test_size,
             'val_size': val_size,
             'random_state': self.random_state,
             'n_samples': n_samples,
-            'fallback_used': True
+            'fallback_used': True,
+            'stratification_possible': can_stratify
         }
         
         # Create SplitIndices
@@ -262,7 +312,7 @@ class StratificationManager:
         self._cached_splits = splits
         
         logger.info(
-            f"Random split complete: train={len(train_idx)}, "
+            f"Random split complete ({stratify_method}): train={len(train_idx)}, "
             f"val={len(val_idx)}, test={len(test_idx)}"
         )
         

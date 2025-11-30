@@ -237,3 +237,48 @@ class BaseProteinStrategy(ABC):
             auxiliary_objects: Objetos auxiliares a serem limpos
         """
         pass
+    
+    # =========================================================================
+    # OPTIONAL METHODS (with default implementations)
+    # =========================================================================
+    
+    def generate_matrix(
+        self,
+        model: Any,
+        auxiliary_objects: Any,
+        sequence: str,
+        device: torch.device,
+        **kwargs
+    ) -> Optional[np.ndarray]:
+        """
+        Gera matriz de embeddings per-token (sem pooling).
+        
+        Este método é OPCIONAL - strategies que não suportam podem retornar None.
+        Implementações devem retornar a matriz completa [seq_len, embed_dim]
+        ao invés do vetor pooled [embed_dim].
+        
+        Args:
+            model: Modelo carregado
+            auxiliary_objects: Objetos auxiliares (alphabet, tokenizer)
+            sequence: Sequência de aminoácidos
+            device: Dispositivo PyTorch
+            **kwargs: Parâmetros específicos (layers, etc.)
+            
+        Returns:
+            Matriz numpy array (shape: [seq_len, embedding_dim]) ou None se não suportado
+            
+        Note:
+            - Retorna None por padrão (backward compatible)
+            - Subclasses devem sobrescrever para suportar matrizes
+            - A matriz NÃO inclui tokens especiais (BOS/EOS)
+        """
+        return None
+    
+    def supports_matrix_output(self) -> bool:
+        """
+        Indica se a strategy suporta geração de matrizes.
+        
+        Returns:
+            True se generate_matrix() está implementado, False caso contrário
+        """
+        return False
