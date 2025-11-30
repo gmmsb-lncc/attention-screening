@@ -361,11 +361,16 @@ class IntegratedPipeline:
                     print("   Pipelines will use default splitting")
         
         # Coletar paths dos arquivos gerados
+        # NOTE: protein/ligand embeddings are stored as individual files {seq_id}_embedding.npy
+        # in output_dir/proteins and output_dir/ligands directories
+        protein_embeddings_dir = self.build_dir / "proteins"
+        ligand_embeddings_dir = self.build_dir / "ligands"
+        
         results = {
             'success': True,
             'embeddings': {
-                'protein': str(self.build_dir / "embeddings" / "protein_embeddings.npy"),
-                'ligand': str(self.build_dir / "embeddings" / "ligand_embeddings.npy"),
+                'protein_dir': str(protein_embeddings_dir),
+                'ligand_dir': str(ligand_embeddings_dir),
                 'concatenated': str(self.build_dir / "embedding_matrix.npy")
             },
             'labels': {

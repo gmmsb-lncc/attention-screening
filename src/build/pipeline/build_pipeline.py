@@ -699,24 +699,28 @@ class BuildPipeline(BaseBuilder):
                 # Load embeddings from results stored by previous steps
                 import numpy as np
                 
-                # Get protein embeddings info
-                protein_info = self.results['embedding_generation']['protein_embeddings']
-                protein_emb_dir = output_dir / "protein_embeddings"
-                protein_emb_path = protein_emb_dir / "protein_embeddings.npy"
+                # The embedding matrix has already been constructed in run_matrix_construction
+                # Matrix format: [protein_embedding | ligand_embedding] for each sample
+                embedding_matrix_path = Path(self.results['matrix_construction']['output_path'])
+                self.logger.info(f"Loading embedding matrix from: {embedding_matrix_path}")
+                embedding_matrix = np.load(str(embedding_matrix_path))
                 
-                # Get ligand embeddings info
-                ligand_info = self.results['embedding_generation']['ligand_embeddings']
-                ligand_emb_dir = output_dir / "ligand_embeddings"
-                ligand_emb_path = ligand_emb_dir / "ligand_embeddings.npy"
+                # Get embedding dimensions from config or from EmbeddingMatrix component
+                embedding_matrix_builder = self.components['embedding_matrix']
+                protein_dim = embedding_matrix_builder.protein_dim
+                ligand_dim = embedding_matrix_builder.ligand_dim
                 
-                # Load embeddings
-                self.logger.info(f"Loading protein embeddings from: {protein_emb_path}")
-                protein_embeddings = np.load(str(protein_emb_path))
+                self.logger.info(f"Embedding dimensions: protein={protein_dim}, ligand={ligand_dim}")
                 
-                self.logger.info(f"Loading ligand embeddings from: {ligand_emb_path}")
-                ligand_embeddings = np.load(str(ligand_emb_path))
+                # Split concatenated matrix back into protein and ligand embeddings
+                # Matrix structure: [protein (0:protein_dim), ligand (protein_dim:protein_dim+ligand_dim)]
+                protein_embeddings = embedding_matrix[:, :protein_dim]
+                ligand_embeddings = embedding_matrix[:, protein_dim:protein_dim + ligand_dim]
                 
-                # Load interaction labels (use interaction labels for stratification)
+                self.logger.info(f"Extracted protein embeddings: {protein_embeddings.shape}")
+                self.logger.info(f"Extracted ligand embeddings: {ligand_embeddings.shape}")
+                
+                # Load labels for stratification
                 labels_path = Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy')
                 self.logger.info(f"Loading labels from: {labels_path}")
                 labels = np.load(str(labels_path))
