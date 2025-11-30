@@ -213,7 +213,7 @@ class StratificationManager:
         
         Args:
             n_samples: Total number of samples
-            labels: Labels for stratification
+            labels: Labels for stratification (can be 1D or 2D)
             test_size: Proportion of test set
             val_size: Proportion of validation set
         
@@ -223,26 +223,49 @@ class StratificationManager:
         from sklearn.model_selection import train_test_split
         from collections import Counter
         
+        # Handle multi-dimensional labels (e.g., multi-task or multi-column labels)
+        # For stratification, we need 1D labels
+        if labels is not None and labels.ndim > 1:
+            # Use first column or convert to string representation
+            if labels.shape[1] == 1:
+                labels_1d = labels.ravel()
+            else:
+                # For multi-dimensional labels, use pure random split
+                logger.warning(
+                    f"Labels have shape {labels.shape}. "
+                    f"Multi-dimensional labels cannot be used for stratification. "
+                    f"Using pure random splitting."
+                )
+                labels_1d = None
+        else:
+            labels_1d = labels
+        
         # Check if stratification is possible
         # Each class needs at least 2 samples for train_test_split with stratify
-        label_counts = Counter(labels)
-        min_samples_per_class = min(label_counts.values())
-        can_stratify = min_samples_per_class >= 2
-        
-        if not can_stratify:
-            logger.warning(
-                f"Cannot stratify: {sum(1 for c in label_counts.values() if c < 2)} classes "
-                f"have fewer than 2 samples (min={min_samples_per_class}). "
-                f"Using pure random splitting."
-            )
+        can_stratify = False
+        if labels_1d is not None:
+            try:
+                label_counts = Counter(labels_1d)
+                min_samples_per_class = min(label_counts.values())
+                can_stratify = min_samples_per_class >= 2
+                
+                if not can_stratify:
+                    logger.warning(
+                        f"Cannot stratify: {sum(1 for c in label_counts.values() if c < 2)} classes "
+                        f"have fewer than 2 samples (min={min_samples_per_class}). "
+                        f"Using pure random splitting."
+                    )
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Cannot count labels for stratification: {e}. Using pure random splitting.")
+                can_stratify = False
         
         try:
-            if can_stratify:
+            if can_stratify and labels_1d is not None:
                 # First split: train+val vs test
                 train_val_idx, test_idx = train_test_split(
                     np.arange(n_samples),
                     test_size=test_size,
-                    stratify=labels,
+                    stratify=labels_1d,
                     random_state=self.random_state
                 )
                 
@@ -252,7 +275,7 @@ class StratificationManager:
                     train_idx, val_idx = train_test_split(
                         train_val_idx,
                         test_size=val_size_adjusted,
-                        stratify=labels[train_val_idx],
+                        stratify=labels_1d[train_val_idx],
                         random_state=self.random_state
                     )
                 else:

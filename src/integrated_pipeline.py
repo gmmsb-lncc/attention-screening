@@ -751,12 +751,58 @@ class IntegratedPipeline:
         
         return results
     
+    def _make_serializable(self, obj: Any) -> Any:
+        """
+        Convert objects to JSON-serializable format recursively.
+        
+        Args:
+            obj: Object to convert
+            
+        Returns:
+            JSON-serializable version of the object
+        """
+        from dataclasses import asdict, is_dataclass
+        
+        if obj is None:
+            return None
+        elif isinstance(obj, (str, int, float, bool)):
+            return obj
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, Path):
+            return str(obj)
+        elif is_dataclass(obj) and not isinstance(obj, type):
+            return {k: self._make_serializable(v) for k, v in asdict(obj).items()}
+        elif hasattr(obj, 'to_dict') and callable(obj.to_dict):
+            return self._make_serializable(obj.to_dict())
+        elif hasattr(obj, '__dict__'):
+            # Handle generic objects with __dict__
+            return {k: self._make_serializable(v) for k, v in obj.__dict__.items() 
+                    if not k.startswith('_')}
+        elif isinstance(obj, dict):
+            return {k: self._make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_serializable(item) for item in obj]
+        else:
+            # Fallback: try to convert to string
+            try:
+                return str(obj)
+            except Exception:
+                return f"<non-serializable: {type(obj).__name__}>"
+    
     def _save_results(self) -> None:
         """Salvar resultados finais em JSON."""
         results_file = self.output_dir / "integrated_results.json"
         
+        # Convert all results to JSON-serializable format
+        serializable_results = self._make_serializable(self.results)
+        
         with open(results_file, 'w') as f:
-            json.dump(self.results, f, indent=2)
+            json.dump(serializable_results, f, indent=2)
         
         if self.config.verbose:
             print(f"\n📁 Results saved to: {results_file}")
@@ -841,8 +887,27 @@ class IntegratedPipeline:
         
         checkpoint_file = checkpoint_dir / f'{phase_name}_checkpoint.json'
         
+        def json_serializable(obj):
+            """Convert non-serializable objects to serializable format."""
+            if hasattr(obj, 'to_dict'):
+                return obj.to_dict()
+            elif hasattr(obj, '__dict__'):
+                return {k: json_serializable(v) for k, v in obj.__dict__.items() 
+                        if not k.startswith('_')}
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            elif isinstance(obj, Path):
+                return str(obj)
+            else:
+                return obj
+        
+        # Convert to serializable format
+        serializable_results = json_serializable(phase_results)
+        
         with open(checkpoint_file, 'w') as f:
-            json.dump(phase_results, f, indent=2)
+            json.dump(serializable_results, f, indent=2, default=str)
         
         if self.config.verbose:
             print(f"✅ Checkpoint salvo: {checkpoint_file}")
