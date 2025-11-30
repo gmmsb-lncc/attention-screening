@@ -7,10 +7,11 @@ This module implements **SOLID-based stratified splitting** for train/validation
 
 - 🎯 **Multi-view clustering**: Combines protein and ligand similarity with configurable weights
 - 🏗️ **SOLID architecture**: Modular, extensible, and maintainable code
-- 📊 **Multiple algorithms**: DBSCAN, Hierarchical, K-Means, and Random clustering
+- 📊 **Multiple algorithms**: DBSCAN, Hierarchical, K-Means, Random, and **Adaptive** clustering
 - 🎨 **Rich visualizations**: PCA, t-SNE, and UMAP plots with automatic optimization
 - ⚡ **Performance optimized**: Handles millions of samples with automatic downsampling
 - 🔍 **Quality validation**: Comprehensive metrics and split analysis
+- 🚀 **Scalable clustering**: Automatic support for datasets >40k samples
 
 ## 🏗️ Architecture (SOLID Principles)
 
@@ -24,7 +25,15 @@ stratification/
 ├── cosine_similarity_calculator.py  # Similarity computation
 ├── visualization.py                 # Plotting tools (optimized)
 ├── validator.py                     # Split quality validation
-└── cluster_analyzer.py              # Clustering analysis
+├── cluster_analyzer.py              # Clustering analysis
+│
+├── # Adaptive Clustering Modules (v2.0)
+├── adaptive_clustering.py           # Main orchestrator
+├── clustering_metrics.py            # Metrics dataclass
+├── similarity_analysis.py           # Similarity distribution analysis
+├── threshold_optimization.py        # Silhouette, elbow, target methods
+├── leakage_aware_optimization.py    # Split quality optimization
+└── scalable_clustering.py           # Large datasets (>40k samples)
 ```
 
 ### Design Patterns
@@ -38,11 +47,16 @@ stratification/
    - Liskov Substitution: All strategies are interchangeable
    - Interface Segregation: Small, focused interface
 
-3. **ClusterSplitter** (Single Responsibility)
+3. **AdaptiveClustering** (Orchestrator + Composition)
+   - Composes specialized modules for different tasks
+   - Automatic threshold detection with 6 methods
+   - Scalable to 500k+ samples
+
+4. **ClusterSplitter** (Single Responsibility)
    - Handles only the splitting logic
    - Supports edge cases (1, 2, 3+ samples per cluster)
 
-4. **StratificationVisualizer** (Performance + Quality)
+5. **StratificationVisualizer** (Performance + Quality)
    - Automatic downsampling for large datasets
    - IncrementalPCA for memory efficiency
    - Multiple dimensionality reduction methods

@@ -108,6 +108,20 @@ This index provides a comprehensive overview of all stratification-related docum
 
 ### Core Modules (src/build/stratification/)
 
+#### Adaptive Clustering (Modular Architecture v2.0) ⭐ NEW
+- **[ADAPTIVE_CLUSTERING_GUIDE.md](ADAPTIVE_CLUSTERING_GUIDE.md)**
+  - **Updated November 30, 2025**
+  - Automatic threshold optimization (6 methods)
+  - Modular architecture with 6 focused modules:
+    - `adaptive_clustering.py` - Main orchestrator
+    - `clustering_metrics.py` - Metrics dataclass
+    - `similarity_analysis.py` - Similarity distribution
+    - `threshold_optimization.py` - Silhouette, elbow, target
+    - `leakage_aware_optimization.py` - Split quality optimization
+    - `scalable_clustering.py` - Large datasets (>40k samples)
+  - Methods: target, silhouette, elbow, percentile, manual, leakage_aware
+  - CLI and Python API examples
+
 #### Main Module
 - **stratifier.py** (200 lines)
   - Main coordinator class
