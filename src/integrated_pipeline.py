@@ -3,12 +3,12 @@
 DockTKinase Integrated Pipeline
 ================================
 
-Sistema de integração end-to-end que orquestra todos os módulos:
-- build: Geração de embeddings e matrizes
-- classifier: Classificação binária (ativo/inativo)
-- regression: Predição quantitativa (pKi/IC50)
+End-to-end integration system that orchestrates all modules:
+- build: Embedding and matrix generation
+- classifier: Binary classification (active/inactive)
+- regression: Quantitative prediction (pKi/IC50)
 
-Uso:
+Usage:
     # CLI
     python -m integrated_pipeline --input data.tsv --output results/
 
@@ -34,30 +34,30 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-# Adicionar paths
+# Add paths
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR / 'src'))
 
 
 @dataclass
 class IntegratedConfig:
-    """Configuração integrada para todos os módulos."""
+    """Integrated configuration for all modules."""
     
     # Input/Output
     input_tsv: str
     output_dir: str = "results/integrated"
-    use_checkpoints: bool = True  # Usar checkpoints para evitar recálculo
+    use_checkpoints: bool = True  # Use checkpoints to avoid recalculation
     
     # Build module
     esm_model: str = "esm2_t6_8M_UR50D"
-    esm_dim: Optional[int] = None  # None = usar dimensão padrão do modelo
+    esm_dim: Optional[int] = None  # None = use default model dimension
     ligand_model: str = "smi-ted-large"
     batch_size: int = 8
     device: str = "cpu"
     
-    # Embedding directories (reutilização de embeddings pré-computados)
-    protein_embeddings_dir: Optional[str] = None  # Se especificado, usa embeddings existentes
-    ligand_embeddings_dir: Optional[str] = None   # Se especificado, usa embeddings existentes (compartilhável)
+    # Embedding directories (reuse of pre-computed embeddings)
+    protein_embeddings_dir: Optional[str] = None  # If specified, use existing embeddings
+    ligand_embeddings_dir: Optional[str] = None   # If specified, use existing embeddings (shareable)
     
     # Data split
     test_size: float = 0.1
@@ -71,14 +71,14 @@ class IntegratedConfig:
     
     # Classification
     run_classification: bool = True
-    use_multi_model_classification: bool = False  # True = 10 modelos, False = MLP apenas
-    classification_models: Optional[List[str]] = None  # None = todos, ou lista específica
-    classifier_epochs: int = 50  # Apenas para MLP
-    classifier_cv_folds: int = 5  # Apenas para MLP
+    use_multi_model_classification: bool = False  # True = 10 models, False = MLP only
+    classification_models: Optional[List[str]] = None  # None = all, or specific list
+    classifier_epochs: int = 50  # Only for MLP
+    classifier_cv_folds: int = 5  # Only for MLP
     
     # Regression
     run_regression: bool = True
-    regression_models: Optional[List[str]] = None  # None = todos os 10 modelos
+    regression_models: Optional[List[str]] = None  # None = all 10 models
     regression_cv_folds: int = 5
     
     # Binary threshold for classification labels
@@ -92,20 +92,20 @@ class IntegratedConfig:
 
 class IntegratedPipeline:
     """
-    Pipeline integrado end-to-end do DockTKinase.
+    DockTKinase end-to-end integrated pipeline.
     
-    Orquestra todos os módulos em sequência:
-    1. Build: Gera embeddings (ligand + protein) e matrizes
-    2. Classifier: Treina modelo de classificação binária
-    3. Regression: Treina modelos de regressão quantitativa
+    Orchestrates all modules in sequence:
+    1. Build: Generate embeddings (ligand + protein) and matrices
+    2. Classifier: Train binary classification model
+    3. Regression: Train quantitative regression models
     """
     
     def __init__(self, config: Union[IntegratedConfig, Dict[str, Any]]):
         """
-        Inicializar pipeline integrado.
+        Initialize integrated pipeline.
         
         Args:
-            config: IntegratedConfig ou dict com configurações
+            config: IntegratedConfig or dict with configurations
         """
         if isinstance(config, dict):
             config = IntegratedConfig(**config)
@@ -136,10 +136,10 @@ class IntegratedPipeline:
     
     def run(self) -> Dict[str, Any]:
         """
-        Executar pipeline completo integrado.
+        Run the complete integrated pipeline.
         
         Returns:
-            Dict com resultados de todos os módulos
+            Dict with results from all modules
         """
         start_time = time.time()
         self.results['timestamp_start'] = datetime.now().isoformat()
@@ -154,18 +154,18 @@ class IntegratedPipeline:
                 print("PHASE 1: BUILD - Embedding Generation & Matrix Construction")
                 print("="*80)
             
-            # Tentar carregar checkpoint
+            # Try to load checkpoint
             build_results = self._load_checkpoint('build')
             
             if build_results is None:
-                # Executar build phase
+                # Run build phase
                 build_results = self._run_build_phase()
                 self._save_checkpoint('build', build_results)
             else:
                 if self.config.verbose:
-                    print("📂 Usando checkpoint da fase de Build")
+                    print("📂 Using checkpoint from Build phase")
                 
-                # Atualizar checkpoint antigo se necessário (adicionar n_samples e embedding_dim)
+                # Update old checkpoint if necessary (add n_samples and embedding_dim)
                 if 'n_samples' not in build_results or 'embedding_dim' not in build_results:
                     import numpy as np
                     embedding_matrix_path = self.build_dir / "embedding_matrix.npy"
@@ -173,7 +173,7 @@ class IntegratedPipeline:
                         embedding_matrix = np.load(embedding_matrix_path)
                         build_results['n_samples'] = embedding_matrix.shape[0]
                         build_results['embedding_dim'] = embedding_matrix.shape[1]
-                        # Salvar checkpoint atualizado
+                        # Save updated checkpoint
                         self._save_checkpoint('build', build_results)
                         if self.config.verbose:
                             print(f"   Updated checkpoint with statistics: {build_results['n_samples']} samples, {build_results['embedding_dim']} features")
@@ -187,20 +187,20 @@ class IntegratedPipeline:
                     print("PHASE 2: CLASSIFICATION - Binary Activity Prediction")
                     print("="*80)
                 
-                # Tentar carregar checkpoint
+                # Try to load checkpoint
                 classifier_results = self._load_checkpoint('classifier')
                 
                 if classifier_results is None:
-                    # Executar classification phase
+                    # Run classification phase
                     classifier_results = self._run_classification_phase(build_results)
                     self._save_checkpoint('classifier', classifier_results)
                 else:
                     if self.config.verbose:
-                        print("📂 Usando checkpoint da fase de Classification")
+                        print("📂 Using checkpoint from Classification phase")
                     
-                    # Se o checkpoint não tem as chaves esperadas, processar
+                    # If checkpoint doesn't have expected keys, process
                     if 'best_model' not in classifier_results:
-                        # Checkpoint antigo - processar para encontrar melhor modelo
+                        # Old checkpoint - process to find best model
                         best_model_name = None
                         best_roc_auc = -1.0
                         best_metrics = {}
@@ -222,7 +222,7 @@ class IntegratedPipeline:
                                     'recall': float(metrics.get('Recall', 0))
                                 }
                         
-                        # Reconstruir com estrutura esperada
+                        # Rebuild with expected structure
                         classifier_results = {
                             'success': True,
                             'mode': 'MultiModel',
@@ -251,16 +251,16 @@ class IntegratedPipeline:
                     print("PHASE 3: REGRESSION - Quantitative Activity Prediction")
                     print("="*80)
                 
-                # Tentar carregar checkpoint
+                # Try to load checkpoint
                 regression_results = self._load_checkpoint('regression')
                 
                 if regression_results is None:
-                    # Executar regression phase
+                    # Run regression phase
                     regression_results = self._run_regression_phase(build_results)
                     self._save_checkpoint('regression', regression_results)
                 else:
                     if self.config.verbose:
-                        print("📂 Usando checkpoint da fase de Regression")
+                        print("📂 Using checkpoint from Regression phase")
                 
                 self.results['regression'] = regression_results
             
@@ -291,20 +291,20 @@ class IntegratedPipeline:
     
     def _run_build_phase(self) -> Dict[str, Any]:
         """
-        Phase 1: Gerar embeddings e construir matrizes.
+        Phase 1: Generate embeddings and build matrices.
         
         Returns:
-            Dict com paths dos arquivos gerados
+            Dict with paths to generated files
         """
         from build.pipeline import BuildPipeline
         from build.core import BuildConfig
         
-        # Configurar build
+        # Configure build
         build_config = BuildConfig(
             input_tsv=self.config.input_tsv,
             output_dir=str(self.build_dir),
             esm_model=self.config.esm_model,
-            esm_dim=self.config.esm_dim,  # Dimensão customizada
+            esm_dim=self.config.esm_dim,  # Custom dimension
             ligand_model=self.config.ligand_model,
             batch_size=self.config.batch_size,
             device=self.config.device,
@@ -312,7 +312,7 @@ class IntegratedPipeline:
             test_size=self.config.test_size,
             val_size=self.config.val_size,
             random_state=self.config.random_state,
-            # Diretórios de embeddings pré-existentes (reutilização)
+            # Pre-existing embedding directories (reuse)
             protein_embeddings_dir=self.config.protein_embeddings_dir,
             ligand_embeddings_dir=self.config.ligand_embeddings_dir,
             # Stratification settings
@@ -328,7 +328,7 @@ class IntegratedPipeline:
             }
         )
         
-        # Executar build pipeline
+        # Run build pipeline
         build_pipeline = BuildPipeline(build_config)
         success = build_pipeline.run_complete_pipeline(
             input_tsv_path=self.config.input_tsv,
@@ -406,20 +406,20 @@ class IntegratedPipeline:
     
     def _run_classification_phase(self, build_results: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Phase 2: Treinar classificador binário.
+        Phase 2: Train binary classifier.
         
         Args:
-            build_results: Resultados do build phase
+            build_results: Results from build phase
         
         Returns:
-            Dict com métricas do classificador
+            Dict with classifier metrics
         """
-        # Paths dos dados
+        # Data paths
         embeddings_path = build_results['embeddings']['concatenated']
         labels_path = build_results['labels']['binary']
         split_indices = build_results.get('split_indices')  # NEW: get stratified splits
         
-        # Escolher pipeline: Multi-modelo ou MLP único
+        # Choose pipeline: Multi-model or single MLP
         if self.config.use_multi_model_classification:
             return self._run_multi_model_classification(embeddings_path, labels_path, split_indices)
         else:
@@ -427,19 +427,19 @@ class IntegratedPipeline:
     
     def _run_mlp_classification(self, embeddings_path: str, labels_path: str, split_indices=None) -> Dict[str, Any]:
         """
-        Executar classificação com MLP único (modo legado).
+        Run classification with single MLP (legacy mode).
         
         Args:
-            embeddings_path: Path dos embeddings concatenados
-            labels_path: Path dos labels binários
+            embeddings_path: Path to concatenated embeddings
+            labels_path: Path to binary labels
             split_indices: Optional SplitIndices object for stratified splits
             
         Returns:
-            Dict com métricas do MLP
+            Dict with MLP metrics
         """
         from classifier.modular_pipeline import MLPEmbeddingPipeline
         
-        # Criar pipeline de classificação
+        # Create classification pipeline
         classifier = MLPEmbeddingPipeline(
             embeddings_path=embeddings_path,
             labels_path=labels_path,
@@ -454,10 +454,10 @@ class IntegratedPipeline:
             split_indices=split_indices  # NEW: pass stratified splits
         )
         
-        # Carregar dados
+        # Load data
         classifier.load_data()
         
-        # Treinar
+        # Train
         val_loss = classifier.train()
         
         # Cross-validation
@@ -492,15 +492,15 @@ class IntegratedPipeline:
     
     def _run_multi_model_classification(self, embeddings_path: str, labels_path: str, split_indices=None) -> Dict[str, Any]:
         """
-        Executar classificação com múltiplos modelos sklearn.
+        Run classification with multiple sklearn models.
         
         Args:
-            embeddings_path: Path dos embeddings concatenados
-            labels_path: Path dos labels binários
+            embeddings_path: Path to concatenated embeddings
+            labels_path: Path to binary labels
             split_indices: Optional SplitIndices object for stratified splits
             
         Returns:
-            Dict com métricas de todos os modelos
+            Dict with metrics for all models
         """
         from classifier.multi_model_pipeline import MultiModelClassificationPipeline
         
@@ -521,10 +521,10 @@ class IntegratedPipeline:
             verbose=self.config.verbose
         )
         
-        # Executar pipeline completo
+        # Run complete pipeline
         test_metrics = pipeline.run()
         
-        # Encontrar melhor modelo com base em ROC-AUC
+        # Find best model based on ROC-AUC
         best_model_name = None
         best_roc_auc = -1.0
         best_metrics = {}
@@ -536,7 +536,7 @@ class IntegratedPipeline:
                 best_model_name = model_name
                 best_metrics = metrics
         
-        # Compilar resultados
+        # Compile results
         results = {
             'success': True,
             'mode': 'MultiModel',
@@ -552,7 +552,7 @@ class IntegratedPipeline:
             'individual_results': {}
         }
         
-        # Adicionar métricas individuais
+        # Add individual metrics
         for model_name, metrics in test_metrics.items():
             results['individual_results'][model_name] = {
                 'roc_auc': float(metrics.get('ROC_AUC', 0)),
@@ -571,24 +571,24 @@ class IntegratedPipeline:
     
     def _run_regression_phase(self, build_results: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Phase 3: Treinar modelos de regressão.
+        Phase 3: Train regression models.
         
         Args:
-            build_results: Resultados do build phase
+            build_results: Results from build phase
         
         Returns:
-            Dict com métricas dos modelos de regressão
+            Dict with regression model metrics
         """
         from regression.modular_pipeline import RegressionPipeline
         
-        # Paths dos dados
+        # Data paths
         embeddings_path = build_results['embeddings']['concatenated']
         targets_path = build_results['labels']['regression']
         
-        # Extrair split_indices do build phase
+        # Extract split_indices from build phase
         split_indices = build_results.get('split_indices')
         
-        # Criar pipeline de regressão
+        # Create regression pipeline
         regression = RegressionPipeline(
             embeddings_path=embeddings_path,
             targets_path=targets_path,
@@ -601,14 +601,14 @@ class IntegratedPipeline:
             split_indices=split_indices
         )
         
-        # FASE 1: Carregar dados (com checkpoint)
+        # PHASE 1: Load data (with checkpoint)
         data_checkpoint = self._load_checkpoint('regression_data')
         if data_checkpoint is None:
             if self.config.verbose:
-                print("📊 Carregando dados de regressão...")
+                print("📊 Loading regression data...")
             regression.load_data()
             
-            # Salvar checkpoint de dados
+            # Save data checkpoint
             data_info = {
                 'n_samples': len(regression.y_train) + len(regression.y_val) + len(regression.y_test),
                 'n_train': len(regression.y_train),
@@ -619,45 +619,45 @@ class IntegratedPipeline:
             self._save_checkpoint('regression_data', data_info)
         else:
             if self.config.verbose:
-                print("📂 Checkpoint de dados carregado")
+                print("📂 Data checkpoint loaded")
                 print(f"   Samples: {data_checkpoint['n_samples']} ({data_checkpoint['n_train']}/{data_checkpoint['n_val']}/{data_checkpoint['n_test']})")
-            # Recarregar dados
+            # Reload data
             regression.load_data()
         
-        # FASE 2: Treinar modelos (com checkpoint)
+        # PHASE 2: Train models (with checkpoint)
         train_checkpoint = self._load_checkpoint('regression_train')
         if train_checkpoint is None:
             if self.config.verbose:
-                print("🎯 Treinando modelos de regressão...")
+                print("🎯 Training regression models...")
             train_results = regression.train_models()
             self._save_checkpoint('regression_train', train_results)
         else:
             if self.config.verbose:
-                print("📂 Checkpoint de treinamento carregado")
+                print("📂 Training checkpoint loaded")
             train_results = train_checkpoint
-            # Recarregar modelos treinados no regression pipeline
+            # Reload trained models in regression pipeline
             regression.val_metrics = train_results
         
-        # FASE 3: Avaliar no conjunto de teste
+        # PHASE 3: Evaluate on test set
         test_checkpoint = self._load_checkpoint('regression_test')
         if test_checkpoint is None:
             if self.config.verbose:
-                print("📊 Avaliando modelos no conjunto de teste...")
+                print("📊 Evaluating models on test set...")
             test_results = regression.evaluate_on_test()
             self._save_checkpoint('regression_test', test_results)
         else:
             if self.config.verbose:
-                print("📂 Checkpoint de teste carregado")
+                print("📂 Test checkpoint loaded")
             test_results = test_checkpoint
             regression.test_metrics = test_results
         
-        # FASE 4: Salvar resultados em arquivos JSON
-        # Garantir que val_metrics e test_metrics estão preenchidos antes de salvar
+        # PHASE 4: Save results to JSON files
+        # Ensure val_metrics and test_metrics are filled before saving
         regression.val_metrics = train_results
         regression.test_metrics = test_results
         regression.save_results()
         
-        # Encontrar melhor modelo com base em MAE do conjunto de validação
+        # Find best model based on validation set MAE
         best_model_name = None
         best_val_mae = float('inf')
         best_val_r2 = -float('inf')
@@ -669,7 +669,7 @@ class IntegratedPipeline:
                 best_model_name = model_name
                 best_val_r2 = metrics.get('R2', 0.0)
         
-        # Obter métricas de TESTE do melhor modelo (selecionado pela validação)
+        # Get TEST metrics of best model (selected by validation)
         best_test_mae = best_val_mae  # fallback
         best_test_r2 = best_val_r2    # fallback
         if test_results and best_model_name in test_results:
@@ -683,11 +683,11 @@ class IntegratedPipeline:
             print(f"   Val MAE: {best_val_mae:.3f}, Test MAE: {best_test_mae:.3f}")
             print(f"   Val R²: {best_val_r2:.4f}, Test R²: {best_test_r2:.4f}")
         
-        # Cross-validation (opcional, para modelos selecionados)
+        # Cross-validation (optional, for selected models)
         from regression.core import quick_cross_validate
         
         cv_results = {}
-        # CV apenas para poucos modelos (se modelos específicos foram escolhidos)
+        # CV only for few models (if specific models were chosen)
         if self.config.regression_models and len(self.config.regression_models) <= 3:
             cv_results = quick_cross_validate(
                 regression.X_train,
@@ -697,7 +697,7 @@ class IntegratedPipeline:
                 random_state=self.config.random_state
             )
         
-        # Compilar resultados
+        # Compile results
         models_trained = len(self.config.regression_models) if self.config.regression_models else len(train_results)
         results = {
             'success': True,
@@ -706,7 +706,7 @@ class IntegratedPipeline:
             'best_val_r2': float(best_val_r2),
             'best_test_mae': float(best_test_mae),
             'best_test_r2': float(best_test_r2),
-            # Para compatibilidade com código existente, manter best_mae/best_r2 como TEST
+            # For compatibility with existing code, keep best_mae/best_r2 as TEST
             'best_mae': float(best_test_mae),
             'best_r2': float(best_test_r2),
             'models_trained': models_trained,
@@ -714,7 +714,7 @@ class IntegratedPipeline:
             'test_results': {}
         }
         
-        # Adicionar métricas individuais de validação
+        # Add individual validation metrics
         for model_name, metrics in train_results.items():
             results['individual_results'][model_name] = {
                 'mae': float(metrics.get('MAE', 0)),
@@ -722,17 +722,17 @@ class IntegratedPipeline:
                 'r2': float(metrics.get('R2', 0))
             }
         
-        # Adicionar métricas de teste
+        # Add test metrics
         if test_results:
             for model_name, metrics in test_results.items():
-                if metrics:  # Verificar se não é None
+                if metrics:  # Check if not None
                     results['test_results'][model_name] = {
                         'mae': float(metrics.get('MAE', 0)),
                         'rmse': float(metrics.get('RMSE', 0)),
                         'r2': float(metrics.get('R2', 0))
                     }
         
-        # Adicionar CV se disponível
+        # Add CV if available
         if cv_results:
             results['cv_results'] = {}
             for model_name, cv_result in cv_results.items():
@@ -795,7 +795,7 @@ class IntegratedPipeline:
                 return f"<non-serializable: {type(obj).__name__}>"
     
     def _save_results(self) -> None:
-        """Salvar resultados finais em JSON."""
+        """Save final results to JSON."""
         results_file = self.output_dir / "integrated_results.json"
         
         # Convert all results to JSON-serializable format
@@ -808,7 +808,7 @@ class IntegratedPipeline:
             print(f"\n📁 Results saved to: {results_file}")
     
     def _print_header(self) -> None:
-        """Imprimir cabeçalho do pipeline."""
+        """Print pipeline header."""
         print("\n" + "="*80)
         print(" " * 20 + "🧬 DOCKTKINASE INTEGRATED PIPELINE 🧬")
         print("="*80)
@@ -828,7 +828,7 @@ class IntegratedPipeline:
         print("="*80)
     
     def _print_summary(self) -> None:
-        """Imprimir resumo final."""
+        """Print final summary."""
         print("\n" + "="*80)
         print(" " * 25 + "🎉 PIPELINE SUMMARY 🎉")
         print("="*80)
@@ -873,11 +873,11 @@ class IntegratedPipeline:
     
     def _save_checkpoint(self, phase_name: str, phase_results: Dict[str, Any]) -> None:
         """
-        Salva checkpoint de uma fase específica.
+        Save checkpoint for a specific phase.
         
         Args:
-            phase_name: Nome da fase ('build', 'classifier', 'regression')
-            phase_results: Resultados da fase
+            phase_name: Name of the phase ('build', 'classifier', 'regression')
+            phase_results: Results of the phase
         """
         if not self.config.use_checkpoints:
             return
@@ -910,17 +910,17 @@ class IntegratedPipeline:
             json.dump(serializable_results, f, indent=2, default=str)
         
         if self.config.verbose:
-            print(f"✅ Checkpoint salvo: {checkpoint_file}")
+            print(f"✅ Checkpoint saved: {checkpoint_file}")
     
     def _load_checkpoint(self, phase_name: str) -> Optional[Dict[str, Any]]:
         """
-        Carrega checkpoint de uma fase se existir.
+        Load checkpoint for a phase if it exists.
         
         Args:
-            phase_name: Nome da fase
+            phase_name: Name of the phase
             
         Returns:
-            Resultados da fase ou None se checkpoint não existe
+            Phase results or None if checkpoint doesn't exist
         """
         if not self.config.use_checkpoints:
             return None
@@ -935,17 +935,17 @@ class IntegratedPipeline:
                 checkpoint_data = json.load(f)
             
             if self.config.verbose:
-                print(f"📂 Checkpoint carregado: {checkpoint_file}")
+                print(f"📂 Checkpoint loaded: {checkpoint_file}")
             
             return checkpoint_data
         except Exception as e:
             if self.config.verbose:
-                print(f"⚠️  Erro ao carregar checkpoint: {e}")
+                print(f"⚠️  Error loading checkpoint: {e}")
             return None
 
 
 def main():
-    """Entry point de linha de comando."""
+    """Command line entry point."""
     parser = argparse.ArgumentParser(
         description="DockTKinase Integrated Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1031,7 +1031,7 @@ Examples:
     
     args = parser.parse_args()
     
-    # Criar configuração
+    # Create configuration
     config = IntegratedConfig(
         input_tsv=args.input,
         output_dir=args.output,
@@ -1044,11 +1044,11 @@ Examples:
         verbose=not args.quiet
     )
     
-    # Executar pipeline
+    # Run pipeline
     pipeline = IntegratedPipeline(config)
     results = pipeline.run()
     
-    # Status de saída
+    # Exit status
     return 0 if results['status'] == 'completed' else 1
 
 
