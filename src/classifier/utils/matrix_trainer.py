@@ -27,6 +27,14 @@ try:
 except ImportError:
     from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel, MultiTaskLoss
 
+# Import matrix metrics for comprehensive evaluation
+try:
+    from .matrix_metrics import MatrixMetricsCalculator, ClassificationMetrics, RegressionMetrics
+except ImportError:
+    MatrixMetricsCalculator = None
+    ClassificationMetrics = None
+    RegressionMetrics = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -526,6 +534,177 @@ class CrossAttentionTrainer:
             'best_val_loss': self.best_val_loss,
             'training_time': str(training_time),
             'epochs_trained': self.current_epoch
+        }
+
+    @torch.no_grad()
+    def evaluate_comprehensive(
+        self,
+        loader: Optional[DataLoader] = None,
+        threshold: float = 0.5,
+        save_dir: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive evaluation with full metrics (matching vector pipeline).
+        
+        This method provides the same metrics as the vector-based pipeline:
+        - Classification: Accuracy, Precision, Recall, F1, ROC-AUC, Average Precision,
+                         Brier Score, MCC, Specificity, Sensitivity, Fbeta variants
+        - Regression: MAE, MSE, RMSE, R², MedianAE, MAPE, Pearson, Spearman,
+                     Explained Variance, Max Error, residual statistics
+        
+        Args:
+            loader: DataLoader to evaluate (defaults to test_loader)
+            threshold: Classification threshold
+            save_dir: Directory to save detailed results
+            
+        Returns:
+            Dictionary with comprehensive metrics
+        """
+        if MatrixMetricsCalculator is None:
+            logger.warning("MatrixMetricsCalculator not available, falling back to basic metrics")
+            return self.validate(loader)
+        
+        loader = loader or self.test_loader or self.val_loader
+        if loader is None:
+            logger.warning("No data loader available for evaluation")
+            return {}
+        
+        self.model.eval()
+        
+        # Collect all predictions and targets
+        all_cls_probs = []
+        all_cls_labels = []
+        all_reg_preds = []
+        all_reg_targets = []
+        all_reg_mask = []
+        
+        logger.info("Running comprehensive evaluation...")
+        
+        for batch in tqdm(loader, desc="Evaluating"):
+            # Move to device
+            protein_matrix = batch['protein_matrix'].to(self.device)
+            ligand_matrix = batch['ligand_matrix'].to(self.device)
+            protein_mask = batch['protein_mask'].to(self.device)
+            ligand_mask = batch['ligand_mask'].to(self.device)
+            labels = batch['labels']
+            reg_targets = batch['regression_targets']
+            reg_mask = batch['regression_mask']
+            
+            # Forward pass
+            output = self.model(
+                protein_matrix, ligand_matrix,
+                protein_mask, ligand_mask
+            )
+            
+            # Collect predictions
+            cls_probs = torch.sigmoid(output['classification']).cpu()
+            reg_preds = output['regression'].cpu()
+            
+            all_cls_probs.append(cls_probs)
+            all_cls_labels.append(labels)
+            all_reg_preds.append(reg_preds)
+            all_reg_targets.append(reg_targets)
+            all_reg_mask.append(reg_mask)
+        
+        # Concatenate all
+        all_cls_probs = torch.cat(all_cls_probs, dim=0).numpy().flatten()
+        all_cls_labels = torch.cat(all_cls_labels, dim=0).numpy().flatten()
+        all_reg_preds = torch.cat(all_reg_preds, dim=0).numpy().flatten()
+        all_reg_targets = torch.cat(all_reg_targets, dim=0).numpy().flatten()
+        all_reg_mask = torch.cat(all_reg_mask, dim=0).numpy().flatten().astype(bool)
+        
+        # Use comprehensive metrics calculator
+        metrics_calculator = MatrixMetricsCalculator(threshold=threshold)
+        
+        # Compute classification metrics
+        cls_metrics = metrics_calculator.calculate_classification_metrics(
+            y_true=all_cls_labels,
+            y_prob=all_cls_probs,
+            threshold=threshold
+        )
+        
+        # Compute regression metrics if targets available
+        reg_metrics = None
+        if all_reg_mask.any():
+            reg_metrics = metrics_calculator.calculate_regression_metrics(
+                y_true=all_reg_targets[all_reg_mask],
+                y_pred=all_reg_preds[all_reg_mask]
+            )
+        
+        # Log summary
+        logger.info("\n" + "="*60)
+        logger.info("COMPREHENSIVE EVALUATION RESULTS")
+        logger.info("="*60)
+        
+        # Classification summary
+        logger.info("\n--- Classification Metrics ---")
+        logger.info(f"  Accuracy:         {cls_metrics.accuracy:.4f}")
+        logger.info(f"  Precision:        {cls_metrics.precision:.4f}")
+        logger.info(f"  Recall:           {cls_metrics.recall:.4f}")
+        logger.info(f"  F1 Score:         {cls_metrics.f1:.4f}")
+        logger.info(f"  ROC-AUC:          {cls_metrics.roc_auc:.4f}")
+        logger.info(f"  Average Precision:{cls_metrics.average_precision:.4f}")
+        logger.info(f"  MCC:              {cls_metrics.mcc:.4f}")
+        logger.info(f"  Specificity:      {cls_metrics.specificity:.4f}")
+        logger.info(f"  Sensitivity:      {cls_metrics.sensitivity:.4f}")
+        logger.info(f"  Brier Score:      {cls_metrics.brier_score:.4f}")
+        
+        # Regression summary
+        if reg_metrics is not None:
+            logger.info("\n--- Regression Metrics ---")
+            logger.info(f"  MAE:              {reg_metrics.mae:.4f}")
+            logger.info(f"  MSE:              {reg_metrics.mse:.4f}")
+            logger.info(f"  RMSE:             {reg_metrics.rmse:.4f}")
+            logger.info(f"  R²:               {reg_metrics.r2:.4f}")
+            logger.info(f"  Pearson:          {reg_metrics.pearson_r:.4f}")
+            logger.info(f"  Spearman:         {reg_metrics.spearman_r:.4f}")
+            logger.info(f"  Median AE:        {reg_metrics.median_ae:.4f}")
+            logger.info(f"  Explained Var:    {reg_metrics.explained_variance:.4f}")
+        
+        logger.info("="*60 + "\n")
+        
+        # Optionally save results
+        if save_dir:
+            save_path = Path(save_dir)
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save as JSON
+            json_results = {
+                'classification': cls_metrics.to_dict(),
+                'regression': reg_metrics.to_dict() if reg_metrics else {},
+                'samples': {
+                    'total': len(all_cls_labels),
+                    'with_regression_target': int(all_reg_mask.sum())
+                }
+            }
+            
+            json_path = save_path / 'comprehensive_metrics.json'
+            with open(json_path, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            logger.info(f"Saved metrics to: {json_path}")
+            
+            # Save formatted report
+            report = metrics_calculator.format_classification_report(cls_metrics)
+            if reg_metrics:
+                report += "\n\n" + metrics_calculator.format_regression_report(reg_metrics)
+            
+            report_path = save_path / 'metrics_report.txt'
+            with open(report_path, 'w') as f:
+                f.write(report)
+            logger.info(f"Saved report to: {report_path}")
+        
+        # Return results in dictionary format for compatibility
+        return {
+            'classification': cls_metrics,
+            'regression': reg_metrics,
+            'classification_dict': cls_metrics.to_dict(),
+            'regression_dict': reg_metrics.to_dict() if reg_metrics else {},
+            # Legacy format for compatibility
+            'accuracy': cls_metrics.accuracy,
+            'auc': cls_metrics.roc_auc,
+            'f1': cls_metrics.f1,
+            'rmse': reg_metrics.rmse if reg_metrics else 0.0,
+            'pearson': reg_metrics.pearson_r if reg_metrics else 0.0
         }
 
 
