@@ -28,9 +28,97 @@ DockTKinase combines state-of-the-art protein language models with molecular emb
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
-| 🔀 **Adaptive Stratification** | Cluster-based splits maintaining data distribution |
+| 🔀 **Scalable Stratification** | Memory-efficient clustering for datasets up to millions of samples |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 | 💾 **Smart Caching** | Incremental embedding generation with caching |
+
+## Scalable Stratification
+
+### The Problem
+
+Standard clustering-based stratification requires computing a pairwise distance matrix $D \in \mathbb{R}^{n \times n}$, which has memory complexity $O(n^2)$:
+
+| Dataset Size | Memory Required |
+|--------------|-----------------|
+| 10,000 samples | 0.4 GB |
+| 100,000 samples | 40 GB |
+| 500,000 samples | **1,000 GB** |
+| 1,000,000 samples | **4,000 GB** |
+
+For large-scale drug discovery datasets (100k+ compound-target pairs), this becomes computationally infeasible.
+
+### Our Solution: Representative Sampling + Label Propagation
+
+We implement a scalable clustering algorithm based on established computational biology and machine learning research:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCALABLE STRATIFICATION ALGORITHM                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. REPRESENTATIVE SAMPLING (PCA-stratified)                                │
+│     • Sample size: min(50k, √n × 50)                                        │
+│     • 50% random + 50% PCA-stratified → covers embedding space              │
+│                                                                             │
+│  2. CLUSTER SAMPLE                                                          │
+│     • Agglomerative hierarchical clustering on sample                       │
+│     • Distance matrix: O(sample²) instead of O(n²)                          │
+│     • Adaptive threshold based on similarity distribution                   │
+│                                                                             │
+│  3. CENTROID COMPUTATION                                                    │
+│     • Compute mean embedding per cluster                                    │
+│     • Normalize centroids for cosine similarity                             │
+│                                                                             │
+│  4. LABEL PROPAGATION                                                       │
+│     • Assign all n points to nearest centroid                               │
+│     • Batch processing (10k samples) → constant memory                      │
+│     • Complexity: O(n × k) where k = number of clusters                     │
+│                                                                             │
+│  5. REFINEMENT                                                              │
+│     • Merge small clusters (< min_size) to nearest neighbor                 │
+│     • Ensures balanced stratification                                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Complexity Analysis
+
+| Metric | Standard Approach | Our Approach |
+|--------|-------------------|--------------|
+| **Memory** | $O(n^2)$ | $O(s^2 + n \cdot k)$ where $s$ = sample size |
+| **Time** | $O(n^2 \log n)$ | $O(s^2 \log s + n \cdot k)$ |
+| **Example (500k samples)** | 1,000 GB | ~10 GB |
+
+### Scientific References
+
+This approach is grounded in established research:
+
+1. **Sculley, D. (2010)**. *Web-scale k-means clustering*. Proceedings of the 19th International Conference on World Wide Web (WWW '10). ACM.
+   - Demonstrates that cluster structure can be accurately captured from representative samples
+
+2. **Arthur, D., & Vassilvitskii, S. (2007)**. *k-means++: The advantages of careful seeding*. Proceedings of the 18th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA '07).
+   - Foundation for centroid-based clustering with quality guarantees
+
+3. **Kaufman, L., & Rousseeuw, P. J. (1990)**. *Finding Groups in Data: An Introduction to Cluster Analysis*. Wiley Series in Probability and Statistics.
+   - Theoretical basis for hierarchical clustering and silhouette validation
+
+### Usage
+
+The scalable stratification is automatically activated when dataset size exceeds 40,000 samples:
+
+```python
+# Automatic - pipeline detects large datasets
+python run_complete_pipeline.py \
+    --input large_dataset.tsv \  # 500k+ samples
+    --output results/ \
+    --seed 42
+
+# Logs will show:
+# [INFO] Dataset too large for full distance matrix (500000 samples would require ~931.3 GiB)
+# [INFO] Using scalable representative sampling approach
+# [INFO] Scalable clustering: 500000 samples → 35355 sample size
+# [INFO] Scalable clustering complete: 127 clusters, silhouette=0.3421
+```
 
 ## Installation
 

@@ -891,6 +891,20 @@ class AdaptiveClustering:
         n_samples = embeddings.shape[0]
         self.logger.info(f"Adaptive clustering with method='{self.method}' on {n_samples} samples")
         
+        # Check if dataset is too large for full distance matrix
+        # A (n,n) float32 matrix requires n*n*4 bytes
+        # Limit to ~8GB = 8 * 10^9 bytes -> n ~ 45000
+        MAX_SAMPLES_FOR_FULL_MATRIX = 40000
+        
+        if n_samples > MAX_SAMPLES_FOR_FULL_MATRIX and distance_matrix is None:
+            estimated_memory_gb = (n_samples * n_samples * 4) / (1024**3)
+            self.logger.warning(
+                f"Dataset too large for full distance matrix clustering "
+                f"({n_samples} samples would require ~{estimated_memory_gb:.1f} GiB). "
+                f"Using scalable representative sampling approach."
+            )
+            return self._cluster_large_dataset(embeddings)
+        
         # Analyze similarity distribution
         sim_stats = self.analyze_similarity_distribution(embeddings)
         self.logger.info(f"Similarity distribution: min={sim_stats['min']:.4f}, "
@@ -1039,6 +1053,355 @@ class AdaptiveClustering:
         
         return labels
     
+    def _cluster_large_dataset(self, embeddings: np.ndarray) -> np.ndarray:
+        """
+        Scalable clustering for large datasets using Representative Sampling + Label Propagation.
+        
+        This approach is based on the scientific principle that cluster structure can be
+        accurately captured from a representative sample, then propagated to the full dataset.
+        
+        Algorithm:
+        1. Stratified sampling to create representative subset (preserves embedding distribution)
+        2. Cluster the sample using standard agglomerative clustering
+        3. Compute cluster centroids from the sample
+        4. Assign all points to nearest centroid (O(n*k) instead of O(n²))
+        5. Optional: Local refinement using mini-batch updates
+        
+        Memory complexity: O(sample_size²) instead of O(n²)
+        Time complexity: O(n*k + sample_size²) where k << n
+        
+        References:
+        - Sculley, D. (2010). Web-scale k-means clustering. WWW '10
+        - Arthur, D., & Vassilvitskii, S. (2007). k-means++: The advantages of careful seeding
+        
+        Args:
+            embeddings: Embedding matrix (n_samples, n_features)
+            
+        Returns:
+            Cluster labels for all samples
+            
+        Raises:
+            RuntimeError: If clustering fails after all attempts, with detailed justification
+        """
+        from sklearn.preprocessing import normalize
+        from sklearn.cluster import AgglomerativeClustering
+        from sklearn.metrics.pairwise import cosine_distances
+        import numpy as np
+        
+        n_samples, n_features = embeddings.shape
+        
+        try:
+            # Normalize embeddings (critical for cosine-based clustering)
+            embeddings_normalized = normalize(embeddings)
+            
+            # === STEP 1: Determine sample size ===
+            # Sample size follows sqrt(n) rule for representative sampling
+            # with minimum of 5000 and maximum of 50000 for practical computation
+            sample_size = min(50000, max(5000, int(np.sqrt(n_samples) * 50)))
+            sample_size = min(sample_size, n_samples)
+            
+            self.logger.info(f"Scalable clustering: {n_samples} samples → {sample_size} sample size")
+            
+            # === STEP 2: Stratified sampling using embedding space ===
+            # Use PCA-based stratification to ensure sample represents full embedding space
+            sample_idx = self._get_representative_sample(embeddings_normalized, sample_size)
+            sample_embeddings = embeddings_normalized[sample_idx]
+            
+            self.logger.info(f"Representative sample selected: {len(sample_idx)} points")
+            
+            # === STEP 3: Cluster the sample ===
+            # Calculate target clusters based on dataset size
+            target_clusters = self._calculate_target_clusters(n_samples)
+            target_clusters = max(self.min_clusters, min(self.max_clusters, target_clusters))
+            
+            # Analyze similarity distribution on sample
+            sim_stats = self.analyze_similarity_distribution(sample_embeddings)
+            
+            # Find optimal threshold on sample
+            if self.method == 'manual' and self.manual_threshold is not None:
+                optimal_threshold = self.manual_threshold
+            else:
+                # Use percentile-based threshold from sample statistics
+                if sim_stats['homogeneity'] == 'very_high':
+                    optimal_threshold = sim_stats['p75']
+                elif sim_stats['homogeneity'] == 'high':
+                    optimal_threshold = sim_stats['p50']
+                else:
+                    optimal_threshold = sim_stats['p25']
+            
+            self.optimal_threshold = optimal_threshold
+            distance_thresh = 1 - optimal_threshold
+            
+            self.logger.info(f"Clustering sample with threshold={optimal_threshold:.4f}")
+            
+            # Compute distance matrix only for sample (memory: sample_size² * 4 bytes)
+            sample_distances = cosine_distances(sample_embeddings)
+            
+            # Agglomerative clustering on sample
+            model = AgglomerativeClustering(
+                n_clusters=None,
+                distance_threshold=distance_thresh,
+                metric='precomputed',
+                linkage='average'
+            )
+            sample_labels = model.fit_predict(sample_distances)
+            
+            # Handle case where clustering produces too few clusters
+            n_sample_clusters = len(np.unique(sample_labels))
+            if n_sample_clusters < self.min_clusters:
+                self.logger.warning(
+                    f"Sample clustering produced only {n_sample_clusters} clusters. "
+                    f"Adjusting threshold."
+                )
+                # Try with higher threshold (more clusters)
+                for mult in [1.05, 1.1, 1.15, 1.2]:
+                    new_thresh = min(0.99, optimal_threshold * mult)
+                    model = AgglomerativeClustering(
+                        n_clusters=None,
+                        distance_threshold=1 - new_thresh,
+                        metric='precomputed',
+                        linkage='average'
+                    )
+                    sample_labels = model.fit_predict(sample_distances)
+                    n_sample_clusters = len(np.unique(sample_labels))
+                    if n_sample_clusters >= self.min_clusters:
+                        self.optimal_threshold = new_thresh
+                        break
+            
+            self.logger.info(f"Sample clustering: {n_sample_clusters} clusters found")
+        
+        # === STEP 4: Compute cluster centroids ===
+        unique_labels = np.unique(sample_labels)
+        centroids = np.zeros((len(unique_labels), n_features))
+        
+        for i, label in enumerate(unique_labels):
+            mask = sample_labels == label
+            centroids[i] = sample_embeddings[mask].mean(axis=0)
+        
+        # Re-normalize centroids
+        centroids = normalize(centroids)
+        
+        # === STEP 5: Assign all points to nearest centroid ===
+        # Process in batches to avoid memory issues
+        batch_size = 10000
+        all_labels = np.zeros(n_samples, dtype=np.int32)
+        
+        self.logger.info(f"Assigning {n_samples} points to {len(centroids)} centroids...")
+        
+        for start in range(0, n_samples, batch_size):
+            end = min(start + batch_size, n_samples)
+            batch = embeddings_normalized[start:end]
+            
+            # Compute distances to all centroids (batch_size x n_centroids)
+            distances = cosine_distances(batch, centroids)
+            
+            # Assign to nearest centroid
+            all_labels[start:end] = unique_labels[np.argmin(distances, axis=1)]
+        
+        # === STEP 6: Filter small clusters ===
+        unique, counts = np.unique(all_labels, return_counts=True)
+        small_clusters = unique[counts < self.min_cluster_size]
+        
+        if len(small_clusters) > 0:
+            self.logger.info(f"Merging {len(small_clusters)} small clusters to nearest large cluster")
+            
+            # Get large cluster centroids
+            large_clusters = unique[counts >= self.min_cluster_size]
+            large_centroids = np.zeros((len(large_clusters), n_features))
+            for i, lc in enumerate(large_clusters):
+                mask = all_labels == lc
+                large_centroids[i] = embeddings_normalized[mask].mean(axis=0)
+            large_centroids = normalize(large_centroids)
+            
+            # Reassign small cluster points
+            for sc in small_clusters:
+                sc_mask = all_labels == sc
+                sc_points = embeddings_normalized[sc_mask]
+                distances = cosine_distances(sc_points, large_centroids)
+                nearest = large_clusters[np.argmin(distances, axis=1)]
+                all_labels[sc_mask] = nearest
+        
+        # === STEP 7: Renumber clusters ===
+        all_labels = self._renumber_clusters(all_labels)
+        
+        # === STEP 8: Calculate metrics ===
+        n_clusters = len(np.unique(all_labels[all_labels != -1]))
+        n_noise = np.sum(all_labels == -1)
+        
+        # Sample-based silhouette score
+        sil_score = None
+        if n_clusters >= 2:
+            try:
+                eval_sample_size = min(5000, n_samples)
+                eval_idx = np.random.choice(n_samples, eval_sample_size, replace=False)
+                sil_score = float(silhouette_score(
+                    embeddings_normalized[eval_idx],
+                    all_labels[eval_idx]
+                ))
+            except Exception as e:
+                self.logger.warning(f"Could not compute silhouette score: {e}")
+        
+        # Store metrics
+        unique_final, counts_final = np.unique(all_labels[all_labels != -1], return_counts=True)
+        cluster_sizes = dict(zip([int(u) for u in unique_final], [int(c) for c in counts_final]))
+        
+        self.search_history = [{
+            'method': 'representative_sampling',
+            'sample_size': sample_size,
+            'n_clusters': n_clusters,
+            'threshold': self.optimal_threshold,
+            'n_samples': n_samples
+        }]
+        
+        self.metrics = ClusteringMetrics(
+            n_clusters=n_clusters,
+            n_samples=n_samples,
+            n_noise=n_noise,
+            silhouette_score=sil_score,
+            calinski_harabasz_score=None,
+            davies_bouldin_score=None,
+            cluster_sizes=cluster_sizes,
+            threshold_used=self.optimal_threshold or 0.0,
+            method='representative_sampling',
+            similarity_stats=sim_stats,
+            threshold_search_history=self.search_history,
+            split_quality_metrics=None
+        )
+        
+        self.logger.info(
+            f"Scalable clustering complete: {n_clusters} clusters, "
+            f"silhouette={sil_score:.4f if sil_score else 'N/A'}"
+        )
+        
+        return all_labels
+        
+        except MemoryError as e:
+            error_msg = (
+                f"CLUSTERING FAILED - Memory Error\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Dataset size: {n_samples:,} samples × {n_features} features\n"
+                f"Sample size attempted: {sample_size:,} samples\n"
+                f"Estimated memory for sample distance matrix: {(sample_size**2 * 4) / (1024**3):.2f} GiB\n"
+                f"\n"
+                f"REASON: Even the representative sampling approach exceeded available memory.\n"
+                f"The sample distance matrix ({sample_size}×{sample_size}) requires more RAM than available.\n"
+                f"\n"
+                f"RECOMMENDATIONS:\n"
+                f"  1. Increase system RAM or use a machine with more memory\n"
+                f"  2. Reduce sample_size parameter (current max: 50,000)\n"
+                f"  3. Use random stratification instead (no clustering required)\n"
+                f"  4. Split dataset into smaller batches and process separately\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+            
+        except Exception as e:
+            error_msg = (
+                f"CLUSTERING FAILED - Unexpected Error\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Dataset size: {n_samples:,} samples × {n_features} features\n"
+                f"Error type: {type(e).__name__}\n"
+                f"Error message: {str(e)}\n"
+                f"\n"
+                f"REASON: The scalable clustering algorithm (Representative Sampling + Label Propagation)\n"
+                f"encountered an unexpected error during execution.\n"
+                f"\n"
+                f"CONTEXT:\n"
+                f"  - Method: Hierarchical clustering on representative sample with centroid propagation\n"
+                f"  - Based on: Sculley (2010) Web-scale k-means, Arthur & Vassilvitskii (2007) k-means++\n"
+                f"\n"
+                f"RECOMMENDATIONS:\n"
+                f"  1. Check if embeddings contain NaN or Inf values\n"
+                f"  2. Verify embedding dimensions are consistent across all samples\n"
+                f"  3. Try with a smaller subset of data to isolate the issue\n"
+                f"  4. Use random stratification as fallback (stratify=None in train_test_split)\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+    
+    def _get_representative_sample(self, embeddings: np.ndarray, sample_size: int) -> np.ndarray:
+        """
+        Get representative sample using PCA-based stratified sampling.
+        
+        This ensures the sample covers the full embedding space, not just dense regions.
+        Uses a combination of:
+        1. Random sampling (50%) - captures overall distribution  
+        2. PCA-stratified sampling (50%) - ensures coverage of embedding space extremes
+        
+        Args:
+            embeddings: Normalized embedding matrix
+            sample_size: Target sample size
+            
+        Returns:
+            Indices of selected samples
+        """
+        from sklearn.decomposition import PCA
+        
+        n_samples = embeddings.shape[0]
+        
+        if n_samples <= sample_size:
+            return np.arange(n_samples)
+        
+        # Part 1: Random sample (50%)
+        random_size = sample_size // 2
+        random_idx = np.random.choice(n_samples, random_size, replace=False)
+        
+        # Part 2: PCA-stratified sample (50%)
+        # Project to lower dimensions and stratify
+        pca_size = sample_size - random_size
+        
+        try:
+            # Use 10 components or fewer
+            n_components = min(10, embeddings.shape[1], n_samples)
+            pca = PCA(n_components=n_components, random_state=42)
+            projected = pca.fit_transform(embeddings)
+            
+            # Divide each PC dimension into bins and sample from each
+            n_bins = int(np.sqrt(pca_size / n_components))
+            n_bins = max(2, n_bins)
+            
+            stratified_idx = set()
+            samples_per_bin = pca_size // (n_bins * n_components) + 1
+            
+            for pc in range(min(3, n_components)):  # Focus on top 3 PCs
+                pc_values = projected[:, pc]
+                bins = np.percentile(pc_values, np.linspace(0, 100, n_bins + 1))
+                
+                for i in range(n_bins):
+                    mask = (pc_values >= bins[i]) & (pc_values < bins[i + 1])
+                    if i == n_bins - 1:  # Include upper bound for last bin
+                        mask = (pc_values >= bins[i]) & (pc_values <= bins[i + 1])
+                    
+                    bin_indices = np.where(mask)[0]
+                    if len(bin_indices) > 0:
+                        n_select = min(samples_per_bin, len(bin_indices))
+                        selected = np.random.choice(bin_indices, n_select, replace=False)
+                        stratified_idx.update(selected)
+            
+            stratified_idx = np.array(list(stratified_idx))
+            
+            # If we got fewer than needed, add random samples
+            if len(stratified_idx) < pca_size:
+                remaining = pca_size - len(stratified_idx)
+                available = np.setdiff1d(np.arange(n_samples), stratified_idx)
+                additional = np.random.choice(available, min(remaining, len(available)), replace=False)
+                stratified_idx = np.concatenate([stratified_idx, additional])
+                
+        except Exception as e:
+            self.logger.warning(f"PCA stratification failed: {e}. Using random sampling.")
+            stratified_idx = np.random.choice(n_samples, pca_size, replace=False)
+        
+        # Combine and remove duplicates
+        all_idx = np.unique(np.concatenate([random_idx, stratified_idx]))
+        
+        # If we have too many, randomly subsample
+        if len(all_idx) > sample_size:
+            all_idx = np.random.choice(all_idx, sample_size, replace=False)
+        
+        return all_idx
+
     def _renumber_clusters(self, labels: np.ndarray) -> np.ndarray:
         """Renumber clusters to be consecutive starting from 0, keeping -1 as noise."""
         new_labels = labels.copy()
