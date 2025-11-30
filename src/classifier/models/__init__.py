@@ -10,6 +10,11 @@ from .cross_attention_model import (
     CrossAttention,
     CrossAttentionBlock
 )
+from .matrix_embedding_extractor import (
+    MatrixEmbeddingExtractor,
+    create_synthetic_embeddings,
+    extract_matrix_embeddings
+)
 
 __all__ = [
     # MLP models
@@ -21,5 +26,9 @@ __all__ = [
     "create_cross_attention_model",
     "CNNEncoder",
     "CrossAttention",
-    "CrossAttentionBlock"
+    "CrossAttentionBlock",
+    # Matrix Embedding Extractor
+    "MatrixEmbeddingExtractor",
+    "create_synthetic_embeddings",
+    "extract_matrix_embeddings"
 ]

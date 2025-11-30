@@ -37,6 +37,15 @@ from .matrix_metrics import (
     MatrixMetricsCalculator
 )
 
+from .attention_analysis import (
+    AttentionResult,
+    AttentionExtractor,
+    ProteinLigandAttentionAnalyzer,
+    save_attention_analysis,
+    generate_attention_report,
+    plot_attention_heatmap
+)
+
 __all__ = [
     # Import utils
     "get_classifier_root", 
@@ -62,5 +71,12 @@ __all__ = [
     "ClassificationMetrics",
     "RegressionMetrics",
     "MultiTaskMetrics",
-    "MatrixMetricsCalculator"
+    "MatrixMetricsCalculator",
+    # Attention analysis
+    "AttentionResult",
+    "AttentionExtractor",
+    "ProteinLigandAttentionAnalyzer",
+    "save_attention_analysis",
+    "generate_attention_report",
+    "plot_attention_heatmap"
 ]
