@@ -206,6 +206,60 @@ class ProteinEmbedding(BaseEmbedding):
             logger=self.logger
         )
     
+    def generate_embedding_matrix(self, sequence: str) -> Optional[np.ndarray]:
+        """
+        Gera matriz de embeddings por token (sem pooling).
+        
+        Retorna representações para cada resíduo/token da sequência,
+        preservando informação posicional para uso com arquiteturas
+        como CNN + Cross-Attention.
+        
+        Args:
+            sequence: Sequência de aminoácidos
+            
+        Returns:
+            Array NumPy com shape [seq_len, embed_dim] ou None se não suportado
+            
+        Note:
+            Nem todas as estratégias suportam extração de matriz.
+            Verifique se o retorno não é None antes de usar.
+        """
+        # Garantir que modelo está carregado
+        if not self._model_loaded:
+            self._do_initialize()
+        
+        # Verificar se estratégia suporta generate_matrix
+        if self.strategy is None:
+            self.logger.warning("Nenhuma estratégia configurada")
+            return None
+        
+        if not hasattr(self.strategy, 'generate_matrix'):
+            self.logger.warning(
+                f"Estratégia {self.strategy.__class__.__name__} não suporta generate_matrix()"
+            )
+            return None
+        
+        # Delegar para estratégia
+        try:
+            matrix = self.strategy.generate_matrix(
+                model=self.model,
+                auxiliary_objects=self.alphabet,
+                sequence=sequence,
+                device=self.device,
+                logger=self.logger
+            )
+            
+            if matrix is not None:
+                self.logger.debug(
+                    f"Matriz gerada: shape={matrix.shape}, dtype={matrix.dtype}"
+                )
+            
+            return matrix
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao gerar matriz de embedding: {e}")
+            return None
+    
     def process_fasta_file(self,
                           fasta_file: Path,
                           output_dir: Path,
@@ -405,19 +459,24 @@ class ProteinEmbedding(BaseEmbedding):
     
     def generate_embeddings(self, 
                           tsv_path: Path, 
-                          output_dir: Optional[Path] = None) -> bool:
+                          output_dir: Optional[Path] = None,
+                          save_matrix: bool = False,
+                          matrix_output_dir: Optional[Path] = None) -> bool:
         """
         Gera embeddings a partir de arquivo TSV (interface para pipeline).
         
         Args:
             tsv_path: Arquivo TSV com dados
-            output_dir: Diretório de saída (usa config se None)
+            output_dir: Diretório de saída para vetores (usa config se None)
+            save_matrix: Se True, também salva matrizes de embedding [seq_len, dim]
+            matrix_output_dir: Diretório para matrizes (usa 'protein_matrix_embeddings' se None)
             
         Returns:
             True se sucesso
         """
         import pandas as pd
         from src.build.utils import ensure_directory
+        from src.build.core.constants import BuildConstants
         
         try:
             # Garantir que modelo está inicializado
@@ -425,12 +484,25 @@ class ProteinEmbedding(BaseEmbedding):
                 self.logger.info("Inicializando modelo ESM...")
                 self._do_initialize()
             
-            # Determinar diretório de saída
+            # Determinar diretório de saída para vetores
             if output_dir is None:
                 output_dir = Path(self.get_config('protein_output_dir', 'protein_embeddings'))
             
             output_dir = Path(output_dir)
             output_dir = ensure_directory(output_dir)
+            
+            # Determinar diretório de saída para matrizes (se habilitado)
+            if save_matrix:
+                if matrix_output_dir is None:
+                    matrix_output_dir = Path(
+                        self.get_config(
+                            'protein_matrix_output_dir', 
+                            BuildConstants.DEFAULT_PROTEIN_MATRIX_OUTPUT_DIR
+                        )
+                    )
+                matrix_output_dir = Path(matrix_output_dir)
+                matrix_output_dir = ensure_directory(matrix_output_dir)
+                self.logger.info(f"📊 Salvando matrizes de embedding em: {matrix_output_dir}")
             
             # Carregar TSV
             self.logger.info(f"Carregando dados de {tsv_path}")
@@ -447,6 +519,7 @@ class ProteinEmbedding(BaseEmbedding):
             # Processar cada sequência
             sucessos = 0
             falhas = 0
+            matrix_sucessos = 0
             
             progress_logger = ProgressLogger(
                 self.logger,
@@ -456,19 +529,44 @@ class ProteinEmbedding(BaseEmbedding):
             
             for seq_id, sequence in unique_seqs.items():
                 try:
-                    # Verificar se já existe
+                    # Verificar se vetor já existe
                     output_file = output_dir / f"{seq_id}_embedding.npy"
-                    if output_file.exists():
-                        self.logger.debug(f"Embedding já existe: {seq_id}")
+                    vector_exists = output_file.exists()
+                    
+                    # Verificar se matriz já existe (se save_matrix habilitado)
+                    matrix_exists = False
+                    if save_matrix:
+                        matrix_file = matrix_output_dir / f"{seq_id}_matrix.npy"
+                        matrix_exists = matrix_file.exists()
+                    
+                    # Pular se tudo já existe
+                    if vector_exists and (not save_matrix or matrix_exists):
+                        self.logger.debug(f"Embedding(s) já existe(m): {seq_id}")
                         sucessos += 1
+                        if save_matrix and matrix_exists:
+                            matrix_sucessos += 1
                         progress_logger.update()
                         continue
                     
-                    # Gerar embedding
-                    embedding = self.generate_embedding(sequence)
+                    # Gerar embedding vetorial (se não existe)
+                    if not vector_exists:
+                        embedding = self.generate_embedding(sequence)
+                        np.save(output_file, embedding)
                     
-                    # Salvar
-                    np.save(output_file, embedding)
+                    # Gerar matriz de embedding (se habilitado e não existe)
+                    if save_matrix and not matrix_exists:
+                        matrix = self.generate_embedding_matrix(sequence)
+                        if matrix is not None:
+                            np.save(matrix_file, matrix)
+                            matrix_sucessos += 1
+                            self.logger.debug(
+                                f"Matriz salva: {seq_id} shape={matrix.shape}"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"Estratégia não suporta matriz para: {seq_id}"
+                            )
+                    
                     sucessos += 1
                     
                 except Exception as e:
@@ -479,10 +577,16 @@ class ProteinEmbedding(BaseEmbedding):
             
             progress_logger.finish()
             
-            # Salvar path de saída
+            # Salvar paths de saída
             self._output_path = output_dir
+            if save_matrix:
+                self._matrix_output_path = matrix_output_dir
             
+            # Log resumo
             self.logger.info(f"Embeddings de proteínas: {sucessos} sucessos, {falhas} falhas")
+            if save_matrix:
+                self.logger.info(f"📊 Matrizes de embedding: {matrix_sucessos} geradas")
+            
             return True
             
         except Exception as e:
@@ -492,28 +596,38 @@ class ProteinEmbedding(BaseEmbedding):
             return False
     
     def get_output_path(self) -> Optional[Path]:
-        """Retorna path de saída dos embeddings."""
+        """Retorna path de saída dos embeddings vetoriais."""
         return getattr(self, '_output_path', None)
+    
+    def get_matrix_output_path(self) -> Optional[Path]:
+        """Retorna path de saída das matrizes de embedding."""
+        return getattr(self, '_matrix_output_path', None)
     
     def get_embeddings_info(self) -> Dict[str, Any]:
         """Retorna informações sobre embeddings gerados."""
         output_path = self.get_output_path()
+        matrix_output_path = self.get_matrix_output_path()
         
-        if output_path and output_path.exists():
-            embedding_files = list(output_path.glob("*_embedding.npy"))
-            return {
-                'output_path': str(output_path),
-                'count': len(embedding_files),
-                'model': self.model_name,
-                'dimension': self.embedding_dim
-            }
-        
-        return {
+        info = {
             'output_path': None,
             'count': 0,
             'model': self.model_name,
-            'dimension': self.embedding_dim
+            'dimension': self.embedding_dim,
+            'matrix_output_path': None,
+            'matrix_count': 0
         }
+        
+        if output_path and output_path.exists():
+            embedding_files = list(output_path.glob("*_embedding.npy"))
+            info['output_path'] = str(output_path)
+            info['count'] = len(embedding_files)
+        
+        if matrix_output_path and matrix_output_path.exists():
+            matrix_files = list(matrix_output_path.glob("*_matrix.npy"))
+            info['matrix_output_path'] = str(matrix_output_path)
+            info['matrix_count'] = len(matrix_files)
+        
+        return info
     
     def build(self) -> Dict[str, Any]:
         """Constrói resumo do processamento."""

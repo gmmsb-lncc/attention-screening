@@ -204,6 +204,51 @@ class LigandEmbedding(BaseEmbedding):
         """
         return self._generate_batch_embeddings([smiles])[0]
     
+    def generate_embedding_matrix(self, smiles: str) -> Optional[np.ndarray]:
+        """
+        Gera matriz de embeddings por token/átomo (sem pooling).
+        
+        Retorna representações para cada token do SMILES,
+        preservando informação posicional para uso com arquiteturas
+        como CNN + Cross-Attention.
+        
+        Args:
+            smiles: String SMILES do ligante
+            
+        Returns:
+            Array NumPy com shape [n_tokens, embed_dim] ou None se não suportado
+            
+        Note:
+            A maioria dos modelos de ligantes (incluindo SMI-TED) produzem
+            apenas representações globais (vetores). Este método retorna None
+            quando representações por token não estão disponíveis.
+            
+            Para usar cross-attention com ligantes, considere:
+            1. Usar tokenização SMILES e embeddings aprendidos
+            2. Usar fingerprints 3D se estrutura disponível
+            3. Usar GraphTransformer para representações por átomo
+        """
+        # Garantir que modelo está carregado
+        if not self._model_loaded:
+            self._do_initialize()
+        
+        # SMI-TED não suporta representações por token
+        # Retorna None para indicar que matriz não está disponível
+        if self.model_name == "SMI-TED":
+            self.logger.debug(
+                f"Modelo {self.model_name} não suporta representações por token. "
+                "Retornando None. Use generate_embedding() para vetor global."
+            )
+            return None
+        
+        # Para outros modelos, verificar se suportam representações por token
+        # Por agora, retornar None para todos os modelos FM4M
+        self.logger.warning(
+            f"Modelo {self.model_name} não suporta representações por token/átomo. "
+            "Use generate_embedding() para obter representação global do ligante."
+        )
+        return None
+    
     def _generate_batch_embeddings(self, smiles_list: List[str]) -> List[np.ndarray]:
         """
         Gera embeddings para batch de SMILES com retry logic e processamento individual.
@@ -483,19 +528,25 @@ class LigandEmbedding(BaseEmbedding):
     
     def generate_embeddings(self, 
                           tsv_path: Path, 
-                          output_dir: Optional[Path] = None) -> bool:
+                          output_dir: Optional[Path] = None,
+                          save_matrix: bool = False,
+                          matrix_output_dir: Optional[Path] = None) -> bool:
         """
         Gera embeddings a partir de arquivo TSV (interface para pipeline).
         
         Args:
             tsv_path: Arquivo TSV com dados
             output_dir: Diretório de saída (usa config se None)
+            save_matrix: Se True, também salva matrizes de embedding [n_tokens, dim]
+                        (Nota: SMI-TED não suporta matrizes por token)
+            matrix_output_dir: Diretório para matrizes (usa 'ligand_matrix_embeddings' se None)
             
         Returns:
             True se sucesso
         """
         import pandas as pd
         from src.build.utils import ensure_directory
+        from src.build.core.constants import BuildConstants
         
         try:
             # Determinar diretório de saída ANTES de carregar modelo
@@ -504,6 +555,24 @@ class LigandEmbedding(BaseEmbedding):
             
             output_dir = Path(output_dir)
             output_dir = ensure_directory(output_dir)
+            
+            # Determinar diretório de saída para matrizes (se habilitado)
+            # Nota: SMI-TED não suporta matrizes, mas mantemos interface consistente
+            if save_matrix:
+                if matrix_output_dir is None:
+                    matrix_output_dir = Path(
+                        self.get_config(
+                            'ligand_matrix_output_dir', 
+                            BuildConstants.DEFAULT_LIGAND_MATRIX_OUTPUT_DIR
+                        )
+                    )
+                matrix_output_dir = Path(matrix_output_dir)
+                matrix_output_dir = ensure_directory(matrix_output_dir)
+                self.logger.info(f"📊 Diretório de matrizes configurado: {matrix_output_dir}")
+                self.logger.warning(
+                    "⚠️ Nota: Modelo SMI-TED não suporta representações por token/átomo. "
+                    "Matrizes não serão geradas."
+                )
             
             # Carregar TSV
             self.logger.info(f"Carregando dados de {tsv_path}")
@@ -616,28 +685,44 @@ class LigandEmbedding(BaseEmbedding):
             return False
     
     def get_output_path(self) -> Optional[Path]:
-        """Retorna path de saída dos embeddings."""
+        """Retorna path de saída dos embeddings vetoriais."""
         return getattr(self, '_output_path', None)
+    
+    def get_matrix_output_path(self) -> Optional[Path]:
+        """
+        Retorna path de saída das matrizes de embedding.
+        
+        Nota: SMI-TED não suporta matrizes por token, então este
+        diretório tipicamente estará vazio para ligantes.
+        """
+        return getattr(self, '_matrix_output_path', None)
     
     def get_embeddings_info(self) -> Dict[str, Any]:
         """Retorna informações sobre embeddings gerados."""
         output_path = self.get_output_path()
+        matrix_output_path = self.get_matrix_output_path()
         
-        if output_path and output_path.exists():
-            embedding_files = list(output_path.glob("*_embedding.npy"))
-            return {
-                'output_path': str(output_path),
-                'count': len(embedding_files),
-                'model': self.model_name,
-                'dimension': self.embedding_dim
-            }
-        
-        return {
+        info = {
             'output_path': None,
             'count': 0,
             'model': self.model_name,
-            'dimension': self.embedding_dim
+            'dimension': self.embedding_dim,
+            'matrix_output_path': None,
+            'matrix_count': 0,
+            'matrix_supported': False  # SMI-TED não suporta matrizes
         }
+        
+        if output_path and output_path.exists():
+            embedding_files = list(output_path.glob("*_embedding.npy"))
+            info['output_path'] = str(output_path)
+            info['count'] = len(embedding_files)
+        
+        if matrix_output_path and matrix_output_path.exists():
+            matrix_files = list(matrix_output_path.glob("*_matrix.npy"))
+            info['matrix_output_path'] = str(matrix_output_path)
+            info['matrix_count'] = len(matrix_files)
+        
+        return info
     
     def build(self) -> Dict[str, Any]:
         """Constrói resumo do processamento."""
