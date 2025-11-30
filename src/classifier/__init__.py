@@ -1,15 +1,15 @@
 """
-DockTKinase Classifier - Predição de interações kinase-composto (Versão Modularizada)
+DockTKinase Classifier - Kinase-compound interaction prediction (Modularized Version)
 =====================================================================================
 
-Módulos Modularizados:
-- models: Arquitetura MLP modularizada
-- core: Avaliador e gerenciador de dados
-- utils: Sistema de imports seguros
-- modular_classifier.py: Interface CLI principal
-- modular_pipeline.py: Pipeline de treinamento
+Modularized Modules:
+- models: Modularized MLP architecture
+- core: Evaluator and data manager
+- utils: Safe imports system
+- modular_classifier.py: Main CLI interface
+- modular_pipeline.py: Training pipeline
 
-Uso:
+Usage:
     from .modular_pipeline import MLPEmbeddingPipeline
     from .models.mlp_classifier import MLPEmbeddingClassifier
     from .core.evaluator import ModelEvaluator
@@ -19,7 +19,7 @@ Uso:
 __version__ = "2.0.0-modular"
 __author__ = "DockTKinase Team"
 
-# Imports principais do sistema modularizado
+# Main imports from modularized system
 try:
     from .modular_pipeline import MLPEmbeddingPipeline
     from .models.mlp_classifier import MLPEmbeddingClassifier
@@ -36,6 +36,6 @@ try:
     ]
     
 except ImportError as e:
-    # Sistema modular pode não estar completamente disponível
-    print(f"⚠️  Aviso: Imports modularizados não disponíveis: {e}")
+    # Modular system may not be fully available
+    print(f"⚠️  Warning: Modular imports not available: {e}")
     __all__ = []
