@@ -5,18 +5,23 @@ This module provides high-level functions to:
 1. Generate matrix embeddings from proteins and ligands
 2. Train the CrossAttentionAffinityModel
 3. Make predictions on new data
+4. Comprehensive evaluation with metrics matching vector pipeline
 
 Author: DockTKinase Team
 Date: November 2025
 """
 
 import logging
+import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List, Tuple
 import pandas as pd
 import numpy as np
 import torch
 from dataclasses import dataclass
+
+# Import metrics
+from .matrix_metrics import MatrixMetricsCalculator, ClassificationMetrics, RegressionMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +638,201 @@ class MatrixAffinityPipeline:
         
         result_df.to_csv(output_path, index=False)
         logger.info(f"Predictions saved to {output_path}")
+
+    @torch.no_grad()
+    def evaluate_comprehensive(
+        self,
+        df: pd.DataFrame,
+        threshold: float = 0.5,
+        save_results: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive evaluation with full metrics matching vector pipeline.
+        
+        This method provides the same metrics as the vector-based pipeline:
+        
+        Classification Metrics:
+        - Accuracy, Precision, Recall, F1 Score
+        - ROC-AUC, Average Precision
+        - Brier Score, MCC (Matthews Correlation Coefficient)
+        - Specificity, Sensitivity
+        - Fbeta variants (β=0.5, β=2.0)
+        
+        Regression Metrics:
+        - MAE, MSE, RMSE, R²
+        - Median Absolute Error
+        - MAPE (Mean Absolute Percentage Error)
+        - Pearson and Spearman correlations
+        - Explained Variance, Max Error
+        - Residual statistics (mean, std, percentiles)
+        
+        Args:
+            df: DataFrame with seq_id, chembl_id, label, and optionally affinity_uM
+            threshold: Classification threshold (default 0.5)
+            save_results: If True, save detailed results to output directory
+            
+        Returns:
+            Dictionary with comprehensive metrics
+        """
+        if self.model is None:
+            raise ValueError("Model not trained. Call train() first or load a checkpoint.")
+        
+        # Get predictions
+        predictions = self.predict(df)
+        
+        # Extract labels
+        cls_labels = df['label'].values if 'label' in df.columns else None
+        reg_targets = df['affinity_uM'].values if 'affinity_uM' in df.columns else None
+        
+        if cls_labels is None:
+            raise ValueError("DataFrame must have 'label' column for evaluation")
+        
+        # Prepare data
+        cls_probs = predictions['classification_prob'].flatten()
+        cls_preds = (cls_probs >= threshold).astype(int)
+        reg_preds = predictions['regression_pred'].flatten()
+        
+        # Determine which samples have regression targets
+        if reg_targets is not None:
+            # Handle NaN or missing values
+            reg_mask = ~np.isnan(reg_targets)
+            reg_targets_valid = reg_targets[reg_mask]
+            reg_preds_valid = reg_preds[reg_mask]
+        else:
+            reg_mask = np.zeros(len(df), dtype=bool)
+            reg_targets_valid = np.array([])
+            reg_preds_valid = np.array([])
+        
+        # Initialize metrics calculator
+        metrics_calculator = MatrixMetricsCalculator(threshold=threshold)
+        
+        # Compute classification metrics
+        cls_metrics = metrics_calculator.calculate_classification_metrics(
+            y_true=cls_labels,
+            y_prob=cls_probs,
+            threshold=threshold
+        )
+        
+        # Compute regression metrics if targets available
+        reg_metrics = None
+        if len(reg_preds_valid) > 0:
+            reg_metrics = metrics_calculator.calculate_regression_metrics(
+                y_true=reg_targets_valid,
+                y_pred=reg_preds_valid
+            )
+        
+        # Log comprehensive results
+        logger.info("\n" + "="*70)
+        logger.info("COMPREHENSIVE EVALUATION RESULTS (Matrix Pipeline)")
+        logger.info("="*70)
+        
+        # Classification summary
+        logger.info("\n" + "-"*35)
+        logger.info("CLASSIFICATION METRICS")
+        logger.info("-"*35)
+        logger.info(f"  Total Samples:          {len(cls_labels)}")
+        logger.info(f"  Positive Class:         {int(cls_labels.sum())} ({100*cls_labels.mean():.1f}%)")
+        logger.info(f"  Negative Class:         {int(len(cls_labels) - cls_labels.sum())} ({100*(1-cls_labels.mean()):.1f}%)")
+        logger.info("")
+        logger.info(f"  Accuracy:               {cls_metrics.accuracy:.4f}")
+        logger.info(f"  Precision:              {cls_metrics.precision:.4f}")
+        logger.info(f"  Recall (Sensitivity):   {cls_metrics.recall:.4f}")
+        logger.info(f"  Specificity:            {cls_metrics.specificity:.4f}")
+        logger.info(f"  F1 Score:               {cls_metrics.f1:.4f}")
+        logger.info(f"  F0.5 Score:             {cls_metrics.fbeta_05:.4f}")
+        logger.info(f"  F2 Score:               {cls_metrics.fbeta_2:.4f}")
+        logger.info(f"  ROC-AUC:                {cls_metrics.roc_auc:.4f}")
+        logger.info(f"  Average Precision:      {cls_metrics.average_precision:.4f}")
+        logger.info(f"  Brier Score:            {cls_metrics.brier_score:.4f}")
+        logger.info(f"  MCC:                    {cls_metrics.mcc:.4f}")
+        
+        # Regression summary
+        if reg_metrics is not None:
+            logger.info("\n" + "-"*35)
+            logger.info("REGRESSION METRICS")
+            logger.info("-"*35)
+            logger.info(f"  Samples with Target:    {len(reg_targets_valid)}")
+            logger.info("")
+            logger.info(f"  MAE:                    {reg_metrics.mae:.4f}")
+            logger.info(f"  MSE:                    {reg_metrics.mse:.4f}")
+            logger.info(f"  RMSE:                   {reg_metrics.rmse:.4f}")
+            logger.info(f"  R²:                     {reg_metrics.r2:.4f}")
+            logger.info(f"  Median AE:              {reg_metrics.median_ae:.4f}")
+            logger.info(f"  MAPE:                   {reg_metrics.mape if reg_metrics.mape else 0:.4f}")
+            logger.info(f"  Pearson r:              {reg_metrics.pearson_r:.4f}")
+            logger.info(f"  Spearman ρ:             {reg_metrics.spearman_r:.4f}")
+            logger.info(f"  Explained Variance:     {reg_metrics.explained_variance:.4f}")
+            logger.info(f"  Max Error:              {reg_metrics.max_error:.4f}")
+            
+            if reg_metrics.mean_residual is not None:
+                logger.info("")
+                logger.info(f"  Residual Mean:          {reg_metrics.mean_residual:.4f}")
+                logger.info(f"  Residual Std:           {reg_metrics.std_residual:.4f}")
+        
+        logger.info("\n" + "="*70 + "\n")
+        
+        # Save results if requested
+        if save_results:
+            save_path = self.output_dir / 'evaluation'
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save metrics as JSON
+            json_results = {
+                'classification': cls_metrics.to_dict(),
+                'regression': reg_metrics.to_dict() if reg_metrics else {},
+                'metadata': {
+                    'total_samples': len(cls_labels),
+                    'positive_samples': int(cls_labels.sum()),
+                    'negative_samples': int(len(cls_labels) - cls_labels.sum()),
+                    'samples_with_regression_target': len(reg_targets_valid),
+                    'threshold': threshold
+                }
+            }
+            
+            json_path = save_path / 'comprehensive_metrics.json'
+            with open(json_path, 'w') as f:
+                json.dump(json_results, f, indent=2, default=float)
+            logger.info(f"Saved metrics JSON: {json_path}")
+            
+            # Save formatted report
+            report = metrics_calculator.format_classification_report(cls_metrics)
+            if reg_metrics:
+                report += "\n\n" + metrics_calculator.format_regression_report(reg_metrics)
+            
+            report_path = save_path / 'metrics_report.txt'
+            with open(report_path, 'w') as f:
+                f.write(report)
+            logger.info(f"Saved metrics report: {report_path}")
+            
+            # Save predictions with labels for analysis
+            eval_df = df.copy()
+            eval_df['pred_prob'] = cls_probs
+            eval_df['pred_label'] = cls_preds
+            eval_df['pred_affinity'] = reg_preds
+            eval_df['correct'] = (cls_preds == cls_labels).astype(int)
+            
+            eval_path = save_path / 'evaluation_predictions.csv'
+            eval_df.to_csv(eval_path, index=False)
+            logger.info(f"Saved evaluation predictions: {eval_path}")
+        
+        # Return results
+        return {
+            'classification': cls_metrics,
+            'regression': reg_metrics,
+            'classification_dict': cls_metrics.to_dict(),
+            'regression_dict': reg_metrics.to_dict() if reg_metrics else {},
+            # Legacy format for compatibility
+            'accuracy': cls_metrics.accuracy,
+            'precision': cls_metrics.precision,
+            'recall': cls_metrics.recall,
+            'f1': cls_metrics.f1,
+            'auc': cls_metrics.roc_auc,
+            'mcc': cls_metrics.mcc,
+            'rmse': reg_metrics.rmse if reg_metrics else 0.0,
+            'r2': reg_metrics.r2 if reg_metrics else 0.0,
+            'pearson': reg_metrics.pearson_r if reg_metrics else 0.0,
+            'spearman': reg_metrics.spearman_r if reg_metrics else 0.0
+        }
 
 
 def run_matrix_pipeline(

@@ -30,6 +30,13 @@ from .matrix_pipeline import (
     run_matrix_pipeline
 )
 
+from .matrix_metrics import (
+    ClassificationMetrics,
+    RegressionMetrics,
+    MultiTaskMetrics,
+    MatrixMetricsCalculator
+)
+
 __all__ = [
     # Import utils
     "get_classifier_root", 
@@ -50,5 +57,10 @@ __all__ = [
     # Matrix pipeline
     "MatrixPipelineConfig",
     "MatrixAffinityPipeline",
-    "run_matrix_pipeline"
+    "run_matrix_pipeline",
+    # Matrix metrics
+    "ClassificationMetrics",
+    "RegressionMetrics",
+    "MultiTaskMetrics",
+    "MatrixMetricsCalculator"
 ]
