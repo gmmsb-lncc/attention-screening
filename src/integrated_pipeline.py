@@ -398,9 +398,9 @@ class IntegratedPipeline:
         
         if self.config.verbose:
             print("✅ Build phase completed successfully")
-            print(f"   Embeddings saved to: {self.build_dir / 'embeddings'}")
-            print(f"   Matrix saved to: {self.build_dir / 'matrix'}")
-            print(f"   Labels saved to: {self.build_dir / 'labels'}")
+            print(f"   Protein embeddings: {protein_embeddings_dir}")
+            print(f"   Ligand embeddings: {ligand_embeddings_dir}")
+            print(f"   Concatenated matrix: {self.build_dir / 'embedding_matrix.npy'}")
         
         return results
     
