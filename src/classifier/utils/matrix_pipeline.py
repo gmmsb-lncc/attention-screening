@@ -37,6 +37,10 @@ class MatrixPipelineConfig:
     protein_matrix_dir: Optional[str] = None
     ligand_matrix_dir: Optional[str] = None
     
+    # Vector embedding directories (for stratification)
+    protein_vector_dir: Optional[str] = None
+    ligand_vector_dir: Optional[str] = None
+    
     # Model configuration
     hidden_dim: int = 256
     num_cnn_layers: int = 3
@@ -54,6 +58,15 @@ class MatrixPipelineConfig:
     # Loss weights
     classification_weight: float = 1.0
     regression_weight: float = 1.0
+    
+    # Stratification configuration
+    use_stratification: bool = True  # Use embedding-based stratification
+    stratification_method: str = 'adaptive'  # 'adaptive', 'dbscan', 'hierarchical', 'simple'
+    adaptive_method: str = 'target'  # 'silhouette', 'elbow', 'target', 'leakage_aware'
+    similarity_threshold: Optional[float] = None  # Manual threshold (None = auto)
+    stratify_by: str = 'both'  # 'protein', 'ligand', 'both'
+    protein_weight: float = 0.6  # Weight for protein in multi-view
+    ligand_weight: float = 0.4  # Weight for ligand in multi-view
     
     # Device
     device: str = 'auto'
@@ -206,6 +219,53 @@ class MatrixAffinityPipeline:
         
         return protein_dir, ligand_dir
     
+    def _load_vectors_from_matrices(
+        self,
+        df: pd.DataFrame,
+        protein_id_col: str = 'seq_id',
+        ligand_id_col: str = 'chembl_id'
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Load vector embeddings by mean-pooling matrices.
+        
+        This enables stratification using the same embeddings as training.
+        
+        Args:
+            df: DataFrame with IDs
+            protein_id_col: Column for protein IDs
+            ligand_id_col: Column for ligand IDs
+            
+        Returns:
+            protein_vectors [N, protein_dim], ligand_vectors [N, ligand_dim]
+        """
+        protein_dir = Path(self.config.protein_matrix_dir)
+        ligand_dir = Path(self.config.ligand_matrix_dir)
+        
+        protein_vectors = []
+        ligand_vectors = []
+        
+        for _, row in df.iterrows():
+            # Load protein matrix and mean-pool
+            prot_file = protein_dir / f"{row[protein_id_col]}_matrix.npy"
+            if prot_file.exists():
+                prot_matrix = np.load(prot_file)
+                prot_vector = prot_matrix.mean(axis=0)  # Mean over seq_len
+            else:
+                raise FileNotFoundError(f"Protein matrix not found: {prot_file}")
+            
+            # Load ligand matrix and mean-pool
+            lig_file = ligand_dir / f"{row[ligand_id_col]}_matrix.npy"
+            if lig_file.exists():
+                lig_matrix = np.load(lig_file)
+                lig_vector = lig_matrix.mean(axis=0)  # Mean over tokens
+            else:
+                raise FileNotFoundError(f"Ligand matrix not found: {lig_file}")
+            
+            protein_vectors.append(prot_vector)
+            ligand_vectors.append(lig_vector)
+        
+        return np.array(protein_vectors), np.array(ligand_vectors)
+    
     def prepare_data(
         self,
         df: pd.DataFrame,
@@ -218,6 +278,10 @@ class MatrixAffinityPipeline:
         """
         Prepare and split data for training.
         
+        Uses embedding-based stratification if enabled in config.
+        This ensures train/val/test have minimal data leakage based on
+        protein-ligand similarity.
+        
         Args:
             df: DataFrame with embeddings
             label_col: Column for classification labels
@@ -229,15 +293,29 @@ class MatrixAffinityPipeline:
         Returns:
             train_df, val_df, test_df
         """
-        from sklearn.model_selection import train_test_split
-        
         # Ensure required columns
         required_cols = ['seq_id', 'chembl_id', label_col]
         for col in required_cols:
             if col not in df.columns:
                 raise ValueError(f"Missing required column: {col}")
         
-        # Split data
+        # Use stratification system if enabled
+        if self.config.use_stratification and self.config.stratification_method != 'simple':
+            return self._stratified_split(df, label_col, val_split, test_split, random_state)
+        else:
+            return self._simple_split(df, label_col, val_split, test_split, random_state)
+    
+    def _simple_split(
+        self,
+        df: pd.DataFrame,
+        label_col: str,
+        val_split: float,
+        test_split: float,
+        random_state: int
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Simple random split with label stratification."""
+        from sklearn.model_selection import train_test_split
+        
         train_val_df, test_df = train_test_split(
             df, test_size=test_split, random_state=random_state, stratify=df[label_col]
         )
@@ -247,7 +325,90 @@ class MatrixAffinityPipeline:
             train_val_df, test_size=val_size, random_state=random_state, stratify=train_val_df[label_col]
         )
         
-        logger.info(f"Data split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+        logger.info(f"Simple split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+        
+        return train_df, val_df, test_df
+    
+    def _stratified_split(
+        self,
+        df: pd.DataFrame,
+        label_col: str,
+        val_split: float,
+        test_split: float,
+        random_state: int
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Embedding-based stratified split using the Stratifier system.
+        
+        This prevents data leakage by grouping similar protein-ligand pairs
+        and ensuring they end up in the same split.
+        """
+        from src.build.stratification import Stratifier
+        
+        logger.info(f"Using embedding-based stratification: method={self.config.stratification_method}")
+        logger.info(f"  Adaptive method: {self.config.adaptive_method}")
+        logger.info(f"  Stratify by: {self.config.stratify_by}")
+        
+        # Load vector embeddings (mean-pooled from matrices)
+        try:
+            protein_vectors, ligand_vectors = self._load_vectors_from_matrices(df)
+            logger.info(f"Loaded vectors: protein={protein_vectors.shape}, ligand={ligand_vectors.shape}")
+        except FileNotFoundError as e:
+            logger.warning(f"Could not load matrices for stratification: {e}")
+            logger.warning("Falling back to simple split")
+            return self._simple_split(df, label_col, val_split, test_split, random_state)
+        
+        # Create stratifier
+        stratifier = Stratifier(
+            clustering_algorithm=self.config.stratification_method,
+            similarity_threshold=self.config.similarity_threshold,
+            adaptive_method=self.config.adaptive_method,
+            test_size=test_split,
+            val_size=val_split,
+            output_dir=str(self.output_dir / 'stratification')
+        )
+        
+        # Get labels
+        labels = df[label_col].values
+        
+        # Perform stratified split based on config
+        if self.config.stratify_by == 'protein':
+            train_idx, val_idx, test_idx = stratifier.stratified_split(
+                protein_vectors, labels,
+                test_size=test_split,
+                val_size=val_split,
+                output_dir=str(self.output_dir / 'stratification')
+            )
+        elif self.config.stratify_by == 'ligand':
+            train_idx, val_idx, test_idx = stratifier.stratified_split(
+                ligand_vectors, labels,
+                test_size=test_split,
+                val_size=val_split,
+                output_dir=str(self.output_dir / 'stratification')
+            )
+        else:  # 'both' - multi-view
+            train_idx, val_idx, test_idx = stratifier.multi_view_stratified_split(
+                protein_vectors, ligand_vectors, labels,
+                test_size=test_split,
+                val_size=val_split,
+                protein_weight=self.config.protein_weight,
+                ligand_weight=self.config.ligand_weight,
+                output_dir=str(self.output_dir / 'stratification')
+            )
+        
+        # Create DataFrames from indices
+        df_indexed = df.reset_index(drop=True)
+        train_df = df_indexed.iloc[train_idx].copy()
+        val_df = df_indexed.iloc[val_idx].copy()
+        test_df = df_indexed.iloc[test_idx].copy()
+        
+        logger.info(f"Stratified split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+        
+        # Log cluster info
+        cluster_info = stratifier.get_cluster_info()
+        if cluster_info:
+            logger.info(f"  Clusters: {cluster_info.get('n_clusters', 'N/A')}")
+            logger.info(f"  Noise points: {cluster_info.get('n_noise_points', 0)}")
         
         return train_df, val_df, test_df
     
