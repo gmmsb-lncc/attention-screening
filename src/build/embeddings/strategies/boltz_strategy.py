@@ -283,6 +283,136 @@ class BoltzStrategy(BaseProteinStrategy):
         self.output_dir = None
         self.cli_available = False
     
+    def generate_matrix(
+        self,
+        model: None,
+        auxiliary_objects: None,
+        sequence: str,
+        device: torch.device,
+        **kwargs
+    ) -> np.ndarray:
+        """
+        Generate matrix of embeddings per-token using Boltz-2 CLI (without pooling).
+        
+        Args:
+            model: Unused (CLI-based approach)
+            auxiliary_objects: Unused (CLI-based approach)
+            sequence: Protein sequence (single letter amino acid codes)
+            device: Device for computation
+            **kwargs: Additional arguments (recycling_steps, sampling_steps, seq_id)
+        
+        Returns:
+            Matrix numpy array (shape: [seq_len, embedding_dim])
+        
+        Raises:
+            ValueError: If sequence is invalid or empty
+            RuntimeError: If Boltz CLI execution fails
+        """
+        # Validate sequence
+        sequence = sequence.strip().upper()
+        if not sequence:
+            raise ValueError("Sequence cannot be empty")
+        
+        invalid_chars = set(sequence) - VALID_AMINO_ACIDS
+        if invalid_chars:
+            raise ValueError(f"Invalid amino acids in sequence: {invalid_chars}")
+        
+        self.logger.info(f"Generating Boltz-2 embedding MATRIX for sequence ({len(sequence)} AA)")
+        
+        # Extract kwargs
+        recycling_steps = kwargs.get('recycling_steps', DEFAULT_RECYCLING_STEPS)
+        sampling_steps = kwargs.get('sampling_steps', DEFAULT_SAMPLING_STEPS)
+        seq_id = kwargs.get('seq_id', None)
+        
+        # Create YAML input file
+        yaml_path = self._create_yaml_input(sequence, seq_id=seq_id)
+        
+        # Execute Boltz CLI
+        self._run_boltz_cli(
+            yaml_path,
+            recycling_steps=recycling_steps,
+            sampling_steps=sampling_steps
+        )
+        
+        # Extract embeddings WITHOUT pooling (return full matrix)
+        matrix = self._extract_embedding_matrix(sequence)
+        
+        return matrix
+    
+    def _extract_embedding_matrix(self, sequence: str) -> np.ndarray:
+        """
+        Extract full embedding matrix from Boltz CLI output (without pooling).
+        
+        Args:
+            sequence: Original sequence (for length validation)
+        
+        Returns:
+            Embedding matrix [seq_len, embedding_dim]
+        
+        Raises:
+            RuntimeError: If output files not found or invalid
+        """
+        # Find the results directory (same logic as _extract_embeddings)
+        results_dir = self.output_dir / "boltz_results_input"
+        
+        if not results_dir.exists():
+            raise RuntimeError(f"Boltz results directory not found: {results_dir}")
+        
+        predictions_dir = results_dir / 'predictions'
+        if not predictions_dir.exists():
+            raise RuntimeError(f"Boltz predictions directory not found: {predictions_dir}")
+        
+        job_dirs = [d for d in predictions_dir.iterdir() if d.is_dir()]
+        if not job_dirs:
+            raise RuntimeError(f"No job directories found in: {predictions_dir}")
+        
+        protein_dir = job_dirs[0]
+        
+        # Try to load embeddings
+        embedding_files = list(protein_dir.glob('embeddings*.npz'))
+        confidence_files = list(protein_dir.glob('confidences*.npz'))
+        
+        if embedding_files:
+            data = np.load(embedding_files[0])
+        elif confidence_files:
+            data = np.load(confidence_files[0])
+        else:
+            raise RuntimeError(f"No embedding files found in {protein_dir}")
+        
+        # Extract 's' (single representation)
+        possible_keys = ['s_trunk', 's', 'single']
+        s = None
+        
+        for key in possible_keys:
+            if key in data:
+                s = data[key]
+                break
+        
+        if s is None:
+            raise RuntimeError(f"No valid embedding key found. Available: {list(data.keys())}")
+        
+        # Convert to numpy if needed
+        if isinstance(s, torch.Tensor):
+            s = s.cpu().numpy()
+        
+        # Handle batch dimension if present
+        if s.ndim == 3:
+            if s.shape[0] != 1:
+                raise RuntimeError(f"Unexpected batch size: {s.shape[0]}")
+            s = s.squeeze(0)  # [N_tokens, dim]
+        
+        if s.ndim != 2:
+            raise RuntimeError(f"Invalid 's' shape: {s.shape}")
+        
+        self.logger.info(f"✓ Extracted embedding MATRIX: {s.shape}")
+        
+        # Return full matrix WITHOUT pooling
+        return s.astype(np.float32)
+    
+    def supports_matrix_output(self) -> bool:
+        """Boltz-2 suporta geração de matrizes per-token."""
+        return True
+    
     # =========================================================================
     # PRIVATE METHODS
     # =========================================================================

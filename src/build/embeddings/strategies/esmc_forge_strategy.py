@@ -281,6 +281,42 @@ class ESMCForgeStrategy(BaseProteinStrategy):
         except Exception as e:
             raise EmbeddingError(f"ESM-C 6B Forge API embedding failed: {e}")
     
+    def generate_matrix(
+        self,
+        model: Any,
+        auxiliary_objects: Any,
+        sequence: str,
+        device: torch.device,
+        **kwargs
+    ) -> Optional[np.ndarray]:
+        """
+        Generate ESM-C 6B embedding matrix via Forge API.
+        
+        Note: The Forge API currently only provides mean-pooled embeddings,
+        not per-token embeddings. This method returns None until the API
+        supports per-token output.
+        
+        Args:
+            model: Forge API client
+            auxiliary_objects: Not used (None)
+            sequence: Amino acid sequence
+            device: PyTorch device
+            **kwargs: Additional parameters (logger)
+        
+        Returns:
+            None (per-token embeddings not available via Forge API)
+        """
+        self.logger = kwargs.get('logger', self.logger)
+        
+        if self.logger:
+            self.logger.warning(
+                "ESM-C 6B Forge API does not support per-token embeddings. "
+                "Only mean-pooled embeddings are available. "
+                "For per-token embeddings, use local ESM-C (300M or 600M) models."
+            )
+        
+        return None
+    
     def get_max_length(self, model_name: str) -> int:
         """Return max sequence length for model."""
         return self.MODEL_SPECS.get(model_name, {}).get('max_len', 2048)
