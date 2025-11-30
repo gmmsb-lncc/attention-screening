@@ -222,6 +222,100 @@ class ESM2Strategy(BaseProteinStrategy):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     
+    def generate_matrix(
+        self,
+        model: Any,
+        auxiliary_objects: Any,
+        sequence: str,
+        device: torch.device,
+        **kwargs
+    ) -> np.ndarray:
+        """
+        Gera matriz de embeddings ESM-2 per-token (sem pooling).
+        
+        Args:
+            model: Modelo ESM-2 carregado
+            auxiliary_objects: Alphabet (tokenizer) do ESM-2
+            sequence: Sequência de aminoácidos
+            device: Dispositivo PyTorch
+            **kwargs: Parâmetros opcionais (logger, etc.)
+            
+        Returns:
+            Matriz numpy array (shape: [seq_len, embedding_dim])
+            
+        Raises:
+            EmbeddingError: Se falhar ao gerar embedding
+        """
+        alphabet = auxiliary_objects
+        self.logger = kwargs.get('logger', self.logger)
+        
+        # Validar sequência
+        if not sequence or not sequence.strip():
+            raise EmbeddingError("Sequência vazia")
+        
+        # Limpar sequência (apenas aminoácidos válidos)
+        clean_sequence = ''.join(
+            c for c in sequence.upper() 
+            if c in 'ACDEFGHIKLMNPQRSTVWY'
+        )
+        
+        if not clean_sequence:
+            raise EmbeddingError("Sequência não contém aminoácidos válidos")
+        
+        # Truncar se necessário
+        max_len = self.get_max_length(model.args.arch if hasattr(model, 'args') else model.__class__.__name__)
+        
+        if len(clean_sequence) > max_len:
+            if self.logger:
+                self.logger.warning(
+                    f"Sequência truncada: {len(clean_sequence)} → {max_len} aa"
+                )
+            clean_sequence = clean_sequence[:max_len]
+        
+        try:
+            # Preparar tokens
+            batch_converter = alphabet.get_batch_converter()
+            batch_labels, batch_strs, batch_tokens = batch_converter(
+                [("sequence", clean_sequence)]
+            )
+            batch_tokens = batch_tokens.to(device)
+            
+            # Inferência
+            with torch.no_grad():
+                results = model(
+                    batch_tokens,
+                    repr_layers=[model.num_layers],
+                    return_contacts=False
+                )
+                
+                # Extrair embeddings (remover tokens especiais BOS/EOS)
+                token_representations = results["representations"][model.num_layers]
+                embedding_matrix = token_representations[0, 1:-1]  # [seq_len, embed_dim]
+                
+                # Mover para CPU - SEM POOLING (mantém matriz completa)
+                result = embedding_matrix.cpu().numpy()
+            
+            # Limpeza de memória CRÍTICA
+            del batch_tokens, results, token_representations, embedding_matrix
+            gc.collect()
+            
+            if str(device) == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
+            return result
+            
+        except Exception as e:
+            # Limpar memória mesmo em erro
+            if str(device) == 'cuda':
+                torch.cuda.empty_cache()
+            gc.collect()
+            raise EmbeddingError(f"Erro ao gerar matriz de embedding ESM-2: {e}")
+    
+    def supports_matrix_output(self) -> bool:
+        """ESM-2 suporta geração de matrizes per-token."""
+        return True
+    
     # ===== Métodos Privados =====
     
     def _setup_cache_dirs(self, offload_folder: Optional[str] = None) -> None:

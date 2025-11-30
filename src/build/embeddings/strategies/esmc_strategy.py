@@ -330,6 +330,112 @@ class ESMCStrategy(BaseProteinStrategy):
                 torch.cuda.empty_cache()
             raise EmbeddingError(f"ESM-C embedding generation failed: {e}")
     
+    def generate_matrix(
+        self,
+        model: Any,
+        auxiliary_objects: Any,
+        sequence: str,
+        device: torch.device,
+        **kwargs
+    ) -> Optional[np.ndarray]:
+        """
+        Generate ESM-C embedding matrix (per-token, no pooling).
+        
+        Returns embeddings for each token/residue in the sequence,
+        preserving positional information for use with CNN + Cross-Attention
+        architectures.
+        
+        Args:
+            model: Loaded ESM-C model
+            auxiliary_objects: Tokenizer
+            sequence: Amino acid sequence
+            device: PyTorch device
+            **kwargs: Additional parameters (logger)
+        
+        Returns:
+            Embedding matrix numpy array (shape: [seq_len, embedding_dim])
+            Returns None on failure
+        """
+        tokenizer = auxiliary_objects
+        self.logger = kwargs.get('logger', self.logger)
+        
+        # Validate and clean sequence
+        clean_sequence = self._clean_sequence(sequence)
+        
+        # Truncate if needed
+        max_len = self.get_max_length(model.__class__.__name__)
+        if len(clean_sequence) > max_len:
+            if self.logger:
+                self.logger.warning(
+                    f"Sequence truncated: {len(clean_sequence)} → {max_len} aa"
+                )
+            clean_sequence = clean_sequence[:max_len]
+        
+        try:
+            # Tokenize using model's built-in method
+            tokens = model._tokenize([clean_sequence])
+            
+            # Generate embedding matrix
+            with torch.no_grad():
+                output = model.forward(sequence_tokens=tokens)
+                
+                # Extract embeddings - shape: [batch, length, dim]
+                embeddings = output.embeddings
+                
+                # Remove batch dimension: [length, dim]
+                sequence_embeddings = embeddings.squeeze(0)
+                
+                # Identify padding tokens
+                pad_token_id = tokenizer.pad_token_id
+                token_seq = tokens.squeeze(0)  # [length]
+                
+                # Find indices of non-padding tokens
+                valid_mask = token_seq != pad_token_id
+                
+                # Extract only non-padding embeddings
+                # ESM-C adds special tokens (BOS/EOS), we want residue embeddings only
+                # Typically: [BOS, aa1, aa2, ..., aan, EOS, PAD, PAD, ...]
+                # We skip BOS (index 0) and take up to EOS (exclusive)
+                
+                # Find first padding after EOS
+                valid_embeddings = sequence_embeddings[valid_mask]
+                
+                # Skip BOS token (first) and EOS token (last of valid)
+                # This gives us pure residue embeddings
+                if len(valid_embeddings) > 2:
+                    residue_embeddings = valid_embeddings[1:-1]
+                else:
+                    residue_embeddings = valid_embeddings
+                
+                # Convert to numpy
+                result = residue_embeddings.cpu().numpy()
+            
+            # Log shape
+            if self.logger:
+                self.logger.debug(
+                    f"ESM-C matrix: shape={result.shape}, "
+                    f"seq_len={len(clean_sequence)}"
+                )
+            
+            # Critical cleanup
+            del tokens, output, embeddings, sequence_embeddings
+            del valid_mask, valid_embeddings, residue_embeddings
+            gc.collect()
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
+            return result
+            
+        except Exception as e:
+            # Cleanup on error
+            gc.collect()
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+            if self.logger:
+                self.logger.error(f"ESM-C matrix generation failed: {e}")
+            return None
+    
     def get_max_length(self, model_name: str) -> int:
         """Return max sequence length for model."""
         return self.MODEL_SPECS.get(model_name, {}).get('max_len', 2048)

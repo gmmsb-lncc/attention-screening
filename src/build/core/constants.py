@@ -8,6 +8,7 @@ __all__ = [
     'BuildConstants',
     'DEFAULT_BASE_DIR', 'DEFAULT_LIGAND_DIR', 'DEFAULT_PROTEIN_DIR',
     'DEFAULT_LIGAND_OUTPUT_DIR', 'DEFAULT_PROTEIN_OUTPUT_DIR', 'DEFAULT_MATRIX_OUTPUT_DIR',
+    'DEFAULT_PROTEIN_MATRIX_OUTPUT_DIR', 'DEFAULT_LIGAND_MATRIX_OUTPUT_DIR',
     'DEFAULT_CONCATENATED_OUTPUT_DIR', 'DEFAULT_EMBEDDING_TYPE',
     'DEFAULT_LIGAND_DIM', 'DEFAULT_PROTEIN_DIM', 'DEFAULT_BATCH_SIZE',
     'DEFAULT_ESM_MODEL', 'DEFAULT_FM4M_MODEL',
@@ -30,6 +31,8 @@ class BuildConstants:
     DEFAULT_PROTEIN_DIR = 'protein'
     DEFAULT_LIGAND_OUTPUT_DIR = 'ligand_embeddings'
     DEFAULT_PROTEIN_OUTPUT_DIR = 'protein_embeddings'
+    DEFAULT_PROTEIN_MATRIX_OUTPUT_DIR = 'protein_matrix_embeddings'  # NEW: per-token matrices
+    DEFAULT_LIGAND_MATRIX_OUTPUT_DIR = 'ligand_matrix_embeddings'    # NEW: per-token matrices
     DEFAULT_MATRIX_OUTPUT_DIR = 'matrix_embedding'
     DEFAULT_CONCATENATED_OUTPUT_DIR = 'concatenated_embeddings'
     
