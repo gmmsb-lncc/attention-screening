@@ -409,11 +409,22 @@ class RegressionPhase:
     
     def _compile_results(self, train_results: Dict, test_results: Dict) -> Dict[str, Any]:
         """Compile regression results."""
+        # Filter out None results (failed models)
+        valid_train = {k: v for k, v in train_results.items() if v is not None}
+        valid_test = {k: v for k, v in test_results.items() if v is not None}
+        
+        if not valid_train:
+            return {
+                'success': False,
+                'error': 'All regression models failed to train',
+                'models_trained': 0
+            }
+        
         # Find best model by validation MAE
-        best_model = min(train_results.items(), key=lambda x: x[1].get('MAE', float('inf')))
+        best_model = min(valid_train.items(), key=lambda x: x[1].get('MAE', float('inf')))
         best_name = best_model[0]
         
-        best_test = test_results.get(best_name, {})
+        best_test = valid_test.get(best_name, {})
         
         return {
             'success': True,
@@ -424,15 +435,14 @@ class RegressionPhase:
             'best_test_r2': float(best_test.get('R2', 0)),
             'best_mae': float(best_test.get('MAE', 0)),
             'best_r2': float(best_test.get('R2', 0)),
-            'models_trained': len(train_results),
+            'models_trained': len(valid_train),
             'individual_results': {
                 name: {k: v if isinstance(v, (int, float)) else str(v) for k, v in metrics.items()}
-                for name, metrics in train_results.items()
+                for name, metrics in valid_train.items()
             },
             'test_results': {
                 name: {k: v if isinstance(v, (int, float)) else str(v) for k, v in metrics.items()}
-                for name, metrics in test_results.items()
-                if metrics
+                for name, metrics in valid_test.items()
             }
         }
     
