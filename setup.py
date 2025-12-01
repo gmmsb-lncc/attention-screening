@@ -244,6 +244,9 @@ def install_dependencies() -> bool:
         "datasets>=2.13.1",       # HuggingFace datasets
         "evaluate>=0.4.0",        # Model evaluation metrics
         
+        # Scalable Clustering (para estratificação de datasets grandes)
+        "faiss-cpu>=1.7.0",       # FAISS for efficient similarity search and clustering
+        
         # Utilitários
         "requests>=2.32.2",       # HTTP requests
         "urllib3>=2.2.2",         # HTTP client
