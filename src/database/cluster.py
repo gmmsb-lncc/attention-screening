@@ -62,14 +62,14 @@ class MoleculeClusterer:
         return AllChem.GetMorganFingerprintAsBitVect(mol, 2) if mol else None
 
     def parallel_generate_fingerprints(self, smile_column, batch_size):
-        num_cpus = os.cpu_count() // 2  # Ajuste para usar metade dos CPUs disponíveis para evitar sobrecarga
+        num_cpus = os.cpu_count() // 2  # Adjust to use half of available CPUs to avoid overload
         smiles_list = self.data[smile_column].tolist()
         with ProcessPoolExecutor(max_workers=num_cpus) as executor:
             results = list(tqdm(executor.map(self.smiles_to_fingerprint, smiles_list, chunksize=batch_size), total=len(smiles_list)))
 
-        # Filtrar resultados não None e limpar memória
+        # Filter non-None results and free memory
         self.fingerprints = [fp for fp in results if fp is not None]
-        del results  # Libera a memória dos resultados imediatamente
+        del results  # Immediately free memory from results
 
     def save_clustered_data(self, output_file_path):
         self.data.to_csv(output_file_path, sep='\t', index=False)
@@ -104,7 +104,7 @@ class MoleculeClusterer:
         for group, color in group_color_dict.items():
             if cluster_counts[group] >= threshold:
                 idxs = self.data[self.data['kinase_group'] == group].index
-                valid_idxs = idxs[idxs < len(tsne_results)]  # Certifique-se de que os índices são válidos
+                valid_idxs = idxs[idxs < len(tsne_results)]  # Ensure indices are valid
                 plt.scatter(tsne_results[valid_idxs, 0], tsne_results[valid_idxs, 1], label=group, color=color, alpha=0.5)
 
         plt.title('t-SNE clustering colored by kinase group')
@@ -157,24 +157,24 @@ def run(smiles_file_path, output_file_path, state_file_path, tanimoto_threshold,
 
     try:
         clusterer.load_state(state_file_path)
-        print("Estado carregado com sucesso.")
+        print("State loaded successfully.")
     except FileNotFoundError:
-        print("Nenhum estado salvo encontrado. Iniciando processamento do zero.")
+        print("No saved state found. Starting processing from scratch.")
         clusterer.load_data(smile_column)
         clusterer.parallel_generate_fingerprints(smile_column, batch_size)
         clusterer.save_state(state_file_path)
     except Exception as e:
-        print(f"Erro ao carregar o estado: {e}")
+        print(f"Error loading state: {e}")
         return
 
     if clusterer.fingerprints:
         tsne_results = clusterer.calculate_tsne()
         clusters = clusterer.cluster_by_similarity(threshold=tanimoto_threshold)
 
-        cluster_ids = [None] * len(clusterer.data)  # Assegurar que esta lista tem o tamanho correto
+        cluster_ids = [None] * len(clusterer.data)  # Ensure this list has the correct size
         for cluster_id, cluster in enumerate(clusters):
             for idx in cluster:
-                if idx < len(cluster_ids):  # Verificação de segurança
+                if idx < len(cluster_ids):  # Safety check
                     cluster_ids[idx] = cluster_id
         clusterer.data['cluster_id'] = cluster_ids
 
@@ -184,7 +184,7 @@ def run(smiles_file_path, output_file_path, state_file_path, tanimoto_threshold,
 
         #clusterer.save_state(state_file_path)
     else:
-        print("Nenhum fingerprint válido foi encontrado.")
+        print("No valid fingerprint was found.")
 
 
 def main():
@@ -193,8 +193,8 @@ def main():
     state_file_path = './molecule_clusterer_state.pkl'
     smile_column = 'canonical_smiles'
     tanimoto_threshold = 0.8
-    cluster_size_threshold = 3  # numero minimo de moleculas por cluster
-    batch_size = 10240  # tamanho do lote para processamento paralelo
+    cluster_size_threshold = 3  # minimum number of molecules per cluster
+    batch_size = 10240  # batch size for parallel processing
 
     run(smiles_file_path, output_file_path, state_file_path, tanimoto_threshold, cluster_size_threshold, smile_column, batch_size)
 
