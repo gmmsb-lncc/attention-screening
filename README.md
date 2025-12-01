@@ -329,6 +329,8 @@ CCO...             MKVLW...           7.5
 
 ## System Architecture
 
+DockTKinase provides a **reproducible, documented pipeline** that ensures consistent train/validation/test splits across all experiments. The same stratification is used for both traditional ML models and deep learning approaches.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     run_complete_pipeline.py                     │
@@ -348,21 +350,139 @@ CCO...             MKVLW...           7.5
 │   BUILD PHASE   │ │  CLASSIFIER     │ │  REGRESSION     │
 │                 │ │     PHASE       │ │     PHASE       │
 │ • Protein Emb.  │ │                 │ │                 │
-│ • Ligand Emb.   │ │ • 12 Models     │ │ • 12 Models     │
+│ • Ligand Emb.   │ │ • 12 ML Models  │ │ • 12 ML Models  │
 │ • Matrix Build  │ │ • MLP           │ │ • Neural Net    │
 │ • Stratification│ │ • Cross-Val     │ │ • Metrics       │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
-                              │
-                              ▼
+         │                   │                   │
+         │         ┌─────────┴─────────┐         │
+         │         │  SAME SPLITS USED │         │
+         │         │  ACROSS ALL MODELS│         │
+         │         └─────────┬─────────┘         │
+         │                   │                   │
+         └───────────────────┼───────────────────┘
+                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                   ATTENTION MATRIX MODULE                        │
-│                  (attention_matrix.py CLI)                       │
+│             CNN + CROSS-ATTENTION MODULE                         │
+│              (Deep Learning for Interactions)                    │
 │                                                                  │
-│  • CNN + Cross-Attention Model (~1.8M parameters)                │
-│  • Pre-computed embedding matrix support                         │
-│  • Classification (accuracy, ROC-AUC, F1, MCC)                   │
-│  • Regression (R², Pearson, Spearman, RMSE)                      │
+│  Uses the SAME stratified splits for fair comparison with ML    │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### Reproducible Stratification
+
+All models (ML and DL) receive the **exact same data splits**, ensuring:
+
+| Guarantee | Description |
+|-----------|-------------|
+| **Reproducibility** | Same random seed → identical splits every run |
+| **Fair Comparison** | All 12 classifiers + 12 regressors + CNN use same train/val/test |
+| **No Data Leakage** | K-means++ clustering keeps similar samples together |
+| **Documented** | Split indices saved in JSON for audit and reproducibility |
+
+```python
+# Splits are saved and can be reloaded
+results/
+├── stratification/
+│   ├── split_indices.json      # Exact sample indices for train/val/test
+│   ├── split_metadata.json     # Clustering parameters, proportions
+│   └── cluster_assignments.npy # Which cluster each sample belongs to
+```
+
+## CNN + Cross-Attention Model
+
+The deep learning component uses **CNN encoders** combined with **Cross-Attention** to model protein-ligand interactions at the token level.
+
+### Why CNN + Cross-Attention?
+
+| Component | Purpose | What it Captures |
+|-----------|---------|------------------|
+| **CNN Encoder** | Extract local patterns | Motifs in protein sequence, functional groups in ligand |
+| **Cross-Attention** | Model interactions | Which protein residues interact with which ligand atoms |
+| **Multi-Task Head** | Joint prediction | Classification + regression with shared representations |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  INPUT: Per-token Embedding Matrices                                        │
+│  ├── Protein: [batch, seq_len, 2560]  (ESM-2 per-residue embeddings)       │
+│  └── Ligand:  [batch, seq_len, 768]   (SMI-TED per-atom embeddings)        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 1: CNN ENCODERS                                                      │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐               │
+│  │  Protein CNN             │    │  Ligand CNN              │               │
+│  │  • Input projection      │    │  • Input projection      │               │
+│  │  • Multi-scale Conv1D    │    │  • Multi-scale Conv1D    │               │
+│  │  • Residual connections  │    │  • Residual connections  │               │
+│  │  • Layer normalization   │    │  • Layer normalization   │               │
+│  └──────────────────────────┘    └──────────────────────────┘               │
+│           ↓ [batch, seq_len, 256]      ↓ [batch, seq_len, 256]              │
+│                                                                             │
+│  + Positional Encoding (sinusoidal) → preserve sequence order               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 2: BIDIRECTIONAL CROSS-ATTENTION (×2 layers)                         │
+│                                                                             │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  (A) Protein attends to Ligand:                                        │ │
+│  │      • Query = protein residues                                        │ │
+│  │      • Key/Value = ligand atoms                                        │ │
+│  │      • "Which ligand atoms are relevant to each residue?"              │ │
+│  │                                                                        │ │
+│  │  (B) Ligand attends to Protein:                                        │ │
+│  │      • Query = ligand atoms                                            │ │
+│  │      • Key/Value = protein residues                                    │ │
+│  │      • "Which residues are relevant to each atom?"                     │ │
+│  │                                                                        │ │
+│  │  8 attention heads → capture different interaction types               │ │
+│  │  (hydrogen bonds, hydrophobic contacts, electrostatics, etc.)          │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 3: POOLING + MULTI-TASK PREDICTION                                   │
+│                                                                             │
+│  Adaptive Average Pooling: sequence → single vector                        │
+│  Concatenate: [protein_repr | ligand_repr] → [batch, 512]                  │
+│                                                                             │
+│           ┌─────────────────────┬─────────────────────┐                     │
+│           ▼                     ▼                     │                     │
+│  ┌─────────────────┐   ┌─────────────────┐           │                     │
+│  │  Classification │   │   Regression    │   Shared  │                     │
+│  │  (active/inact) │   │   (pChEMBL)     │   layers  │                     │
+│  └─────────────────┘   └─────────────────┘           │                     │
+│                                                       │                     │
+│  Multi-task learning → regularization between tasks   │                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cross-Attention Interpretation
+
+The attention weights reveal which protein-ligand interactions the model learned:
+
+```
+                    Ligand Atoms
+                 1  2  3  4  5  6  7  8  9  10
+              ┌─────────────────────────────────┐
+           45 │ ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  │
+           50 │ ·  ·  ·  ▓  ▓  █  █  ▓  ·  ·  │ ← Active site
+Protein    55 │ ·  ·  ▓  █  █  █  █  █  ▓  ·  │    residues attend
+Residues   60 │ ·  ·  ·  ▓  ▓  █  █  ▓  ·  ·  │    to pharmacophore
+           65 │ ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  │
+           70 │ ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  │
+              └─────────────────────────────────┘
+                          ↑
+                    Key functional group
+
+█ = high attention  ▓ = medium  · = low
 ```
 
 ## Embedding Matrix Processing
@@ -395,42 +515,6 @@ ligand_emb = ligand_embedder.generate_batch_embeddings(smiles)  # (N, 768)
 import numpy as np
 embedding_matrix = np.concatenate([protein_emb, ligand_emb], axis=1)  # (N, 1088)
 np.save('concatenated_embeddings/embedding_matrix.npy', embedding_matrix)
-```
-
-### Cross-Attention Model Architecture
-
-The `ImprovedCrossAttentionModel` processes the embedding matrix:
-
-```
-Input: (batch, 1088)
-    │
-    ▼
-┌──────────────────┐
-│ Reshape + Expand │ → (batch, 1, 1088)
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  CNN Layers      │
-│  Conv1d(64→128)  │
-│  BatchNorm + ReLU│
-│  MaxPool1d       │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Cross-Attention  │
-│  MultiheadAttn   │
-│  (8 heads)       │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Output Heads    │
-├──────────────────┤
-│ Classification:1 │ → Binary (active/inactive)
-│ Regression: 1    │ → pChEMBL prediction
-└──────────────────┘
 ```
 
 ## Supported Models
