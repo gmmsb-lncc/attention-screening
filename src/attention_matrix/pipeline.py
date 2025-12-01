@@ -488,8 +488,8 @@ class AttentionMatrixPipeline:
     
     def run_with_precomputed_embeddings(
         self,
-        protein_embeddings: np.ndarray,
-        ligand_embeddings: np.ndarray,
+        protein_embeddings,  # np.ndarray or List[np.ndarray]
+        ligand_embeddings,   # np.ndarray or List[np.ndarray]
         binary_labels: np.ndarray,
         regression_targets: np.ndarray,
         train_idx: np.ndarray,
@@ -501,8 +501,12 @@ class AttentionMatrixPipeline:
         Run pipeline with pre-computed embeddings and splits.
         
         Args:
-            protein_embeddings: Array of protein embeddings (N, dim)
-            ligand_embeddings: Array of ligand embeddings (N, dim)
+            protein_embeddings: Array/List of protein embeddings
+                - Vector mode: (N, dim) array
+                - Matrix mode: List of (seq_len, dim) arrays
+            ligand_embeddings: Array/List of ligand embeddings
+                - Vector mode: (N, dim) array
+                - Matrix mode: List of (tokens, dim) arrays
             binary_labels: Binary classification labels (N,)
             regression_targets: Regression targets (N,)
             train_idx: Training indices
@@ -513,12 +517,17 @@ class AttentionMatrixPipeline:
         Returns:
             Results dictionary with metrics
         """
-        from torch.utils.data import TensorDataset, DataLoader
+        from torch.utils.data import DataLoader
+        from torch.nn.utils.rnn import pad_sequence
         import time
         
         logger.info("=" * 60)
         logger.info("ATTENTION MATRIX PIPELINE (Pre-computed)")
         logger.info("=" * 60)
+        
+        # Detect if we're in matrix mode (list of arrays) or vector mode (single array)
+        is_matrix_mode = isinstance(protein_embeddings, list)
+        logger.info(f"  Mode: {'matrix' if is_matrix_mode else 'vector'}")
         
         # Save config
         self.config.save(self.output_dir / 'config.json')
@@ -529,18 +538,88 @@ class AttentionMatrixPipeline:
         else:
             device = torch.device(self.config.device)
         
-        # Create tensors with sequence dimension for cross-attention
-        def make_loader(idx, shuffle=False):
-            prot = torch.from_numpy(protein_embeddings[idx]).float().unsqueeze(1)
-            lig = torch.from_numpy(ligand_embeddings[idx]).float().unsqueeze(1)
-            cls = torch.from_numpy(binary_labels[idx]).float()
-            reg = torch.from_numpy(regression_targets[idx]).float()
-            dataset = TensorDataset(prot, lig, cls, reg)
-            return DataLoader(dataset, batch_size=self.config.batch_size, shuffle=shuffle)
-        
-        train_loader = make_loader(train_idx, shuffle=True)
-        val_loader = make_loader(val_idx)
-        test_loader = make_loader(test_idx)
+        if is_matrix_mode:
+            # Matrix mode: use custom collate with padding
+            def collate_fn(batch):
+                """Custom collate function for variable-length sequences."""
+                prot_list, lig_list, cls_list, reg_list = [], [], [], []
+                for prot, lig, cls_label, reg_target in batch:
+                    prot_list.append(torch.from_numpy(prot).float())
+                    lig_list.append(torch.from_numpy(lig).float())
+                    cls_list.append(cls_label)
+                    reg_list.append(reg_target)
+                
+                # Pad sequences to max length in batch
+                prot_padded = pad_sequence(prot_list, batch_first=True)
+                lig_padded = pad_sequence(lig_list, batch_first=True)
+                
+                return (
+                    prot_padded,
+                    lig_padded,
+                    torch.tensor(cls_list, dtype=torch.float),
+                    torch.tensor(reg_list, dtype=torch.float)
+                )
+            
+            class EmbeddingDataset:
+                def __init__(self, prot_embs, lig_embs, cls_labels, reg_targets, indices):
+                    self.prot_embs = prot_embs
+                    self.lig_embs = lig_embs
+                    self.cls_labels = cls_labels
+                    self.reg_targets = reg_targets
+                    self.indices = indices
+                
+                def __len__(self):
+                    return len(self.indices)
+                
+                def __getitem__(self, idx):
+                    i = self.indices[idx]
+                    return (
+                        self.prot_embs[i],
+                        self.lig_embs[i],
+                        self.cls_labels[i],
+                        self.reg_targets[i]
+                    )
+            
+            train_dataset = EmbeddingDataset(
+                protein_embeddings, ligand_embeddings, 
+                binary_labels, regression_targets, train_idx
+            )
+            val_dataset = EmbeddingDataset(
+                protein_embeddings, ligand_embeddings,
+                binary_labels, regression_targets, val_idx
+            )
+            test_dataset = EmbeddingDataset(
+                protein_embeddings, ligand_embeddings,
+                binary_labels, regression_targets, test_idx
+            )
+            
+            train_loader = DataLoader(
+                train_dataset, batch_size=self.config.batch_size, 
+                shuffle=True, collate_fn=collate_fn
+            )
+            val_loader = DataLoader(
+                val_dataset, batch_size=self.config.batch_size, 
+                shuffle=False, collate_fn=collate_fn
+            )
+            test_loader = DataLoader(
+                test_dataset, batch_size=self.config.batch_size, 
+                shuffle=False, collate_fn=collate_fn
+            )
+        else:
+            # Vector mode: use TensorDataset
+            from torch.utils.data import TensorDataset
+            
+            def make_loader(idx, shuffle=False):
+                prot = torch.from_numpy(protein_embeddings[idx]).float().unsqueeze(1)
+                lig = torch.from_numpy(ligand_embeddings[idx]).float().unsqueeze(1)
+                cls = torch.from_numpy(binary_labels[idx]).float()
+                reg = torch.from_numpy(regression_targets[idx]).float()
+                dataset = TensorDataset(prot, lig, cls, reg)
+                return DataLoader(dataset, batch_size=self.config.batch_size, shuffle=shuffle)
+            
+            train_loader = make_loader(train_idx, shuffle=True)
+            val_loader = make_loader(val_idx)
+            test_loader = make_loader(test_idx)
         
         logger.info(f"  Train: {len(train_idx)} | Val: {len(val_idx)} | Test: {len(test_idx)}")
         
