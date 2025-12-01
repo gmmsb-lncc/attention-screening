@@ -1,7 +1,7 @@
 # Adaptive Clustering Guide
 
-**Last Updated**: November 25, 2025  
-**Module**: `src/build/stratification/adaptive_clustering.py`
+**Last Updated**: November 30, 2025  
+**Module**: `src/build/stratification/` (modular architecture)
 
 ---
 
@@ -98,6 +98,46 @@ The system will warn if the threshold is inappropriate for the data:
 Warning: Manual threshold 0.70 is below P25 (0.94) for highly homogeneous data.
 This may result in very few clusters.
 ```
+
+---
+
+### 6. Leakage-Aware Method
+
+**Optimize threshold to minimize data leakage between train/val/test splits.**
+
+This method evaluates split quality using three criteria:
+- **Separation Score**: Cluster purity within each split
+- **Coverage Score**: How well clusters are distributed
+- **Balance Score**: Label distribution balance
+
+```python
+clustering = AdaptiveClustering(
+    method='leakage_aware',
+    test_size=0.1,
+    val_size=0.1
+)
+```
+
+**Best For**: When preventing data leakage is critical.
+
+---
+
+### 7. Scalable Clustering (Auto)
+
+**Automatically used for datasets > 40,000 samples.**
+
+Uses Representative Sampling + Label Propagation:
+1. Sample representative points using stratified selection
+2. Cluster representative points with standard methods
+3. Propagate labels to all points via nearest neighbors
+
+```python
+# Automatic for large datasets
+clustering = AdaptiveClustering(method='target')
+labels = clustering.cluster(large_embeddings)  # >40k samples
+```
+
+**Memory**: ~8GB for 40k samples (full matrix)
 
 **Best For**: When you know the optimal threshold for your dataset.
 
@@ -435,6 +475,33 @@ If all similarities are > 0.9:
 
 ---
 
-**Module**: `src/build/stratification/adaptive_clustering.py`  
+## 📦 Module Structure
+
+The adaptive clustering system is organized into focused modules:
+
+| Module | Responsibility |
+|--------|----------------|
+| `adaptive_clustering.py` | Main orchestrator |
+| `clustering_metrics.py` | Metrics dataclass |
+| `similarity_analysis.py` | Similarity distribution analysis |
+| `threshold_optimization.py` | Silhouette, elbow, target methods |
+| `leakage_aware_optimization.py` | Split quality optimization |
+| `scalable_clustering.py` | Large dataset support (>40k) |
+
+```python
+# Import from unified interface
+from src.build.stratification import (
+    AdaptiveClustering,
+    ClusteringMetrics,
+    SimilarityAnalyzer,
+    ThresholdOptimizer,
+    LeakageAwareOptimizer,
+    ScalableClustering
+)
+```
+
+---
+
+**Module**: `src/build/stratification/`  
 **Author**: DockTKinase Team  
-**Version**: 1.0
+**Version**: 2.0 (Modular Architecture)

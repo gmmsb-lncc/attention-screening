@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Treinador Multi-Modelo Sklearn - Classificação
-==============================================
+Sklearn Multi-Model Trainer - Classification
+=============================================
 
-Gerencia treinamento de múltiplos modelos sklearn de classificação.
-Equivalente ao trainer de regressão, mas para classificação binária.
+Manages training of multiple sklearn classification models.
+Equivalent to regression trainer, but for binary classification.
 """
 
 import time
@@ -25,7 +25,7 @@ from sklearn.metrics import (
 
 
 class ClassificationMetricsCalculator:
-    """Calcula todas as métricas de classificação."""
+    """Calculates all classification metrics."""
     
     @staticmethod
     def calculate_all_metrics(y_true: np.ndarray, 
@@ -33,20 +33,20 @@ class ClassificationMetricsCalculator:
                               y_pred_proba: Optional[np.ndarray] = None,
                               model_name: str = '') -> Dict[str, Any]:
         """
-        Calcula todas as métricas de classificação.
+        Calculate all classification metrics.
         
         Args:
-            y_true: Labels verdadeiros
-            y_pred: Predições (0/1)
-            y_pred_proba: Probabilidades (para ROC-AUC, etc)
-            model_name: Nome do modelo (para logging)
+            y_true: True labels
+            y_pred: Predictions (0/1)
+            y_pred_proba: Probabilities (for ROC-AUC, etc)
+            model_name: Model name (for logging)
             
         Returns:
-            Dict com todas as métricas
+            Dict with all metrics
         """
         metrics = {}
         
-        # Métricas básicas
+        # Basic metrics
         metrics['Accuracy'] = accuracy_score(y_true, y_pred)
         metrics['Precision'] = precision_score(y_true, y_pred, zero_division=0)
         metrics['Recall'] = recall_score(y_true, y_pred, zero_division=0)
@@ -70,14 +70,14 @@ class ClassificationMetricsCalculator:
         # Matthews Correlation Coefficient
         metrics['MCC'] = matthews_corrcoef(y_true, y_pred)
         
-        # Métricas baseadas em probabilidades
+        # Probability-based metrics
         if y_pred_proba is not None:
             try:
                 metrics['ROC_AUC'] = roc_auc_score(y_true, y_pred_proba)
                 metrics['Average_Precision'] = average_precision_score(y_true, y_pred_proba)
                 metrics['Brier_Score'] = brier_score_loss(y_true, y_pred_proba)
             except Exception as e:
-                # Se houver apenas uma classe, algumas métricas podem falhar
+                # If there's only one class, some metrics may fail
                 metrics['ROC_AUC'] = 0.0
                 metrics['Average_Precision'] = 0.0
                 metrics['Brier_Score'] = 0.0
@@ -91,8 +91,8 @@ class ClassificationMetricsCalculator:
 
 class SklearnClassificationTrainer:
     """
-    Treinador de múltiplos modelos sklearn de classificação.
-    Equivalente ao RegressionTrainer mas para classificação.
+    Multi-model sklearn classification trainer.
+    Equivalent to RegressionTrainer but for classification.
     """
     
     def __init__(self, 
@@ -100,12 +100,12 @@ class SklearnClassificationTrainer:
                  verbose: bool = True,
                  random_state: int = 42):
         """
-        Inicializar trainer.
+        Initialize trainer.
         
         Args:
-            models_dict: Dicionário {nome: modelo}
-            verbose: Mostrar progresso
-            random_state: Seed para reprodutibilidade
+            models_dict: Dictionary {name: model}
+            verbose: Show progress
+            random_state: Seed for reproducibility
         """
         self.models_dict = models_dict
         self.verbose = verbose
@@ -125,32 +125,32 @@ class SklearnClassificationTrainer:
                           X_val: Optional[np.ndarray] = None,
                           y_val: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
-        Treinar um único modelo.
+        Train a single model.
         
         Args:
-            model_name: Nome do modelo
-            model: Instância do modelo
-            X_train: Features de treino
-            y_train: Labels de treino
-            X_val: Features de validação (opcional)
-            y_val: Labels de validação (opcional)
+            model_name: Model name
+            model: Model instance
+            X_train: Training features
+            y_train: Training labels
+            X_val: Validation features (optional)
+            y_val: Validation labels (optional)
             
         Returns:
-            Dict com métricas de validação (ou treino se val=None)
+            Dict with validation metrics (or training if val=None)
         """
         start_time = time.time()
         
         if self.verbose:
-            print(f'\n   🔧 Treinando {model_name}...')
+            print(f'\n   🔧 Training {model_name}...')
         
-        # Treinar
+        # Train
         model.fit(X_train, y_train)
         train_time = time.time() - start_time
         
-        # Avaliar em treino
+        # Evaluate on training
         y_train_pred = model.predict(X_train)
         
-        # Obter probabilidades se disponível
+        # Get probabilities if available
         if hasattr(model, 'predict_proba'):
             y_train_proba = model.predict_proba(X_train)[:, 1]
         else:
@@ -161,7 +161,7 @@ class SklearnClassificationTrainer:
         )
         train_metrics['training_time'] = train_time
         
-        # Avaliar em validação se disponível
+        # Evaluate on validation if available
         val_metrics = None
         if X_val is not None and y_val is not None:
             y_val_pred = model.predict(X_val)
@@ -175,17 +175,17 @@ class SklearnClassificationTrainer:
                 y_val, y_val_pred, y_val_proba, model_name
             )
         
-        # Armazenar
+        # Store
         self.trained_models[model_name] = model
         self.train_results[model_name] = train_metrics
         if val_metrics:
             self.val_results[model_name] = val_metrics
         
         if self.verbose:
-            print(f'      ✅ Treino: Acc={train_metrics["Accuracy"]:.4f} | '
+            print(f'      ✅ Train: Acc={train_metrics["Accuracy"]:.4f} | '
                   f'F1={train_metrics["F1"]:.4f} | '
                   f'ROC-AUC={train_metrics["ROC_AUC"]:.4f} | '
-                  f'Tempo={train_time:.2f}s')
+                  f'Time={train_time:.2f}s')
             
             if val_metrics:
                 print(f'      ✅ Valid: Acc={val_metrics["Accuracy"]:.4f} | '
@@ -200,19 +200,19 @@ class SklearnClassificationTrainer:
                   X_val: Optional[np.ndarray] = None,
                   y_val: Optional[np.ndarray] = None) -> Dict[str, Dict[str, Any]]:
         """
-        Treinar todos os modelos.
+        Train all models.
         
         Args:
-            X_train: Features de treino
-            y_train: Labels de treino
-            X_val: Features de validação (opcional)
-            y_val: Labels de validação (opcional)
+            X_train: Training features
+            y_train: Training labels
+            X_val: Validation features (optional)
+            y_val: Validation labels (optional)
             
         Returns:
-            Dict com métricas de validação de todos os modelos
+            Dict with validation metrics for all models
         """
         if self.verbose:
-            print(f'\n   📊 Treinando {len(self.models_dict)} modelos...')
+            print(f'\n   📊 Training {len(self.models_dict)} models...')
         
         for model_name, model in self.models_dict.items():
             try:
@@ -223,27 +223,27 @@ class SklearnClassificationTrainer:
                 )
             except Exception as e:
                 if self.verbose:
-                    print(f'      ❌ Erro ao treinar {model_name}: {str(e)}')
+                    print(f'      ❌ Error training {model_name}: {str(e)}')
                 continue
         
         return self.val_results if self.val_results else self.train_results
     
     def get_best_model(self, metric: str = 'ROC_AUC') -> tuple:
         """
-        Retorna o melhor modelo baseado em uma métrica.
+        Return the best model based on a metric.
         
         Args:
-            metric: Métrica para comparação (default: ROC_AUC)
+            metric: Metric for comparison (default: ROC_AUC)
             
         Returns:
-            Tuple (nome_modelo, modelo, métrica_valor)
+            Tuple (model_name, model, metric_value)
         """
         results = self.val_results if self.val_results else self.train_results
         
         if not results:
             return None, None, None
         
-        # Encontrar melhor
+        # Find best
         best_name = max(results.items(), key=lambda x: x[1][metric])[0]
         best_model = self.trained_models[best_name]
         best_value = results[best_name][metric]
@@ -252,10 +252,10 @@ class SklearnClassificationTrainer:
     
     def get_results_summary(self) -> Dict[str, Any]:
         """
-        Retorna resumo dos resultados de todos os modelos.
+        Return summary of results from all models.
         
         Returns:
-            Dict com resumo organizado
+            Dict with organized summary
         """
         results = self.val_results if self.val_results else self.train_results
         
@@ -265,7 +265,7 @@ class SklearnClassificationTrainer:
             'rankings': {}
         }
         
-        # Adicionar resultados de cada modelo
+        # Add results for each model
         for name, metrics in results.items():
             summary['models'][name] = metrics
         
@@ -286,29 +286,29 @@ class SklearnClassificationTrainer:
     
     def print_summary(self, top_n: int = None, use_test: bool = True):
         """
-        Imprime resumo dos resultados (deprecated - use print_results_summary no pipeline).
+        Print summary of results (deprecated - use print_results_summary in pipeline).
         
         Args:
-            top_n: Número de top modelos a mostrar (None = todos)
-            use_test: Se True, usa resultados de teste (default). Se False, usa validação.
+            top_n: Number of top models to show (None = all)
+            use_test: If True, use test results (default). If False, use validation.
         """
-        # Por padrão, usar resultados de teste se disponíveis
+        # By default, use test results if available
         if use_test and self.test_results:
             results = self.test_results
-            result_type = "Teste"
+            result_type = "Test"
         elif self.val_results:
             results = self.val_results
-            result_type = "Validação"
+            result_type = "Validation"
         else:
             results = self.train_results
-            result_type = "Treino"
+            result_type = "Training"
         
         if not results:
-            print('⚠️  Nenhum modelo treinado')
+            print('⚠️  No models trained')
             return
         
         print('\n' + '=' * 80)
-        print(f'📊 RESUMO DOS RESULTADOS (Conjunto de {result_type})')
+        print(f'📊 RESULTS SUMMARY ({result_type} Set)')
         print('=' * 80)
         
         # Ordenar por ROC-AUC
@@ -322,12 +322,12 @@ class SklearnClassificationTrainer:
         if top_n:
             sorted_results = sorted_results[:top_n]
         
-        # Cabeçalho
-        header = f"{'Modelo':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'ROC-AUC':>10} {'Tempo':>8}"
+        # Header
+        header = f"{'Model':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'ROC-AUC':>10} {'Time':>8}"
         print(header)
         print('-' * 80)
         
-        # Modelos
+        # Models
         for i, (model_name, metrics) in enumerate(sorted_results):
             train_time = self.train_results[model_name].get('training_time', 0)
             row = (
@@ -348,11 +348,11 @@ class SklearnClassificationTrainer:
         
         print('=' * 80)
         
-        # Melhor modelo
+        # Best model
         best_name = sorted_results[0][0]
         best_metrics = sorted_results[0][1]
         
-        print(f'\n🏆 MELHOR MODELO: {best_name}')
+        print(f'\n🏆 BEST MODEL: {best_name}')
         print(f'   ROC-AUC: {best_metrics["ROC_AUC"]:.4f}')
         print(f'   F1-Score: {best_metrics["F1"]:.4f}')
         print(f'   Accuracy: {best_metrics["Accuracy"]:.4f}')
@@ -362,7 +362,7 @@ class SklearnClassificationTrainer:
 
 
 if __name__ == '__main__':
-    print('SklearnClassificationTrainer - Treinador Multi-Modelo Sklearn')
+    print('SklearnClassificationTrainer - Sklearn Multi-Model Trainer')
     print('=' * 70)
-    print('\nMódulo de treinamento para múltiplos classificadores sklearn.')
-    print('Use em conjunto com ClassificationModels.')
+    print('\nTraining module for multiple sklearn classifiers.')
+    print('Use in conjunction with ClassificationModels.')

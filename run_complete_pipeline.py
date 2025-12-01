@@ -332,6 +332,13 @@ Dispositivos:
         help='Diretório com embeddings de ligantes pré-computados. Pode ser compartilhado entre experimentos com diferentes modelos de proteína.'
     )
     
+    # Attention Matrix options
+    parser.add_argument(
+        '--save-matrices',
+        action='store_true',
+        help='Salvar matrizes de embedding per-residue/per-token (para Cross-Attention model). Gera protein_matrices/ e ligand_matrices/.'
+    )
+    
     return parser.parse_args()
 
 
