@@ -279,5 +279,95 @@ class TestRoPEVsSinusoidal:
         assert rope_out.shape == sin_out.shape == x.shape
 
 
+class TestCrossAttentionModelWithRoPE:
+    """Tests for CrossAttentionAffinityModel with RoPE support."""
+    
+    def test_model_with_sinusoidal(self):
+        """Model works with sinusoidal encoding."""
+        from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel
+        
+        model = CrossAttentionAffinityModel(
+            protein_dim=128,
+            ligand_dim=64,
+            hidden_dim=32,
+            num_cnn_layers=2,
+            num_cross_attn_layers=1,
+            num_heads=4,
+            positional_encoding_type='sinusoidal'
+        )
+        
+        protein = torch.randn(2, 100, 128)
+        ligand = torch.randn(2, 50, 64)
+        
+        output = model(protein, ligand)
+        
+        assert 'classification' in output
+        assert 'regression' in output
+        assert output['classification'].shape == (2, 1)
+        assert output['regression'].shape == (2, 1)
+    
+    def test_model_with_rope(self):
+        """Model works with RoPE encoding."""
+        from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel
+        
+        model = CrossAttentionAffinityModel(
+            protein_dim=128,
+            ligand_dim=64,
+            hidden_dim=32,
+            num_cnn_layers=2,
+            num_cross_attn_layers=1,
+            num_heads=4,
+            positional_encoding_type='rope'
+        )
+        
+        protein = torch.randn(2, 100, 128)
+        ligand = torch.randn(2, 50, 64)
+        
+        output = model(protein, ligand)
+        
+        assert 'classification' in output
+        assert 'regression' in output
+        assert output['classification'].shape == (2, 1)
+    
+    def test_rope_handles_long_sequences(self):
+        """RoPE model handles sequences beyond max_len."""
+        from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel
+        
+        model = CrossAttentionAffinityModel(
+            protein_dim=64,
+            ligand_dim=32,
+            hidden_dim=32,
+            num_cnn_layers=1,
+            num_cross_attn_layers=1,
+            num_heads=4,
+            max_protein_len=100,  # Initial cache size
+            max_ligand_len=50,
+            positional_encoding_type='rope'
+        )
+        
+        # Sequences much longer than initial max_len
+        protein = torch.randn(1, 500, 64)
+        ligand = torch.randn(1, 200, 32)
+        
+        output = model(protein, ligand)
+        
+        assert output['classification'].shape == (1, 1)
+    
+    def test_config_includes_encoding_type(self):
+        """Model config includes positional_encoding_type."""
+        from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel
+        
+        model = CrossAttentionAffinityModel(
+            protein_dim=64,
+            ligand_dim=32,
+            hidden_dim=32,
+            positional_encoding_type='rope'
+        )
+        
+        info = model.get_architecture_info()
+        
+        assert info['config']['positional_encoding_type'] == 'rope'
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
