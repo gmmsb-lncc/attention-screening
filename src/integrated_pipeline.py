@@ -54,6 +54,7 @@ class IntegratedConfig:
     ligand_model: str = "smi-ted-large"
     batch_size: int = 8
     device: str = "cpu"
+    save_matrices: bool = False  # If True, save per-residue/per-token matrices for Cross-Attention
     
     # Embedding directories (reuse of pre-computed embeddings)
     protein_embeddings_dir: Optional[str] = None  # If specified, use existing embeddings
