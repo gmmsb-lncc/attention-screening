@@ -338,24 +338,35 @@ class EmbeddingDataLoader:
             search_paths.insert(0, Path(splits_dir))
         
         splits_path = None
+        split_names = None
         for path in search_paths:
-            if path.exists() and (path / 'train_idx.npy').exists():
-                splits_path = path
-                break
+            if path.exists():
+                # Check for both naming conventions
+                if (path / 'train_idx.npy').exists():
+                    splits_path = path
+                    split_names = ('train_idx.npy', 'val_idx.npy', 'test_idx.npy')
+                    break
+                elif (path / 'train_indices.npy').exists():
+                    splits_path = path
+                    split_names = ('train_indices.npy', 'val_indices.npy', 'test_indices.npy')
+                    break
         
         if splits_path is not None:
-            return self._load_existing_splits(splits_path)
+            return self._load_existing_splits(splits_path, split_names)
         else:
             logger.info("No pre-computed splits found. Creating leakage-aware splits...")
             return self._create_leakage_aware_splits()
     
-    def _load_existing_splits(self, splits_path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _load_existing_splits(self, splits_path: Path, split_names: Tuple[str, str, str] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Load splits from existing files."""
         logger.info(f"Loading splits from: {splits_path}")
         
-        train_idx_orig = np.load(splits_path / 'train_idx.npy')
-        val_idx_orig = np.load(splits_path / 'val_idx.npy')
-        test_idx_orig = np.load(splits_path / 'test_idx.npy')
+        if split_names is None:
+            split_names = ('train_idx.npy', 'val_idx.npy', 'test_idx.npy')
+        
+        train_idx_orig = np.load(splits_path / split_names[0])
+        val_idx_orig = np.load(splits_path / split_names[1])
+        test_idx_orig = np.load(splits_path / split_names[2])
         
         # Remap indices to valid samples if needed
         if self.valid_indices is not None and len(self.valid_indices) < len(train_idx_orig) + len(val_idx_orig) + len(test_idx_orig):

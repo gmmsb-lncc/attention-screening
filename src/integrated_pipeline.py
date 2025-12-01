@@ -776,6 +776,8 @@ class IntegratedPipeline:
             return bool(obj)
         elif isinstance(obj, Path):
             return str(obj)
+        elif hasattr(obj, '_asdict'):  # NamedTuple (including SplitIndices)
+            return self._make_serializable(obj._asdict())
         elif is_dataclass(obj) and not isinstance(obj, type):
             return {k: self._make_serializable(v) for k, v in asdict(obj).items()}
         elif hasattr(obj, 'to_dict') and callable(obj.to_dict):
@@ -890,19 +892,31 @@ class IntegratedPipeline:
         
         def json_serializable(obj):
             """Convert non-serializable objects to serializable format."""
-            if hasattr(obj, 'to_dict'):
-                return obj.to_dict()
-            elif hasattr(obj, '__dict__'):
-                return {k: json_serializable(v) for k, v in obj.__dict__.items() 
-                        if not k.startswith('_')}
+            if obj is None:
+                return None
+            elif isinstance(obj, dict):
+                return {k: json_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [json_serializable(item) for item in obj]
             elif isinstance(obj, np.ndarray):
                 return obj.tolist()
             elif isinstance(obj, (np.integer, np.floating)):
                 return obj.item()
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
             elif isinstance(obj, Path):
                 return str(obj)
-            else:
+            elif hasattr(obj, '_asdict'):  # NamedTuple
+                return json_serializable(obj._asdict())
+            elif hasattr(obj, 'to_dict'):
+                return json_serializable(obj.to_dict())
+            elif hasattr(obj, '__dict__') and not isinstance(obj, type):
+                return {k: json_serializable(v) for k, v in obj.__dict__.items() 
+                        if not k.startswith('_')}
+            elif isinstance(obj, (str, int, float, bool)):
                 return obj
+            else:
+                return str(obj)  # Fallback to string representation
         
         # Convert to serializable format
         serializable_results = json_serializable(phase_results)
