@@ -87,6 +87,17 @@ Detailed documentation for each module in the DockTKinase project.
     - Test suite templates
     - **Essential for implementation**
 
+### 🆕 Deep Learning Architecture (NEW - CNN Optimization!)
+
+12. **[CNN_CROSS_ATTENTION_ARCHITECTURE.md](CNN_CROSS_ATTENTION_ARCHITECTURE.md)** 🧠 **← NEW**
+    - **CNN + Cross-Attention Model Architecture** (500+ lines)
+    - Depthwise Separable Convolutions (Chollet, 2017)
+    - Squeeze-and-Excitation blocks (Hu et al., 2018)
+    - Pre-LayerNorm Transformers (Xiong et al., 2020)
+    - 56% parameter reduction with 16% larger receptive field
+    - Scientific references and design rationale
+    - **Essential for understanding the affinity prediction model**
+
 ---
 
 ## 🎯 Module Overview
