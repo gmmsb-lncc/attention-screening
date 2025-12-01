@@ -20,7 +20,7 @@ class EmbeddingDataLoader:
     Loads pre-computed protein and ligand embeddings for the attention matrix pipeline.
     
     Supports loading from:
-    1. Individual embedding files (*_embedding.npy)
+    1. Individual embedding files (*_embedding.npy or *_matrix.npy)
     2. Pre-built embedding matrix (embedding_matrix.npy)
     3. Existing splits (train_idx.npy, val_idx.npy, test_idx.npy)
     
@@ -30,6 +30,7 @@ class EmbeddingDataLoader:
         protein_dim: Expected protein embedding dimension (default: 320 for ESM2-8M)
         ligand_dim: Expected ligand embedding dimension (default: 768 for SMI-TED)
         activity_threshold: pChEMBL threshold for binary classification (default: 7.0)
+        embedding_mode: 'vector' for mean-pooled embeddings, 'matrix' for per-residue/per-token
     """
     
     def __init__(
@@ -38,13 +39,15 @@ class EmbeddingDataLoader:
         data_file: str,
         protein_dim: int = 320,
         ligand_dim: int = 768,
-        activity_threshold: float = 7.0
+        activity_threshold: float = 7.0,
+        embedding_mode: str = 'matrix'
     ):
         self.results_dir = Path(results_dir)
         self.data_file = Path(data_file)
         self.protein_dim = protein_dim
         self.ligand_dim = ligand_dim
         self.activity_threshold = activity_threshold
+        self.embedding_mode = embedding_mode  # 'vector' or 'matrix'
         
         # Data containers
         self.df: Optional[pd.DataFrame] = None
@@ -77,7 +80,8 @@ class EmbeddingDataLoader:
         """
         Load embeddings from files. Supports multiple directory structures:
         1. protein_matrices/ + ligand_matrices/ (individual files)
-        2. build/embedding_matrix.npy (concatenated matrix)
+        2. embedding_matrix.npy (concatenated matrix in results_dir)
+        3. build/embedding_matrix.npy (concatenated matrix in build subdir)
         
         Returns:
             Tuple of (protein_embeddings, ligand_embeddings) arrays
@@ -85,24 +89,30 @@ class EmbeddingDataLoader:
         if self.df is None:
             self.load_dataset()
         
-        # Try method 1: individual files
+        # Try method 1: individual matrix files
         protein_dir = self.results_dir / 'protein_matrices'
         ligand_dir = self.results_dir / 'ligand_matrices'
         
         if protein_dir.exists() and ligand_dir.exists():
             return self._load_from_individual_files(protein_dir, ligand_dir)
         
-        # Try method 2: concatenated matrix in build/
-        build_dir = self.results_dir / 'build'
-        emb_matrix_file = build_dir / 'embedding_matrix.npy'
-        
+        # Try method 2: concatenated matrix directly in results_dir
+        emb_matrix_file = self.results_dir / 'embedding_matrix.npy'
         if emb_matrix_file.exists():
+            return self._load_from_concatenated_matrix(self.results_dir)
+        
+        # Try method 3: concatenated matrix in build/ subdirectory
+        build_dir = self.results_dir / 'build'
+        emb_matrix_file_build = build_dir / 'embedding_matrix.npy'
+        
+        if emb_matrix_file_build.exists():
             return self._load_from_concatenated_matrix(build_dir)
         
         raise FileNotFoundError(
             f"Could not find embeddings. Expected either:\n"
             f"  1. {protein_dir} and {ligand_dir}\n"
-            f"  2. {emb_matrix_file}"
+            f"  2. {emb_matrix_file}\n"
+            f"  3. {emb_matrix_file_build}"
         )
     
     def _load_from_concatenated_matrix(self, build_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
@@ -154,31 +164,90 @@ class EmbeddingDataLoader:
         return self.protein_embeddings, self.ligand_embeddings
     
     def _load_from_individual_files(self, protein_dir: Path, ligand_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
-        """Load from individual protein_matrices/ and ligand_matrices/ files."""
+        """Load from individual protein_matrices/ and ligand_matrices/ files.
+        
+        Supports two formats:
+        1. *_embedding.npy - Mean-pooled vectors (1D) - for embedding_mode='vector'
+        2. *_matrix.npy - Per-residue/per-token matrices (2D) - for embedding_mode='matrix'
+        """
         logger.info(f"Loading from individual files: {protein_dir}, {ligand_dir}")
+        logger.info(f"Embedding mode: {self.embedding_mode}")
         
         # Load protein embeddings
         protein_emb_dict = {}
-        for f in protein_dir.glob('*_embedding.npy'):
-            protein_id = f.stem.replace('_embedding', '')
-            emb = np.load(f)
-            protein_emb_dict[protein_id] = emb.flatten()
+        
+        if self.embedding_mode == 'matrix':
+            # Load matrix files (per-residue embeddings)
+            matrix_files = list(protein_dir.glob('*_matrix.npy'))
+            if matrix_files:
+                logger.info(f"Found {len(matrix_files)} protein matrix files (per-residue format)")
+                for f in matrix_files:
+                    protein_id = f.stem.replace('_matrix', '')
+                    emb = np.load(f)
+                    protein_emb_dict[protein_id] = emb  # Keep as 2D [seq_len, dim]
+            else:
+                logger.warning("No matrix files found, falling back to embeddings")
+                for f in protein_dir.glob('*_embedding.npy'):
+                    protein_id = f.stem.replace('_embedding', '')
+                    emb = np.load(f).flatten()
+                    # Convert vector to 1xdim matrix for consistency
+                    protein_emb_dict[protein_id] = emb.reshape(1, -1)
+        else:
+            # Load vector files (mean-pooled)
+            vector_files = list(protein_dir.glob('*_embedding.npy'))
+            if vector_files:
+                for f in vector_files:
+                    protein_id = f.stem.replace('_embedding', '')
+                    emb = np.load(f)
+                    protein_emb_dict[protein_id] = emb.flatten()
+            else:
+                # Fall back to matrix files, compute mean
+                for f in protein_dir.glob('*_matrix.npy'):
+                    protein_id = f.stem.replace('_matrix', '')
+                    emb = np.load(f)
+                    protein_emb_dict[protein_id] = emb.mean(axis=0)  # Mean pool
         logger.info(f"Loaded {len(protein_emb_dict)} protein embeddings")
         
         # Load ligand embeddings
         logger.info("Loading ligand embeddings...")
         ligand_emb_dict = {}
-        for f in ligand_dir.glob('*_embedding.npy'):
-            ligand_id = f.stem.replace('_embedding', '')
-            ligand_emb_dict[ligand_id] = np.load(f).flatten()
+        
+        if self.embedding_mode == 'matrix':
+            # Load matrix files (per-token embeddings)
+            matrix_files = list(ligand_dir.glob('*_matrix.npy'))
+            if matrix_files:
+                logger.info(f"Found {len(matrix_files)} ligand matrix files (per-token format)")
+                for f in matrix_files:
+                    ligand_id = f.stem.replace('_matrix', '')
+                    emb = np.load(f)
+                    ligand_emb_dict[ligand_id] = emb  # Keep as 2D [tokens, dim]
+            else:
+                logger.warning("No matrix files found, falling back to embeddings")
+                for f in ligand_dir.glob('*_embedding.npy'):
+                    ligand_id = f.stem.replace('_embedding', '')
+                    emb = np.load(f).flatten()
+                    ligand_emb_dict[ligand_id] = emb.reshape(1, -1)
+        else:
+            # Load vector files (mean-pooled)
+            vector_files = list(ligand_dir.glob('*_embedding.npy'))
+            if vector_files:
+                for f in vector_files:
+                    ligand_id = f.stem.replace('_embedding', '')
+                    ligand_emb_dict[ligand_id] = np.load(f).flatten()
+            else:
+                # Fall back to matrix files, compute mean
+                for f in ligand_dir.glob('*_matrix.npy'):
+                    ligand_id = f.stem.replace('_matrix', '')
+                    emb = np.load(f)
+                    ligand_emb_dict[ligand_id] = emb.mean(axis=0)
         logger.info(f"Loaded {len(ligand_emb_dict)} ligand embeddings")
         
         # Determine column names
         protein_col = 'seq_id'
-        ligand_col = 'chembl_id'
+        ligand_col = 'molecule_chembl_id' if 'molecule_chembl_id' in self.df.columns else 'chembl_id'
         
         # Build aligned arrays
-        logger.info("Building embedding matrix...")
+        logger.info("Building embedding arrays...")
         protein_embs = []
         ligand_embs = []
         binary_labels = []
@@ -209,18 +278,43 @@ class EmbeddingDataLoader:
                 valid_indices.append(idx)
                 protein_ids_list.append(prot_id)
         
-        self.protein_embeddings = np.array(protein_embs)
-        self.ligand_embeddings = np.array(ligand_embs)
+        # For matrix mode, we keep as list (variable length sequences)
+        # For vector mode, we stack into arrays
+        if self.embedding_mode == 'matrix':
+            self.protein_embeddings = protein_embs  # List of 2D arrays
+            self.ligand_embeddings = ligand_embs    # List of 2D arrays
+            # Update dims from first sample
+            if protein_embs:
+                self.protein_dim = protein_embs[0].shape[-1]
+            if ligand_embs:
+                self.ligand_dim = ligand_embs[0].shape[-1]
+        else:
+            self.protein_embeddings = np.array(protein_embs)
+            self.ligand_embeddings = np.array(ligand_embs)
+            # Update dims
+            if len(protein_embs) > 0:
+                self.protein_dim = self.protein_embeddings.shape[-1]
+            if len(ligand_embs) > 0:
+                self.ligand_dim = self.ligand_embeddings.shape[-1]
+        
         self.binary_labels = np.array(binary_labels)
         self.regression_targets = np.array(regression_targets)
         self.valid_indices = np.array(valid_indices)
         self.protein_ids = np.array(protein_ids_list)
         
         logger.info(f"Valid samples: {len(valid_indices)} / {len(self.df)}")
-        logger.info(f"Protein embeddings: {self.protein_embeddings.shape}")
-        logger.info(f"Ligand embeddings: {self.ligand_embeddings.shape}")
-        logger.info(f"Binary labels: {self.binary_labels.sum()} active, {len(self.binary_labels) - self.binary_labels.sum()} inactive")
-        logger.info(f"Regression targets: min={self.regression_targets.min():.2f}, max={self.regression_targets.max():.2f}, mean={self.regression_targets.mean():.2f}")
+        if self.embedding_mode == 'matrix':
+            logger.info(f"Protein embeddings: {len(protein_embs)} matrices, dim={self.protein_dim}")
+            logger.info(f"Ligand embeddings: {len(ligand_embs)} matrices, dim={self.ligand_dim}")
+        else:
+            logger.info(f"Protein embeddings: {self.protein_embeddings.shape}")
+            logger.info(f"Ligand embeddings: {self.ligand_embeddings.shape}")
+        
+        if len(binary_labels) > 0:
+            logger.info(f"Binary labels: {self.binary_labels.sum()} active, {len(self.binary_labels) - self.binary_labels.sum()} inactive")
+            logger.info(f"Regression targets: min={self.regression_targets.min():.2f}, max={self.regression_targets.max():.2f}, mean={self.regression_targets.mean():.2f}")
+        else:
+            logger.warning("No valid samples found!")
         
         return self.protein_embeddings, self.ligand_embeddings
     
@@ -287,7 +381,11 @@ class EmbeddingDataLoader:
         """Create leakage-aware splits ensuring no protein overlap."""
         from sklearn.model_selection import train_test_split
         
-        n_samples = len(self.protein_embeddings)
+        # Handle both list (matrix mode) and array (vector mode)
+        if isinstance(self.protein_embeddings, list):
+            n_samples = len(self.protein_embeddings)
+        else:
+            n_samples = len(self.protein_embeddings)
         
         if self.protein_ids is None:
             # Simple random split if no protein IDs
@@ -354,11 +452,21 @@ class EmbeddingDataLoader:
         
         total = len(self.train_idx) + len(self.val_idx) + len(self.test_idx)
         
+        # Handle both list (matrix mode) and array (vector mode)
+        if isinstance(self.protein_embeddings, list):
+            n_samples = len(self.protein_embeddings)
+            protein_dim = self.protein_dim
+            ligand_dim = self.ligand_dim
+        else:
+            n_samples = len(self.protein_embeddings)
+            protein_dim = self.protein_embeddings.shape[-1]
+            ligand_dim = self.ligand_embeddings.shape[-1]
+        
         return {
-            'n_samples': len(self.protein_embeddings),
-            'n_valid': len(self.valid_indices) if self.valid_indices is not None else len(self.protein_embeddings),
-            'protein_dim': self.protein_embeddings.shape[1],
-            'ligand_dim': self.ligand_embeddings.shape[1],
+            'n_samples': n_samples,
+            'n_valid': len(self.valid_indices) if self.valid_indices is not None else n_samples,
+            'protein_dim': protein_dim,
+            'ligand_dim': ligand_dim,
             'n_active': int(self.binary_labels.sum()),
             'n_inactive': int(len(self.binary_labels) - self.binary_labels.sum()),
             'pchembl_min': float(self.regression_targets.min()),
@@ -371,7 +479,8 @@ class EmbeddingDataLoader:
             'train_ratio': len(self.train_idx) / total,
             'val_ratio': len(self.val_idx) / total,
             'test_ratio': len(self.test_idx) / total,
-            'activity_threshold': self.activity_threshold
+            'activity_threshold': self.activity_threshold,
+            'embedding_mode': self.embedding_mode
         }
 
 
