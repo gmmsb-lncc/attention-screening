@@ -74,9 +74,9 @@ This directory contains the core source code of DockTKinase, organized into thre
 
 - **Purpose**: Analyze and process molecular databases for kinase research
 - **Key Features**:
-  - Molecular clustering using fingerprints and similarity metrics
+  - FAISS-based molecular clustering for scalable stratification ⭐ **UPDATED**
   - Statistical analysis of human vs non-human kinases
-  - Class balance analysis and stratification
+  - Class balance analysis and FAISS K-means stratification
   - SMILES standardization and cleaning
   - Comprehensive molecular descriptors calculation
 - **Architecture**: Organized into core/, processing/, analysis/, sql/
