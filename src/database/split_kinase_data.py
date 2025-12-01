@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Script para separar dados de kinases em 3 arquivos:
-1. kinase_all_compounds.tsv (todos - já existe)
-2. kinase_human_compounds.tsv (apenas Homo sapiens)
-3. kinase_non_human_compounds.tsv (exceto Homo sapiens)
+Script to separate kinase data into 3 files:
+1. kinase_all_compounds.tsv (all - already exists)
+2. kinase_human_compounds.tsv (Homo sapiens only)
+3. kinase_non_human_compounds.tsv (except Homo sapiens)
 """
 
 import pandas as pd
@@ -12,140 +12,140 @@ from pathlib import Path
 
 def split_kinase_data(input_file, output_dir):
     """
-    Separa os dados de kinases em humanos e não-humanos.
+    Separate kinase data into human and non-human.
     
     Args:
-        input_file: Caminho para o arquivo kinase_all_compounds.tsv
-        output_dir: Diretório onde os arquivos serão salvos
+        input_file: Path to kinase_all_compounds.tsv file
+        output_dir: Directory where files will be saved
     """
     
     print("=" * 80)
-    print("🧬 SEPARAÇÃO DE DADOS DE KINASES")
+    print("🧬 KINASE DATA SEPARATION")
     print("=" * 80)
     
-    # Verificar se o arquivo existe
+    # Check if file exists
     if not os.path.exists(input_file):
-        raise FileNotFoundError(f"❌ Arquivo não encontrado: {input_file}")
+        raise FileNotFoundError(f"❌ File not found: {input_file}")
     
-    print(f"\n📂 Lendo arquivo: {input_file}")
-    print(f"📊 Tamanho do arquivo: {os.path.getsize(input_file) / (1024**3):.2f} GB")
+    print(f"\n📂 Reading file: {input_file}")
+    print(f"📊 File size: {os.path.getsize(input_file) / (1024**3):.2f} GB")
     
-    # Ler o arquivo TSV
-    print("\n⏳ Carregando dados (pode levar alguns minutos)...")
+    # Read the TSV file
+    print("\n⏳ Loading data (may take a few minutes)...")
     df = pd.read_csv(input_file, sep='\t', low_memory=False)
     
-    print(f"✅ Dados carregados: {len(df):,} registros")
-    print(f"\n📋 Colunas disponíveis:")
+    print(f"✅ Data loaded: {len(df):,} records")
+    print(f"\n📋 Available columns:")
     for i, col in enumerate(df.columns, 1):
         print(f"  {i}. {col}")
     
-    # Verificar valores únicos na coluna organism
-    print(f"\n🌍 Organismos únicos encontrados: {df['organism'].nunique():,}")
-    print("\n📊 Top 10 organismos mais frequentes:")
+    # Check unique values in organism column
+    print(f"\n🌍 Unique organisms found: {df['organism'].nunique():,}")
+    print("\n📊 Top 10 most frequent organisms:")
     organism_counts = df['organism'].value_counts()
     for org, count in organism_counts.head(10).items():
         percentage = (count / len(df)) * 100
         print(f"  • {org}: {count:,} ({percentage:.2f}%)")
     
-    # Separar dados
+    # Separate data
     print("\n" + "=" * 80)
-    print("🔬 SEPARANDO DADOS...")
+    print("🔬 SEPARATING DATA...")
     print("=" * 80)
     
-    # Filtrar humanos
+    # Filter humans
     df_humans = df[df['organism'] == 'Homo sapiens'].copy()
-    print(f"\n✅ Dados humanos: {len(df_humans):,} registros ({len(df_humans)/len(df)*100:.2f}%)")
+    print(f"\n✅ Human data: {len(df_humans):,} records ({len(df_humans)/len(df)*100:.2f}%)")
     
-    # Filtrar não-humanos
+    # Filter non-humans
     df_non_humans = df[df['organism'] != 'Homo sapiens'].copy()
-    print(f"✅ Dados não-humanos: {len(df_non_humans):,} registros ({len(df_non_humans)/len(df)*100:.2f}%)")
+    print(f"✅ Non-human data: {len(df_non_humans):,} records ({len(df_non_humans)/len(df)*100:.2f}%)")
     
-    # Verificar soma
-    assert len(df_humans) + len(df_non_humans) == len(df), "❌ Erro: soma não confere!"
-    print(f"✅ Verificação: {len(df_humans):,} + {len(df_non_humans):,} = {len(df):,} ✓")
+    # Verify sum
+    assert len(df_humans) + len(df_non_humans) == len(df), "❌ Error: sum mismatch!"
+    print(f"✅ Verification: {len(df_humans):,} + {len(df_non_humans):,} = {len(df):,} ✓")
     
-    # Criar diretório de saída se não existir
+    # Create output directory if it doesn't exist
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    # Salvar arquivos
+    # Save files
     print("\n" + "=" * 80)
-    print("💾 SALVANDO ARQUIVOS...")
+    print("💾 SAVING FILES...")
     print("=" * 80)
     
-    # Arquivo de humanos
+    # Human file
     output_humans = os.path.join(output_dir, 'kinase_human_compounds.tsv')
-    print(f"\n📝 Salvando: {output_humans}")
+    print(f"\n📝 Saving: {output_humans}")
     df_humans.to_csv(output_humans, sep='\t', index=False)
     size_humans = os.path.getsize(output_humans) / (1024**2)
-    print(f"   ✅ Salvo: {size_humans:.2f} MB")
+    print(f"   ✅ Saved: {size_humans:.2f} MB")
     
-    # Arquivo de não-humanos
+    # Non-human file
     output_non_humans = os.path.join(output_dir, 'kinase_non_human_compounds.tsv')
-    print(f"\n📝 Salvando: {output_non_humans}")
+    print(f"\n📝 Saving: {output_non_humans}")
     df_non_humans.to_csv(output_non_humans, sep='\t', index=False)
     size_non_humans = os.path.getsize(output_non_humans) / (1024**2)
-    print(f"   ✅ Salvo: {size_non_humans:.2f} MB")
+    print(f"   ✅ Saved: {size_non_humans:.2f} MB")
     
-    # Copiar arquivo original para o diretório de saída (se necessário)
+    # Copy original file to output directory (if needed)
     output_all = os.path.join(output_dir, 'kinase_all_compounds.tsv')
     if os.path.abspath(input_file) != os.path.abspath(output_all):
-        print(f"\n📝 Copiando arquivo original para: {output_all}")
+        print(f"\n📝 Copying original file to: {output_all}")
         df.to_csv(output_all, sep='\t', index=False)
         size_all = os.path.getsize(output_all) / (1024**2)
-        print(f"   ✅ Salvo: {size_all:.2f} MB")
+        print(f"   ✅ Saved: {size_all:.2f} MB")
     
-    # Resumo final
+    # Final summary
     print("\n" + "=" * 80)
-    print("🎉 PROCESSAMENTO CONCLUÍDO COM SUCESSO!")
+    print("🎉 PROCESSING COMPLETED SUCCESSFULLY!")
     print("=" * 80)
     
-    print("\n📊 RESUMO DOS ARQUIVOS GERADOS:")
+    print("\n📊 SUMMARY OF GENERATED FILES:")
     print(f"\n1️⃣  kinase_all_compounds.tsv")
-    print(f"   • Registros: {len(df):,}")
-    print(f"   • Tamanho: {os.path.getsize(input_file) / (1024**2):.2f} MB")
+    print(f"   • Records: {len(df):,}")
+    print(f"   • Size: {os.path.getsize(input_file) / (1024**2):.2f} MB")
     
     print(f"\n2️⃣  kinase_human_compounds.tsv")
-    print(f"   • Registros: {len(df_humans):,}")
-    print(f"   • Tamanho: {size_humans:.2f} MB")
-    print(f"   • Organismo: Homo sapiens")
+    print(f"   • Records: {len(df_humans):,}")
+    print(f"   • Size: {size_humans:.2f} MB")
+    print(f"   • Organism: Homo sapiens")
     
     print(f"\n3️⃣  kinase_non_human_compounds.tsv")
-    print(f"   • Registros: {len(df_non_humans):,}")
-    print(f"   • Tamanho: {size_non_humans:.2f} MB")
-    print(f"   • Organismos: {df_non_humans['organism'].nunique():,} espécies")
+    print(f"   • Records: {len(df_non_humans):,}")
+    print(f"   • Size: {size_non_humans:.2f} MB")
+    print(f"   • Organisms: {df_non_humans['organism'].nunique():,} species")
     
-    # Estatísticas das sequências
+    # Sequence statistics
     print("\n" + "=" * 80)
-    print("🧬 ESTATÍSTICAS DAS SEQUÊNCIAS:")
+    print("🧬 SEQUENCE STATISTICS:")
     print("=" * 80)
     
-    print(f"\n📊 Todos os compostos:")
-    print(f"   • Com sequência: {df['seq'].notna().sum():,} ({df['seq'].notna().sum()/len(df)*100:.2f}%)")
-    print(f"   • Sem sequência: {df['seq'].isna().sum():,} ({df['seq'].isna().sum()/len(df)*100:.2f}%)")
-    print(f"   • Sequências únicas: {df['seq'].nunique():,}")
+    print(f"\n📊 All compounds:")
+    print(f"   • With sequence: {df['seq'].notna().sum():,} ({df['seq'].notna().sum()/len(df)*100:.2f}%)")
+    print(f"   • Without sequence: {df['seq'].isna().sum():,} ({df['seq'].isna().sum()/len(df)*100:.2f}%)")
+    print(f"   • Unique sequences: {df['seq'].nunique():,}")
     
-    print(f"\n📊 Compostos humanos:")
-    print(f"   • Com sequência: {df_humans['seq'].notna().sum():,} ({df_humans['seq'].notna().sum()/len(df_humans)*100:.2f}%)")
-    print(f"   • Sem sequência: {df_humans['seq'].isna().sum():,} ({df_humans['seq'].isna().sum()/len(df_humans)*100:.2f}%)")
-    print(f"   • Sequências únicas: {df_humans['seq'].nunique():,}")
+    print(f"\n📊 Human compounds:")
+    print(f"   • With sequence: {df_humans['seq'].notna().sum():,} ({df_humans['seq'].notna().sum()/len(df_humans)*100:.2f}%)")
+    print(f"   • Without sequence: {df_humans['seq'].isna().sum():,} ({df_humans['seq'].isna().sum()/len(df_humans)*100:.2f}%)")
+    print(f"   • Unique sequences: {df_humans['seq'].nunique():,}")
     
-    print(f"\n📊 Compostos não-humanos:")
-    print(f"   • Com sequência: {df_non_humans['seq'].notna().sum():,} ({df_non_humans['seq'].notna().sum()/len(df_non_humans)*100:.2f}%)")
-    print(f"   • Sem sequência: {df_non_humans['seq'].isna().sum():,} ({df_non_humans['seq'].isna().sum()/len(df_non_humans)*100:.2f}%)")
-    print(f"   • Sequências únicas: {df_non_humans['seq'].nunique():,}")
+    print(f"\n📊 Non-human compounds:")
+    print(f"   • With sequence: {df_non_humans['seq'].notna().sum():,} ({df_non_humans['seq'].notna().sum()/len(df_non_humans)*100:.2f}%)")
+    print(f"   • Without sequence: {df_non_humans['seq'].isna().sum():,} ({df_non_humans['seq'].isna().sum()/len(df_non_humans)*100:.2f}%)")
+    print(f"   • Unique sequences: {df_non_humans['seq'].nunique():,}")
     
     print("\n" + "=" * 80)
-    print("✅ Todos os arquivos foram gerados com sucesso!")
+    print("✅ All files have been generated successfully!")
     print("=" * 80 + "\n")
     
     return df, df_humans, df_non_humans
 
 
 if __name__ == "__main__":
-    # Configuração dos caminhos
+    # Path configuration
     input_file = os.path.expanduser("~/Desktop/2024_desktop/chembl_35/kinase_all_compounds.tsv")
     
-    # Diretórios de saída no projeto docktkinase (caminho relativo ao script)
+    # Output directories in docktkinase project (relative path to script)
     base_dir = Path(__file__).parent  # docktkinase/src/database -> parent = src
     output_dirs = {
         'all': base_dir / 'kinase_all',
@@ -153,73 +153,73 @@ if __name__ == "__main__":
         'non_humans': base_dir / 'kinase_non_humans'
     }
     
-    # Criar diretórios se não existirem
+    # Create directories if they don't exist
     for dir_path in output_dirs.values():
         Path(dir_path).mkdir(parents=True, exist_ok=True)
-        print(f"📁 Diretório verificado/criado: {dir_path}")
+        print(f"📁 Directory verified/created: {dir_path}")
     
-    # Executar a separação
+    # Execute the separation
     try:
         print("\n" + "=" * 80)
-        print("🚀 INICIANDO PROCESSAMENTO COM NOVOS DIRETÓRIOS")
+        print("🚀 STARTING PROCESSING WITH NEW DIRECTORIES")
         print("=" * 80)
         
-        # Ler dados
-        print(f"\n📂 Lendo arquivo: {input_file}")
+        # Read data
+        print(f"\n📂 Reading file: {input_file}")
         df = pd.read_csv(input_file, sep='\t', low_memory=False)
-        print(f"✅ Dados carregados: {len(df):,} registros")
+        print(f"✅ Data loaded: {len(df):,} records")
         
-        # Separar dados
+        # Separate data
         df_humans = df[df['organism'] == 'Homo sapiens'].copy()
         df_non_humans = df[df['organism'] != 'Homo sapiens'].copy()
         
-        print(f"\n✅ Dados humanos: {len(df_humans):,} registros")
-        print(f"✅ Dados não-humanos: {len(df_non_humans):,} registros")
+        print(f"\n✅ Human data: {len(df_humans):,} records")
+        print(f"✅ Non-human data: {len(df_non_humans):,} records")
         
-        # Salvar nos diretórios corretos
+        # Save to correct directories
         print("\n" + "=" * 80)
-        print("💾 SALVANDO ARQUIVOS NOS DIRETÓRIOS DO PROJETO")
+        print("💾 SAVING FILES TO PROJECT DIRECTORIES")
         print("=" * 80)
         
-        # 1. Arquivo ALL
+        # 1. ALL file
         output_all = os.path.join(output_dirs['all'], 'kinase_all_compounds.tsv')
-        print(f"\n1️⃣  Salvando: {output_all}")
+        print(f"\n1️⃣  Saving: {output_all}")
         df.to_csv(output_all, sep='\t', index=False)
         size_all = os.path.getsize(output_all) / (1024**2)
-        print(f"   ✅ Salvo: {size_all:.2f} MB ({len(df):,} registros)")
+        print(f"   ✅ Saved: {size_all:.2f} MB ({len(df):,} records)")
         
-        # 2. Arquivo HUMANS
+        # 2. HUMANS file
         output_humans = os.path.join(output_dirs['humans'], 'kinase_human_compounds.tsv')
-        print(f"\n2️⃣  Salvando: {output_humans}")
+        print(f"\n2️⃣  Saving: {output_humans}")
         df_humans.to_csv(output_humans, sep='\t', index=False)
         size_humans = os.path.getsize(output_humans) / (1024**2)
-        print(f"   ✅ Salvo: {size_humans:.2f} MB ({len(df_humans):,} registros)")
+        print(f"   ✅ Saved: {size_humans:.2f} MB ({len(df_humans):,} records)")
         
-        # 3. Arquivo NON-HUMANS
+        # 3. NON-HUMANS file
         output_non_humans = os.path.join(output_dirs['non_humans'], 'kinase_non_human_compounds.tsv')
-        print(f"\n3️⃣  Salvando: {output_non_humans}")
+        print(f"\n3️⃣  Saving: {output_non_humans}")
         df_non_humans.to_csv(output_non_humans, sep='\t', index=False)
         size_non_humans = os.path.getsize(output_non_humans) / (1024**2)
-        print(f"   ✅ Salvo: {size_non_humans:.2f} MB ({len(df_non_humans):,} registros)")
+        print(f"   ✅ Saved: {size_non_humans:.2f} MB ({len(df_non_humans):,} records)")
         
-        # Resumo final
+        # Final summary
         print("\n" + "=" * 80)
-        print("🎉 TODOS OS ARQUIVOS FORAM SALVOS COM SUCESSO!")
+        print("🎉 ALL FILES HAVE BEEN SAVED SUCCESSFULLY!")
         print("=" * 80)
         
-        print("\n📊 LOCALIZAÇÃO DOS ARQUIVOS:")
+        print("\n📊 FILE LOCATIONS:")
         print(f"\n1️⃣  {output_all}")
-        print(f"   • {len(df):,} registros | {size_all:.2f} MB")
+        print(f"   • {len(df):,} records | {size_all:.2f} MB")
         
         print(f"\n2️⃣  {output_humans}")
-        print(f"   • {len(df_humans):,} registros | {size_humans:.2f} MB")
+        print(f"   • {len(df_humans):,} records | {size_humans:.2f} MB")
         
         print(f"\n3️⃣  {output_non_humans}")
-        print(f"   • {len(df_non_humans):,} registros | {size_non_humans:.2f} MB")
+        print(f"   • {len(df_non_humans):,} records | {size_non_humans:.2f} MB")
         
-        print("\n✅ Script executado com sucesso!")
+        print("\n✅ Script executed successfully!")
         
     except Exception as e:
-        print(f"\n❌ ERRO: {e}")
+        print(f"\n❌ ERROR: {e}")
         import traceback
         traceback.print_exc()

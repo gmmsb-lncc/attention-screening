@@ -13,10 +13,24 @@ from pathlib import Path
 
 def download_fm4m_model_files():
     """Download required FM4M model files with retry logic."""
-    # Get the FM4M directory
+    # Get the FM4M directory (prioritize llm/FM4M)
     script_dir = Path(__file__).parent.absolute()
     project_dir = script_dir.parent
-    fm4m_dir = project_dir / "FM4M"
+    
+    # Try llm/FM4M first, then FM4M at root
+    llm_fm4m_dir = project_dir / "llm" / "FM4M"
+    root_fm4m_dir = project_dir / "FM4M"
+    
+    if llm_fm4m_dir.exists():
+        fm4m_dir = llm_fm4m_dir
+        print(f"📁 Using FM4M at: {fm4m_dir}")
+    elif root_fm4m_dir.exists():
+        fm4m_dir = root_fm4m_dir
+        print(f"📁 Using FM4M at: {fm4m_dir} (legacy)")
+    else:
+        print("❌ FM4M not found at llm/FM4M or FM4M/")
+        return False
+    
     model_files_dir = fm4m_dir / "model_files"
     
     # Create model_files directory if it doesn't exist
