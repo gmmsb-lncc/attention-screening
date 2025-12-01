@@ -92,7 +92,6 @@ class BuildPipeline(BaseBuilder):
                 'split_validator': SplitValidator(self.config),
                 'stratification_manager': StratificationManager(
                     self.config,
-                    clustering_algorithm=self.config.get('stratification_params', {}).get('clustering_algorithm', 'kmeans'),
                     protein_weight=self.config.get('stratification_params', {}).get('protein_weight', 0.6),
                     ligand_weight=self.config.get('stratification_params', {}).get('ligand_weight', 0.4),
                     random_state=self.config.get('random_state', 42)
