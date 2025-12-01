@@ -28,6 +28,15 @@ from .cnn_encoder import (
     create_encoder
 )
 
+# Positional Encoding (RoPE recommended for variable-length sequences)
+from .positional_encoding import (
+    RotaryPositionalEmbedding,
+    RoPE,
+    SinusoidalPositionalEncoding,
+    RoPEMultiHeadAttention,
+    create_positional_encoding
+)
+
 __all__ = [
     # MLP models
     "MLPEmbeddingClassifier",
@@ -47,6 +56,12 @@ __all__ = [
     # Optimized CNN encoder
     "OptimizedCNNEncoder",
     "create_encoder",
+    # Positional Encoding
+    "RotaryPositionalEmbedding",
+    "RoPE",
+    "SinusoidalPositionalEncoding",
+    "RoPEMultiHeadAttention",
+    "create_positional_encoding",
     # Matrix Embedding Extractor
     "MatrixEmbeddingExtractor",
     "create_synthetic_embeddings",
