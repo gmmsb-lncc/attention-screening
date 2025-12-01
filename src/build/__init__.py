@@ -4,11 +4,20 @@ Main build module exports.
 Provides convenient imports for the modular build system components.
 """
 
-"""
-Main build module exports.
+# ============================================================================
+# CRITICAL: Fix OpenMP conflict on macOS
+# FAISS and other libraries (PyTorch, sklearn, scipy) use different OpenMP
+# runtimes. This must be set BEFORE any imports.
+# ============================================================================
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-Provides convenient imports for the modular build system components.
-"""
+# Import FAISS first to avoid OpenMP conflicts (optional dependency)
+try:
+    import faiss
+    _FAISS_AVAILABLE = True
+except ImportError:
+    _FAISS_AVAILABLE = False
 
 # Core components
 from .core import BuildConfig, BaseBuilder, BuildException
