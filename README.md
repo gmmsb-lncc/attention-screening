@@ -28,7 +28,7 @@ DockTKinase combines state-of-the-art protein language models with molecular emb
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
-| 🔀 **Scalable Stratification** | Memory-efficient clustering for datasets up to millions of samples |
+| 🔀 **FAISS Stratification** | Unified K-means clustering with O(n) complexity for any dataset size |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 | 💾 **Smart Caching** | Incremental embedding generation with caching |
 

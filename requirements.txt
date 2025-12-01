@@ -92,6 +92,9 @@ optuna>=3.0.0
 imbalanced-learn>=0.12.0
 shap>=0.45.0
 
+# Scalable Approximate Clustering (for large datasets)
+faiss-cpu>=1.7.0  # FAISS for efficient similarity search and clustering
+
 torch-optimizer
 datasets>=2.13.1
 evaluate>=0.4.0
