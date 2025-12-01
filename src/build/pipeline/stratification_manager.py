@@ -30,6 +30,9 @@ from pathlib import Path
 import numpy as np
 import logging
 
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.preprocessing import normalize
+
 from src.build.core.config import BuildConfig
 from src.build.stratification.stratifier import Stratifier
 from src.build.stratification.cluster_analyzer import ClusterAnalyzer
@@ -75,18 +78,27 @@ class StratificationManager:
         """
         Initialize StratificationManager.
         
-        Uses unified FAISS K-means clustering strategy for all dataset sizes.
-        FAISS provides O(n) complexity and preserves chemical similarity.
+        Uses K-means++ clustering (Arthur & Vassilvitskii, 2007) for robust
+        centroid initialization. K-means++ provides O(log k) competitive ratio
+        guarantees and is the gold standard for scientific applications.
+        
+        Implementation uses MiniBatchKMeans for computational efficiency while
+        maintaining K-means++ initialization benefits.
+        
+        References:
+            Arthur, D., & Vassilvitskii, S. (2007). k-means++: The advantages 
+            of careful seeding. SODA '07: Proceedings of the eighteenth annual 
+            ACM-SIAM symposium on Discrete algorithms.
         
         Args:
             config: BuildConfig instance
             protein_weight: Weight for protein similarity (0-1)
             ligand_weight: Weight for ligand similarity (0-1)
             random_state: Random seed for reproducibility
-            enable_fallback: Whether to fallback to label-based splitting on FAISS errors
+            enable_fallback: Whether to fallback to label-based splitting on errors
         """
         self.config = config
-        self.clustering_algorithm = 'faiss_kmeans'  # Unified FAISS strategy for all sizes
+        self.clustering_algorithm = 'kmeans++'  # Scientifically robust initialization
         self.protein_weight = protein_weight
         self.ligand_weight = ligand_weight
         self.random_state = random_state if random_state is not None else config.get('random_state', 42)
@@ -165,15 +177,17 @@ class StratificationManager:
         n_samples = len(labels)
         logger.info(f"Stratifying {n_samples:,} samples (test={test_size}, val={val_size})")
         
-        # Unified strategy: FAISS K-means clustering for ALL dataset sizes
+        # Unified strategy: K-means++ clustering for ALL dataset sizes
         # 
         # Scientific rationale:
-        # - FAISS K-means is O(n) complexity - works for any dataset size
+        # - K-means++ (Arthur & Vassilvitskii, 2007) provides O(log k) competitive
+        #   ratio guarantees for centroid initialization
         # - Preserves chemical similarity by clustering on embeddings
         # - Prevents data leakage by keeping similar compounds in same split
+        # - MiniBatchKMeans provides O(n) complexity for large datasets
         # - Adaptive cluster count: sqrt(n) bounded between 10-1000
         #
-        return self._stratify_by_faiss_clustering(
+        return self._stratify_by_kmeans_pp(
             protein_embeddings=protein_embeddings,
             ligand_embeddings=ligand_embeddings,
             labels=labels,
@@ -181,7 +195,7 @@ class StratificationManager:
             val_size=val_size
         )
     
-    def _stratify_by_faiss_clustering(
+    def _stratify_by_kmeans_pp(
         self,
         protein_embeddings: np.ndarray,
         ligand_embeddings: np.ndarray,
@@ -190,13 +204,16 @@ class StratificationManager:
         val_size: float
     ) -> SplitIndices:
         """
-        Unified stratification using FAISS K-means clustering.
+        Stratification using K-means++ clustering (scikit-learn).
         
-        This is the single, scientifically robust method for all dataset sizes.
-        Uses FAISS K-means which is:
-        - O(n) complexity - scalable to millions of samples
-        - Embedding-aware - clusters by chemical similarity
-        - Reproducible - uses fixed random seed
+        K-means++ is the scientifically preferred method because:
+        1. Theoretical guarantees: O(log k) competitive ratio (Arthur & Vassilvitskii, 2007)
+        2. Reproducibility: deterministic given random seed
+        3. Wide adoption: standard in ML literature and peer-reviewed publications
+        4. Better convergence: typically requires fewer iterations than random init
+        
+        Uses MiniBatchKMeans for computational efficiency with large datasets
+        while maintaining K-means++ initialization benefits.
         
         Args:
             protein_embeddings: Protein embeddings (n_samples, protein_dim)
@@ -210,19 +227,6 @@ class StratificationManager:
         """
         n_samples = len(labels)
         
-        # Check if FAISS is available
-        if not FAISS_AVAILABLE:
-            logger.warning(
-                "FAISS not available. Install with: pip install faiss-cpu. "
-                "Falling back to label-based stratification."
-            )
-            return self._stratify_by_labels(
-                n_samples=n_samples,
-                labels=labels,
-                test_size=test_size,
-                val_size=val_size
-            )
-        
         try:
             # Combine embeddings with weighting
             combined = np.concatenate([
@@ -230,27 +234,36 @@ class StratificationManager:
                 ligand_embeddings * self.ligand_weight
             ], axis=1).astype(np.float32)
             
-            # Ensure contiguous array (required by FAISS)
-            combined = np.ascontiguousarray(combined)
-            
-            # Normalize for cosine similarity
-            faiss.normalize_L2(combined)
+            # L2 normalize for cosine similarity behavior
+            combined = normalize(combined, norm='l2', axis=1)
             
             # Adaptive cluster count: sqrt(n), bounded [10, 1000]
             n_clusters = min(1000, max(10, int(np.sqrt(n_samples))))
             
             logger.info(
-                f"FAISS K-means clustering: {n_samples:,} samples -> {n_clusters} clusters"
+                f"K-means++ clustering: {n_samples:,} samples -> {n_clusters} clusters"
             )
             
-            # FAISS K-means clustering
-            d = combined.shape[1]
-            kmeans = faiss.Kmeans(d, n_clusters, niter=20, verbose=False, seed=self.random_state)
-            kmeans.train(combined)
-            _, cluster_labels = kmeans.index.search(combined, 1)
-            cluster_labels = cluster_labels.ravel()
+            # MiniBatchKMeans with K-means++ initialization
+            # - init='k-means++': Arthur & Vassilvitskii (2007) initialization
+            # - batch_size=1024: efficient mini-batch processing
+            # - n_init='auto': sklearn chooses optimal number of initializations
+            # - max_iter=100: sufficient for convergence
+            kmeans = MiniBatchKMeans(
+                n_clusters=n_clusters,
+                init='k-means++',
+                batch_size=min(1024, n_samples),
+                n_init='auto',
+                max_iter=100,
+                random_state=self.random_state,
+                verbose=0
+            )
+            cluster_labels = kmeans.fit_predict(combined)
             
-            logger.info(f"Clustering complete: {len(np.unique(cluster_labels))} clusters formed")
+            logger.info(
+                f"Clustering complete: {len(np.unique(cluster_labels))} clusters formed, "
+                f"inertia={kmeans.inertia_:.2f}"
+            )
             
             # Split by clusters
             return self._split_by_clusters(
@@ -259,11 +272,11 @@ class StratificationManager:
                 test_size=test_size,
                 val_size=val_size,
                 n_samples=n_samples,
-                strategy_name='faiss_kmeans'
+                strategy_name='kmeans++'
             )
             
         except Exception as e:
-            logger.warning(f"FAISS clustering failed: {e}. Falling back to label-based.")
+            logger.warning(f"K-means++ clustering failed: {e}. Falling back to label-based.")
             return self._stratify_by_labels(
                 n_samples=n_samples,
                 labels=labels,
@@ -404,6 +417,87 @@ class StratificationManager:
         
         return splits
     
+    def _rebalance_clusters(
+        self,
+        test_clusters: list,
+        val_clusters: list,
+        train_clusters: list,
+        cluster_sizes: dict,
+        target_test: int,
+        target_val: int,
+        target_train: int
+    ) -> tuple:
+        """
+        Rebalance cluster assignments to achieve target sample proportions.
+        
+        Uses greedy swapping to move clusters between splits when proportions
+        are significantly off target (>5% deviation).
+        
+        Args:
+            test_clusters: Current test cluster list
+            val_clusters: Current validation cluster list
+            train_clusters: Current train cluster list
+            cluster_sizes: Dict mapping cluster_id -> sample count
+            target_test: Target number of test samples
+            target_val: Target number of validation samples
+            target_train: Target number of train samples
+            
+        Returns:
+            Tuple of (test_clusters, val_clusters, train_clusters) after rebalancing
+        """
+        def get_counts():
+            return (
+                sum(cluster_sizes[c] for c in test_clusters),
+                sum(cluster_sizes[c] for c in val_clusters),
+                sum(cluster_sizes[c] for c in train_clusters)
+            )
+        
+        max_iterations = 50  # Prevent infinite loops
+        tolerance = 0.05  # 5% tolerance
+        
+        for _ in range(max_iterations):
+            current_test, current_val, current_train = get_counts()
+            total = current_test + current_val + current_train
+            
+            # Check if within tolerance
+            test_ratio = current_test / total
+            val_ratio = current_val / total
+            train_ratio = current_train / total
+            
+            target_test_ratio = target_test / total
+            target_val_ratio = target_val / total
+            target_train_ratio = target_train / total
+            
+            test_ok = abs(test_ratio - target_test_ratio) <= tolerance
+            val_ok = abs(val_ratio - target_val_ratio) <= tolerance
+            train_ok = abs(train_ratio - target_train_ratio) <= tolerance
+            
+            if test_ok and val_ok and train_ok:
+                break
+            
+            # Find the most over-represented and under-represented splits
+            deviations = [
+                ('test', current_test - target_test, test_clusters),
+                ('val', current_val - target_val, val_clusters),
+                ('train', current_train - target_train, train_clusters)
+            ]
+            
+            # Sort by deviation (most over-represented first)
+            deviations.sort(key=lambda x: x[1], reverse=True)
+            over_name, over_dev, over_list = deviations[0]
+            under_name, under_dev, under_list = deviations[-1]
+            
+            if over_dev <= 0 or under_dev >= 0:
+                break  # No imbalance to fix
+            
+            # Find smallest cluster in over-represented split to move
+            if over_list:
+                smallest_cluster = min(over_list, key=lambda c: cluster_sizes[c])
+                over_list.remove(smallest_cluster)
+                under_list.append(smallest_cluster)
+        
+        return test_clusters, val_clusters, train_clusters
+    
     def _split_by_clusters(
         self,
         cluster_labels: np.ndarray,
@@ -431,61 +525,83 @@ class StratificationManager:
             SplitIndices with cluster-aware splits
         """
         from sklearn.model_selection import train_test_split
-        from collections import Counter
         
-        # Get unique clusters
+        # Get unique clusters and their sizes
         unique_clusters = np.unique(cluster_labels)
         n_clusters = len(unique_clusters)
         
-        logger.info(f"Splitting {n_clusters} clusters into train/val/test")
+        # Calculate cluster sizes (number of samples per cluster)
+        cluster_sizes = {c: np.sum(cluster_labels == c) for c in unique_clusters}
+        total_samples = sum(cluster_sizes.values())
         
-        # Calculate cluster sizes for stratification
-        cluster_sizes = np.array([np.sum(cluster_labels == c) for c in unique_clusters])
+        logger.info(f"Splitting {n_clusters} clusters ({total_samples} samples) into train/val/test")
         
-        # Assign clusters to splits (stratify by cluster size to balance)
-        # Bin cluster sizes for stratification
-        size_bins = np.digitize(cluster_sizes, bins=np.percentile(cluster_sizes, [25, 50, 75]))
+        # Target sample counts for exact 80/10/10 split
+        target_test = int(total_samples * test_size)
+        target_val = int(total_samples * val_size)
+        target_train = total_samples - target_test - target_val
         
-        try:
-            # First split: train+val clusters vs test clusters
-            train_val_clusters, test_clusters = train_test_split(
-                unique_clusters,
-                test_size=test_size,
-                stratify=size_bins,
-                random_state=self.random_state
-            )
+        # Sort clusters by size (largest first) for greedy assignment
+        sorted_clusters = sorted(unique_clusters, key=lambda c: cluster_sizes[c], reverse=True)
+        
+        # Greedy assignment to achieve target proportions
+        # Assign each cluster to the split that needs more samples
+        test_clusters = []
+        val_clusters = []
+        train_clusters = []
+        
+        current_test = 0
+        current_val = 0
+        current_train = 0
+        
+        for cluster in sorted_clusters:
+            size = cluster_sizes[cluster]
             
-            # Second split: train clusters vs val clusters
-            if val_size > 0:
-                val_size_adjusted = val_size / (1 - test_size)
-                train_val_bins = size_bins[np.isin(unique_clusters, train_val_clusters)]
-                
-                train_clusters, val_clusters = train_test_split(
-                    train_val_clusters,
-                    test_size=val_size_adjusted,
-                    stratify=train_val_bins,
-                    random_state=self.random_state
-                )
+            # Calculate how far each split is from its target
+            test_need = target_test - current_test
+            val_need = target_val - current_val
+            train_need = target_train - current_train
+            
+            # Assign to the split that:
+            # 1. Still needs samples AND
+            # 2. Would benefit most from this cluster (relative to its target)
+            if test_need > 0 and (current_test + size <= target_test * 1.2):
+                # Assign to test if it needs samples and won't exceed by much
+                test_clusters.append(cluster)
+                current_test += size
+            elif val_need > 0 and (current_val + size <= target_val * 1.2):
+                # Assign to val
+                val_clusters.append(cluster)
+                current_val += size
             else:
-                train_clusters = train_val_clusters
-                val_clusters = np.array([])
-                
-        except Exception as e:
-            logger.warning(f"Stratified cluster split failed: {e}. Using random cluster assignment.")
-            
-            # Random cluster assignment
-            shuffled_clusters = np.random.RandomState(self.random_state).permutation(unique_clusters)
-            n_test = int(len(shuffled_clusters) * test_size)
-            n_val = int(len(shuffled_clusters) * val_size)
-            
-            test_clusters = shuffled_clusters[:n_test]
-            val_clusters = shuffled_clusters[n_test:n_test + n_val]
-            train_clusters = shuffled_clusters[n_test + n_val:]
+                # Assign to train (default)
+                train_clusters.append(cluster)
+                current_train += size
+        
+        # Rebalance if proportions are significantly off
+        # Move clusters from over-represented to under-represented splits
+        test_clusters, val_clusters, train_clusters = self._rebalance_clusters(
+            test_clusters, val_clusters, train_clusters,
+            cluster_sizes, target_test, target_val, target_train
+        )
+        
+        # Convert to arrays
+        test_clusters = np.array(test_clusters)
+        val_clusters = np.array(val_clusters)
+        train_clusters = np.array(train_clusters)
         
         # Convert cluster assignments to sample indices
         train_idx = np.where(np.isin(cluster_labels, train_clusters))[0]
         val_idx = np.where(np.isin(cluster_labels, val_clusters))[0]
         test_idx = np.where(np.isin(cluster_labels, test_clusters))[0]
+        
+        # Log actual proportions
+        actual_train = len(train_idx) / total_samples * 100
+        actual_val = len(val_idx) / total_samples * 100
+        actual_test = len(test_idx) / total_samples * 100
+        logger.info(
+            f"Split complete: train={actual_train:.1f}%, val={actual_val:.1f}%, test={actual_test:.1f}%"
+        )
         
         # Log split statistics
         binary_labels = self._extract_binary_labels(labels)
