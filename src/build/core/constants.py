@@ -92,6 +92,62 @@ ESM_MODELS = {
     'boltz2': {'dim': 384, 'layers': 64, 'max_len': 2048},               # Boltz-2: 384-dim single representation (mean pooling)
 }
 
+
+def get_esm_model_info(model_name: str) -> dict:
+    """
+    Get ESM model configuration.
+    
+    Args:
+        model_name: Name of the ESM model
+        
+    Returns:
+        Dictionary with 'dim', 'layers', 'max_len'
+        
+    Example:
+        >>> get_esm_model_info('esm2_t6_8M_UR50D')
+        {'dim': 320, 'layers': 6, 'max_len': 1024}
+    """
+    if model_name not in ESM_MODELS:
+        raise ValueError(f"Unknown ESM model: {model_name}. Available: {list(ESM_MODELS.keys())}")
+    return ESM_MODELS[model_name].copy()
+
+
+def get_esm_max_length(model_name: str) -> int:
+    """
+    Get maximum sequence length for ESM model.
+    
+    Always use this function to get max_len - it ensures consistency
+    and uses the full capacity of the model.
+    
+    Args:
+        model_name: Name of the ESM model
+        
+    Returns:
+        Maximum sequence length supported by the model
+        
+    Example:
+        >>> get_esm_max_length('esm2_t36_3B_UR50D')
+        4096
+    """
+    return get_esm_model_info(model_name)['max_len']
+
+
+def get_esm_embedding_dim(model_name: str) -> int:
+    """
+    Get embedding dimension for ESM model.
+    
+    Args:
+        model_name: Name of the ESM model
+        
+    Returns:
+        Embedding dimension
+        
+    Example:
+        >>> get_esm_embedding_dim('esm2_t36_3B_UR50D')
+        2560
+    """
+    return get_esm_model_info(model_name)['dim']
+
 # Modelos FM4M disponíveis
 FM4M_MODELS = {
     'SMI-TED': {'dim': 768, 'type': 'transformer'},
