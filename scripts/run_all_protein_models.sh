@@ -34,8 +34,8 @@ set -e  # Exit on error
 # =============================================================================
 
 # Default paths (can be overridden via command line)
-INPUT_FILE="${1:-tests/datasets/kinase_human_compounds.tsv}"
-OUTPUT_BASE="${2:-results/protein_model_benchmark_human}"
+INPUT_FILE="${1:-tests/datasets/kinase_non_human_compounds.tsv}"
+OUTPUT_BASE="${2:-results/protein_model_benchmark_non_human}"
 
 # Shared ligand embeddings directory (compute once, reuse for all protein models)
 # This saves significant time as ligand embeddings are identical across protein models
@@ -75,7 +75,7 @@ ESMC_MODELS=(
 
 # Structure-based Models (2 models)
 STRUCTURE_MODELS=(
-    "openfold3"             # 1536-dim, Structure prediction
+    #"openfold3"             # 1536-dim, Structure prediction
     "boltz2"                # 384-dim, Boltz-2 embeddings
 )
 
@@ -84,7 +84,7 @@ STRUCTURE_MODELS=(
 # =============================================================================
 
 # Option 1: Run ALL 11 models (ESM-2 + ESM-C + Structure)
-# MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
 # Option 2: Run only ESM-2 local models (no API key required) - uncomment below
 # MODELS_TO_RUN=("${ESM2_MODELS[@]}")
@@ -96,7 +96,7 @@ STRUCTURE_MODELS=(
 # MODELS_TO_RUN=("${STRUCTURE_MODELS[@]}")
 
 # Option 5: Run only ESM-2 15B + Boltz-2
-MODELS_TO_RUN=("esm2_t48_15B_UR50D" "boltz2")
+# MODELS_TO_RUN=("esm2_t48_15B_UR50D" "boltz2")
 
 # =============================================================================
 # Logging Configuration

@@ -656,8 +656,10 @@ class CrossAttentionTrainer:
             logger.info(f"  MSE:              {reg_metrics.mse:.4f}")
             logger.info(f"  RMSE:             {reg_metrics.rmse:.4f}")
             logger.info(f"  R²:               {reg_metrics.r2:.4f}")
-            logger.info(f"  Pearson:          {reg_metrics.pearson_r:.4f}")
-            logger.info(f"  Spearman:         {reg_metrics.spearman_r:.4f}")
+            logger.info(f"  Pearson r:        {reg_metrics.pearson_r:.4f}")
+            logger.info(f"  Spearman ρ:       {reg_metrics.spearman_r:.4f}")
+            logger.info(f"  Kendall τ:        {reg_metrics.kendall_tau:.4f}")
+            logger.info(f"  CCC (Lin):        {reg_metrics.ccc:.4f}")
             logger.info(f"  Median AE:        {reg_metrics.median_ae:.4f}")
             logger.info(f"  Explained Var:    {reg_metrics.explained_variance:.4f}")
         
