@@ -776,10 +776,19 @@ class IntegratedPipeline:
             return bool(obj)
         elif isinstance(obj, Path):
             return str(obj)
-        elif hasattr(obj, '_asdict'):  # NamedTuple (including SplitIndices)
+        elif hasattr(obj, 'to_json_dict') and callable(obj.to_json_dict):
+            # SplitIndices and similar classes with JSON-safe conversion
+            return self._make_serializable(obj.to_json_dict())
+        elif hasattr(obj, '_asdict'):  # NamedTuple
             return self._make_serializable(obj._asdict())
         elif is_dataclass(obj) and not isinstance(obj, type):
-            return {k: self._make_serializable(v) for k, v in asdict(obj).items()}
+            # Convert dataclass, handling numpy arrays inside
+            try:
+                return {k: self._make_serializable(v) for k, v in asdict(obj).items()}
+            except Exception:
+                # Fallback for frozen dataclasses with non-serializable fields
+                return {k: self._make_serializable(getattr(obj, k)) 
+                        for k in obj.__dataclass_fields__.keys()}
         elif hasattr(obj, 'to_dict') and callable(obj.to_dict):
             return self._make_serializable(obj.to_dict())
         elif hasattr(obj, '__dict__'):
