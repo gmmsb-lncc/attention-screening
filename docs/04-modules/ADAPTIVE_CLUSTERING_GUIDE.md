@@ -1,21 +1,60 @@
 # Adaptive Clustering Guide
 
 **Last Updated**: November 30, 2025  
-**Module**: `src/build/stratification/` (modular architecture)
+**Module**: `src/build/pipeline/stratification_manager.py`
 
 ---
 
 ## 📋 Overview
 
-The Adaptive Clustering module automatically determines optimal clustering parameters for molecular embeddings. It solves the problem of **homogeneous embeddings** where fixed thresholds fail to produce meaningful clusters.
+> **⚠️ UPDATE (Nov 2025)**: The stratification system now uses a **unified FAISS K-means strategy** for all dataset sizes. The legacy adaptive threshold methods are deprecated.
 
-### The Problem
+### Current Approach: Unified FAISS K-means
+
+The stratification module now uses **FAISS (Facebook AI Similarity Search) K-means clustering** as the single, scientifically robust method for all datasets:
+
+```python
+# Single strategy for all sizes
+from src.build.pipeline.stratification_manager import StratificationManager
+from src.build.core.config import BuildConfig
+
+config = BuildConfig()
+manager = StratificationManager(config)  # Always uses FAISS K-means
+splits = manager.stratify(protein_emb, ligand_emb, labels)
+```
+
+### Key Benefits
+
+| Feature | Description |
+|---------|-------------|
+| **O(n) complexity** | Scales linearly with dataset size |
+| **Memory efficient** | No O(n²) distance matrix |
+| **Chemical-aware** | Clusters by weighted protein+ligand similarity |
+| **Prevents leakage** | Similar compounds stay in same split |
+| **Reproducible** | Fixed random seed for consistent results |
+
+### Performance
+
+| Dataset Size | Time | Clusters |
+|--------------|------|-----------|
+| 5K | 0.11s | ~71 |
+| 50K | 1.66s | ~224 |
+| 100K | 3.48s | ~316 |
+| 500K | ~17s | ~707 |
+
+---
+
+## 📚 Legacy Methods (Deprecated)
+
+The following methods are **deprecated** but documented for reference. The unified FAISS approach supersedes all of them.
+
+### The Original Problem
 
 When embeddings are highly similar (e.g., all pairwise similarities > 0.9), a fixed threshold like 0.7 results in a **single cluster** containing all samples. This defeats the purpose of stratified splitting.
 
-### The Solution
+### Legacy Solution (Deprecated)
 
-Adaptive Clustering analyzes the similarity distribution and automatically selects an appropriate threshold that produces meaningful clusters.
+Adaptive Clustering analyzed the similarity distribution and automatically selected an appropriate threshold that produces meaningful clusters. This required O(n²) memory for the distance matrix.
 
 ---
 
@@ -122,24 +161,38 @@ clustering = AdaptiveClustering(
 
 ---
 
-### 7. Scalable Clustering (Auto)
+### 7. Unified FAISS K-means (Current Default) ⭐
 
-**Automatically used for datasets > 40,000 samples.**
+**Used for ALL dataset sizes (replaces all other methods).**
 
-Uses Representative Sampling + Label Propagation:
-1. Sample representative points using stratified selection
-2. Cluster representative points with standard methods
-3. Propagate labels to all points via nearest neighbors
+FAISS K-means clustering with adaptive cluster count:
+1. Combine protein and ligand embeddings with weighting
+2. L2 normalize for cosine similarity
+3. Run FAISS K-means with k = sqrt(n), bounded [10, 1000]
+4. Split clusters into train/val/test sets
 
 ```python
-# Automatic for large datasets
-clustering = AdaptiveClustering(method='target')
-labels = clustering.cluster(large_embeddings)  # >40k samples
+from src.build.pipeline.stratification_manager import StratificationManager
+from src.build.core.config import BuildConfig
+
+config = BuildConfig()
+manager = StratificationManager(config)
+
+# Works for any size: 1k to 1M+ samples
+splits = manager.stratify(
+    protein_embeddings,  # (n, 320)
+    ligand_embeddings,   # (n, 768)
+    labels,              # (n,)
+    test_size=0.1,
+    val_size=0.1
+)
 ```
 
-**Memory**: ~8GB for 40k samples (full matrix)
+**Memory**: O(n × d), ~4GB for 500k samples
 
-**Best For**: When you know the optimal threshold for your dataset.
+**Time**: ~3.5s per 100k samples
+
+**Best For**: All datasets. This is the recommended and only supported method.
 
 ---
 
