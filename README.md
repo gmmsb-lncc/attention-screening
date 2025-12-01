@@ -28,15 +28,115 @@ DockTKinase combines state-of-the-art protein language models with molecular emb
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
-| 🔀 **FAISS Stratification** | Unified K-means clustering with O(n) complexity for any dataset size |
+| 🔀 **K-means++ Stratification** | Cluster-aware train/val/test splitting with cosine similarity validation |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 | 💾 **Smart Caching** | Incremental embedding generation with caching |
 
-## Scalable Stratification
+## Scalable Stratification with K-means++
 
-### The Problem
+### The Stratification Challenge
 
-Standard clustering-based stratification requires computing a pairwise distance matrix $D \in \mathbb{R}^{n \times n}$, which has memory complexity $O(n^2)$:
+Machine learning models for drug discovery require careful dataset splitting to prevent **data leakage**. Simply random splitting can place highly similar protein-ligand pairs in different sets, leading to:
+
+- **Overly optimistic performance estimates** during validation
+- **Poor generalization** to truly novel compounds
+- **Unreliable model selection**
+
+Our stratification strategy addresses this by clustering similar samples together before splitting, ensuring that chemically/structurally related samples remain in the same subset.
+
+### K-means++ Algorithm
+
+We implement **K-means++** (Arthur & Vassilvitskii, 2007), which provides theoretical guarantees for clustering quality:
+
+**Mathematical Foundation:**
+
+The K-means++ initialization selects initial centroids with probability proportional to squared distance from existing centroids:
+
+$$P(x) = \frac{D(x)^2}{\sum_{x' \in X} D(x')^2}$$
+
+where $D(x)$ is the distance to the nearest existing centroid.
+
+**Key Properties:**
+- **O(log k) competitive ratio**: Expected cost is at most $O(\log k)$ times the optimal k-means cost
+- **Deterministic given seed**: Reproducible results for scientific experiments
+- **Faster convergence**: Reduces Lloyd's algorithm iterations by 2-5x
+
+**Implementation:**
+
+```python
+from sklearn.cluster import MiniBatchKMeans
+
+kmeans = MiniBatchKMeans(
+    n_clusters=n_clusters,
+    init='k-means++',      # Arthur & Vassilvitskii initialization
+    n_init=10,             # Multiple initializations for robustness
+    batch_size=1024,       # Memory-efficient mini-batch processing
+    random_state=42        # Reproducibility
+)
+cluster_labels = kmeans.fit_predict(L2_normalized_embeddings)
+```
+
+### How K-means++ and Cosine Similarity Complement Each Other
+
+Our stratification pipeline combines **K-means++ clustering** with **cosine similarity analysis** in a complementary fashion:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STRATIFICATION WORKFLOW: K-means++ + Cosine Similarity                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STEP 1: EMBEDDING NORMALIZATION                                            │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ • L2-normalize protein embeddings: ||p|| = 1                          │  │
+│  │ • L2-normalize ligand embeddings:  ||l|| = 1                          │  │
+│  │ • Concatenate: [p | l] → combined embedding                           │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  STEP 2: K-MEANS++ CLUSTERING (Primary: Cluster Formation)                  │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ • K-means++ on L2-normalized vectors uses Euclidean distance          │  │
+│  │ • For normalized vectors: d²(a,b) = 2(1 - cos(θ))                     │  │
+│  │ • Therefore: minimizing Euclidean ≡ maximizing cosine similarity      │  │
+│  │ • Result: clusters of semantically similar protein-ligand pairs       │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  STEP 3: GREEDY CLUSTER ASSIGNMENT (Split: 80/10/10)                        │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ • Sort clusters by size (descending)                                  │  │
+│  │ • Assign each cluster to train/val/test based on current proportions  │  │
+│  │ • Target: ~80% train, ~10% validation, ~10% test (±3% tolerance)      │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  STEP 4: COSINE SIMILARITY VALIDATION (Secondary: Quality Assurance)       │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ • Compute pairwise cosine similarity between splits                   │  │
+│  │ • Verify low inter-split similarity (no data leakage)                 │  │
+│  │ • Verify high intra-split similarity (coherent clusters)              │  │
+│  │ • Generate quality reports and statistics                             │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why This Combination Works:**
+
+| Component | Role | Metric |
+|-----------|------|--------|
+| **K-means++** | Forms clusters of similar samples | Euclidean on L2-normalized (≡ cosine) |
+| **Cosine Similarity** | Validates split quality | Direct similarity measurement |
+| **Greedy Assignment** | Ensures proportions | Sample count ratios |
+
+**Mathematical Equivalence:**
+
+For L2-normalized vectors $\vec{a}$ and $\vec{b}$ where $||\vec{a}|| = ||\vec{b}|| = 1$:
+
+$$d_{euclidean}^2(\vec{a}, \vec{b}) = ||\vec{a} - \vec{b}||^2 = ||\vec{a}||^2 + ||\vec{b}||^2 - 2\vec{a} \cdot \vec{b} = 2(1 - \cos\theta)$$
+
+Therefore, K-means++ on normalized embeddings **implicitly optimizes for cosine similarity**, while the explicit cosine similarity analysis provides **interpretable validation metrics**.
+
+### Scalability for Large Datasets
+
+Standard clustering requires computing a pairwise distance matrix $D \in \mathbb{R}^{n \times n}$, which has memory complexity $O(n^2)$:
 
 | Dataset Size | Memory Required |
 |--------------|-----------------|
@@ -47,9 +147,9 @@ Standard clustering-based stratification requires computing a pairwise distance 
 
 For large-scale drug discovery datasets (100k+ compound-target pairs), this becomes computationally infeasible.
 
-### Our Solution: Representative Sampling + Label Propagation
+### Scalable Solution: Representative Sampling + K-means++
 
-We implement a scalable clustering algorithm based on established computational biology and machine learning research:
+We implement a scalable clustering algorithm that combines K-means++ with representative sampling:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -60,10 +160,10 @@ We implement a scalable clustering algorithm based on established computational 
 │     • Sample size: min(50k, √n × 50)                                        │
 │     • 50% random + 50% PCA-stratified → covers embedding space              │
 │                                                                             │
-│  2. CLUSTER SAMPLE                                                          │
-│     • Agglomerative hierarchical clustering on sample                       │
-│     • Distance matrix: O(sample²) instead of O(n²)                          │
-│     • Adaptive threshold based on similarity distribution                   │
+│  2. K-MEANS++ CLUSTERING ON SAMPLE                                          │
+│     • MiniBatchKMeans with init='k-means++' on sample                       │
+│     • Memory: O(sample²) instead of O(n²)                                   │
+│     • Theoretical guarantee: O(log k) competitive ratio                     │
 │                                                                             │
 │  3. CENTROID COMPUTATION                                                    │
 │     • Compute mean embedding per cluster                                    │
@@ -74,9 +174,13 @@ We implement a scalable clustering algorithm based on established computational 
 │     • Batch processing (10k samples) → constant memory                      │
 │     • Complexity: O(n × k) where k = number of clusters                     │
 │                                                                             │
-│  5. REFINEMENT                                                              │
-│     • Merge small clusters (< min_size) to nearest neighbor                 │
-│     • Ensures balanced stratification                                       │
+│  5. GREEDY SPLIT ASSIGNMENT                                                 │
+│     • Assign clusters to train/val/test (80/10/10)                          │
+│     • Ensures balanced stratification with ±3% tolerance                    │
+│                                                                             │
+│  6. COSINE SIMILARITY VALIDATION                                            │
+│     • Verify inter-split dissimilarity (no leakage)                         │
+│     • Report intra-cluster cohesion statistics                              │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -93,21 +197,42 @@ We implement a scalable clustering algorithm based on established computational 
 
 This approach is grounded in established research:
 
-1. **Sculley, D. (2010)**. *Web-scale k-means clustering*. Proceedings of the 19th International Conference on World Wide Web (WWW '10). ACM.
-   - Demonstrates that cluster structure can be accurately captured from representative samples
+1. **Arthur, D., & Vassilvitskii, S. (2007)**. *k-means++: The advantages of careful seeding*. Proceedings of the 18th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA '07).
+   - Foundation for K-means++ initialization with O(log k) competitive guarantee
+   - Core algorithm used in our stratification pipeline
 
-2. **Arthur, D., & Vassilvitskii, S. (2007)**. *k-means++: The advantages of careful seeding*. Proceedings of the 18th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA '07).
-   - Foundation for centroid-based clustering with quality guarantees
+2. **Sculley, D. (2010)**. *Web-scale k-means clustering*. Proceedings of the 19th International Conference on World Wide Web (WWW '10). ACM.
+   - Demonstrates that MiniBatchKMeans efficiently handles large-scale datasets
+   - Basis for our scalable implementation
 
 3. **Kaufman, L., & Rousseeuw, P. J. (1990)**. *Finding Groups in Data: An Introduction to Cluster Analysis*. Wiley Series in Probability and Statistics.
-   - Theoretical basis for hierarchical clustering and silhouette validation
+   - Theoretical basis for cluster validation and silhouette analysis
+
+4. **Nguyen, X., Epps, J., & Bailey, J. (2010)**. *Information theoretic measures for clusterings comparison*. Journal of Machine Learning Research, 11, 2837-2854.
+   - Framework for evaluating clustering quality in stratification
 
 ### Usage
 
-The scalable stratification is automatically activated when dataset size exceeds 40,000 samples:
+The K-means++ stratification is automatically used by the pipeline:
 
 ```python
-# Automatic - pipeline detects large datasets
+# Automatic - pipeline uses K-means++ with cosine similarity validation
+python run_complete_pipeline.py \
+    --input dataset.tsv \
+    --output results/ \
+    --seed 42
+
+# Logs will show:
+# [INFO] Clustering with K-means++ (Arthur & Vassilvitskii, 2007)
+# [INFO] Using 10 initializations for robustness
+# [INFO] Clustering complete: 45 clusters formed, inertia=1234.56
+# [INFO] Split proportions: train=80.2%, val=9.8%, test=10.0%
+```
+
+For large datasets (>40k samples), scalable mode is automatically activated:
+
+```python
+# Large dataset - automatic scalable mode
 python run_complete_pipeline.py \
     --input large_dataset.tsv \  # 500k+ samples
     --output results/ \
@@ -117,6 +242,7 @@ python run_complete_pipeline.py \
 # [INFO] Dataset too large for full distance matrix (500000 samples would require ~931.3 GiB)
 # [INFO] Using scalable representative sampling approach
 # [INFO] Scalable clustering: 500000 samples → 35355 sample size
+# [INFO] K-means++ on sample, then label propagation to all points
 # [INFO] Scalable clustering complete: 127 clusters, silhouette=0.3421
 ```
 
@@ -517,4 +643,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Status**: ✅ Production Ready | **Version**: 2.0 | **Last Updated**: November 2025
+**Status**: ✅ Production Ready | **Version**: 2.1 | **Last Updated**: December 2025
