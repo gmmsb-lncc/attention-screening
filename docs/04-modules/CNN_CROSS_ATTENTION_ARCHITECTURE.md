@@ -11,13 +11,14 @@ This document describes the deep learning architecture used in DockTKinase for p
 ## Table of Contents
 
 1. [Theoretical Background](#theoretical-background)
-2. [Architecture Overview](#architecture-overview)
-3. [CNN Encoder](#cnn-encoder)
-4. [Cross-Attention Mechanism](#cross-attention-mechanism)
-5. [Multi-Task Learning](#multi-task-learning)
-6. [Optimized CNN Encoder](#optimized-cnn-encoder)
-7. [Implementation Details](#implementation-details)
-8. [Scientific References](#scientific-references)
+2. [Sequence Length Handling and Positional Encoding](#sequence-length-handling-and-positional-encoding)
+3. [Architecture Overview](#architecture-overview)
+4. [CNN Encoder](#cnn-encoder)
+5. [Cross-Attention Mechanism](#cross-attention-mechanism)
+6. [Multi-Task Learning](#multi-task-learning)
+7. [Optimized CNN Encoder](#optimized-cnn-encoder)
+8. [Implementation Details](#implementation-details)
+9. [Scientific References](#scientific-references)
 
 ---
 
@@ -58,6 +59,149 @@ Our architecture incorporates several inductive biases appropriate for molecular
 2. **Permutation invariance** (Attention pooling): The order of residue-atom pairs should not affect the final prediction
 3. **Locality** (CNN kernel size): Binding interactions are primarily local in sequence space
 4. **Sparsity** (Attention softmax): Most residue-atom pairs do not interact directly
+
+---
+
+## Sequence Length Handling and Positional Encoding
+
+### Understanding the Two-Stage Pipeline
+
+The sequence length handling in DockTKinase occurs at **two distinct stages**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 1: EMBEDDING GENERATION (ESM/ESM-C Models)                           │
+│                                                                             │
+│  ⚠️  Limitation: ESM models have FIXED maximum sequence lengths            │
+│                                                                             │
+│  If protein length > max_len:                                              │
+│      → Sequence is TRUNCATED before embedding                              │
+│      → Information from truncated residues is LOST                         │
+│                                                                             │
+│  This truncation happens BEFORE our CNN+CrossAttention model               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 2: CNN + CROSS-ATTENTION (Our Model)                                 │
+│                                                                             │
+│  ✅  With RoPE: Can process embeddings of ANY length                        │
+│  ⚠️  With Sinusoidal: Limited by pre-defined max_len                       │
+│                                                                             │
+│  Note: Our model can only process what ESM provides                        │
+│  If ESM truncated the sequence, we cannot recover that information         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### ESM Model Sequence Limits
+
+The following table shows the maximum sequence lengths supported by each protein embedding model:
+
+| Model | Max Tokens | Embedding Dim | Recommended Use |
+|-------|------------|---------------|-----------------|
+| **esm2_t6_8M_UR50D** | 1024 | 320 | Quick testing, short proteins |
+| **esm2_t12_35M_UR50D** | 1024 | 480 | Fast inference |
+| **esm2_t30_150M_UR50D** | 1024 | 640 | Balanced |
+| **esm2_t33_650M_UR50D** | 1024 | 1280 | Good accuracy |
+| **esm2_t36_3B_UR50D** | **4096** | 2560 | Long proteins ✅ |
+| **esm2_t48_15B_UR50D** | **5120** | 5120 | Very long proteins ✅ |
+| **esmc-300m-2024-12** | 2048 | 960 | ESM Cambrian |
+| **esmc-600m-2024-12** | 2048 | 1152 | ESM Cambrian |
+| **esmc-6b-2024-12** | 2048 | 3072 | Via Forge API |
+
+**Key insight**: For kinases (typically 250-500 aa), all models are sufficient. For large proteins (>1024 aa), use `esm2_t36_3B_UR50D` or larger.
+
+### Positional Encoding Strategies
+
+Once embeddings are generated, our CNN+CrossAttention model needs positional information. We support two strategies:
+
+#### 1. Sinusoidal Positional Encoding (Vaswani et al., 2017)
+
+The classical approach from "Attention Is All You Need":
+
+$$PE(pos, 2i) = \sin\left(\frac{pos}{10000^{2i/d}}\right)$$
+$$PE(pos, 2i+1) = \cos\left(\frac{pos}{10000^{2i/d}}\right)$$
+
+**Characteristics**:
+- ✅ Simple and well-understood
+- ✅ Fixed computation (pre-computed buffer)
+- ❌ Requires pre-defined `max_len`
+- ❌ Positions beyond `max_len` cannot be encoded
+
+**Usage**:
+```python
+model = CrossAttentionAffinityModel(
+    positional_encoding_type='sinusoidal',  # default
+    max_protein_len=2048,  # must be set appropriately
+    max_ligand_len=512
+)
+```
+
+#### 2. Rotary Position Embedding (RoPE) (Su et al., 2021)
+
+Modern approach used by LLaMA, Mistral, and ESM-2 internally:
+
+$$\text{RoPE}(x, pos) = x \cdot \cos(\theta_{pos}) + \text{rotate\_half}(x) \cdot \sin(\theta_{pos})$$
+
+where:
+$$\theta_i = \frac{pos}{10000^{2i/d}}$$
+
+**Characteristics**:
+- ✅ **No maximum sequence length** (extends dynamically)
+- ✅ Preserves relative position information
+- ✅ Applied to Q and K only (not V)
+- ✅ Used by state-of-the-art models (LLaMA, Mistral)
+- ⚠️ Slightly more compute per forward pass
+
+**Mathematical Intuition**: RoPE rotates the query and key vectors in 2D subspaces by angles proportional to their positions. When computing attention scores $q \cdot k$, the rotation difference encodes the relative position:
+
+$$\text{RoPE}(q, m) \cdot \text{RoPE}(k, n) = f(q, k, m-n)$$
+
+This means attention naturally captures relative rather than absolute positions.
+
+**Usage**:
+```python
+model = CrossAttentionAffinityModel(
+    positional_encoding_type='rope',  # unlimited length
+    # max_protein_len is now just initial cache size
+)
+```
+
+### Practical Recommendations
+
+| Scenario | ESM Model | Positional Encoding |
+|----------|-----------|---------------------|
+| Quick testing | esm2_t6_8M | sinusoidal |
+| Standard kinases (<500 aa) | esm2_t33_650M | sinusoidal |
+| Long proteins (500-2000 aa) | esm2_t36_3B | RoPE |
+| Very long proteins (>2000 aa) | esm2_t36_3B or esm2_t48_15B | RoPE |
+| Variable-length batches | any | RoPE |
+
+### Code Example: Handling Long Sequences
+
+```python
+from src.classifier.models import CrossAttentionAffinityModel
+
+# For standard kinases (< 1024 aa)
+model_standard = CrossAttentionAffinityModel(
+    protein_dim=1280,  # esm2_t33_650M
+    positional_encoding_type='sinusoidal'
+)
+
+# For variable-length proteins (any size)
+model_flexible = CrossAttentionAffinityModel(
+    protein_dim=2560,  # esm2_t36_3B (max_len=4096)
+    positional_encoding_type='rope'  # handles any length
+)
+
+# The model will process whatever ESM provides
+# ESM truncation is the bottleneck, not our model
+```
+
+### References
+
+- Vaswani, A., et al. (2017). "Attention Is All You Need". NeurIPS.
+- Su, J., et al. (2021). "RoFormer: Enhanced Transformer with Rotary Position Embedding". arXiv:2104.09864.
 
 ---
 
