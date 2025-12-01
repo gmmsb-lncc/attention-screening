@@ -141,6 +141,29 @@ class SplitIndices:
             'metadata': self.metadata.copy()
         }
     
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert to JSON-serializable dictionary format.
+        
+        Converts numpy arrays to lists for JSON serialization.
+        
+        Returns:
+            Dictionary with all values JSON-serializable
+        
+        Example:
+            >>> import json
+            >>> json.dumps(splits.to_json_dict())  # Works!
+        """
+        return {
+            'train_idx': self.train_idx.tolist(),
+            'val_idx': self.val_idx.tolist(),
+            'test_idx': self.test_idx.tolist(),
+            'train_size': len(self.train_idx),
+            'val_size': len(self.val_idx),
+            'test_size': len(self.test_idx),
+            'metadata': self.metadata.copy()
+        }
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SplitIndices':
         """
