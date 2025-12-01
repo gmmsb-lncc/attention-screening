@@ -14,8 +14,10 @@ from sklearn.metrics import (
     mean_squared_error,
     r2_score,
     median_absolute_error,
-    mean_absolute_percentage_error
+    mean_absolute_percentage_error,
+    explained_variance_score
 )
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 # Import utilitários centralizados - SEMPRE adiciona src no TOPO do sys.path
 import sys
@@ -63,6 +65,20 @@ class RegressionEvaluator:
         rmse = np.sqrt(mse)
         r2 = r2_score(y_true, y_pred)
         median_ae = median_absolute_error(y_true, y_pred)
+        explained_var = explained_variance_score(y_true, y_pred)
+        
+        # Correlation metrics
+        pearson_r, pearson_p = pearsonr(y_true, y_pred)
+        spearman_r, spearman_p = spearmanr(y_true, y_pred)
+        kendall_tau, kendall_p = kendalltau(y_true, y_pred)
+        
+        # Concordance Correlation Coefficient (Lin's CCC)
+        mean_true = np.mean(y_true)
+        mean_pred = np.mean(y_pred)
+        var_true = np.var(y_true)
+        var_pred = np.var(y_pred)
+        covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+        ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
         
         # MAPE (cuidado com divisão por zero)
         try:
@@ -102,6 +118,16 @@ class RegressionEvaluator:
             'R2': float(r2),
             'MedianAE': float(median_ae),
             'MAPE': float(mape) if not np.isnan(mape) else None,
+            'ExplainedVariance': float(explained_var),
+            
+            # Correlation metrics
+            'Pearson_R': float(pearson_r),
+            'Pearson_P': float(pearson_p),
+            'Spearman_R': float(spearman_r),
+            'Spearman_P': float(spearman_p),
+            'Kendall_Tau': float(kendall_tau),
+            'Kendall_P': float(kendall_p),
+            'CCC': float(ccc),
             
             # Estatísticas dos resíduos
             'mean_residual': float(mean_residual),
@@ -277,8 +303,15 @@ class RegressionEvaluator:
         print(f"  RMSE:      {metrics.get('RMSE', 0):.4f} nM")
         print(f"  MedianAE:  {metrics.get('MedianAE', 0):.4f} nM")
         print(f"  R²:        {metrics.get('R2', 0):.4f}")
+        print(f"  Expl.Var:  {metrics.get('ExplainedVariance', 0):.4f}")
         if metrics.get('MAPE') is not None:
             print(f"  MAPE:      {metrics.get('MAPE', 0):.2f}%")
+        
+        print('\n📈 Correlation Metrics:')
+        print(f"  Pearson r:   {metrics.get('Pearson_R', 0):.4f} (p={metrics.get('Pearson_P', 1):.2e})")
+        print(f"  Spearman ρ:  {metrics.get('Spearman_R', 0):.4f} (p={metrics.get('Spearman_P', 1):.2e})")
+        print(f"  Kendall τ:   {metrics.get('Kendall_Tau', 0):.4f} (p={metrics.get('Kendall_P', 1):.2e})")
+        print(f"  CCC (Lin):   {metrics.get('CCC', 0):.4f}")
         
         print('\n📈 Estatísticas dos Erros:')
         print(f"  Erro Médio:   {metrics.get('mean_residual', 0):.4f} nM")

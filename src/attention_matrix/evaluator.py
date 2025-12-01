@@ -13,7 +13,7 @@ from sklearn.metrics import (
     roc_auc_score, confusion_matrix, mean_absolute_error,
     mean_squared_error, r2_score
 )
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 
 logger = logging.getLogger(__name__)
@@ -102,11 +102,23 @@ class AttentionEvaluator:
         if len(y_true) > 2:
             pearson_r, pearson_p = pearsonr(y_true, y_pred)
             spearman_r, spearman_p = spearmanr(y_true, y_pred)
+            kendall_tau, kendall_p = kendalltau(y_true, y_pred)
             
             metrics['pearson'] = float(pearson_r)
             metrics['pearson_p'] = float(pearson_p)
             metrics['spearman'] = float(spearman_r)
             metrics['spearman_p'] = float(spearman_p)
+            metrics['kendall_tau'] = float(kendall_tau)
+            metrics['kendall_p'] = float(kendall_p)
+            
+            # Concordance Correlation Coefficient (Lin's CCC)
+            mean_true = np.mean(y_true)
+            mean_pred = np.mean(y_pred)
+            var_true = np.var(y_true)
+            var_pred = np.var(y_pred)
+            covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+            ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+            metrics['ccc'] = float(ccc)
         
         # Error distribution
         errors = y_pred - y_true
@@ -178,10 +190,12 @@ class AttentionEvaluator:
         
         print(f'\nREGRESSION (pChEMBL):')
         reg = results['regression']
-        print(f'  MAE:       {reg["mae"]:.4f}')
-        print(f'  RMSE:      {reg["rmse"]:.4f}')
-        print(f'  R²:        {reg["r2"]:.4f}')
-        print(f'  Pearson:   {reg.get("pearson", 0):.4f}')
-        print(f'  Spearman:  {reg.get("spearman", 0):.4f}')
+        print(f'  MAE:         {reg["mae"]:.4f}')
+        print(f'  RMSE:        {reg["rmse"]:.4f}')
+        print(f'  R²:          {reg["r2"]:.4f}')
+        print(f'  Pearson r:   {reg.get("pearson", 0):.4f}')
+        print(f'  Spearman ρ:  {reg.get("spearman", 0):.4f}')
+        print(f'  Kendall τ:   {reg.get("kendall_tau", 0):.4f}')
+        print(f'  CCC (Lin):   {reg.get("ccc", 0):.4f}')
         
         print('=' * 70)
