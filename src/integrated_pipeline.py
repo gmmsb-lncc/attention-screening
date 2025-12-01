@@ -426,11 +426,11 @@ class RegressionPhase:
             'best_r2': float(best_test.get('R2', 0)),
             'models_trained': len(train_results),
             'individual_results': {
-                name: {k: float(v) for k, v in metrics.items()}
+                name: {k: v if isinstance(v, (int, float)) else str(v) for k, v in metrics.items()}
                 for name, metrics in train_results.items()
             },
             'test_results': {
-                name: {k: float(v) for k, v in metrics.items()}
+                name: {k: v if isinstance(v, (int, float)) else str(v) for k, v in metrics.items()}
                 for name, metrics in test_results.items()
                 if metrics
             }
