@@ -18,6 +18,7 @@ from sklearn.metrics import (
     explained_variance_score,
     max_error
 )
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 
 class MetricsCalculator:
@@ -64,6 +65,19 @@ class MetricsCalculator:
         explained_var = explained_variance_score(y_true, y_pred)
         max_err = max_error(y_true, y_pred)
         
+        # Correlation metrics
+        pearson_r, pearson_p = pearsonr(y_true, y_pred)
+        spearman_r, spearman_p = spearmanr(y_true, y_pred)
+        kendall_tau, kendall_p = kendalltau(y_true, y_pred)
+        
+        # Concordance Correlation Coefficient (Lin's CCC)
+        mean_true = np.mean(y_true)
+        mean_pred_val = np.mean(y_pred)
+        var_true = np.var(y_true)
+        var_pred = np.var(y_pred)
+        covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred_val))
+        ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred_val) ** 2)
+        
         # MAPE (cuidado com divisão por zero)
         mape = MetricsCalculator._safe_mape(y_true, y_pred)
         
@@ -101,6 +115,15 @@ class MetricsCalculator:
             'MAPE': float(mape) if mape is not None else None,
             'ExplainedVariance': float(explained_var),
             'MaxError': float(max_err),
+            
+            # Correlation metrics
+            'Pearson_R': float(pearson_r),
+            'Pearson_P': float(pearson_p),
+            'Spearman_R': float(spearman_r),
+            'Spearman_P': float(spearman_p),
+            'Kendall_Tau': float(kendall_tau),
+            'Kendall_P': float(kendall_p),
+            'CCC': float(ccc),
             
             # Estatísticas dos resíduos
             'mean_residual': mean_residual,
@@ -171,8 +194,14 @@ class MetricsCalculator:
         lines.append(f"  RMSE:    {metrics['RMSE']:.4f}")
         lines.append(f"  R²:      {metrics['R2']:.4f}")
         lines.append(f"  MedianAE: {metrics['MedianAE']:.4f}")
+        lines.append(f"  Expl.Var: {metrics['ExplainedVariance']:.4f}")
         if metrics['MAPE'] is not None:
             lines.append(f"  MAPE:    {metrics['MAPE']:.2f}%")
+        lines.append(f"{'-' * 60}")
+        lines.append(f"  Pearson r:   {metrics['Pearson_R']:.4f} (p={metrics['Pearson_P']:.2e})")
+        lines.append(f"  Spearman ρ:  {metrics['Spearman_R']:.4f} (p={metrics['Spearman_P']:.2e})")
+        lines.append(f"  Kendall τ:   {metrics['Kendall_Tau']:.4f} (p={metrics['Kendall_P']:.2e})")
+        lines.append(f"  CCC (Lin):   {metrics['CCC']:.4f}")
         lines.append(f"{'-' * 60}")
         lines.append(f"  Mean Residual: {metrics['mean_residual']:+.4f}")
         lines.append(f"  Std Residual:  {metrics['std_residual']:.4f}")

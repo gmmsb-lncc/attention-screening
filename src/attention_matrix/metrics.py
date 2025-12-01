@@ -18,7 +18,7 @@ from sklearn.metrics import (
     r2_score, mean_squared_error, mean_absolute_error,
     explained_variance_score
 )
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, spearmanr, kendalltau
 import logging
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,18 @@ def compute_regression_metrics(
     # Spearman rank correlation
     spearman_r, spearman_p = spearmanr(y_true, y_pred)
     
+    # Kendall's tau (rank correlation - robust to outliers)
+    kendall_tau, kendall_p = kendalltau(y_true, y_pred)
+    
+    # Concordance Correlation Coefficient (Lin's CCC)
+    # Measures agreement between predicted and observed, not just correlation
+    mean_true = np.mean(y_true)
+    mean_pred = np.mean(y_pred)
+    var_true = np.var(y_true)
+    var_pred = np.var(y_pred)
+    covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+    ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+    
     # Error metrics
     mse = mean_squared_error(y_true, y_pred)
     rmse = np.sqrt(mse)
@@ -119,6 +131,9 @@ def compute_regression_metrics(
         'pearson_p_value': pearson_p,
         'spearman_r': spearman_r,
         'spearman_p_value': spearman_p,
+        'kendall_tau': kendall_tau,
+        'kendall_p_value': kendall_p,
+        'ccc': ccc,
         'mse': mse,
         'rmse': rmse,
         'mae': mae,
@@ -183,6 +198,8 @@ def print_metrics_summary(metrics: Dict[str, Dict[str, float]], prefix: str = ""
     print(f"{prefix}  R² (coef. determination): {reg['r2']:.4f}")
     print(f"{prefix}  Pearson r:                {reg['pearson_r']:.4f} (p={reg['pearson_p_value']:.2e})")
     print(f"{prefix}  Spearman ρ:               {reg['spearman_r']:.4f} (p={reg['spearman_p_value']:.2e})")
+    print(f"{prefix}  Kendall τ:                {reg['kendall_tau']:.4f} (p={reg['kendall_p_value']:.2e})")
+    print(f"{prefix}  CCC (Lin's):              {reg['ccc']:.4f}")
     print(f"{prefix}  RMSE:                     {reg['rmse']:.4f}")
     print(f"{prefix}  MAE:                      {reg['mae']:.4f}")
     print(f"{prefix}  Max Error:                {reg['max_error']:.4f}")

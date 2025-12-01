@@ -743,9 +743,21 @@ class AttentionMatrixPipeline:
         # Compute metrics
         from sklearn.metrics import (
             accuracy_score, roc_auc_score, f1_score, matthews_corrcoef,
-            r2_score, mean_squared_error, mean_absolute_error
+            r2_score, mean_squared_error, mean_absolute_error, explained_variance_score
         )
-        from scipy.stats import pearsonr, spearmanr
+        from scipy.stats import pearsonr, spearmanr, kendalltau
+        
+        # Calculate regression metrics
+        reg_targets = np.array(all_reg_targets)
+        reg_preds = np.array(all_reg_preds)
+        
+        # Concordance Correlation Coefficient (Lin's CCC)
+        mean_true = np.mean(reg_targets)
+        mean_pred = np.mean(reg_preds)
+        var_true = np.var(reg_targets)
+        var_pred = np.var(reg_preds)
+        covariance = np.mean((reg_targets - mean_true) * (reg_preds - mean_pred))
+        ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
         
         metrics = {
             'classification': {
@@ -755,11 +767,17 @@ class AttentionMatrixPipeline:
                 'mcc': matthews_corrcoef(all_cls_labels, all_cls_preds)
             },
             'regression': {
-                'r2': r2_score(all_reg_targets, all_reg_preds),
-                'pearson_r': pearsonr(all_reg_targets, all_reg_preds)[0],
-                'spearman_r': spearmanr(all_reg_targets, all_reg_preds)[0],
-                'rmse': np.sqrt(mean_squared_error(all_reg_targets, all_reg_preds)),
-                'mae': mean_absolute_error(all_reg_targets, all_reg_preds)
+                'r2': r2_score(reg_targets, reg_preds),
+                'pearson_r': pearsonr(reg_targets, reg_preds)[0],
+                'pearson_p': pearsonr(reg_targets, reg_preds)[1],
+                'spearman_r': spearmanr(reg_targets, reg_preds)[0],
+                'spearman_p': spearmanr(reg_targets, reg_preds)[1],
+                'kendall_tau': kendalltau(reg_targets, reg_preds)[0],
+                'kendall_p': kendalltau(reg_targets, reg_preds)[1],
+                'ccc': float(ccc),
+                'rmse': np.sqrt(mean_squared_error(reg_targets, reg_preds)),
+                'mae': mean_absolute_error(reg_targets, reg_preds),
+                'explained_variance': explained_variance_score(reg_targets, reg_preds)
             }
         }
         

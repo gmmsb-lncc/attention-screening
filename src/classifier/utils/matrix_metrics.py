@@ -34,7 +34,7 @@ from sklearn.metrics import (
     explained_variance_score,
     max_error
 )
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, spearmanr, kendalltau
 import logging
 import json
 from pathlib import Path
@@ -136,6 +136,11 @@ class RegressionMetrics:
     pearson_p: float = 1.0
     spearman_r: float = 0.0
     spearman_p: float = 1.0
+    kendall_tau: float = 0.0
+    kendall_p: float = 1.0
+    
+    # Concordance Correlation Coefficient (Lin's CCC)
+    ccc: float = 0.0
     
     # Residual statistics
     mean_residual: float = 0.0
@@ -185,6 +190,9 @@ class RegressionMetrics:
             "Pearson_P": self.pearson_p,
             "Spearman_R": self.spearman_r,
             "Spearman_P": self.spearman_p,
+            "Kendall_Tau": self.kendall_tau,
+            "Kendall_P": self.kendall_p,
+            "CCC": self.ccc,
             
             # Residuals
             "mean_residual": self.mean_residual,
@@ -404,6 +412,27 @@ class MatrixMetricsCalculator:
                 metrics.spearman_p = float(p)
             except:
                 pass
+            
+            # Kendall's tau (rank correlation - robust to outliers)
+            try:
+                tau, p = kendalltau(y_true, y_pred)
+                metrics.kendall_tau = float(tau)
+                metrics.kendall_p = float(p)
+            except:
+                pass
+            
+            # Concordance Correlation Coefficient (Lin's CCC)
+            # Measures agreement, not just correlation
+            try:
+                mean_true = np.mean(y_true)
+                mean_pred = np.mean(y_pred)
+                var_true = np.var(y_true)
+                var_pred = np.var(y_pred)
+                covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+                ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+                metrics.ccc = float(ccc)
+            except:
+                pass
         
         # Residual statistics
         residuals = y_true - y_pred
@@ -518,21 +547,24 @@ class MatrixMetricsCalculator:
             "=" * 60,
             f"  Samples: {metrics.n_samples:,}",
             "-" * 60,
-            f"  MAE:         {metrics.mae:.4f}",
-            f"  RMSE:        {metrics.rmse:.4f}",
-            f"  R²:          {metrics.r2:.4f}",
-            f"  MedianAE:    {metrics.median_ae:.4f}",
+            f"  MAE:              {metrics.mae:.4f}",
+            f"  RMSE:             {metrics.rmse:.4f}",
+            f"  R²:               {metrics.r2:.4f}",
+            f"  MedianAE:         {metrics.median_ae:.4f}",
+            f"  Explained Var:    {metrics.explained_variance:.4f}",
             "-" * 60,
-            f"  Pearson R:   {metrics.pearson_r:.4f} (p={metrics.pearson_p:.2e})",
-            f"  Spearman R:  {metrics.spearman_r:.4f} (p={metrics.spearman_p:.2e})",
+            f"  Pearson r:        {metrics.pearson_r:.4f} (p={metrics.pearson_p:.2e})",
+            f"  Spearman ρ:       {metrics.spearman_r:.4f} (p={metrics.spearman_p:.2e})",
+            f"  Kendall τ:        {metrics.kendall_tau:.4f} (p={metrics.kendall_p:.2e})",
+            f"  CCC (Lin):        {metrics.ccc:.4f}",
             "-" * 60,
-            f"  Mean Resid:  {metrics.mean_residual:+.4f}",
-            f"  Std Resid:   {metrics.std_residual:.4f}",
-            f"  Max Error:   {metrics.max_error:.4f}",
+            f"  Mean Resid:       {metrics.mean_residual:+.4f}",
+            f"  Std Resid:        {metrics.std_residual:.4f}",
+            f"  Max Error:        {metrics.max_error:.4f}",
             "-" * 60,
-            f"  Error P50:   {metrics.error_p50:.4f}",
-            f"  Error P90:   {metrics.error_p90:.4f}",
-            f"  Error P95:   {metrics.error_p95:.4f}",
+            f"  Error P50:        {metrics.error_p50:.4f}",
+            f"  Error P90:        {metrics.error_p90:.4f}",
+            f"  Error P95:        {metrics.error_p95:.4f}",
             "=" * 60,
             ""
         ]
