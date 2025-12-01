@@ -28,95 +28,95 @@ python3 comparative_analysis.py
 ### 2️⃣ **Redundancy Removal** - `remove_redundance.py`
 
 ```bash
-# Execute diretamente:
+# Execute directly:
 cd src/database/
 python3 remove_redundance.py
 ```
 
-**Pré-requisitos:**
+**Prerequisites:**
 - `../0_database/kinase_all_compounds_formatted.tsv`
 
-**O que faz:**
-- Remove sais e canoniza SMILES
-- Remove duplicatas
-- Calcula descritores moleculares
-- Gera arquivos limpos: `nr_kinase_all_compounds_salt_free_ver3.tsv`
+**What it does:**
+- Removes salts and canonizes SMILES
+- Removes duplicates
+- Calculates molecular descriptors
+- Generates clean files: `nr_kinase_all_compounds_salt_free_ver3.tsv`
 
 ---
 
-## 🔧 **SCRIPTS PARA IMPORTAÇÃO EM CÓDIGO**
+## 🔧 **SCRIPTS FOR CODE IMPORT**
 
-### 3️⃣ **Clustering Molecular** - `cluster.py`
+### 3️⃣ **Molecular Clustering** - `cluster.py`
 
 ```python
-# Importe em seu código:
+# Import in your code:
 from src.database.cluster import MoleculeClusterer
 
-# Uso básico:
-clusterer = MoleculeClusterer("caminho/para/arquivo.tsv")
+# Basic usage:
+clusterer = MoleculeClusterer("path/to/file.tsv")
 clusterer.load_data("canonical_smiles")
 clusterer.parallel_generate_fingerprints("canonical_smiles", batch_size=1000)
 clusters = clusterer.cluster_by_similarity(threshold=0.8)
 
-# Visualizações:
+# Visualizations:
 tsne_results = clusterer.calculate_tsne()
 clusterer.plot_tsne(tsne_results, threshold=0.8)
 ```
 
-**Métodos principais:**
-- `load_data(smile_column)` - Carrega dados
-- `parallel_generate_fingerprints()` - Gera fingerprints
-- `cluster_by_similarity(threshold)` - Faz clustering
-- `calculate_tsne()` - Redução dimensional
-- `plot_tsne()` - Visualização t-SNE
+**Main methods:**
+- `load_data(smile_column)` - Loads data
+- `parallel_generate_fingerprints()` - Generates fingerprints
+- `cluster_by_similarity(threshold)` - Performs clustering
+- `calculate_tsne()` - Dimensional reduction
+- `plot_tsne()` - t-SNE visualization
 
 ---
 
-### 4️⃣ **Descritores Moleculares** - `descriptors.py`
+### 4️⃣ **Molecular Descriptors** - `descriptors.py`
 
 ```python
-# Importe em seu código:
+# Import in your code:
 from src.database.descriptors import MolecularDescriptors
 
-# Uso básico:
-descriptors = MolecularDescriptors("caminho/para/arquivo.tsv")
+# Basic usage:
+descriptors = MolecularDescriptors("path/to/file.tsv")
 descriptors.compute_descriptors()
 descriptors.save_descriptors("output_descriptors.tsv")
 
-# Visualizações:
+# Visualizations:
 descriptors.plot_histograms(output_path="histograms.png")
 descriptors.violin_plot()
 ```
 
-**Métodos principais:**
-- `calculate_descriptors(smiles_list)` - Calcula descritores
-- `compute_descriptors()` - Processa todo o dataset
-- `save_descriptors(path)` - Salva resultados
-- `plot_histograms()` - Gera histogramas
-- `violin_plot()` - Gráficos de violino
+**Main methods:**
+- `calculate_descriptors(smiles_list)` - Calculates descriptors
+- `compute_descriptors()` - Processes entire dataset
+- `save_descriptors(path)` - Saves results
+- `plot_histograms()` - Generates histograms
+- `violin_plot()` - Violin plots
 
 ---
 
-## 🗃️ **CONSULTAS SQL** - Pasta `sql/`
+## 🗃️ **SQL QUERIES** - `sql/` Folder
 
 ```bash
-# Use as consultas SQL diretamente no ChEMBL:
+# Use the SQL queries directly on ChEMBL:
 cat sql/kinase_humans.sql | mysql -h chembl_host -u user -p chembl_35
 
-# Ou copie as queries para seu cliente SQL favorito
+# Or copy the queries to your favorite SQL client
 ```
 
-**Arquivos disponíveis:**
-- `kinase_humans.sql` - Extrai dados de quinases humanas
-- `kinase_non_humans.sql` - Extrai dados de quinases não humanas
-- `kinase_compounds.sql` - Consultas gerais de compostos
-- `kinase_compounds_and_seq.sql` - Inclui sequências
+**Available files:**
+- `kinase_humans.sql` - Extracts human kinase data
+- `kinase_non_humans.sql` - Extracts non-human kinase data
+- `kinase_compounds.sql` - General compound queries
+- `kinase_compounds_and_seq.sql` - Includes sequences
 
 ---
 
-## 🔍 **ESTRUTURA MODULAR AVANÇADA**
+## 🔍 **ADVANCED MODULAR STRUCTURE**
 
-Para usuários avançados que querem usar os módulos internos:
+For advanced users who want to use internal modules:
 
 ```python
 # Core configuration:
@@ -134,45 +134,45 @@ from src.database.analysis.balance_checker import BalanceChecker
 
 ---
 
-## 📁 **ESTRUTURA DE ARQUIVOS ESPERADA**
+## 📁 **EXPECTED FILE STRUCTURE**
 
 ```
-sua_pasta_trabalho/
-├── kinase_human_compounds.tsv          # Para comparative_analysis.py
-├── kinase_non_human_compounds.tsv      # Para comparative_analysis.py
+your_working_folder/
+├── kinase_human_compounds.tsv          # For comparative_analysis.py
+├── kinase_non_human_compounds.tsv      # For comparative_analysis.py
 ├── 0_database/
-│   └── kinase_all_compounds_formatted.tsv  # Para remove_redundance.py
-└── output/                             # Diretório de saída (criado automaticamente)
+│   └── kinase_all_compounds_formatted.tsv  # For remove_redundance.py
+└── output/                             # Output directory (created automatically)
 ```
 
 ---
 
-## ⚡ **EXEMPLOS RÁPIDOS**
+## ⚡ **QUICK EXAMPLES**
 
-### Análise Comparativa Rápida:
+### Quick Comparative Analysis:
 ```bash
 cd src/database/
 python3 comparative_analysis.py
 ```
 
-### Limpeza de Dados Rápida:
+### Quick Data Cleaning:
 ```bash
 cd src/database/
 python3 remove_redundance.py
 ```
 
-### Clustering em Python:
+### Clustering in Python:
 ```python
 from src.database.cluster import MoleculeClusterer
-clusterer = MoleculeClusterer("meus_dados.tsv")
+clusterer = MoleculeClusterer("my_data.tsv")
 clusterer.load_data("canonical_smiles")
-# ... continue processamento
+# ... continue processing
 ```
 
-### Descritores em Python:
+### Descriptors in Python:
 ```python
 from src.database.descriptors import MolecularDescriptors
-desc = MolecularDescriptors("meus_dados.tsv")
+desc = MolecularDescriptors("my_data.tsv")
 desc.compute_descriptors()
 desc.plot_histograms()
 ```
@@ -181,27 +181,27 @@ desc.plot_histograms()
 
 ## 🆘 **TROUBLESHOOTING**
 
-### Erro: "Arquivo não encontrado"
-- Verifique se os arquivos TSV estão no local correto
-- Use caminhos absolutos se necessário
+### Error: "File not found"
+- Verify that TSV files are in the correct location
+- Use absolute paths if necessary
 
-### Erro: "Import não encontrado"
-- Execute a partir do diretório correto: `cd src/database/`
-- Verifique se o ambiente Python tem as dependências (rdkit, pandas, etc.)
+### Error: "Import not found"
+- Run from the correct directory: `cd src/database/`
+- Verify that the Python environment has the required dependencies (rdkit, pandas, etc.)
 
-### Erro: "RDKit não encontrado"
-- Instale: `conda install -c conda-forge rdkit`
-- Ou: `pip install rdkit-pypi`
+### Error: "RDKit not found"
+- Install: `conda install -c conda-forge rdkit`
+- Or: `pip install rdkit-pypi`
 
 ---
 
-## 📞 **RESUMO**
+## 📞 **SUMMARY**
 
-| Script | Como Usar | Propósito |
+| Script | How to Use | Purpose |
 |--------|-----------|-----------|
-| `comparative_analysis.py` | `python3 comparative_analysis.py` | Análise estatística |
-| `remove_redundance.py` | `python3 remove_redundance.py` | Limpeza de dados |
-| `cluster.py` | `from cluster import MoleculeClusterer` | Clustering molecular |
-| `descriptors.py` | `from descriptors import MolecularDescriptors` | Cálculo descritores |
+| `comparative_analysis.py` | `python3 comparative_analysis.py` | Statistical analysis |
+| `remove_redundance.py` | `python3 remove_redundance.py` | Data cleaning |
+| `cluster.py` | `from cluster import MoleculeClusterer` | Molecular clustering |
+| `descriptors.py` | `from descriptors import MolecularDescriptors` | Descriptor calculation |
 
-**🎯 DICA**: Comece com `comparative_analysis.py` ou `remove_redundance.py` para ver os scripts em ação!
+**🎯 TIP**: Start with `comparative_analysis.py` or `remove_redundance.py` to see the scripts in action!

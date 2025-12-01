@@ -190,6 +190,10 @@ tmp/
 # Test datasets (keep structure but ignore data)
 tests/datasets/*.tsv
 tests/datasets/*.csv
+tests/datasets/datasets/
+
+# Model files (large binary files)
+model_files/
 
 # macOS system files
 .DS_Store
