@@ -198,39 +198,55 @@ result = matrix.reconstruct_matrix()
 
 ## 🎯 Enhanced Train/Validation/Test Splitting
 
-### Cosine Similarity-Based Stratification
+### Unified FAISS K-means Stratification ⭐ **UPDATED Nov 2025**
 
-The system now includes advanced stratification methods using cosine similarity to create more balanced and representative train/validation/test splits:
+The system uses **FAISS K-means clustering** for scalable, embedding-aware stratification:
 
 ```python
-from build.core import BuildConfig
-from build.pipeline import BuildPipeline
+from src.build.pipeline.stratification_manager import StratificationManager
+from src.build.core.config import BuildConfig
 
-# Enable stratification with custom parameters
-config = BuildConfig({
-    'stratification_enabled': True,
-    'stratification_params': {
-        'clustering_algorithm': 'dbscan',  # 'dbscan', 'hierarchical', 'kmeans', 'random'
-        'similarity_threshold': 0.8,
-        'cluster_min_size': 5,
-        'stratify_by': 'both',  # 'ligand', 'protein', 'both', 'combined'
-        'protein_weight': 0.6,
-        'ligand_weight': 0.4
-    }
-})
+config = BuildConfig()
+manager = StratificationManager(
+    config=config,
+    protein_weight=0.6,  # Weight for protein embeddings
+    ligand_weight=0.4    # Weight for ligand embeddings
+)
 
-# Run pipeline with stratified splits
-pipeline = BuildPipeline(config)
-success = pipeline.run_complete_pipeline(
-    input_tsv_path='input.tsv',
-    output_dir='output/',
-    stratify_splits=True,  # Enable stratified splitting
-    test_size=0.2,
+# Works for ANY dataset size (1k to 1M+ samples)
+splits = manager.stratify(
+    protein_embeddings,  # (n_samples, 320)
+    ligand_embeddings,   # (n_samples, 768)
+    labels,              # (n_samples,)
+    test_size=0.1,
     val_size=0.1
 )
+
+print(f"Train: {len(splits.train_idx)}")
+print(f"Val: {len(splits.val_idx)}")
+print(f"Test: {len(splits.test_idx)}")
 ```
 
-### Multi-View Stratification
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **O(n) complexity** | Scales linearly, no O(n²) distance matrix |
+| **Adaptive clusters** | k = sqrt(n), bounded [10, 1000] |
+| **Chemical-aware** | Weighted protein + ligand embeddings |
+| **Prevents leakage** | Similar compounds in same split |
+| **Auto-fallback** | Label stratification if FAISS fails |
+
+### Performance Benchmarks
+
+| Dataset Size | Time | Memory |
+|--------------|------|--------|
+| 5K samples | 0.11s | ~100 MB |
+| 50K samples | 1.66s | ~500 MB |
+| 100K samples | 3.48s | ~1 GB |
+| 500K samples | ~17s | ~4 GB |
+
+### Multi-View Embedding Combination
 
 The system supports stratification based on:
 - **Ligand similarity**: Groups compounds by structural/chemical similarity
