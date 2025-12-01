@@ -908,6 +908,8 @@ class IntegratedPipeline:
                 return str(obj)
             elif hasattr(obj, '_asdict'):  # NamedTuple
                 return json_serializable(obj._asdict())
+            elif hasattr(obj, 'to_json_dict'):  # SplitIndices and similar
+                return json_serializable(obj.to_json_dict())
             elif hasattr(obj, 'to_dict'):
                 return json_serializable(obj.to_dict())
             elif hasattr(obj, '__dict__') and not isinstance(obj, type):
