@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 
-def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False):
+def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, use_pchembl=True):
     """
     Prepara targets de regressão com priorização de medidas.
     
@@ -24,9 +24,13 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False):
         verbose: Mostrar informações
         keep_all: Se True, mantém TODAS as medidas (sem remover duplicatas).
                   Use True quando já tiver splits pré-definidos.
+        use_pchembl: Se True, usa pChEMBL value (-log10 do valor em Molar).
+                     Isso é RECOMENDADO para regressão pois os valores de
+                     Ki/IC50 variam em várias ordens de magnitude.
+                     Se pchembl_value não existir, calcula automaticamente.
         
     Returns:
-        y: Array com valores em nM
+        y: Array com valores (pChEMBL se use_pchembl=True, senão nM)
         df_filtered: DataFrame filtrado (1 linha por composto se keep_all=False)
         measure_types: Array com tipo de medida usada para cada amostra
         kept_indices: Índices das linhas mantidas no DataFrame original
@@ -74,9 +78,55 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False):
             df_filtered = df_valid.copy()
     
     # Extrair targets e índices originais
-    y = df_filtered['standard_value'].values
     measure_types = df_filtered['standard_type'].values
     kept_indices = df_filtered['_original_index'].values
+    
+    # Escolher entre pChEMBL (logarítmico) ou valor bruto (nM)
+    if use_pchembl:
+        # Usar pchembl_value se disponível, senão calcular a partir de standard_value
+        if 'pchembl_value' in df_filtered.columns:
+            # Tentar usar pchembl_value existente
+            pchembl_series = pd.to_numeric(df_filtered['pchembl_value'], errors='coerce')
+            standard_series = pd.to_numeric(df_filtered['standard_value'], errors='coerce')
+            
+            # Calcular pchembl para valores faltantes: pChEMBL = -log10(nM * 1e-9) = 9 - log10(nM)
+            missing_mask = pchembl_series.isna() & standard_series.notna() & (standard_series > 0)
+            pchembl_series.loc[missing_mask] = 9 - np.log10(standard_series.loc[missing_mask])
+            
+            # Filtrar amostras com valores válidos
+            valid_mask = pchembl_series.notna()
+            if valid_mask.sum() < len(df_filtered):
+                n_invalid = len(df_filtered) - valid_mask.sum()
+                if verbose:
+                    print(f'   ⚠️  Removendo {n_invalid} amostras sem pChEMBL válido')
+                df_filtered = df_filtered[valid_mask].copy()
+                pchembl_series = pchembl_series[valid_mask]
+                measure_types = measure_types[valid_mask.values]
+                kept_indices = kept_indices[valid_mask.values]
+            
+            y = pchembl_series.values
+        else:
+            # Calcular pchembl a partir de standard_value
+            standard_series = pd.to_numeric(df_filtered['standard_value'], errors='coerce')
+            valid_mask = standard_series.notna() & (standard_series > 0)
+            
+            if valid_mask.sum() < len(df_filtered):
+                n_invalid = len(df_filtered) - valid_mask.sum()
+                if verbose:
+                    print(f'   ⚠️  Removendo {n_invalid} amostras com standard_value inválido')
+                df_filtered = df_filtered[valid_mask].copy()
+                standard_series = standard_series[valid_mask]
+                measure_types = measure_types[valid_mask.values]
+                kept_indices = kept_indices[valid_mask.values]
+            
+            # pChEMBL = -log10(nM * 1e-9) = 9 - log10(nM)
+            y = 9 - np.log10(standard_series.values)
+        
+        value_unit = 'pChEMBL'
+    else:
+        # Usar valor bruto em nM (comportamento anterior)
+        y = df_filtered['standard_value'].values
+        value_unit = 'nM'
     
     # Remover colunas temporárias
     columns_to_drop = ['_priority', '_original_index']
@@ -90,11 +140,14 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False):
             pct = (count / len(measure_types)) * 100
             print(f'      {measure}: {count:,} ({pct:.1f}%)')
         
-        print(f'\n   Estatísticas dos valores (nM):')
+        print(f'\n   Estatísticas dos valores ({value_unit}):')
         print(f'      Min:    {y.min():.2f}')
         print(f'      Mediana: {np.median(y):.2f}')
         print(f'      Média:  {y.mean():.2f}')
         print(f'      Max:    {y.max():.2f}')
+        
+        if use_pchembl:
+            print(f'\n   ℹ️  Usando escala pChEMBL (logarítmica) - recomendado para regressão')
     
     return y, df_filtered, measure_types, kept_indices
 
@@ -231,21 +284,31 @@ if __name__ == '__main__':
         'molregno': [1, 1, 2, 3],
         'seq_id': [10, 10, 20, 30],
         'standard_type': ['IC50', 'Ki', 'Kd', 'Ki'],
-        'standard_value': [500, 300, 800, 1200]
+        'standard_value': [500, 300, 800, 1200],
+        'pchembl_value': [6.3, 6.52, None, 5.92]  # Alguns com pchembl, outros sem
     })
     
-    print('=== Teste com keep_all=False (remove duplicatas) ===')
-    y, df_filtered, types, indices = prepare_regression_targets(df_test, keep_all=False)
+    print('=== Teste com use_pchembl=True (padrão) ===')
+    y, df_filtered, types, indices = prepare_regression_targets(df_test, keep_all=False, use_pchembl=True)
     print('\nResultados:')
-    print(f'y: {y}')
+    print(f'y (pChEMBL): {y}')
     print(f'types: {types}')
     print(f'indices: {indices}')
-    print(f'df_filtered:\n{df_filtered}')
     
-    print('\n=== Teste com keep_all=True (mantém todas) ===')
-    y2, df_filtered2, types2, indices2 = prepare_regression_targets(df_test, keep_all=True)
+    print('\n=== Teste com use_pchembl=False (valores brutos em nM) ===')
+    y2, df_filtered2, types2, indices2 = prepare_regression_targets(df_test, keep_all=False, use_pchembl=False)
     print('\nResultados:')
-    print(f'y: {y2}')
+    print(f'y (nM): {y2}')
     print(f'types: {types2}')
-    print(f'indices: {indices2}')
-    print(f'df_filtered:\n{df_filtered2}')
+    
+    print('\n=== Teste sem coluna pchembl_value (deve calcular automaticamente) ===')
+    df_test_no_pchembl = pd.DataFrame({
+        'molregno': [1, 2, 3],
+        'seq_id': [10, 20, 30],
+        'standard_type': ['Ki', 'Ki', 'IC50'],
+        'standard_value': [100, 1000, 10000]  # Esperado: pChEMBL = 7.0, 6.0, 5.0
+    })
+    y3, df_filtered3, types3, indices3 = prepare_regression_targets(df_test_no_pchembl, use_pchembl=True)
+    print('\nResultados:')
+    print(f'y (pChEMBL calculado): {y3}')
+    print(f'Esperado: [7.0, 6.0, 5.0]')
