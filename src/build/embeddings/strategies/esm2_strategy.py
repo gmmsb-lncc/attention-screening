@@ -37,6 +37,7 @@ class ESM2Strategy(BaseProteinStrategy):
         self.logger = None  # Will be configured when needed
         self._cache_dir = None
         self._offload_folder = None
+        self._model_name = None  # Store model name for max_length lookup
     
     def load(
         self, 
@@ -63,6 +64,9 @@ class ESM2Strategy(BaseProteinStrategy):
         """
         # Configure logger if provided
         self.logger = kwargs.get('logger')
+        
+        # Store model name for later use (max_length lookup)
+        self._model_name = model_name
         
         # Validate model
         if model_name not in ESM_MODELS:
@@ -149,8 +153,8 @@ class ESM2Strategy(BaseProteinStrategy):
         if not clean_sequence:
             raise EmbeddingError("Sequence contains no valid amino acids")
         
-        # Truncate if necessary
-        max_len = self.get_max_length(model.args.arch if hasattr(model, 'args') else model.__class__.__name__)
+        # Truncate if necessary - use stored model name for correct max_length
+        max_len = self.get_max_length(self._model_name)
         
         if len(clean_sequence) > max_len:
             if self.logger:
@@ -262,8 +266,8 @@ class ESM2Strategy(BaseProteinStrategy):
         if not clean_sequence:
             raise EmbeddingError("Sequence contains no valid amino acids")
         
-        # Truncate if necessary
-        max_len = self.get_max_length(model.args.arch if hasattr(model, 'args') else model.__class__.__name__)
+        # Truncate if necessary - use stored model name for correct max_length
+        max_len = self.get_max_length(self._model_name)
         
         if len(clean_sequence) > max_len:
             if self.logger:
@@ -425,10 +429,21 @@ class ESM2Strategy(BaseProteinStrategy):
             # Carregar modelo sem mover para device
             model, alphabet = esm_module.pretrained.load_model_and_alphabet(model_name)
             
-            # Calcular memória balanceada (20GB GPU + 30GB CPU)
+            # Detect available GPU memory dynamically
+            if torch.cuda.is_available():
+                gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                # Reserve 20% for overhead, use 80% of available memory
+                usable_gpu_memory = int(gpu_memory_gb * 0.8)
+                gpu_memory_str = f"{usable_gpu_memory}GiB"
+                if self.logger:
+                    self.logger.info(f"   GPU memory detected: {gpu_memory_gb:.1f}GB, using: {usable_gpu_memory}GB")
+            else:
+                gpu_memory_str = "0GiB"
+            
+            # Calcular memória balanceada (dynamic GPU + 30GB CPU)
             max_memory = get_balanced_memory(
                 model,
-                max_memory={0: "20GiB", "cpu": "30GiB"},
+                max_memory={0: gpu_memory_str, "cpu": "30GiB"},
                 no_split_module_classes=["TransformerLayer"]
             )
             
