@@ -722,7 +722,8 @@ class BuildPipeline(BaseBuilder):
                 # Load labels for stratification
                 labels_path = Path(self.results['label_generation']['interaction_labels']['path']).with_suffix('.npy')
                 self.logger.info(f"Loading labels from: {labels_path}")
-                labels = np.load(str(labels_path))
+                # Use allow_pickle=True because labels contain mixed types (int, string, float)
+                labels = np.load(str(labels_path), allow_pickle=True)
                 
                 # Perform stratification using StratificationManager
                 stratification_manager = self.components['stratification_manager']
