@@ -22,8 +22,20 @@ import os
 import sys
 from pathlib import Path
 
-# Adicionar src ao path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# =============================================================================
+# CRITICAL: Pre-import ESM before any other imports to avoid segfault
+# The local ESM must be loaded before any other module imports it differently
+# =============================================================================
+_project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(_project_root / "llm" / "ESM"))
+try:
+    import esm as _esm_preload
+    print(f"[ESM PRE-LOAD] ✅ ESM loaded from: {_esm_preload.__file__}")
+except ImportError:
+    print("[ESM PRE-LOAD] ⚠️ Failed to pre-load ESM, will try later")
+
+# Now add src to path
+sys.path.insert(0, str(_project_root))
 
 from src.integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
@@ -92,36 +104,38 @@ def run_integrated_pipeline():
     print("EXECUÇÃO DO INTEGRATED PIPELINE")
     print("=" * 80)
     
-    # Configuração
+    # Configuration
     config = IntegratedConfig(
         input_tsv="tests/datasets/kinase_non_human_compounds.tsv",
         output_dir="results/demo_kinase_non_human",
         
         # Build settings
-        esm_model="esm2_t6_8M_UR50D",  # Modelo pequeno para demonstração
-        device="cpu",  # Usar GPU se disponível: "cuda" ou "mps"
+        esm_model="esm2_t6_8M_UR50D",  # Small model for demonstration
+        device="cpu",  # Use CPU (MPS causes segfault with fair-esm)
         
         # Classification settings
         run_classification=True,
-        active_threshold=1000.0,  # 1000 nM
+        use_multi_model_classification=True,  # Use sklearn models instead of MLP (avoids PySpark)
+        classification_models=['RandomForest', 'GradientBoosting', 'LogisticRegression', 'SVM'],  # Top 4 sklearn models
+        binary_threshold=1000.0,  # 1000 nM
         
         # Regression settings
         run_regression=True,
-        regression_models=['Ridge', 'Lasso', 'RandomForest', 'XGBoost'],  # Top 4 modelos
+        regression_models=['Ridge', 'Lasso', 'RandomForest', 'XGBoost'],  # Top 4 models
         
         # General settings
-        random_state=42,
-        n_jobs=-1  # Usar todos os CPUs disponíveis
+        random_state=42
     )
     
-    print(f"\n⚙️  Configuração:")
+    print(f"\n⚙️  Configuration:")
     print(f"  • Input: {config.input_tsv}")
     print(f"  • Output: {config.output_dir}")
     print(f"  • ESM Model: {config.esm_model}")
     print(f"  • Device: {config.device}")
-    print(f"  • Classification: {'✅ Enabled' if config.run_classification else '❌ Disabled'}")
+    print(f"  • Classification: {'✅ Enabled (Multi-Model)' if config.run_classification else '❌ Disabled'}")
+    print(f"  • Classification Models: {', '.join(config.classification_models)}")
     print(f"  • Regression: {'✅ Enabled' if config.run_regression else '❌ Disabled'}")
-    print(f"  • Active Threshold: {config.active_threshold} nM")
+    print(f"  • Binary Threshold: {config.binary_threshold} nM")
     print(f"  • Regression Models: {', '.join(config.regression_models)}")
     
     # Inicializar pipeline
