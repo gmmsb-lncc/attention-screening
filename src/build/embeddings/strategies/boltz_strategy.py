@@ -7,6 +7,7 @@ for inference and extracts embeddings from intermediate representations.
 
 Key Features:
 - CLI-based execution (subprocess wrapper around `boltz predict`)
+- Supports local Boltz installation in llm/BOLTZ-2/boltz-main/
 - Extracts trunk representations (s and z) from Pairformer blocks
 - MSA generation via ColabFold server (--use_msa_server)
 - Compatible with DockTKinase embedding concatenation pipeline
@@ -28,6 +29,7 @@ License: Apache 2.0
 """
 
 import sys
+import os
 import logging
 import subprocess
 import tempfile
@@ -41,6 +43,77 @@ import torch
 import numpy as np
 
 from src.build.embeddings.strategies.base_protein_strategy import BaseProteinStrategy
+
+
+# =============================================================================
+# BOLTZ LOCAL PATH DISCOVERY
+# =============================================================================
+
+def _find_boltz_local_path() -> Optional[Path]:
+    """
+    Find local Boltz installation path.
+    
+    Search order:
+    1. llm/BOLTZ-2/boltz-main/src (relative to project root)
+    2. ../llm/BOLTZ-2/boltz-main/src (if running from src/)
+    3. Environment variable BOLTZ_HOME
+    
+    Returns:
+        Path to Boltz src directory if found, None otherwise
+    """
+    # Get project root (docktkinase)
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parent.parent.parent.parent.parent  # strategies -> embeddings -> build -> src -> docktkinase
+    
+    # Possible paths to check
+    possible_paths = [
+        project_root / "llm" / "BOLTZ-2" / "boltz-main" / "src",
+        project_root / "llm" / "BOLTZ-2" / "boltz-main",
+        project_root.parent / "llm" / "BOLTZ-2" / "boltz-main" / "src",
+        Path.home() / "llm" / "BOLTZ-2" / "boltz-main" / "src",
+    ]
+    
+    # Check environment variable
+    if os.environ.get("BOLTZ_HOME"):
+        boltz_home = Path(os.environ["BOLTZ_HOME"])
+        possible_paths.insert(0, boltz_home / "src")
+        possible_paths.insert(0, boltz_home)
+    
+    for path in possible_paths:
+        boltz_module = path / "boltz" if path.name == "src" else path / "src" / "boltz"
+        if boltz_module.exists() and (boltz_module / "__init__.py").exists():
+            return path if path.name == "src" else path / "src"
+    
+    return None
+
+
+def _get_boltz_cli_path() -> Optional[str]:
+    """
+    Get the path to boltz CLI command.
+    
+    Returns:
+        Path to boltz CLI if found, None otherwise
+    """
+    # Check if boltz is in PATH
+    try:
+        result = subprocess.run(
+            ["which", "boltz"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    
+    # Check local installation
+    boltz_src = _find_boltz_local_path()
+    if boltz_src:
+        # Boltz can be run as a Python module
+        return f"python -m boltz"
+    
+    return None
 
 
 # =============================================================================
@@ -66,7 +139,7 @@ DEFAULT_POOLING = 'mean'
 # Valid amino acids (standard 20 + special tokens)
 VALID_AMINO_ACIDS = set('ACDEFGHIKLMNPQRSTVWY')
 
-# Boltz CLI command
+# Boltz CLI command (will be set dynamically based on local installation)
 BOLTZ_CLI = 'boltz'
 
 # Default MSA server (ColabFold)
@@ -89,13 +162,19 @@ class BoltzStrategy(BaseProteinStrategy):
     and binding affinities. This strategy uses the Boltz CLI tool for inference and
     extracts intermediate embeddings from the model without requiring full forward pass.
     
+    Supports both:
+    - Global CLI installation (pip install boltz[cuda])
+    - Local installation in llm/BOLTZ-2/boltz-main/
+    
     Attributes:
         logger (logging.Logger): Logger instance for tracking operations
         cli_available (bool): Whether Boltz CLI is installed
+        boltz_src_path (Path): Path to local Boltz src directory (if using local)
         output_dir (Path): Temporary directory for Boltz outputs
         use_msa (bool): Whether to use MSA generation
         msa_server (str): MSA server URL (ColabFold compatible)
         device (torch.device): Device for computation (CPU/CUDA/MPS)
+        use_local_boltz (bool): Whether using local Boltz installation
     
     Example:
         >>> strategy = BoltzStrategy(logger=custom_logger, use_msa=True)
@@ -125,6 +204,9 @@ class BoltzStrategy(BaseProteinStrategy):
         self.use_msa = use_msa
         self.msa_server = msa_server
         self.device = None
+        self.use_local_boltz = False
+        self.boltz_src_path = None
+        self.boltz_cli_cmd = None  # Will be set in load()
     
     def load(
         self,
@@ -135,9 +217,12 @@ class BoltzStrategy(BaseProteinStrategy):
         """
         Initialize Boltz-2 CLI environment and validate installation.
         
-        This method checks if the Boltz CLI is installed and creates a temporary
-        directory for storing Boltz outputs. Unlike ESM/OpenFold strategies, no
-        model is loaded into memory - inference happens via CLI subprocess.
+        This method checks if the Boltz CLI is installed (globally or locally)
+        and creates a temporary directory for storing Boltz outputs.
+        
+        Search order:
+        1. Local installation in llm/BOLTZ-2/boltz-main/
+        2. Global CLI installation (pip install boltz[cuda])
         
         Args:
             model_name: Name of the model (should be 'boltz2')
@@ -160,23 +245,61 @@ class BoltzStrategy(BaseProteinStrategy):
         
         self.logger.info(f"Initializing Boltz-2 CLI environment for '{model_name}'")
         
-        # Check if Boltz CLI is installed
-        try:
-            result = subprocess.run(
-                [BOLTZ_CLI, '--version'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            self.cli_available = (result.returncode == 0)
-            if self.cli_available:
-                version = result.stdout.strip() or result.stderr.strip()
-                self.logger.info(f"✓ Boltz CLI found: {version}")
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
-            raise RuntimeError(
-                f"Boltz CLI not found. Please install: pip install boltz[cuda]\n"
-                f"Error: {e}"
-            ) from e
+        # First, try to find local Boltz installation
+        self.boltz_src_path = _find_boltz_local_path()
+        
+        if self.boltz_src_path:
+            self.logger.info(f"✓ Found local Boltz installation: {self.boltz_src_path}")
+            self.use_local_boltz = True
+            self.cli_available = True
+            
+            # Verify the local installation works
+            try:
+                # Add to sys.path temporarily to verify import
+                if str(self.boltz_src_path) not in sys.path:
+                    sys.path.insert(0, str(self.boltz_src_path))
+                
+                import boltz
+                version = getattr(boltz, '__version__', 'unknown')
+                self.logger.info(f"✓ Boltz module version: {version}")
+            except ImportError as e:
+                self.logger.warning(f"⚠️  Local Boltz import failed: {e}")
+                self.use_local_boltz = False
+                self.cli_available = False
+        
+        # If local not available, try global CLI
+        if not self.cli_available:
+            try:
+                result = subprocess.run(
+                    [BOLTZ_CLI, '--version'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                self.cli_available = (result.returncode == 0)
+                if self.cli_available:
+                    version = result.stdout.strip() or result.stderr.strip()
+                    self.logger.info(f"✓ Boltz CLI found (global): {version}")
+                    self.boltz_cli_cmd = [BOLTZ_CLI]
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                # Provide helpful error message with local path info
+                local_path_info = ""
+                if self.boltz_src_path:
+                    local_path_info = f"\nLocal installation found at: {self.boltz_src_path} but import failed."
+                
+                raise RuntimeError(
+                    f"Boltz CLI not found. Options to install:\n"
+                    f"  1. pip install boltz[cuda]  (global installation)\n"
+                    f"  2. Clone to llm/BOLTZ-2/boltz-main/ and pip install -e .\n"
+                    f"  3. Set BOLTZ_HOME environment variable{local_path_info}\n"
+                    f"Error: {e}"
+                ) from e
+        
+        # Set up CLI command for local installation
+        if self.use_local_boltz:
+            # Use Python to run the boltz module directly
+            self.boltz_cli_cmd = [sys.executable, "-m", "boltz"]
+            self.logger.info(f"✓ Using local Boltz via: {' '.join(self.boltz_cli_cmd)}")
         
         # Create temporary output directory
         self.output_dir = Path(tempfile.mkdtemp(prefix='boltz_'))
@@ -488,13 +611,20 @@ class BoltzStrategy(BaseProteinStrategy):
         """
         Execute Boltz CLI predict command.
         
-        Command format:
+        Supports both global CLI and local Python module execution.
+        
+        Command format (global CLI):
         ```bash
         boltz predict input.yaml \\
             --out_dir output/ \\
             --recycling_steps 3 \\
             --sampling_steps 200 \\
             [--use_msa_server]
+        ```
+        
+        Command format (local module):
+        ```bash
+        python -m boltz predict input.yaml ...
         ```
         
         Args:
@@ -505,8 +635,14 @@ class BoltzStrategy(BaseProteinStrategy):
         Raises:
             RuntimeError: If CLI execution fails
         """
-        cmd = [
-            BOLTZ_CLI, 'predict',
+        # Build command based on installation type
+        if self.boltz_cli_cmd:
+            cmd = self.boltz_cli_cmd.copy()
+        else:
+            cmd = [BOLTZ_CLI]
+        
+        cmd.extend([
+            'predict',
             str(yaml_path),
             '--out_dir', str(self.output_dir),
             '--recycling_steps', str(recycling_steps),
@@ -515,7 +651,7 @@ class BoltzStrategy(BaseProteinStrategy):
             '--write_embeddings',  # Write embeddings to npz file
             '--accelerator', 'cpu' if self.device.type == 'cpu' else 'gpu',
             '--no_kernels'  # Disable CUDA kernels (avoids cuequivariance-ops-torch dependency)
-        ]
+        ])
         
         # Add MSA server if enabled
         if self.use_msa:
@@ -529,13 +665,21 @@ class BoltzStrategy(BaseProteinStrategy):
         # Set timeout based on MSA usage
         timeout = 1200 if self.use_msa else 600  # 20 min with MSA, 10 min without
         
+        # Set up environment for local Boltz
+        env = os.environ.copy()
+        if self.use_local_boltz and self.boltz_src_path:
+            # Add Boltz src to PYTHONPATH
+            pythonpath = env.get('PYTHONPATH', '')
+            env['PYTHONPATH'] = f"{self.boltz_src_path}:{pythonpath}"
+        
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                check=True
+                check=True,
+                env=env
             )
             
             self.logger.debug(f"Boltz CLI stdout:\n{result.stdout}")
@@ -545,7 +689,7 @@ class BoltzStrategy(BaseProteinStrategy):
         
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
-                f"Boltz CLI execution timeout (600s). Try reducing sequence length.\n"
+                f"Boltz CLI execution timeout ({timeout}s). Try reducing sequence length.\n"
                 f"Command: {' '.join(cmd)}"
             ) from e
         
@@ -782,11 +926,23 @@ class BoltzStrategy(BaseProteinStrategy):
 
 def validate_boltz_installation() -> bool:
     """
-    Check if Boltz CLI is installed and accessible.
+    Check if Boltz CLI is installed and accessible (locally or globally).
     
     Returns:
         True if Boltz CLI is available, False otherwise
     """
+    # First check local installation
+    boltz_src = _find_boltz_local_path()
+    if boltz_src:
+        try:
+            if str(boltz_src) not in sys.path:
+                sys.path.insert(0, str(boltz_src))
+            import boltz
+            return True
+        except ImportError:
+            pass
+    
+    # Then check global CLI
     try:
         result = subprocess.run(
             [BOLTZ_CLI, '--version'],
@@ -805,6 +961,18 @@ def get_boltz_version() -> Optional[str]:
     Returns:
         Version string or None if not installed
     """
+    # First check local installation
+    boltz_src = _find_boltz_local_path()
+    if boltz_src:
+        try:
+            if str(boltz_src) not in sys.path:
+                sys.path.insert(0, str(boltz_src))
+            import boltz
+            return f"local: {getattr(boltz, '__version__', 'unknown')}"
+        except ImportError:
+            pass
+    
+    # Then check global CLI
     try:
         result = subprocess.run(
             [BOLTZ_CLI, '--version'],
