@@ -67,6 +67,16 @@ class ModelEvaluator:
         all_preds = np.array(all_preds)
         all_probs = np.array(all_probs)
         
+        # Handle empty dataloader case
+        if total == 0:
+            self.logger.warning("Empty dataloader - returning zero metrics")
+            return {
+                'loss': 0.0, 'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0,
+                'f1': 0.0, 'roc_auc': 0.5, 'specificity': 0.0, 'mcc': 0.0,
+                'fbeta_0.5': 0.0, 'fbeta_2': 0.0, 'avg_precision': 0.0,
+                'confusion_matrix': {'TP': 0, 'TN': 0, 'FP': 0, 'FN': 0}
+            }
+        
         # Cálculo das métricas - EXATAMENTE como no original
         acc = correct / total
         precision = np.sum((all_preds == 1) & (all_labels == 1)) / max(1, np.sum(all_preds == 1))
