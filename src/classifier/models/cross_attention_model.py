@@ -16,7 +16,7 @@ Date: November 2025
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Literal
 import logging
 import math
 
@@ -24,6 +24,19 @@ try:
     from .base_model import BaseClassifier
 except ImportError:
     from base_model import BaseClassifier
+
+try:
+    from .positional_encoding import (
+        SinusoidalPositionalEncoding,
+        RotaryPositionalEmbedding,
+        create_positional_encoding
+    )
+except ImportError:
+    from positional_encoding import (
+        SinusoidalPositionalEncoding,
+        RotaryPositionalEmbedding,
+        create_positional_encoding
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +426,15 @@ class CrossAttentionAffinityModel(BaseClassifier):
     Output format:
         classification_logits: [batch, 1]
         regression_output: [batch, 1]
+    
+    Positional Encoding Options:
+        - 'sinusoidal': Classical Vaswani et al. (2017) - fixed max length
+        - 'rope': Rotary Position Embedding (Su et al., 2021) - unlimited length
+        - None: No positional encoding
+    
+    References:
+        - Vaswani et al. (2017). "Attention Is All You Need". NeurIPS.
+        - Su et al. (2021). "RoFormer: Enhanced Transformer with Rotary PE". arXiv:2104.09864.
     """
     
     def __init__(
@@ -425,10 +447,34 @@ class CrossAttentionAffinityModel(BaseClassifier):
         num_heads: int = 8,           # Attention heads
         ff_dim: int = 1024,           # Feed-forward dimension
         dropout: float = 0.1,
-        max_protein_len: int = 2048,  # Max protein sequence length
-        max_ligand_len: int = 512,    # Max ligand token length
-        use_positional_encoding: bool = True
+        max_protein_len: int = 2048,  # Max protein sequence length (sinusoidal only)
+        max_ligand_len: int = 512,    # Max ligand token length (sinusoidal only)
+        use_positional_encoding: bool = True,
+        positional_encoding_type: Literal['sinusoidal', 'rope'] = 'sinusoidal'
     ):
+        """
+        Initialize CrossAttentionAffinityModel.
+        
+        Args:
+            protein_dim: Input dimension for protein embeddings (e.g., 2560 for ESM-2 3B)
+            ligand_dim: Input dimension for ligand embeddings (e.g., 768 for SMI-TED)
+            hidden_dim: Internal hidden dimension for all layers
+            num_cnn_layers: Number of CNN encoder layers
+            num_cross_attn_layers: Number of cross-attention blocks
+            num_heads: Number of attention heads
+            ff_dim: Feed-forward network dimension
+            dropout: Dropout probability
+            max_protein_len: Maximum protein sequence length (only used for sinusoidal)
+            max_ligand_len: Maximum ligand token length (only used for sinusoidal)
+            use_positional_encoding: Whether to use positional encoding
+            positional_encoding_type: Type of positional encoding:
+                - 'sinusoidal': Classical Vaswani (2017), fixed max length
+                - 'rope': Rotary Position Embedding (Su et al., 2021), unlimited length
+        
+        Note:
+            RoPE is recommended for sequences longer than max_len or when you need
+            variable-length support without truncation.
+        """
         # BaseClassifier expects input_dim, we'll use hidden_dim * 2 (pooled concatenation)
         super().__init__(input_dim=hidden_dim * 2)
         
@@ -436,12 +482,28 @@ class CrossAttentionAffinityModel(BaseClassifier):
         self.ligand_dim = ligand_dim
         self.hidden_dim = hidden_dim
         self.num_cross_attn_layers = num_cross_attn_layers
+        self.positional_encoding_type = positional_encoding_type
         
         # Positional encoding
         self.use_positional_encoding = use_positional_encoding
         if use_positional_encoding:
-            self.protein_pos_enc = PositionalEncoding(hidden_dim, max_protein_len, dropout)
-            self.ligand_pos_enc = PositionalEncoding(hidden_dim, max_ligand_len, dropout)
+            if positional_encoding_type == 'rope':
+                # RoPE: Rotary Position Embedding (Su et al., 2021)
+                # Applied to Q/K in attention, handles any sequence length
+                self.protein_pos_enc = RotaryPositionalEmbedding(
+                    dim=hidden_dim,
+                    max_seq_len_cached=max_protein_len  # Initial cache, auto-extends
+                )
+                self.ligand_pos_enc = RotaryPositionalEmbedding(
+                    dim=hidden_dim,
+                    max_seq_len_cached=max_ligand_len
+                )
+                logger.info(f"Using RoPE positional encoding (unlimited sequence length)")
+            else:
+                # Sinusoidal: Classical Vaswani (2017)
+                self.protein_pos_enc = PositionalEncoding(hidden_dim, max_protein_len, dropout)
+                self.ligand_pos_enc = PositionalEncoding(hidden_dim, max_ligand_len, dropout)
+                logger.info(f"Using Sinusoidal positional encoding (max_len: protein={max_protein_len}, ligand={max_ligand_len})")
         
         # CNN encoders
         self.protein_encoder = CNNEncoder(
@@ -479,7 +541,8 @@ class CrossAttentionAffinityModel(BaseClassifier):
             'num_cross_attn_layers': num_cross_attn_layers,
             'num_heads': num_heads,
             'ff_dim': ff_dim,
-            'dropout': dropout
+            'dropout': dropout,
+            'positional_encoding_type': positional_encoding_type
         }
         
         logger.info(f"CrossAttentionAffinityModel initialized: {self.count_parameters():,} parameters")
