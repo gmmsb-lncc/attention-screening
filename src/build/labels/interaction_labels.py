@@ -135,9 +135,9 @@ class InteractionLabels(BaseLabels):
                 self.logger.error("Empty labels array")
                 return False
             
-            # Check if we have 4 columns (molregno, kinase, type, value)
-            if len(self.labels.shape) != 2 or self.labels.shape[1] != 4:
-                self.logger.error("Labels should have 4 columns")
+            # Check if we have 4 or 5 columns (molregno, kinase, type, value, [pchembl])
+            if len(self.labels.shape) != 2 or self.labels.shape[1] not in (4, 5):
+                self.logger.error(f"Labels should have 4 or 5 columns, got {self.labels.shape[1]}")
                 return False
             
             # Check for missing values in standard_value column
