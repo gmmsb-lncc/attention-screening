@@ -150,10 +150,9 @@ class Stratifier(BaseBuilder):
             manual_threshold = self.similarity_threshold if not self.auto_threshold else None
             
             # Create adaptive clustering strategy
+            # min_clusters defaults to 3 in AdaptiveClustering to ensure proper train/val/test splits
             self.adaptive_clustering = AdaptiveClustering(
                 method=method,
-                min_clusters=5,
-                max_clusters=100,
                 min_cluster_size=self.cluster_min_size,
                 target_cluster_ratio=self.target_cluster_ratio,
                 auto_threshold=self.auto_threshold,
@@ -164,8 +163,6 @@ class Stratifier(BaseBuilder):
             )
             return AdaptiveClusteringStrategy(
                 method=method,
-                min_clusters=5,
-                max_clusters=100,
                 min_cluster_size=self.cluster_min_size,
                 target_cluster_ratio=self.target_cluster_ratio,
                 output_dir=output_dir
