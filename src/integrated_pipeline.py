@@ -96,6 +96,7 @@ class IntegratedConfig:
     run_regression: bool = True
     regression_models: Optional[List[str]] = None
     regression_cv_folds: int = 5
+    use_pchembl: bool = True  # Use pChEMBL scale for regression (recommended)
     
     # Binary threshold
     binary_threshold: float = 1000.0  # nM
@@ -360,7 +361,8 @@ class RegressionPhase:
             val_size=self.config.val_size,
             random_state=self.config.random_state,
             verbose=self.config.verbose,
-            split_indices=build_results.get('split_indices')
+            split_indices=build_results.get('split_indices'),
+            use_pchembl=self.config.use_pchembl
         )
         
         # Load data
