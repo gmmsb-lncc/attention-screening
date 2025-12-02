@@ -275,8 +275,8 @@ class ESMCStrategy(BaseProteinStrategy):
         # Validate and clean sequence
         clean_sequence = self._clean_sequence(sequence)
         
-        # Truncate if needed
-        max_len = self.get_max_length(model.__class__.__name__)
+        # Truncate if needed - use stored model name for correct max_length
+        max_len = self.get_max_length(self.model_name)
         if len(clean_sequence) > max_len:
             if self.logger:
                 self.logger.warning(
@@ -362,8 +362,8 @@ class ESMCStrategy(BaseProteinStrategy):
         # Validate and clean sequence
         clean_sequence = self._clean_sequence(sequence)
         
-        # Truncate if needed
-        max_len = self.get_max_length(model.__class__.__name__)
+        # Truncate if needed - use stored model name for correct max_length
+        max_len = self.get_max_length(self.model_name)
         if len(clean_sequence) > max_len:
             if self.logger:
                 self.logger.warning(
