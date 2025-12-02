@@ -428,6 +428,7 @@ def install_dependencies() -> bool:
         # Protein and Ligand Embeddings
         "transformers>=4.38",     # HuggingFace models (required for ESM)
         "sentencepiece",          # Tokenizer (used by some models)
+        "accelerate>=0.20.0",     # CPU/GPU offloading for large ESM models (15B+)
         
         # Chemistry and Molecules
         "rdkit",                  # Chemistry toolkit (install via pip in env)

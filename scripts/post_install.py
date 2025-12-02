@@ -187,6 +187,43 @@ def install_fm4m_dependencies():
         return False
 
 
+def install_accelerate():
+    """Install accelerate for CPU offloading support with large ESM models."""
+    try:
+        print("\nInstalling accelerate for large model support...")
+        
+        # Try to import first
+        try:
+            import accelerate
+            print(f"✓ accelerate {accelerate.__version__} is already installed")
+            return True
+        except ImportError:
+            pass
+        
+        # Install accelerate
+        print("Installing accelerate...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "accelerate>=0.20.0"],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        if result.returncode == 0:
+            print("✓ Successfully installed accelerate")
+            return True
+        else:
+            print(f"✗ Error installing accelerate: {result.stderr}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("✗ Timeout installing accelerate")
+        return False
+    except Exception as e:
+        print(f"✗ Error installing accelerate: {e}")
+        return False
+
+
 def install_ml_dependencies():
     """Install machine learning dependencies (XGBoost, LightGBM, CatBoost, etc.)."""
     try:
@@ -470,6 +507,9 @@ if __name__ == "__main__":
     print("DockTKinase Post-Install Setup")
     print("=" * 40)
     
+    # Install accelerate for large model CPU offloading
+    accelerate_success = install_accelerate()
+    
     # Install ML dependencies (lightgbm, xgboost, catboost)
     ml_deps_success = install_ml_dependencies()
     
@@ -488,7 +528,7 @@ if __name__ == "__main__":
     # Download ESM model files
     esm_success = download_esm_model()
     
-    if ml_deps_success and fm4m_deps_success and boltz_success and fm4m_success and esm_success:
+    if accelerate_success and ml_deps_success and fm4m_deps_success and boltz_success and fm4m_success and esm_success:
         # Verify downloads
         verify_success = verify_downloads()
         
@@ -497,6 +537,7 @@ if __name__ == "__main__":
             print("✅ Post-install setup completed successfully!")
             print("DockTKinase is ready to use.")
             print("\nInstalled components:")
+            print("  ✓ Accelerate (CPU offloading for large ESM models)")
             print("  ✓ ML dependencies (lightgbm, xgboost, catboost)")
             print("  ✓ FM4M dependencies (torch_nl, ase, torch-scatter)")
             print("  ✓ Boltz-2 dependencies (einx, fairscale, hydra-core, etc.)")
@@ -518,6 +559,8 @@ if __name__ == "__main__":
         print("❌ Post-install setup failed!")
         print("Please check your internet connection and try again.")
         print("\nFailed components:")
+        if not accelerate_success:
+            print("  ✗ Accelerate (CPU offloading)")
         if not ml_deps_success:
             print("  ✗ ML dependencies (lightgbm, xgboost, catboost)")
         if not fm4m_deps_success:
@@ -531,6 +574,8 @@ if __name__ == "__main__":
         if not esm_success:
             print("  ✗ ESM model files")
         print("\nYou can try installing failed components manually:")
+        if not accelerate_success:
+            print("  pip install accelerate>=0.20.0")
         if not ml_deps_success:
             print("  pip install lightgbm xgboost catboost")
         if not fm4m_deps_success:
