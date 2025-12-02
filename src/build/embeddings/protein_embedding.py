@@ -12,10 +12,16 @@ from typing import Dict, Any, List, Tuple, Optional, TYPE_CHECKING, Union
 import numpy as np
 from pathlib import Path
 
-# Adicionar ESM local ao path
-ESM_LOCAL_PATH = Path(__file__).parent.parent.parent.parent / "ESM"
+# Add local ESM to path
+ESM_LOCAL_PATH = Path(__file__).parent.parent.parent.parent / "llm" / "ESM"
 if str(ESM_LOCAL_PATH) not in sys.path:
     sys.path.insert(0, str(ESM_LOCAL_PATH))
+
+# Pre-import ESM from local to avoid segfault issues with strategy loading
+try:
+    import esm as _esm_module
+except ImportError:
+    _esm_module = None
 
 if TYPE_CHECKING:
     from src.build.core import BuildConfig
@@ -88,7 +94,7 @@ class ProteinEmbedding(BaseEmbedding):
         except ImportError as e:
             raise DependencyError(
                 f"ESM is not available in local repository ({ESM_LOCAL_PATH}). "
-                f"Check if ESM/ folder exists and contains source code. Error: {e}"
+                f"Check if llm/ESM/ folder exists and contains source code. Error: {e}"
             )
     
     def _create_strategy(self) -> None:
