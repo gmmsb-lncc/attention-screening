@@ -48,17 +48,17 @@ class ProteinEmbedding(BaseEmbedding):
         Inicializa gerador de embeddings de proteínas.
         
         Args:
-            config: Configuração do sistema build
-            model_name: Nome do modelo ESM
-            use_gpu: Se deve usar GPU quando disponível
-            **kwargs: Argumentos adicionais
+            config: Build system configuration
+            model_name: ESM model name
+            use_gpu: Whether to use GPU when available
+            **kwargs: Additional arguments
         """
-        # Definir atributos antes da inicialização do pai
+        # Define attributes before parent initialization
         self.use_gpu = use_gpu
         self.device = None
-        self.alphabet = None  # Será configurado pela estratégia
+        self.alphabet = None  # Will be configured by strategy
         self.batch_converter = None
-        self.strategy: Optional[BaseProteinStrategy] = None  # Estratégia de modelo
+        self.strategy: Optional[BaseProteinStrategy] = None  # Model strategy
             
         super().__init__(model_name=model_name, config=config, **kwargs)
         
@@ -69,94 +69,94 @@ class ProteinEmbedding(BaseEmbedding):
         self._create_strategy()
     
     def _check_dependencies(self) -> None:
-        """Verifica se dependências estão disponíveis."""
+        """Check if dependencies are available."""
         try:
             import torch
             self.torch = torch
             self.torch_available = True
         except ImportError:
             raise DependencyError(
-                "PyTorch não está disponível. Instale com: pip install torch"
+                "PyTorch is not available. Install with: pip install torch"
             )
         
         try:
-            # Importar ESM do código fonte local
+            # Import ESM from local source code
             import esm
             self.esm = esm
             self.esm_available = True
-            self.logger.info(f"ESM carregado do código fonte local: {ESM_LOCAL_PATH}")
+            self.logger.info(f"ESM loaded from local source code: {ESM_LOCAL_PATH}")
         except ImportError as e:
             raise DependencyError(
-                f"ESM não está disponível no repositório local ({ESM_LOCAL_PATH}). "
-                f"Verifique se a pasta ESM/ existe e contém o código fonte. Erro: {e}"
+                f"ESM is not available in local repository ({ESM_LOCAL_PATH}). "
+                f"Check if ESM/ folder exists and contains source code. Error: {e}"
             )
     
     def _create_strategy(self) -> None:
         """
-        Cria estratégia apropriada usando factory.
+        Create appropriate strategy using factory.
         
         Raises:
-            ValueError: Se modelo não for suportado
+            ValueError: If model is not supported
         """
         try:
             factory = ProteinModelFactory()
             self.strategy = factory.create_strategy(self.model_name)
-            self.logger.info(f"✅ Estratégia criada: {self.strategy.__class__.__name__}")
+            self.logger.info(f"✅ Strategy created: {self.strategy.__class__.__name__}")
         except ValueError as e:
-            raise EmbeddingError(f"Falha ao criar estratégia: {e}")
+            raise EmbeddingError(f"Failed to create strategy: {e}")
     
     def _validate_config(self) -> None:
-        """Valida configuração específica para embeddings de proteínas."""
+        """Validate configuration specific to protein embeddings."""
         super()._validate_config()
         
-        # Validar modelo
+        # Validate model
         if self.model_name not in ESM_MODELS:
-            raise EmbeddingError(f"Modelo ESM inválido: {self.model_name}. Modelos disponíveis: {list(ESM_MODELS.keys())}")
+            raise EmbeddingError(f"Invalid ESM model: {self.model_name}. Available models: {list(ESM_MODELS.keys())}")
         
-        # Verificar configuração de GPU (CUDA ou MPS)
+        # Check GPU configuration (CUDA or MPS)
         if self.use_gpu:
             import torch
             has_cuda = torch.cuda.is_available()
             has_mps = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
             
             if not (has_cuda or has_mps):
-                self.logger.warning("GPU solicitada mas não disponível. Usando CPU.")
+                self.logger.warning("GPU requested but not available. Using CPU.")
                 self.use_gpu = False
             elif has_mps and not has_cuda:
-                self.logger.info("✨ Usando MPS (Metal Performance Shaders) para aceleração GPU")
+                self.logger.info("✨ Using MPS (Metal Performance Shaders) for GPU acceleration")
     
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
-        """Retorna modelos ESM suportados."""
+        """Return supported ESM models."""
         return ESM_MODELS.copy()
     
     def _load_model(self) -> Any:
         """
-        Carrega modelo usando estratégia apropriada.
+        Load model using appropriate strategy.
         
-        REFATORADO: Delega para strategy.load() ao invés de código direto.
+        REFACTORED: Delegates to strategy.load() instead of direct code.
         """
-        self.logger.info(f"Configurando dispositivo...")
+        self.logger.info(f"Configuring device...")
         
-        # Configurar cache local para modelos ESM
+        # Configure local cache for ESM models
         import os
         cache_dir = Path(__file__).parent.parent.parent.parent / "llm" / "models_cache" / "ESM"
         cache_dir.mkdir(parents=True, exist_ok=True)
         offload_folder = cache_dir / "offload"
         
-        # Configurar dispositivo (prioridade: CUDA > MPS > CPU)
+        # Configure device (priority: CUDA > MPS > CPU)
         if self.use_gpu:
             if self.torch.cuda.is_available():
                 self.device = self.torch.device("cuda")
-                self.logger.info(f"Usando GPU CUDA: {self.torch.cuda.get_device_name()}")
+                self.logger.info(f"Using CUDA GPU: {self.torch.cuda.get_device_name()}")
             elif hasattr(self.torch.backends, 'mps') and self.torch.backends.mps.is_available():
                 self.device = self.torch.device("mps")
-                self.logger.info("✨ Usando GPU MPS (Metal Performance Shaders - Apple Silicon)")
+                self.logger.info("✨ Using MPS GPU (Metal Performance Shaders - Apple Silicon)")
             else:
                 self.device = self.torch.device("cpu")
-                self.logger.info("Usando CPU")
+                self.logger.info("Using CPU")
         else:
             self.device = self.torch.device("cpu")
-            self.logger.info("Usando CPU")
+            self.logger.info("Using CPU")
         
         # Delegar carregamento para estratégia
         model, self.alphabet = self.strategy.load(
@@ -268,64 +268,64 @@ class ProteinEmbedding(BaseEmbedding):
         Processa arquivo FASTA com sequências de proteínas.
         
         Args:
-            fasta_file: Arquivo FASTA de entrada
-            output_dir: Diretório de saída
-            batch_size: Tamanho do batch
+            fasta_file: Input FASTA file
+            output_dir: Output directory
+            batch_size: Batch size
             
         Returns:
-            Tupla (sucessos, falhas)
+            Tuple (successes, failures)
         """
         sequences = self._read_fasta_file(fasta_file)
         
         if not sequences:
-            raise EmbeddingError(f"Nenhuma sequência encontrada em {fasta_file}")
+            raise EmbeddingError(f"No sequences found in {fasta_file}")
         
-        self.logger.info(f"Processando {len(sequences)} sequências de {fasta_file}")
+        self.logger.info(f"Processing {len(sequences)} sequences from {fasta_file}")
         
-        # Preparar saída
+        # Prepare output
         output_path = ensure_directory(output_dir)
         
-        sucessos = 0
-        falhas = 0
+        successes = 0
+        failures = 0
         
         # Progress logger
         progress_logger = ProgressLogger(
             self.logger,
             len(sequences),
-            "Processando sequências FASTA"
+            "Processing FASTA sequences"
         )
         
         for seq_id, sequence in sequences:
             try:
-                # Verificar se já existe
+                # Check if already exists
                 output_file = output_path / f"{seq_id}_embedding.npy"
                 if output_file.exists():
-                    self.logger.debug(f"Embedding já existe, pulando: {seq_id}")
-                    sucessos += 1
+                    self.logger.debug(f"Embedding already exists, skipping: {seq_id}")
+                    successes += 1
                     progress_logger.update()
                     continue
                 
-                # Gerar embedding
+                # Generate embedding
                 embedding = self.generate_embedding(sequence)
                 
-                # Salvar
+                # Save
                 np.save(output_file, embedding)
-                sucessos += 1
+                successes += 1
                 
             except Exception as e:
-                self.logger.error(f"Erro ao processar sequência {seq_id}: {e}")
-                falhas += 1
+                self.logger.error(f"Error processing sequence {seq_id}: {e}")
+                failures += 1
             
             progress_logger.update()
         
         progress_logger.finish()
-        self.logger.info(f"Processamento FASTA concluído: {sucessos} sucessos, {falhas} falhas")
+        self.logger.info(f"FASTA processing completed: {successes} successes, {failures} failures")
         
-        return sucessos, falhas
+        return successes, failures
     
     def _read_fasta_file(self, fasta_file: Path) -> List[Tuple[str, str]]:
         """
-        Lê arquivo FASTA e retorna lista de (ID, sequência).
+        Read FASTA file and return list of (ID, sequence).
         
         Args:
             fasta_file: Arquivo FASTA
@@ -368,66 +368,66 @@ class ProteinEmbedding(BaseEmbedding):
                                   output_dir: Path,
                                   batch_size: Optional[int] = None) -> Tuple[int, int]:
         """
-        Processa diretório com arquivos de sequências.
+        Process directory with sequence files.
         
         Args:
-            seq_input_dir: Diretório com arquivos de sequência
-            output_dir: Diretório de saída
-            batch_size: Tamanho do batch
+            seq_input_dir: Directory with sequence files
+            output_dir: Output directory
+            batch_size: Batch size
             
         Returns:
-            Tupla (sucessos, falhas)
+            Tuple (successes, failures)
         """
         seq_dir = Path(seq_input_dir)
         
         if not seq_dir.exists():
-            raise EmbeddingError(f"Diretório não encontrado: {seq_input_dir}")
+            raise EmbeddingError(f"Directory not found: {seq_input_dir}")
         
-        # Encontrar arquivos de sequência
+        # Find sequence files
         sequence_files = list(seq_dir.glob("*.fasta")) + list(seq_dir.glob("*.txt"))
         
         if not sequence_files:
-            raise EmbeddingError(f"Nenhum arquivo de sequência encontrado em {seq_input_dir}")
+            raise EmbeddingError(f"No sequence files found in {seq_input_dir}")
         
-        self.logger.info(f"Encontrados {len(sequence_files)} arquivos de sequência")
+        self.logger.info(f"Found {len(sequence_files)} sequence files")
         
-        total_sucessos = 0
-        total_falhas = 0
+        total_successes = 0
+        total_failures = 0
         
         for seq_file in sequence_files:
             try:
                 if seq_file.suffix.lower() == '.fasta':
-                    sucessos, falhas = self.process_fasta_file(seq_file, output_dir, batch_size)
+                    successes, failures = self.process_fasta_file(seq_file, output_dir, batch_size)
                 else:
-                    # Processar como arquivo de texto simples
-                    sucessos, falhas = self._process_text_file(seq_file, output_dir)
+                    # Process as plain text file
+                    successes, failures = self._process_text_file(seq_file, output_dir)
                 
-                total_sucessos += sucessos
-                total_falhas += falhas
+                total_successes += successes
+                total_failures += failures
                 
             except Exception as e:
-                self.logger.error(f"Erro ao processar arquivo {seq_file}: {e}")
-                total_falhas += 1
+                self.logger.error(f"Error processing file {seq_file}: {e}")
+                total_failures += 1
         
-        return total_sucessos, total_falhas
+        return total_successes, total_failures
     
     def _process_text_file(self, text_file: Path, output_dir: Path) -> Tuple[int, int]:
-        """Processa arquivo de texto simples com sequência."""
+        """Process plain text file with sequence."""
         try:
             with open(text_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
             
-            # Juntar linhas que não começam com >
+            # Join lines that don't start with >
             sequence = ''.join(line.strip() for line in lines if not line.startswith('>'))
             
             if not sequence:
-                self.logger.warning(f"Arquivo vazio ou sem sequência: {text_file}")
+                self.logger.warning(f"Empty file or no sequence: {text_file}")
                 return 0, 1
             
-            # Nome do arquivo sem extensão
+            # File name without extension
             seq_id = text_file.stem
             
-            # Gerar embedding
+            # Generate embedding
             embedding = self.generate_embedding(sequence)
             
             # Salvar
@@ -472,26 +472,26 @@ class ProteinEmbedding(BaseEmbedding):
             matrix_output_dir: Diretório para matrizes (usa 'protein_matrix_embeddings' se None)
             
         Returns:
-            True se sucesso
+            True if successful
         """
         import pandas as pd
         from src.build.utils import ensure_directory
         from src.build.core.constants import BuildConstants
         
         try:
-            # Garantir que modelo está inicializado
+            # Ensure model is initialized
             if not self._model_loaded:
-                self.logger.info("Inicializando modelo ESM...")
+                self.logger.info("Initializing ESM model...")
                 self._do_initialize()
             
-            # Determinar diretório de saída para vetores
+            # Determine output directory for vectors
             if output_dir is None:
                 output_dir = Path(self.get_config('protein_output_dir', 'protein_embeddings'))
             
             output_dir = Path(output_dir)
             output_dir = ensure_directory(output_dir)
             
-            # Determinar diretório de saída para matrizes (se habilitado)
+            # Determine output directory for matrices (if enabled)
             if save_matrix:
                 if matrix_output_dir is None:
                     matrix_output_dir = Path(
@@ -502,109 +502,109 @@ class ProteinEmbedding(BaseEmbedding):
                     )
                 matrix_output_dir = Path(matrix_output_dir)
                 matrix_output_dir = ensure_directory(matrix_output_dir)
-                self.logger.info(f"📊 Salvando matrizes de embedding em: {matrix_output_dir}")
+                self.logger.info(f"📊 Saving embedding matrices to: {matrix_output_dir}")
             
-            # Carregar TSV
-            self.logger.info(f"Carregando dados de {tsv_path}")
+            # Load TSV
+            self.logger.info(f"Loading data from {tsv_path}")
             df = pd.read_csv(tsv_path, sep='\t')
             
-            # Verificar colunas obrigatórias
+            # Check required columns
             if 'seq_id' not in df.columns or 'seq' not in df.columns:
-                raise EmbeddingError("TSV deve conter colunas 'seq_id' e 'seq'")
+                raise EmbeddingError("TSV must contain columns 'seq_id' and 'seq'")
             
-            # Obter sequências únicas
+            # Get unique sequences
             unique_seqs = df.groupby('seq_id')['seq'].first()
-            self.logger.info(f"Processando {len(unique_seqs)} sequências únicas")
+            self.logger.info(f"Processing {len(unique_seqs)} unique sequences")
             
-            # Processar cada sequência
-            sucessos = 0
-            falhas = 0
-            matrix_sucessos = 0
+            # Process each sequence
+            successes = 0
+            failures = 0
+            matrix_successes = 0
             
             progress_logger = ProgressLogger(
                 self.logger,
                 len(unique_seqs),
-                "Gerando embeddings de proteínas"
+                "Generating protein embeddings"
             )
             
             for seq_id, sequence in unique_seqs.items():
                 try:
-                    # Verificar se vetor já existe
+                    # Check if vector already exists
                     output_file = output_dir / f"{seq_id}_embedding.npy"
                     vector_exists = output_file.exists()
                     
-                    # Verificar se matriz já existe (se save_matrix habilitado)
+                    # Check if matrix already exists (if save_matrix enabled)
                     matrix_exists = False
                     if save_matrix:
                         matrix_file = matrix_output_dir / f"{seq_id}_matrix.npy"
                         matrix_exists = matrix_file.exists()
                     
-                    # Pular se tudo já existe
+                    # Skip if everything already exists
                     if vector_exists and (not save_matrix or matrix_exists):
-                        self.logger.debug(f"Embedding(s) já existe(m): {seq_id}")
-                        sucessos += 1
+                        self.logger.debug(f"Embedding(s) already exist(s): {seq_id}")
+                        successes += 1
                         if save_matrix and matrix_exists:
-                            matrix_sucessos += 1
+                            matrix_successes += 1
                         progress_logger.update()
                         continue
                     
-                    # Gerar embedding vetorial (se não existe)
+                    # Generate vector embedding (if doesn't exist)
                     if not vector_exists:
                         embedding = self.generate_embedding(sequence)
                         np.save(output_file, embedding)
                     
-                    # Gerar matriz de embedding (se habilitado e não existe)
+                    # Generate embedding matrix (if enabled and doesn't exist)
                     if save_matrix and not matrix_exists:
                         matrix = self.generate_embedding_matrix(sequence)
                         if matrix is not None:
                             np.save(matrix_file, matrix)
-                            matrix_sucessos += 1
+                            matrix_successes += 1
                             self.logger.debug(
-                                f"Matriz salva: {seq_id} shape={matrix.shape}"
+                                f"Matrix saved: {seq_id} shape={matrix.shape}"
                             )
                         else:
                             self.logger.warning(
-                                f"Estratégia não suporta matriz para: {seq_id}"
+                                f"Strategy does not support matrix for: {seq_id}"
                             )
                     
-                    sucessos += 1
+                    successes += 1
                     
                 except Exception as e:
-                    self.logger.error(f"Erro ao processar {seq_id}: {e}")
-                    falhas += 1
+                    self.logger.error(f"Error processing {seq_id}: {e}")
+                    failures += 1
                 
                 progress_logger.update()
             
             progress_logger.finish()
             
-            # Salvar paths de saída
+            # Save output paths
             self._output_path = output_dir
             if save_matrix:
                 self._matrix_output_path = matrix_output_dir
             
-            # Log resumo
-            self.logger.info(f"Embeddings de proteínas: {sucessos} sucessos, {falhas} falhas")
+            # Log summary
+            self.logger.info(f"Protein embeddings: {successes} successes, {failures} failures")
             if save_matrix:
-                self.logger.info(f"📊 Matrizes de embedding: {matrix_sucessos} geradas")
+                self.logger.info(f"📊 Embedding matrices: {matrix_successes} generated")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Erro ao gerar embeddings: {e}")
+            self.logger.error(f"Error generating embeddings: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
             return False
     
     def get_output_path(self) -> Optional[Path]:
-        """Retorna path de saída dos embeddings vetoriais."""
+        """Return vector embeddings output path."""
         return getattr(self, '_output_path', None)
     
     def get_matrix_output_path(self) -> Optional[Path]:
-        """Retorna path de saída das matrizes de embedding."""
+        """Return embedding matrices output path."""
         return getattr(self, '_matrix_output_path', None)
     
     def get_embeddings_info(self) -> Dict[str, Any]:
-        """Retorna informações sobre embeddings gerados."""
+        """Return information about generated embeddings."""
         output_path = self.get_output_path()
         matrix_output_path = self.get_matrix_output_path()
         
@@ -630,7 +630,7 @@ class ProteinEmbedding(BaseEmbedding):
         return info
     
     def build(self) -> Dict[str, Any]:
-        """Constrói resumo do processamento."""
+        """Build processing summary."""
         result = super().build()
         
         result.update({
@@ -644,12 +644,12 @@ class ProteinEmbedding(BaseEmbedding):
     
     def __del__(self):
         """
-        Cleanup ao destruir objeto.
+        Cleanup when object is destroyed.
         
-        REFATORADO: Delega para strategy.cleanup() ao invés de código direto.
+        REFACTORED: Delegates to strategy.cleanup() instead of direct code.
         """
         if hasattr(self, 'strategy') and self.strategy:
             try:
                 self.strategy.cleanup(self.model, self.alphabet)
             except:
-                pass  # Ignorar erros no destrutor
+                pass  # Ignore errors in destructor
