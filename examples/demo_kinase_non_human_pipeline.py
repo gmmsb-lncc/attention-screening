@@ -115,6 +115,8 @@ def run_integrated_pipeline():
         
         # Classification settings
         run_classification=True,
+        use_multi_model_classification=True,  # Use sklearn models instead of MLP (avoids PySpark)
+        classification_models=['RandomForest', 'GradientBoosting', 'LogisticRegression', 'SVM'],  # Top 4 sklearn models
         binary_threshold=1000.0,  # 1000 nM
         
         # Regression settings
@@ -130,7 +132,8 @@ def run_integrated_pipeline():
     print(f"  • Output: {config.output_dir}")
     print(f"  • ESM Model: {config.esm_model}")
     print(f"  • Device: {config.device}")
-    print(f"  • Classification: {'✅ Enabled' if config.run_classification else '❌ Disabled'}")
+    print(f"  • Classification: {'✅ Enabled (Multi-Model)' if config.run_classification else '❌ Disabled'}")
+    print(f"  • Classification Models: {', '.join(config.classification_models)}")
     print(f"  • Regression: {'✅ Enabled' if config.run_regression else '❌ Disabled'}")
     print(f"  • Binary Threshold: {config.binary_threshold} nM")
     print(f"  • Regression Models: {', '.join(config.regression_models)}")

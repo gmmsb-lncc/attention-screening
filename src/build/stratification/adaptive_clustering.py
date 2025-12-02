@@ -53,9 +53,14 @@ class AdaptiveClustering:
     # Maximum samples for full distance matrix (~8GB RAM)
     MAX_SAMPLES_FOR_FULL_MATRIX = 40000
     
+    # Minimum clusters to guarantee proper train/val/test splits
+    # With 2 clusters, one might go entirely to train and the other to test,
+    # leaving validation empty, which causes division by zero errors.
+    MIN_CLUSTERS_ABSOLUTE = 3
+    
     def __init__(self,
                  method: str = 'silhouette',
-                 min_clusters: int = 5,
+                 min_clusters: int = 3,
                  max_clusters: int = 100,
                  min_cluster_size: int = 3,
                  target_cluster_ratio: float = 0.01,
@@ -80,7 +85,8 @@ class AdaptiveClustering:
             logger: Logger instance
         """
         self.method = method
-        self.min_clusters = min_clusters
+        # Enforce minimum of 3 clusters to avoid empty val splits
+        self.min_clusters = max(min_clusters, self.MIN_CLUSTERS_ABSOLUTE)
         self.max_clusters = max_clusters
         self.min_cluster_size = min_cluster_size
         self.target_cluster_ratio = target_cluster_ratio
@@ -433,7 +439,7 @@ class AdaptiveClusteringStrategy:
     
     def __init__(self,
                  method: str = 'target',
-                 min_clusters: int = 5,
+                 min_clusters: int = 3,  # Minimum 3 to ensure proper train/val/test splits
                  max_clusters: int = 100,
                  min_cluster_size: int = 3,
                  target_cluster_ratio: float = 0.01,
@@ -443,7 +449,7 @@ class AdaptiveClusteringStrategy:
         
         Args:
             method: Optimization method ('silhouette', 'elbow', 'target', 'percentile')
-            min_clusters: Minimum clusters
+            min_clusters: Minimum clusters (minimum 3 enforced to avoid empty val splits)
             max_clusters: Maximum clusters
             min_cluster_size: Minimum points per cluster
             target_cluster_ratio: Target clusters as ratio of samples
@@ -451,7 +457,7 @@ class AdaptiveClusteringStrategy:
         """
         self.adaptive = AdaptiveClustering(
             method=method,
-            min_clusters=min_clusters,
+            min_clusters=max(min_clusters, 3),  # Enforce minimum of 3
             max_clusters=max_clusters,
             min_cluster_size=min_cluster_size,
             target_cluster_ratio=target_cluster_ratio
