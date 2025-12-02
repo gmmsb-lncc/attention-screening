@@ -20,22 +20,30 @@ class DataManager:
     
     Implementa cache em memória e divisão estratificada de dados,
     mantendo compatibilidade total com o pipeline original.
+    
+    Suporta transformação pChEMBL para melhor performance de regressão.
     """
     
-    def __init__(self, embeddings_path: str = None, targets_path: str = None):
+    def __init__(self, embeddings_path: str = None, targets_path: str = None, use_pchembl: bool = True):
         """
         Inicializar gerenciador de dados.
         
         Args:
             embeddings_path: Caminho para embeddings (.npy ou .npz)
             targets_path: Caminho para targets (.npy)
+            use_pchembl: Se True, converte valores nM para pChEMBL (-log10(M)).
+                        Isso é RECOMENDADO para regressão pois valores Ki/IC50
+                        variam em várias ordens de magnitude (1 nM a 100,000 nM).
+                        pChEMBL = 9 - log10(nM)
         """
         self.embeddings_path = embeddings_path
         self.targets_path = targets_path
+        self.use_pchembl = use_pchembl
         
         # Cache em memória
         self._embeddings = None
         self._targets = None
+        self._targets_original_nm = None  # Guardar valores originais em nM
         self._data_loaded = False
     
     def load_embeddings(self, embeddings_path: Optional[str] = None) -> np.ndarray:
@@ -78,16 +86,20 @@ class DataManager:
         self._embeddings = embeddings
         return embeddings
     
-    def load_targets(self, targets_path: Optional[str] = None, target_column: int = 3) -> np.ndarray:
+    def load_targets(self, targets_path: Optional[str] = None, target_column: int = 3, pchembl_column: int = 4) -> np.ndarray:
         """
         Carregar targets de arquivo.
         
+        Para regressão, preferimos usar pchembl_value (escala logarítmica) quando disponível.
+        Se não disponível, usamos standard_value e convertemos para pChEMBL.
+        
         Args:
             targets_path: Caminho alternativo para targets
-            target_column: Índice da coluna a usar se targets for 2D (default: 3 para standard_value)
+            target_column: Índice da coluna standard_value (default: 3)
+            pchembl_column: Índice da coluna pchembl_value (default: 4)
             
         Returns:
-            Array de targets (n_samples,)
+            Array de targets (n_samples,) em pChEMBL se use_pchembl=True, senão em nM
         """
         if targets_path is not None:
             self.targets_path = targets_path
@@ -100,23 +112,73 @@ class DataManager:
         if not path.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {path}")
         
-        targets = np.load(path, allow_pickle=True)
+        raw_data = np.load(path, allow_pickle=True)
         
         # Se array 2D (ex: interaction_labels com múltiplas colunas)
-        # Extrair coluna específica ao invés de flatten
-        if len(targets.shape) > 1:
-            if targets.shape[1] > target_column:
-                # Extrair coluna target_column e converter para float
-                targets = targets[:, target_column]
+        if len(raw_data.shape) > 1:
+            n_cols = raw_data.shape[1]
+            has_pchembl_col = n_cols > pchembl_column
+            
+            # Extrair standard_value (sempre disponível)
+            if n_cols > target_column:
+                standard_values = raw_data[:, target_column]
             else:
-                # Se não tiver coluna suficiente, usar primeira coluna
-                targets = targets[:, 0]
-        
-        # Converter para float e garantir array 1D
-        try:
-            targets = np.array([float(x) for x in targets])
-        except (ValueError, TypeError) as e:
-            raise ValueError(f"Erro ao converter targets para float: {e}")
+                standard_values = raw_data[:, 0]
+            
+            # Converter standard_value para float
+            try:
+                standard_values = np.array([float(x) if x is not None else np.nan for x in standard_values])
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Erro ao converter standard_value para float: {e}")
+            
+            # Guardar valores originais em nM
+            self._targets_original_nm = standard_values.copy()
+            
+            if self.use_pchembl:
+                if has_pchembl_col:
+                    # Tentar usar pchembl_value da coluna 4
+                    pchembl_values = raw_data[:, pchembl_column]
+                    
+                    # Converter para float, tratando None/vazio como NaN
+                    pchembl_arr = []
+                    for val in pchembl_values:
+                        try:
+                            if val is None or val == '' or val == 'None':
+                                pchembl_arr.append(np.nan)
+                            else:
+                                pchembl_arr.append(float(val))
+                        except (ValueError, TypeError):
+                            pchembl_arr.append(np.nan)
+                    pchembl_values = np.array(pchembl_arr)
+                    
+                    # Calcular pChEMBL para valores faltantes a partir de standard_value
+                    missing_mask = np.isnan(pchembl_values) & (standard_values > 0) & np.isfinite(standard_values)
+                    n_missing = np.sum(missing_mask)
+                    if n_missing > 0:
+                        print(f"   ℹ️  Calculando pChEMBL para {n_missing} amostras sem valor original")
+                        pchembl_values[missing_mask] = 9 - np.log10(standard_values[missing_mask])
+                    
+                    targets = pchembl_values
+                else:
+                    # Não tem coluna pchembl_value, calcular a partir de standard_value
+                    print(f"   ℹ️  Coluna pchembl_value não encontrada, calculando a partir de standard_value")
+                    valid_mask = (standard_values > 0) & np.isfinite(standard_values)
+                    targets = np.where(valid_mask, 9 - np.log10(standard_values), np.nan)
+            else:
+                # Usar standard_value diretamente (nM)
+                targets = standard_values
+        else:
+            # Array 1D - assumir que são valores em nM
+            try:
+                targets = np.array([float(x) for x in raw_data])
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Erro ao converter targets para float: {e}")
+            
+            self._targets_original_nm = targets.copy()
+            
+            if self.use_pchembl:
+                valid_mask = (targets > 0) & np.isfinite(targets)
+                targets = np.where(valid_mask, 9 - np.log10(targets), np.nan)
         
         self._targets = targets
         return targets
@@ -222,17 +284,29 @@ class DataManager:
         if not self._data_loaded:
             self.load_data()
         
-        return {
+        stats = {
             'n_samples': len(self._embeddings),
             'embedding_dim': self._embeddings.shape[1],
-            'target_mean': float(np.mean(self._targets)),
-            'target_std': float(np.std(self._targets)),
-            'target_min': float(np.min(self._targets)),
-            'target_max': float(np.max(self._targets)),
-            'target_median': float(np.median(self._targets)),
+            'target_mean': float(np.nanmean(self._targets)),
+            'target_std': float(np.nanstd(self._targets)),
+            'target_min': float(np.nanmin(self._targets)),
+            'target_max': float(np.nanmax(self._targets)),
+            'target_median': float(np.nanmedian(self._targets)),
             'embeddings_memory_mb': self._embeddings.nbytes / 1024 / 1024,
-            'targets_memory_mb': self._targets.nbytes / 1024 / 1024
+            'targets_memory_mb': self._targets.nbytes / 1024 / 1024,
+            'use_pchembl': self.use_pchembl,
+            'target_unit': 'pChEMBL' if self.use_pchembl else 'nM'
         }
+        
+        # Adicionar estatísticas originais em nM se pChEMBL estiver ativo
+        if self.use_pchembl and self._targets_original_nm is not None:
+            stats['target_original_nm'] = {
+                'mean': float(np.nanmean(self._targets_original_nm)),
+                'min': float(np.nanmin(self._targets_original_nm)),
+                'max': float(np.nanmax(self._targets_original_nm)),
+            }
+        
+        return stats
 
 
 # Funções de conveniência
@@ -241,7 +315,8 @@ def load_regression_data(
     targets_path: str,
     test_size: float = 0.2,
     val_size: float = 0.1,
-    random_state: int = 42
+    random_state: int = 42,
+    use_pchembl: bool = True
 ) -> Dict[str, np.ndarray]:
     """
     Função de conveniência para carregar e dividir dados.
@@ -252,11 +327,12 @@ def load_regression_data(
         test_size: Proporção do teste
         val_size: Proporção da validação
         random_state: Seed
+        use_pchembl: Se True, converte valores nM para pChEMBL
         
     Returns:
         Dict com 'X_train', 'X_val', 'X_test', 'y_train', 'y_val', 'y_test'
     """
-    manager = DataManager(embeddings_path, targets_path)
+    manager = DataManager(embeddings_path, targets_path, use_pchembl=use_pchembl)
     X_train, X_val, X_test, y_train, y_val, y_test = manager.split_data(
         test_size=test_size,
         val_size=val_size,
