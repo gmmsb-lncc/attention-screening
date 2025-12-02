@@ -440,6 +440,27 @@ class MLPEmbeddingPipeline:
         preds  = np.asarray(preds,  dtype=np.float32)
         probs  = np.asarray(probs,  dtype=np.float32)
 
+        # Handle empty dataloader case (e.g., empty validation set)
+        if total == 0:
+            return {
+                "Loss": 0.0,
+                "Accuracy": 0.0,
+                "Precision": 0.0,
+                "Recall": 0.0,
+                "F1": 0.0,
+                "ROC_AUC": 0.5,
+                "True_Negatives": 0,
+                "False_Positives": 0,
+                "False_Negatives": 0,
+                "True_Positives": 0,
+                "Specificity": 0.0,
+                "Fbeta_0.5": 0.0,
+                "Fbeta_2": 0.0,
+                "MCC": 0.0,
+                "Average_Precision": 0.0,
+                "Brier_Score": 0.0,
+            }
+
         acc       = correct / total
         precision = np.sum((preds == 1) & (labels == 1)) / max(1, np.sum(preds == 1))
         recall    = np.sum((preds == 1) & (labels == 1)) / max(1, np.sum(labels == 1))

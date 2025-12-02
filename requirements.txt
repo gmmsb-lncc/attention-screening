@@ -44,7 +44,9 @@ ipykernel
 # ==============================================================================
 
 # Protein Embeddings (ESM-2)
-fair-esm>=2.0.0  # Meta AI ESM-2 models for protein embeddings
+# NOTE: ESM is loaded from local repository (llm/ESM) via sys.path
+# DO NOT install fair-esm via pip - it causes segfaults on some systems
+# Clone: git clone https://github.com/facebookresearch/esm.git llm/ESM
 transformers>=4.38
 sentencepiece
 

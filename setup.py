@@ -385,25 +385,43 @@ def install_dependencies() -> bool:
         "threadpoolctl>=3.1.0",  # Thread pool control (to avoid KNN bugs)
     ]
     
-    # Install local ESM (from llm/ESM/ folder)
-    print("\n🧬 Installing local ESM...")
-    # Look for ESM in llm/ESM first, then in root
+    # ==========================================================================
+    # CRITICAL: Remove any pip-installed ESM packages to avoid conflicts
+    # The local ESM in llm/ESM must be used exclusively via sys.path
+    # ==========================================================================
+    print("\n🧬 Configuring ESM (local repository version)...")
+    
+    # First, uninstall any pip-installed ESM packages that could conflict
+    esm_pip_packages = ["fair-esm", "esm"]
+    for pkg in esm_pip_packages:
+        print(f"   🔍 Checking for pip package: {pkg}")
+        try:
+            result = subprocess.run(
+                [pip_exe, "show", pkg], 
+                capture_output=True, 
+                text=True
+            )
+            if result.returncode == 0:
+                print(f"   ⚠️  Found conflicting package: {pkg}")
+                run_command([pip_exe, "uninstall", "-y", pkg], f"Removing {pkg}")
+        except Exception:
+            pass
+    
+    # Verify local ESM exists (but DO NOT install via pip)
     esm_paths = [Path("llm/ESM"), Path("ESM")]
     esm_path = None
     for p in esm_paths:
-        if p.exists() and (p / "setup.py").exists():
+        if p.exists() and (p / "esm" / "__init__.py").exists():
             esm_path = p
             break
     
     if esm_path:
-        print(f"   📁 ESM found at: {esm_path}")
-        success, _ = run_command([pip_exe, "install", "-e", str(esm_path)], "Installing local ESM")
-        if success:
-            print("✅ ESM installed from local directory")
-        else:
-            print("⚠️  Failed to install local ESM (optional)")
+        print(f"   ✅ Local ESM found at: {esm_path.absolute()}")
+        print(f"   📝 ESM will be loaded via sys.path (NOT pip install)")
+        print(f"   💡 Scripts must add '{esm_path}' to sys.path before importing esm")
     else:
-        print("⚠️  ESM folder not found (checked llm/ESM and ESM/)")
+        print("   ⚠️  ESM folder not found!")
+        print("   📝 Clone it with: git clone https://github.com/facebookresearch/esm.git llm/ESM")
     
     # Optional dependencies (installed with error handling)
     optional_deps = [
