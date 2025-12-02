@@ -64,7 +64,8 @@ class RegressionPipeline:
         val_size: float = 0.1,
         random_state: int = 42,
         verbose: bool = True,
-        split_indices: Optional['SplitIndices'] = None
+        split_indices: Optional['SplitIndices'] = None,
+        use_pchembl: bool = True
     ):
         """
         Inicializar pipeline de regressão.
@@ -81,6 +82,9 @@ class RegressionPipeline:
             split_indices: Optional SplitIndices object with pre-defined train/val/test splits.
                           If provided, these indices will be used instead of random splitting.
                           This ensures consistency with other pipelines (e.g., classification).
+            use_pchembl: Se True, converte valores nM para pChEMBL (-log10(M)).
+                        Isso é RECOMENDADO para regressão pois valores Ki/IC50
+                        variam em várias ordens de magnitude.
         """
         self.embeddings_path = embeddings_path
         self.targets_path = targets_path
@@ -91,6 +95,7 @@ class RegressionPipeline:
         self.random_state = random_state
         self.verbose = verbose
         self.split_indices = split_indices  # Store external splits if provided
+        self.use_pchembl = use_pchembl
         
         # Criar diretórios de saída
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +104,7 @@ class RegressionPipeline:
         (self.output_dir / 'metrics').mkdir(exist_ok=True)
         
         # Componentes modularizados
-        self.data_manager = DataManager(embeddings_path, targets_path)
+        self.data_manager = DataManager(embeddings_path, targets_path, use_pchembl=use_pchembl)
         self.metrics_calculator = MetricsCalculator()
         self.evaluator = RegressionEvaluator()
         
@@ -170,6 +175,7 @@ class RegressionPipeline:
         
         # Estatísticas
         stats = self.data_manager.get_stats()
+        target_unit = stats.get('target_unit', 'nM')
         
         if self.verbose:
             print(f"✅ Dados carregados com sucesso!")
@@ -178,11 +184,21 @@ class RegressionPipeline:
             print(f"   Treino: {len(self.X_train):,} amostras")
             print(f"   Validação: {len(self.X_val):,} amostras")
             print(f"   Teste: {len(self.X_test):,} amostras")
-            print(f"\n   Target (nM):")
+            print(f"\n   Target ({target_unit}):")
             print(f"      Média: {stats['target_mean']:.2f}")
             print(f"      Std: {stats['target_std']:.2f}")
             print(f"      Min: {stats['target_min']:.2f}")
             print(f"      Max: {stats['target_max']:.2f}")
+            
+            # Mostrar valores originais em nM se usando pChEMBL
+            if self.use_pchembl and 'target_original_nm' in stats:
+                orig = stats['target_original_nm']
+                print(f"\n   Target original (nM):")
+                print(f"      Média: {orig['mean']:.2f}")
+                print(f"      Min: {orig['min']:.2f}")
+                print(f"      Max: {orig['max']:.2f}")
+                print(f"\n   ℹ️  Usando escala pChEMBL (logarítmica) - recomendado para regressão")
+            
             print(f"\n   Tempo: {time.time() - start_time:.2f}s")
             print('=' * 70)
             print()
@@ -194,6 +210,8 @@ class RegressionPipeline:
             'n_samples_val': len(self.X_val),
             'n_samples_test': len(self.X_test),
             'embedding_dim': stats['embedding_dim'],
+            'use_pchembl': self.use_pchembl,
+            'target_unit': target_unit,
             'target_stats': {
                 'mean': stats['target_mean'],
                 'std': stats['target_std'],
