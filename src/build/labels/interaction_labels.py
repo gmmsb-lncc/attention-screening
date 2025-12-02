@@ -50,7 +50,8 @@ class InteractionLabels(BaseLabels):
                        molregno_col: str = "molregno",
                        kinase_col: str = "target_kinase", 
                        type_col: str = "standard_type",
-                       value_col: str = "standard_value") -> np.ndarray:
+                       value_col: str = "standard_value",
+                       pchembl_col: str = "pchembl_value") -> np.ndarray:
         """
         Generate interaction labels from TSV data.
         
@@ -58,10 +59,17 @@ class InteractionLabels(BaseLabels):
             molregno_col: Column name for molecule registry number
             kinase_col: Column name for target kinase
             type_col: Column name for standard type
-            value_col: Column name for standard value
+            value_col: Column name for standard value (Ki/IC50/Kd in nM)
+            pchembl_col: Column name for pChEMBL value (-log10(M))
             
         Returns:
-            Generated interaction labels
+            Generated interaction labels with columns:
+            [molregno, kinase, type, standard_value, pchembl_value]
+            
+        Note:
+            pchembl_value is preferred for regression as it provides
+            a logarithmic scale. If pchembl_value is missing, it will
+            be calculated as: 9 - log10(standard_value_nM)
         """
         try:
             self.logger.info(f"Generating interaction labels from {self.tsv_path}")
@@ -78,8 +86,18 @@ class InteractionLabels(BaseLabels):
                 inferSchema=True
             )
             
-            # Select relevant columns
-            df_selected = df.select(molregno_col, kinase_col, type_col, value_col)
+            # Check if pchembl_value column exists
+            available_columns = df.columns
+            has_pchembl = pchembl_col in available_columns
+            
+            if has_pchembl:
+                # Select with pchembl_value as 5th column
+                df_selected = df.select(molregno_col, kinase_col, type_col, value_col, pchembl_col)
+                self.logger.info(f"Including pchembl_value column for regression")
+            else:
+                # Fallback: only 4 columns (pchembl will be calculated later)
+                df_selected = df.select(molregno_col, kinase_col, type_col, value_col)
+                self.logger.warning(f"pchembl_value column not found, will be calculated from standard_value")
             
             # Collect data
             labels_data = df_selected.collect()
@@ -88,10 +106,10 @@ class InteractionLabels(BaseLabels):
             self.interaction_data = np.array(labels_data)
             self.raw_labels = self.interaction_data
             
-            # Store structured labels (molregno, kinase, type, value)
+            # Store structured labels
             self.labels = self.interaction_data
             
-            self.logger.info(f"Generated {len(self.labels)} interaction labels")
+            self.logger.info(f"Generated {len(self.labels)} interaction labels with {self.labels.shape[1]} columns")
             return self.labels
             
         except Exception as e:
@@ -117,9 +135,9 @@ class InteractionLabels(BaseLabels):
                 self.logger.error("Empty labels array")
                 return False
             
-            # Check if we have 4 columns (molregno, kinase, type, value)
-            if len(self.labels.shape) != 2 or self.labels.shape[1] != 4:
-                self.logger.error("Labels should have 4 columns")
+            # Check if we have 4 or 5 columns (molregno, kinase, type, value, [pchembl])
+            if len(self.labels.shape) != 2 or self.labels.shape[1] not in (4, 5):
+                self.logger.error(f"Labels should have 4 or 5 columns, got {self.labels.shape[1]}")
                 return False
             
             # Check for missing values in standard_value column
