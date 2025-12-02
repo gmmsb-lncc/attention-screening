@@ -52,6 +52,15 @@ class ClusterSplitter:
             val_idx.extend(val)
             test_idx.extend(test)
         
+        # CRITICAL: Ensure val is not empty (required for training)
+        if len(val_idx) == 0 and len(train_idx) > 10:
+            # Move 10% of train to val
+            n_move = max(1, int(len(train_idx) * 0.1))
+            np.random.seed(self.random_state)
+            move_indices = np.random.choice(len(train_idx), n_move, replace=False)
+            val_idx = [train_idx[i] for i in move_indices]
+            train_idx = [train_idx[i] for i in range(len(train_idx)) if i not in move_indices]
+        
         return np.array(train_idx), np.array(val_idx), np.array(test_idx)
     
     def _group_by_cluster(self, cluster_labels: np.ndarray) -> dict:
