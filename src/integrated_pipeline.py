@@ -66,7 +66,7 @@ class IntegratedConfig:
     # Build module
     esm_model: str = "esm2_t6_8M_UR50D"
     esm_dim: Optional[int] = None
-    ligand_model: str = "smi-ted-large"
+    ligand_model: str = "SMI-TED"
     batch_size: int = 8
     device: str = "cpu"
     save_matrices: bool = False

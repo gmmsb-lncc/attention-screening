@@ -21,7 +21,8 @@ pyarrow>=14.0.1
 # EMBEDDINGS
 # ==============================================================================
 
-fair-esm>=2.0.0  # Meta AI ESM-2 models for protein embeddings
+# NOTE: ESM is loaded from local repository (llm/ESM) via sys.path
+# DO NOT install fair-esm via pip - it causes segfaults on macOS
 transformers>=4.38
 sentencepiece
 
