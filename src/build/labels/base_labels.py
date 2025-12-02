@@ -71,17 +71,31 @@ class BaseLabels(BaseBuilder):
         
         stats = {
             'total_samples': len(self.labels),
-            'unique_labels': len(np.unique(self.labels)),
             'label_distribution': {}
         }
         
-        # Calculate distribution
-        unique, counts = np.unique(self.labels, return_counts=True)
-        for label, count in zip(unique, counts):
-            stats['label_distribution'][str(label)] = {
-                'count': int(count),
-                'percentage': float(count / len(self.labels) * 100)
-            }
+        try:
+            # For 2D arrays with mixed types, avoid np.unique on the whole array
+            if len(self.labels.shape) == 2:
+                stats['num_columns'] = self.labels.shape[1]
+                stats['unique_labels'] = 'N/A (multi-column)'
+            else:
+                # For 1D arrays, calculate unique values
+                # Convert to string to handle mixed types
+                labels_str = [str(x) for x in self.labels]
+                unique = set(labels_str)
+                stats['unique_labels'] = len(unique)
+                
+                # Calculate distribution
+                from collections import Counter
+                counts = Counter(labels_str)
+                for label, count in counts.items():
+                    stats['label_distribution'][label] = {
+                        'count': int(count),
+                        'percentage': float(count / len(self.labels) * 100)
+                    }
+        except Exception as e:
+            stats['unique_labels'] = f'Error: {e}'
         
         return stats
     
