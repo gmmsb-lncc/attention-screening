@@ -4,7 +4,7 @@ Configuration for Attention Matrix Module.
 Single Responsibility: Configuration management only.
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional, Dict, Any
 from pathlib import Path
 import json
@@ -16,16 +16,19 @@ class AttentionMatrixConfig:
     Configuration for the Attention Matrix pipeline.
     
     Attributes:
-        protein_dim: Dimension of protein embeddings (ESM2: 320, 480, 640, 1280, etc.)
+        protein_model: Name of ESM model (determines protein_dim and max_protein_len)
+        protein_dim: Dimension of protein embeddings (auto-detected from protein_model)
         ligand_dim: Dimension of ligand embeddings (SMI-TED: 768)
         
-        max_protein_len: Maximum protein sequence length (truncate/pad)
+        max_protein_len: Maximum protein sequence length (auto-detected from protein_model)
         max_ligand_len: Maximum ligand SMILES length (truncate/pad)
         
         hidden_dim: Hidden dimension for projections and attention
         num_heads: Number of attention heads
         num_layers: Number of cross-attention layers
         dropout: Dropout rate
+        
+        positional_encoding_type: Type of positional encoding ('sinusoidal' or 'rope')
         
         batch_size: Training batch size
         learning_rate: Initial learning rate
@@ -38,19 +41,25 @@ class AttentionMatrixConfig:
         random_state: Random seed for reproducibility
     """
     
-    # Embedding dimensions
-    protein_dim: int = 320
+    # ESM Model (determines protein_dim and max_protein_len automatically)
+    protein_model: str = 'esm2_t6_8M_UR50D'
+    
+    # Embedding dimensions (auto-detected if protein_model is set)
+    protein_dim: Optional[int] = None  # Will be set from protein_model
     ligand_dim: int = 768
     
-    # Sequence lengths
-    max_protein_len: int = 256
-    max_ligand_len: int = 64
+    # Sequence lengths (auto-detected if protein_model is set)
+    max_protein_len: Optional[int] = None  # Will be set from protein_model
+    max_ligand_len: int = 512  # SMI-TED max tokens
     
     # Model architecture
     hidden_dim: int = 256
     num_heads: int = 8
     num_layers: int = 2
     dropout: float = 0.2
+    
+    # Positional encoding
+    positional_encoding_type: str = 'rope'  # 'sinusoidal' or 'rope' (rope recommended)
     
     # Training
     batch_size: int = 64
@@ -74,12 +83,43 @@ class AttentionMatrixConfig:
     n_protein_clusters: Optional[int] = None  # Auto if None
     
     def __post_init__(self):
-        """Validate configuration."""
+        """Validate and auto-configure from protein_model."""
+        # Auto-detect dimensions from protein_model
+        self._configure_from_protein_model()
+        
         # Validate dimensions
         if self.hidden_dim % self.num_heads != 0:
             raise ValueError(
                 f"hidden_dim ({self.hidden_dim}) must be divisible by num_heads ({self.num_heads})"
             )
+        
+        # Validate positional encoding type
+        valid_pe_types = ['sinusoidal', 'rope']
+        if self.positional_encoding_type not in valid_pe_types:
+            raise ValueError(
+                f"positional_encoding_type must be one of {valid_pe_types}, "
+                f"got '{self.positional_encoding_type}'"
+            )
+    
+    def _configure_from_protein_model(self):
+        """Auto-configure protein_dim and max_protein_len from protein_model."""
+        try:
+            from src.build.core.constants import get_esm_model_info
+            model_info = get_esm_model_info(self.protein_model)
+            
+            # Only set if not explicitly provided
+            if self.protein_dim is None:
+                self.protein_dim = model_info['dim']
+            
+            if self.max_protein_len is None:
+                self.max_protein_len = model_info['max_len']
+                
+        except (ImportError, ValueError):
+            # Fallback to defaults if constants not available
+            if self.protein_dim is None:
+                self.protein_dim = 320
+            if self.max_protein_len is None:
+                self.max_protein_len = 1024
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
