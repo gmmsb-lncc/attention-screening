@@ -1,5 +1,5 @@
 """
-Geração de embeddings de ligantes usando modelos FM4M (IBM).
+Generation of ligand embeddings using FM4M models (IBM).
 """
 
 import os
@@ -20,7 +20,7 @@ from src.build.core.exceptions import DependencyError, EmbeddingError
 from src.build.utils import ProgressLogger, ensure_directory, optimize_batch_size, memory_monitor
 
 class LigandEmbedding(BaseEmbedding):
-    """Gerador de embeddings de ligantes usando FM4M."""
+    """Ligand embedding generator using FM4M."""
     
     def __init__(self, 
                  config: Optional['BuildConfig'] = None,
@@ -29,14 +29,14 @@ class LigandEmbedding(BaseEmbedding):
                  checkpoint_enabled: bool = True,
                  **kwargs):
         """
-        Inicializa gerador de embeddings de ligantes.
+        Initialize ligand embedding generator.
         
         Args:
-            config: Configuração do sistema build
-            model_name: Nome do modelo FM4M
-            use_parallel: Se deve usar processamento paralelo
-            checkpoint_enabled: Se deve usar sistema de checkpoint
-            **kwargs: Argumentos adicionais
+            config: Build system configuration
+            model_name: FM4M model name
+            use_parallel: Whether to use parallel processing
+            checkpoint_enabled: Whether to use checkpoint system
+            **kwargs: Additional arguments
         """
         # Definir atributos antes da inicialização do pai
         self.use_parallel = use_parallel
@@ -55,39 +55,39 @@ class LigandEmbedding(BaseEmbedding):
         self._setup_fm4m_path()
     
     def _check_dependencies(self) -> None:
-        """Verifica se dependências estão disponíveis."""
+        """Check if dependencies are available."""
         try:
             import pandas as pd
             self.pd = pd
         except ImportError:
-            raise DependencyError("Pandas não disponível. Instale com: pip install pandas")
+            raise DependencyError("Pandas not available. Install with: pip install pandas")
         
-        # FM4M será verificado durante inicialização
+        # FM4M will be checked during initialization
         self.fm4m = None
         self.fm4m_available = False
     
     def _validate_config(self) -> None:
-        """Valida configuração específica para embeddings de ligantes."""
+        """Validate ligand embedding specific configuration."""
         super()._validate_config()
         
-        # Validar modelo FM4M
+        # Validate FM4M model
         if self.model_name not in FM4M_MODELS:
-            raise EmbeddingError(f"Modelo FM4M inválido: {self.model_name}. Modelos disponíveis: {list(FM4M_MODELS.keys())}")
+            raise EmbeddingError(f"Invalid FM4M model: {self.model_name}. Available models: {list(FM4M_MODELS.keys())}")
         
-        # Verificar configuração de processamento paralelo
+        # Check parallel processing configuration
         if self.use_parallel:
             try:
                 import multiprocessing
                 cpu_count = multiprocessing.cpu_count()
                 if cpu_count < 2:
-                    self.logger.warning("Processamento paralelo solicitado mas apenas 1 CPU disponível")
+                    self.logger.warning("Parallel processing requested but only 1 CPU available")
                     self.use_parallel = False
             except Exception:
-                self.logger.warning("Não foi possível verificar CPUs disponíveis. Desabilitando processamento paralelo.")
+                self.logger.warning("Could not check available CPUs. Disabling parallel processing.")
                 self.use_parallel = False
     
     def _setup_fm4m_path(self) -> None:
-        """Configura caminho para FM4M."""
+        """Configure path for FM4M."""
         # Adicionar FM4M ao path se necessário - usar insert(0) para prioridade
         current_dir = Path(__file__).parent.parent.parent.parent  # Volta para raiz
         fm4m_path = current_dir / "llm" / "FM4M"
@@ -103,32 +103,32 @@ class LigandEmbedding(BaseEmbedding):
                 sys.path.insert(0, fm4m_str)
     
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
-        """Retorna modelos FM4M suportados."""
+        """Return supported FM4M models."""
         return FM4M_MODELS.copy()
     
     def _load_model(self) -> Any:
-        """Carrega modelo SMI-TED diretamente (evita fm4m.py que tem bug)."""
+        """Load SMI-TED model directly (avoids fm4m.py which has bug)."""
         try:
-            # NOTA: Não importar models.fm4m diretamente pois causa crash
-            # Importar apenas o modelo específico necessário
-            self.fm4m = None  # Não usar fm4m.py genérico
+            # NOTE: Don't import models.fm4m directly as it causes crash
+            # Import only the specific model needed
+            self.fm4m = None  # Don't use generic fm4m.py
             self.fm4m_available = True
             
-            self.logger.info(f"Carregando modelo: {self.model_name}")
+            self.logger.info(f"Loading model: {self.model_name}")
             
-            # Carregar modelo SMI-TED diretamente
+            # Load SMI-TED model directly
             if self.model_name == "SMI-TED":
                 import os
                 import torch
                 from smi_ted.smi_ted_light.load import load_smi_ted
                 
-                # Localizar arquivos do modelo
+                # Locate model files
                 materials_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                 model_files_path = os.path.join(materials_path, "llm", "FM4M", "model_files")
                 
-                self.logger.info(f"Pré-carregando modelo SMI-TED de: {model_files_path}")
+                self.logger.info(f"Pre-loading SMI-TED model from: {model_files_path}")
                 
-                # Verificar se arquivos existem
+                # Check if files exist
                 vocab_file = os.path.join(model_files_path, "bert_vocab_curated.txt")
                 ckpt_file = os.path.join(model_files_path, "smi-ted-Light_40.pt")
                 
@@ -138,19 +138,19 @@ class LigandEmbedding(BaseEmbedding):
                         f"Please run: cd llm/FM4M && python download_model_files.py"
                     )
                 
-                # Carregar modelo UMA VEZ e cachear
+                # Load model ONCE and cache
                 self._smited_model = load_smi_ted(folder=model_files_path, ckpt_filename='smi-ted-Light_40.pt')
                 self._smited_model_loaded = True
-                self.logger.info("✅ Modelo SMI-TED pré-carregado e cacheado!")
+                self.logger.info("✅ SMI-TED model pre-loaded and cached!")
                 
                 return self._smited_model
             else:
-                # Para outros modelos, tentar importar fm4m (pode falhar)
+                # For other models, try importing fm4m (may fail)
                 try:
                     import models.fm4m as fm4m
                     self.fm4m = fm4m
                 except ImportError:
-                    raise DependencyError(f"Modelo {self.model_name} requer fm4m que não está disponível")
+                    raise DependencyError(f"Model {self.model_name} requires fm4m which is not available")
                 
                 self._smited_model = None
                 self._smited_model_loaded = False
@@ -158,129 +158,129 @@ class LigandEmbedding(BaseEmbedding):
             
         except ImportError as e:
             raise DependencyError(
-                f"FM4M não está disponível: {e}. "
-                "Certifique-se de que o diretório FM4M está presente e as dependências instaladas."
+                f"FM4M is not available: {e}. "
+                "Make sure the FM4M directory is present and dependencies are installed."
             )
     
     def _do_initialize(self) -> None:
-        """Inicialização específica de ligantes."""
+        """Ligand-specific initialization."""
         super()._do_initialize()
         
-        # Configurar checkpoint se habilitado
+        # Configure checkpoint if enabled
         if self.checkpoint_enabled:
             self.checkpoint_file = Path(self.get_config('base_dir', '.')) / 'processed_ligands.log'
             self._load_checkpoint()
     
     def _load_checkpoint(self) -> None:
-        """Carrega arquivos já processados do checkpoint."""
+        """Load already processed files from checkpoint."""
         if self.checkpoint_file and self.checkpoint_file.exists():
             try:
                 with open(self.checkpoint_file, 'r') as f:
                     self.processed_files = {line.strip() for line in f}
-                self.logger.info(f"Checkpoint carregado: {len(self.processed_files)} arquivos já processados")
+                self.logger.info(f"Checkpoint loaded: {len(self.processed_files)} files already processed")
             except Exception as e:
-                self.logger.warning(f"Erro ao carregar checkpoint: {e}")
+                self.logger.warning(f"Error loading checkpoint: {e}")
                 self.processed_files = set()
     
     def _update_checkpoint(self, file_name: str) -> None:
-        """Atualiza checkpoint com arquivo processado."""
+        """Update checkpoint with processed file."""
         if self.checkpoint_enabled and self.checkpoint_file:
             try:
                 with open(self.checkpoint_file, 'a') as f:
                     f.write(f"{file_name}\\n")
                 self.processed_files.add(file_name)
             except Exception as e:
-                self.logger.warning(f"Erro ao atualizar checkpoint: {e}")
+                self.logger.warning(f"Error updating checkpoint: {e}")
     
     def _generate_single_embedding(self, smiles: str) -> np.ndarray:
         """
-        Gera embedding para uma única string SMILES.
+        Generate embedding for a single SMILES string.
         
         Args:
-            smiles: String SMILES do ligante
+            smiles: Ligand SMILES string
             
         Returns:
-            Array NumPy com embedding
+            NumPy array with embedding
         """
         return self._generate_batch_embeddings([smiles])[0]
     
     def generate_embedding_matrix(self, smiles: str) -> Optional[np.ndarray]:
         """
-        Gera matriz de embeddings por token/átomo (sem pooling).
+        Generate embedding matrix per token/atom (no pooling).
         
-        Retorna representações para cada token do SMILES,
-        preservando informação posicional para uso com arquiteturas
-        como CNN + Cross-Attention.
+        Returns representations for each SMILES token,
+        preserving positional information for use with architectures
+        like CNN + Cross-Attention.
         
         Args:
-            smiles: String SMILES do ligante
+            smiles: Ligand SMILES string
             
         Returns:
-            Array NumPy com shape [n_tokens, embed_dim] ou None se não suportado
+            NumPy array with shape [n_tokens, embed_dim] or None if not supported
             
         Note:
-            A maioria dos modelos de ligantes (incluindo SMI-TED) produzem
-            apenas representações globais (vetores). Este método retorna None
-            quando representações por token não estão disponíveis.
+            Most ligand models (including SMI-TED) produce
+            only global representations (vectors). This method returns None
+            when per-token representations are not available.
             
-            Para usar cross-attention com ligantes, considere:
-            1. Usar tokenização SMILES e embeddings aprendidos
-            2. Usar fingerprints 3D se estrutura disponível
-            3. Usar GraphTransformer para representações por átomo
+            To use cross-attention with ligands, consider:
+            1. Using SMILES tokenization and learned embeddings
+            2. Using 3D fingerprints if structure available
+            3. Using GraphTransformer for per-atom representations
         """
-        # Garantir que modelo está carregado
+        # Ensure model is loaded
         if not self._model_loaded:
             self._do_initialize()
         
-        # SMI-TED não suporta representações por token
-        # Retorna None para indicar que matriz não está disponível
+        # SMI-TED does not support per-token representations
+        # Returns None to indicate matrix is not available
         if self.model_name == "SMI-TED":
             self.logger.debug(
-                f"Modelo {self.model_name} não suporta representações por token. "
-                "Retornando None. Use generate_embedding() para vetor global."
+                f"Model {self.model_name} does not support per-token representations. "
+                "Returning None. Use generate_embedding() for global vector."
             )
             return None
         
-        # Para outros modelos, verificar se suportam representações por token
-        # Por agora, retornar None para todos os modelos FM4M
+        # For other models, check if they support per-token representations
+        # For now, return None for all FM4M models
         self.logger.warning(
-            f"Modelo {self.model_name} não suporta representações por token/átomo. "
-            "Use generate_embedding() para obter representação global do ligante."
+            f"Model {self.model_name} does not support per-token/atom representations. "
+            "Use generate_embedding() to get global ligand representation."
         )
         return None
     
     def _generate_batch_embeddings(self, smiles_list: List[str]) -> List[np.ndarray]:
         """
-        Gera embeddings para batch de SMILES com retry logic e processamento individual.
+        Generate embeddings for batch of SMILES with retry logic and individual processing.
         
         Args:
-            smiles_list: Lista de strings SMILES
+            smiles_list: List of SMILES strings
             
         Returns:
-            Lista de arrays NumPy com embeddings
+            List of NumPy arrays with embeddings
         """
         if not self.fm4m_available:
-            raise EmbeddingError("FM4M não está carregado")
+            raise EmbeddingError("FM4M is not loaded")
         
-        # Filtrar SMILES vazios
+        # Filter empty SMILES
         valid_smiles = [s for s in smiles_list if s and s.strip()]
         if not valid_smiles:
-            raise EmbeddingError("Nenhum SMILES válido fornecido")
+            raise EmbeddingError("No valid SMILES provided")
         
         try:
-            # Se modelo está cacheado (SMI-TED), usar diretamente
+            # If model is cached (SMI-TED), use directly
             if self._smited_model_loaded and self.model_name == "SMI-TED":
                 import torch
                 
-                # Para SMI-TED, processar individualmente para evitar crashes do C++
+                # For SMI-TED, process individually to avoid C++ crashes
                 embeddings = []
                 for smiles in valid_smiles:
                     try:
                         with torch.no_grad():
-                            # Processar SMILES individualmente
+                            # Process SMILES individually
                             representation = self._smited_model.encode([smiles], return_torch=False)
                             
-                            # Converter para array numpy
+                            # Convert to numpy array
                             if hasattr(representation, 'values'):
                                 embedding = representation.values[0]
                             else:
@@ -289,18 +289,18 @@ class LigandEmbedding(BaseEmbedding):
                             embeddings.append(embedding)
                     
                     except Exception as e:
-                        # Log erro mas não falhe todo o batch
+                        # Log error but don't fail entire batch
                         if self.logger:
-                            self.logger.warning(f"Falha ao processar SMILES '{smiles[:50]}...': {e}")
-                        # Re-raise para SMILES individual (será capturado no nível superior)
-                        raise EmbeddingError(f"Erro ao processar SMILES: {e}")
+                            self.logger.warning(f"Failed to process SMILES '{smiles[:50]}...': {e}")
+                        # Re-raise for individual SMILES (will be caught at upper level)
+                        raise EmbeddingError(f"Error processing SMILES: {e}")
                 
                 return embeddings
             else:
-                # Fallback: usar método original (para outros modelos)
+                # Fallback: use original method (for other models)
                 representations = self._get_representation_with_retry(valid_smiles)
                 
-                # Converter para lista de arrays numpy
+                # Convert to list of numpy arrays
                 if hasattr(representations, 'values'):
                     embeddings = [representations.values[i] for i in range(len(representations.values))]
                 else:
@@ -309,10 +309,10 @@ class LigandEmbedding(BaseEmbedding):
                 return embeddings
             
         except Exception as e:
-            raise EmbeddingError(f"Erro ao gerar embeddings FM4M: {e}")
+            raise EmbeddingError(f"Error generating FM4M embeddings: {e}")
     
     def _get_representation_with_retry(self, smiles_list: List[str], max_retries: int = 3):
-        """Gera representações com retry logic para rate limiting."""
+        """Generate representations with retry logic for rate limiting."""
         
         def _get_representation():
             return self.fm4m.get_representation(
@@ -330,10 +330,10 @@ class LigandEmbedding(BaseEmbedding):
                 if "429" in str(e) or "Too Many Requests" in str(e):
                     if attempt < max_retries - 1:
                         wait_time = (2 ** attempt) + random.uniform(0, 1)
-                        self.logger.warning(f"Rate limited. Aguardando {wait_time:.2f}s antes de tentar novamente...")
+                        self.logger.warning(f"Rate limited. Waiting {wait_time:.2f}s before retrying...")
                         time.sleep(wait_time)
                     else:
-                        raise EmbeddingError(f"Rate limit excedido após {max_retries} tentativas")
+                        raise EmbeddingError(f"Rate limit exceeded after {max_retries} attempts")
                 else:
                     raise e
     
@@ -343,23 +343,23 @@ class LigandEmbedding(BaseEmbedding):
                                  batch_size: Optional[int] = None,
                                  show_progress: bool = True) -> List[np.ndarray]:
         """
-        Sobrescreve método da classe base para usar implementação FM4M.
+        Override base class method to use FM4M implementation.
         
         Args:
-            input_list: Lista de SMILES
-            batch_size: Tamanho do batch
-            show_progress: Se deve mostrar progresso
+            input_list: List of SMILES
+            batch_size: Batch size
+            show_progress: Whether to show progress
             
         Returns:
-            Lista de embeddings
+            List of embeddings
         """
         if not self.fm4m_available:
-            raise EmbeddingError("FM4M não está carregado")
+            raise EmbeddingError("FM4M is not loaded")
         
         if not input_list:
             return []
         
-        # Otimizar batch size
+        # Optimize batch size
         if batch_size is None:
             batch_size = self.get_config('batch_size', 32)
         batch_size = optimize_batch_size(batch_size)
@@ -367,15 +367,15 @@ class LigandEmbedding(BaseEmbedding):
         embeddings = []
         total_items = len(input_list)
         
-        # Logger de progresso
+        # Progress logger
         if show_progress:
             progress_logger = ProgressLogger(
                 self.logger,
                 total_items,
-                f"Gerando embeddings FM4M ({self.model_name})"
+                f"Generating FM4M embeddings ({self.model_name})"
             )
         
-        # Processar em batches
+        # Process in batches
         for i in range(0, total_items, batch_size):
             batch = input_list[i:i + batch_size]
             
@@ -387,8 +387,8 @@ class LigandEmbedding(BaseEmbedding):
                     progress_logger.update(len(batch))
                     
             except Exception as e:
-                self.logger.error(f"Erro no batch {i//batch_size + 1}: {e}")
-                # Adicionar embeddings zero para manter consistência
+                self.logger.error(f"Error in batch {i//batch_size + 1}: {e}")
+                # Add zero embeddings to maintain consistency
                 zero_embeddings = [np.zeros(self.embedding_dim) for _ in batch]
                 embeddings.extend(zero_embeddings)
                 
@@ -405,53 +405,53 @@ class LigandEmbedding(BaseEmbedding):
                         output_dir: Path,
                         batch_size: Optional[int] = None) -> Tuple[int, int]:
         """
-        Processa arquivo .smi com SMILES.
+        Process .smi file with SMILES.
         
         Args:
-            smi_file: Arquivo .smi de entrada
-            output_dir: Diretório de saída
-            batch_size: Tamanho do batch
+            smi_file: Input .smi file
+            output_dir: Output directory
+            batch_size: Batch size
             
         Returns:
-            Tupla (sucessos, falhas)
+            Tuple (successes, failures)
         """
         file_name = smi_file.name
         
-        # Verificar checkpoint
+        # Check checkpoint
         if self.checkpoint_enabled and file_name in self.processed_files:
-            self.logger.info(f"Arquivo já processado (checkpoint): {file_name}")
-            return 1, 0  # Assumir sucesso
+            self.logger.info(f"File already processed (checkpoint): {file_name}")
+            return 1, 0  # Assume success
         
         try:
-            # Ler SMILES
+            # Read SMILES
             with open(smi_file, 'r') as f:
                 smiles_list = [line.strip() for line in f if line.strip()]
             
             if not smiles_list:
-                self.logger.warning(f"Arquivo vazio: {file_name}")
+                self.logger.warning(f"Empty file: {file_name}")
                 return 0, 1
             
-            self.logger.info(f"Processando {len(smiles_list)} SMILES de {file_name}")
+            self.logger.info(f"Processing {len(smiles_list)} SMILES from {file_name}")
             
-            # Gerar embeddings
+            # Generate embeddings
             embeddings = self.generate_batch_embeddings(smiles_list, batch_size)
             
-            # Preparar saída
+            # Prepare output
             output_path = ensure_directory(output_dir)
             output_file = output_path / f"{smi_file.stem}.npy"
             
-            # Converter para array numpy e salvar
+            # Convert to numpy array and save
             embeddings_array = np.array(embeddings)
             np.save(output_file, embeddings_array)
             
-            # Atualizar checkpoint
+            # Update checkpoint
             self._update_checkpoint(file_name)
             
-            self.logger.info(f"Embeddings salvos: {output_file}")
+            self.logger.info(f"Embeddings saved: {output_file}")
             return 1, 0
             
         except Exception as e:
-            self.logger.error(f"Erro ao processar {file_name}: {e}")
+            self.logger.error(f"Error processing {file_name}: {e}")
             return 0, 1
     
     def process_smiles_directory(self,
@@ -460,71 +460,71 @@ class LigandEmbedding(BaseEmbedding):
                                use_parallel: Optional[bool] = None,
                                max_workers: Optional[int] = None) -> Tuple[int, int]:
         """
-        Processa diretório com arquivos .smi.
+        Process directory with .smi files.
         
         Args:
-            input_dir: Diretório de entrada
-            output_dir: Diretório de saída
-            use_parallel: Se deve usar processamento paralelo
-            max_workers: Número máximo de workers
+            input_dir: Input directory
+            output_dir: Output directory
+            use_parallel: Whether to use parallel processing
+            max_workers: Maximum number of workers
             
         Returns:
-            Tupla (sucessos, falhas)
+            Tuple (successes, failures)
         """
         input_path = Path(input_dir)
         
         if not input_path.exists():
-            raise EmbeddingError(f"Diretório não encontrado: {input_dir}")
+            raise EmbeddingError(f"Directory not found: {input_dir}")
         
-        # Encontrar arquivos .smi
+        # Find .smi files
         smi_files = list(input_path.glob("*.smi"))
         
         if not smi_files:
-            raise EmbeddingError(f"Nenhum arquivo .smi encontrado em {input_dir}")
+            raise EmbeddingError(f"No .smi files found in {input_dir}")
         
-        self.logger.info(f"Encontrados {len(smi_files)} arquivos .smi")
+        self.logger.info(f"Found {len(smi_files)} .smi files")
         
-        # Usar configuração de classe se não especificado
+        # Use class configuration if not specified
         if use_parallel is None:
             use_parallel = self.use_parallel
         
-        total_sucessos = 0
-        total_falhas = 0
+        total_successes = 0
+        total_failures = 0
         
         if use_parallel and len(smi_files) > 1:
-            # Processamento paralelo
+            # Parallel processing
             if max_workers is None:
                 max_workers = min(os.cpu_count(), len(smi_files))
             
-            self.logger.info(f"Processamento paralelo com {max_workers} workers")
+            self.logger.info(f"Parallel processing with {max_workers} workers")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit todos os jobs
+                # Submit all jobs
                 futures = []
                 for smi_file in smi_files:
                     future = executor.submit(self.process_smi_file, smi_file, output_dir)
                     futures.append(future)
                 
-                # Coletar resultados
+                # Collect results
                 for future in futures:
                     try:
-                        sucessos, falhas = future.result()
-                        total_sucessos += sucessos
-                        total_falhas += falhas
+                        successes, failures = future.result()
+                        total_successes += successes
+                        total_failures += failures
                     except Exception as e:
-                        self.logger.error(f"Erro em worker paralelo: {e}")
-                        total_falhas += 1
+                        self.logger.error(f"Error in parallel worker: {e}")
+                        total_failures += 1
         else:
-            # Processamento sequencial
-            self.logger.info("Processamento sequencial")
+            # Sequential processing
+            self.logger.info("Sequential processing")
             
             for smi_file in smi_files:
-                sucessos, falhas = self.process_smi_file(smi_file, output_dir)
-                total_sucessos += sucessos
-                total_falhas += falhas
+                successes, failures = self.process_smi_file(smi_file, output_dir)
+                total_successes += successes
+                total_failures += failures
         
-        self.logger.info(f"Processamento de diretório concluído: {total_sucessos} sucessos, {total_falhas} falhas")
-        return total_sucessos, total_falhas
+        self.logger.info(f"Directory processing completed: {total_successes} successes, {total_failures} failures")
+        return total_successes, total_failures
     
     def generate_embeddings(self, 
                           tsv_path: Path, 
@@ -532,17 +532,17 @@ class LigandEmbedding(BaseEmbedding):
                           save_matrix: bool = False,
                           matrix_output_dir: Optional[Path] = None) -> bool:
         """
-        Gera embeddings a partir de arquivo TSV (interface para pipeline).
+        Generate embeddings from TSV file (interface for pipeline).
         
         Args:
-            tsv_path: Arquivo TSV com dados
-            output_dir: Diretório de saída (usa config se None)
-            save_matrix: Se True, também salva matrizes de embedding [n_tokens, dim]
-                        (Nota: SMI-TED não suporta matrizes por token)
-            matrix_output_dir: Diretório para matrizes (usa 'ligand_matrix_embeddings' se None)
+            tsv_path: TSV file with data
+            output_dir: Output directory (uses config if None)
+            save_matrix: If True, also save embedding matrices [n_tokens, dim]
+                        (Note: SMI-TED does not support per-token matrices)
+            matrix_output_dir: Directory for matrices (uses 'ligand_matrix_embeddings' if None)
             
         Returns:
-            True se sucesso
+            True if successful
         """
         import pandas as pd
         from src.build.utils import ensure_directory
@@ -556,8 +556,8 @@ class LigandEmbedding(BaseEmbedding):
             output_dir = Path(output_dir)
             output_dir = ensure_directory(output_dir)
             
-            # Determinar diretório de saída para matrizes (se habilitado)
-            # Nota: SMI-TED não suporta matrizes, mas mantemos interface consistente
+            # Determine output directory for matrices (if enabled)
+            # Note: SMI-TED does not support matrices, but we keep interface consistent
             if save_matrix:
                 if matrix_output_dir is None:
                     matrix_output_dir = Path(
@@ -568,19 +568,19 @@ class LigandEmbedding(BaseEmbedding):
                     )
                 matrix_output_dir = Path(matrix_output_dir)
                 matrix_output_dir = ensure_directory(matrix_output_dir)
-                self.logger.info(f"📊 Diretório de matrizes configurado: {matrix_output_dir}")
+                self.logger.info(f"📊 Matrix directory configured: {matrix_output_dir}")
                 self.logger.warning(
-                    "⚠️ Nota: Modelo SMI-TED não suporta representações por token/átomo. "
-                    "Matrizes não serão geradas."
+                    "⚠️ Note: SMI-TED model does not support per-token/atom representations. "
+                    "Matrices will not be generated."
                 )
             
-            # Carregar TSV
-            self.logger.info(f"Carregando dados de {tsv_path}")
+            # Load TSV
+            self.logger.info(f"Loading data from {tsv_path}")
             df = pd.read_csv(tsv_path, sep='\t')
             
-            # Verificar colunas obrigatórias
+            # Check required columns
             if 'chembl_id' not in df.columns or 'canonical_smiles' not in df.columns:
-                raise EmbeddingError("TSV deve conter colunas 'chembl_id' e 'canonical_smiles'")
+                raise EmbeddingError("TSV must contain columns 'chembl_id' and 'canonical_smiles'")
             
             # Obter ligantes únicos
             unique_smiles = df.groupby('chembl_id')['canonical_smiles'].first()
@@ -609,96 +609,96 @@ class LigandEmbedding(BaseEmbedding):
                         shutil.copy(str(global_file), str(output_file))
                         existing_embeddings.append(chembl_id)
                         if self.logger:
-                            self.logger.info(f"Copiado embedding global para output: {filename}")
+                            self.logger.info(f"Copied global embedding to output: {filename}")
                         continue
                     except Exception as e:
                         if self.logger:
-                            self.logger.warning(f"Falha ao copiar embedding global {filename}: {e}")
+                            self.logger.warning(f"Failed to copy global embedding {filename}: {e}")
 
                 # Caso contrário, está faltando
                 missing_embeddings.append(chembl_id)
             
-            # Se TODOS os embeddings já existem, pular inicialização do modelo
+            # If ALL embeddings already exist, skip model initialization
             if len(missing_embeddings) == 0:
-                self.logger.info(f"✅ Todos os {len(existing_embeddings)} embeddings já existem - pulando geração")
+                self.logger.info(f"✅ All {len(existing_embeddings)} embeddings already exist - skipping generation")
                 self._output_path = output_dir
-                self.logger.info(f"Embeddings de ligantes: {len(existing_embeddings)} sucessos, 0 falhas")
+                self.logger.info(f"Ligand embeddings: {len(existing_embeddings)} successes, 0 failures")
                 return True
             
-            # Se há embeddings faltando, inicializar modelo
-            self.logger.info(f"Embeddings existentes: {len(existing_embeddings)}/{len(unique_smiles)}")
-            self.logger.info(f"Embeddings faltando: {len(missing_embeddings)}")
+            # If there are missing embeddings, initialize model
+            self.logger.info(f"Existing embeddings: {len(existing_embeddings)}/{len(unique_smiles)}")
+            self.logger.info(f"Missing embeddings: {len(missing_embeddings)}")
             
             if not self._model_loaded:
-                self.logger.info("Inicializando modelo FM4M...")
+                self.logger.info("Initializing FM4M model...")
                 self._do_initialize()
             
-            # Obter SMILES únicos
+            # Get unique SMILES
             unique_smiles = df.groupby('chembl_id')['canonical_smiles'].first()
-            self.logger.info(f"Processando {len(unique_smiles)} ligantes únicos")
+            self.logger.info(f"Processing {len(unique_smiles)} unique ligands")
             
-            # Processar cada ligante
-            sucessos = 0
-            falhas = 0
+            # Process each ligand
+            successes = 0
+            failures = 0
             
             progress_logger = ProgressLogger(
                 self.logger,
                 len(unique_smiles),
-                "Gerando embeddings de ligantes"
+                "Generating ligand embeddings"
             )
             
             for chembl_id, smiles in unique_smiles.items():
                 try:
-                    # Verificar se já existe
+                    # Check if already exists
                     output_file = output_dir / f"{chembl_id}_embedding.npy"
                     if output_file.exists():
-                        self.logger.debug(f"Embedding já existe: {chembl_id}")
-                        sucessos += 1
+                        self.logger.debug(f"Embedding already exists: {chembl_id}")
+                        successes += 1
                         progress_logger.update()
                         continue
                     
-                    # Gerar embedding
+                    # Generate embedding
                     embedding = self.generate_embedding(smiles)
                     
-                    # Salvar
+                    # Save
                     np.save(output_file, embedding)
-                    sucessos += 1
+                    successes += 1
                     
                 except Exception as e:
-                    self.logger.error(f"Erro ao processar {chembl_id}: {e}")
-                    falhas += 1
+                    self.logger.error(f"Error processing {chembl_id}: {e}")
+                    failures += 1
                 
                 progress_logger.update()
             
             progress_logger.finish()
             
-            # Salvar path de saída
+            # Save output path
             self._output_path = output_dir
             
-            self.logger.info(f"Embeddings de ligantes: {sucessos} sucessos, {falhas} falhas")
+            self.logger.info(f"Ligand embeddings: {successes} successes, {failures} failures")
             return True
             
         except Exception as e:
-            self.logger.error(f"Erro ao gerar embeddings: {e}")
+            self.logger.error(f"Error generating embeddings: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
             return False
     
     def get_output_path(self) -> Optional[Path]:
-        """Retorna path de saída dos embeddings vetoriais."""
+        """Return vector embeddings output path."""
         return getattr(self, '_output_path', None)
     
     def get_matrix_output_path(self) -> Optional[Path]:
         """
-        Retorna path de saída das matrizes de embedding.
+        Return embedding matrices output path.
         
-        Nota: SMI-TED não suporta matrizes por token, então este
-        diretório tipicamente estará vazio para ligantes.
+        Note: SMI-TED does not support per-token matrices, so this
+        directory will typically be empty for ligands.
         """
         return getattr(self, '_matrix_output_path', None)
     
     def get_embeddings_info(self) -> Dict[str, Any]:
-        """Retorna informações sobre embeddings gerados."""
+        """Return information about generated embeddings."""
         output_path = self.get_output_path()
         matrix_output_path = self.get_matrix_output_path()
         
@@ -725,7 +725,7 @@ class LigandEmbedding(BaseEmbedding):
         return info
     
     def build(self) -> Dict[str, Any]:
-        """Constrói resumo do processamento."""
+        """Build processing summary."""
         result = super().build()
         
         result.update({

@@ -343,21 +343,21 @@ Dispositivos:
 
 
 def main():
-    """Executar pipeline completo."""
+    """Execute complete pipeline."""
     args = parse_args()
     
     print('=' * 80)
-    print('🧬 DOCKTKINASE - PIPELINE COMPLETO INTEGRADO')
+    print('🧬 DOCKTKINASE - COMPLETE INTEGRATED PIPELINE')
     print('=' * 80)
     print()
     
-    # Validar input
+    # Validate input
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f'❌ Erro: Arquivo não encontrado: {args.input}')
+        print(f'❌ Error: File not found: {args.input}')
         return 1
     
-    print('📋 Configuração:')
+    print('📋 Configuration:')
     print(f'   Input:  {args.input}')
     print(f'   Output: {args.output}')
     print(f'   Ligand Model: {args.ligand_model} (768-dim)')
@@ -379,13 +379,13 @@ def main():
         'boltz2': 384
     }
     
-    # Usar dimensão customizada se fornecida, senão usar padrão do modelo
+    # Use custom dimension if provided, otherwise use model default
     if args.protein_dim is not None:
         protein_dim = args.protein_dim
-        dim_source = 'customizada'
+        dim_source = 'custom'
     else:
         protein_dim = protein_dims.get(args.protein_model, 320)
-        dim_source = 'padrão'
+        dim_source = 'default'
     
     ligand_dim = 768  # FM4M SMI-TED fixo
     total_dim = ligand_dim + protein_dim
@@ -405,13 +405,13 @@ def main():
     print(f'   Protein Model: {args.protein_model} ({protein_dim}-dim {dim_source})')
     print(f'   Total Embedding: {total_dim}-dim (Ligand: {ligand_dim} + Protein: {protein_dim})')
     print(f'   Device: {args.device} → {detected_device}')
-    print(f'   Checkpoints: {"❌ Desabilitado" if args.no_checkpoints else "✅ Habilitado"}')
+    print(f'   Checkpoints: {"❌ Disabled" if args.no_checkpoints else "✅ Enabled"}')
     
-    # Embedding directories (reutilização)
+    # Embedding directories (reuse)
     if args.protein_embeddings_dir:
-        print(f'   📂 Protein Embeddings: {args.protein_embeddings_dir} (pré-computados)')
+        print(f'   📂 Protein Embeddings: {args.protein_embeddings_dir} (pre-computed)')
     if args.ligand_embeddings_dir:
-        print(f'   📂 Ligand Embeddings: {args.ligand_embeddings_dir} (pré-computados/compartilhados)')
+        print(f'   📂 Ligand Embeddings: {args.ligand_embeddings_dir} (pre-computed/shared)')
     
     # Stratification settings
     if args.stratifier_threshold is not None:
@@ -419,53 +419,53 @@ def main():
     else:
         print(f'   Stratification: Auto-threshold (method={args.stratifier_method})')
     
-    # Validar API key para modelos que requerem Forge API (ESM-C 6B)
+    # Validate API key for models that require Forge API (ESM-C 6B)
     if args.protein_model in FORGE_API_MODELS:
-        print(f'   ⚠️  Modelo requer API: Forge API (EvolutionaryScale)')
+        print(f'   ⚠️  Model requires API: Forge API (EvolutionaryScale)')
         if args.api:
-            print(f'   🔑 API key: fornecida via --api')
+            print(f'   🔑 API key: provided via --api')
     print()
     
     if not validate_forge_api_key(args.protein_model, args.api):
         print()
-        print('❌ Pipeline cancelado: API key não fornecida para modelo ESM-C 6B.')
-        print('   Use --protein-model com outro modelo disponível localmente.')
+        print('❌ Pipeline cancelled: API key not provided for ESM-C 6B model.')
+        print('   Use --protein-model with another locally available model.')
         return 1
     
-    # Determinar quais fases executar
+    # Determine which phases to execute
     run_classification = not args.no_classification
     run_regression = not args.no_regression
     
     if not run_classification and not run_regression:
-        print('❌ Erro: Pelo menos uma fase deve ser habilitada (classificação ou regressão)')
+        print('❌ Error: At least one phase must be enabled (classification or regression)')
         return 1
     
     phases = []
     if run_classification:
         n_clf_models = len(args.classification_models) if args.classification_models else 10
-        phases.append(f'Classification ({n_clf_models} modelos)')
+        phases.append(f'Classification ({n_clf_models} models)')
     if run_regression:
         n_reg_models = len(args.regression_models) if args.regression_models else 10
-        phases.append(f'Regression ({n_reg_models} modelos)')
+        phases.append(f'Regression ({n_reg_models} models)')
     
-    print(f'📊 Fases a executar:')
-    print(f'   • Build (sempre necessário)')
+    print(f'📊 Phases to execute:')
+    print(f'   • Build (always required)')
     for phase in phases:
         print(f'   • {phase}')
     print()
     
-    # Configuração do pipeline
+    # Pipeline configuration
     config = IntegratedConfig(
         # Input/Output
         input_tsv=str(input_path),
         output_dir=args.output,
         
-        # Build (Fase 1)
+        # Build (Phase 1)
         ligand_model=args.ligand_model,
         esm_model=args.protein_model,
-        esm_dim=args.protein_dim,  # Dimensão customizada (None = usar padrão do modelo)
+        esm_dim=args.protein_dim,  # Custom dimension (None = use model default)
         
-        # Embedding directories (reutilização)
+        # Embedding directories (reuse)
         protein_embeddings_dir=args.protein_embeddings_dir,
         ligand_embeddings_dir=args.ligand_embeddings_dir,
         
@@ -492,7 +492,7 @@ def main():
         verbose=not args.quiet
     )
     
-    # Executar pipeline
+    # Execute pipeline
     start_time = time.time()
     
     try:
@@ -503,19 +503,19 @@ def main():
         
         print()
         print('=' * 80)
-        print('✅ PIPELINE COMPLETO - SUCESSO!')
+        print('✅ PIPELINE COMPLETE - SUCCESS!')
         print('=' * 80)
-        print(f'⏱️  Tempo Total: {total_time:.2f}s ({total_time/60:.2f} min)')
+        print(f'⏱️  Total Time: {total_time:.2f}s ({total_time/60:.2f} min)')
         print()
         
-        # Resumo dos resultados
+        # Results summary
         if results.get('status') == 'completed':
             # Build
             if 'build' in results and results['build'].get('success'):
                 build = results['build']
                 print('📦 BUILD:')
-                print(f'   ✅ Amostras processadas: {build.get("n_samples", 0):,}')
-                print(f'   ✅ Dimensão final: {build.get("embedding_dim", 0)}')
+                print(f'   ✅ Samples processed: {build.get("n_samples", 0):,}')
+                print(f'   ✅ Final dimension: {build.get("embedding_dim", 0)}')
                 print()
             
             # Classification
@@ -523,9 +523,9 @@ def main():
                 clf = results['classifier']
                 if clf.get('success'):
                     print('📊 CLASSIFICATION:')
-                    print(f'   ✅ Modelos treinados: {clf.get("n_models_trained", 0)}')
+                    print(f'   ✅ Models trained: {clf.get("n_models_trained", 0)}')
                     if 'best_model' in clf:
-                        print(f'   🏆 Melhor modelo: {clf["best_model"]}')
+                        print(f'   🏆 Best model: {clf["best_model"]}')
                         if 'best_metrics' in clf:
                             metrics = clf['best_metrics']
                             print(f'      ROC-AUC: {metrics.get("ROC_AUC", 0):.4f}')
@@ -538,20 +538,20 @@ def main():
                 reg = results['regression']
                 if reg.get('success'):
                     print('📈 REGRESSION:')
-                    print(f'   ✅ Modelos treinados: {reg.get("models_trained", 0)}')
+                    print(f'   ✅ Models trained: {reg.get("models_trained", 0)}')
                     if 'best_model' in reg:
-                        print(f'   🏆 Melhor modelo: {reg["best_model"]} (selecionado pela validação)')
-                        # Mostrar métricas de validação e teste separadamente
+                        print(f'   🏆 Best model: {reg["best_model"]} (selected by validation)')
+                        # Show validation and test metrics separately
                         if 'best_val_mae' in reg:
-                            print(f'      📊 Validação: MAE={reg.get("best_val_mae", 0):.2f} nM, R²={reg.get("best_val_r2", 0):.4f}')
-                            print(f'      🎯 Teste:     MAE={reg.get("best_test_mae", 0):.2f} nM, R²={reg.get("best_test_r2", 0):.4f}')
+                            print(f'      📊 Validation: MAE={reg.get("best_val_mae", 0):.2f} nM, R²={reg.get("best_val_r2", 0):.4f}')
+                            print(f'      🎯 Test:       MAE={reg.get("best_test_mae", 0):.2f} nM, R²={reg.get("best_test_r2", 0):.4f}')
                         else:
-                            # Fallback para formato antigo
+                            # Fallback for old format
                             print(f'      MAE: {reg.get("best_mae", 0):.2f} nM')
                             print(f'      R²: {reg.get("best_r2", 0):.4f}')
                     print()
         
-        print(f'📁 Resultados salvos em: {args.output}')
+        print(f'📁 Results saved to: {args.output}')
         print('=' * 80)
         
         return 0
@@ -559,14 +559,14 @@ def main():
     except Exception as e:
         print()
         print('=' * 80)
-        print('❌ ERRO NO PIPELINE')
+        print('❌ PIPELINE ERROR')
         print('=' * 80)
-        print(f'Erro: {str(e)}')
+        print(f'Error: {str(e)}')
         
         import traceback
         if not args.quiet:
             print()
-            print('Traceback completo:')
+            print('Full traceback:')
             traceback.print_exc()
         
         return 1

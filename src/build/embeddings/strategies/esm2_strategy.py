@@ -1,6 +1,6 @@
 """
-Implementação concreta da estratégia para modelos ESM-2.
-Contém toda a lógica específica de carregamento, inferência e cleanup para ESM-2.
+Concrete implementation of strategy for ESM-2 models.
+Contains all ESM-2 specific logic for loading, inference and cleanup.
 """
 
 import os
@@ -17,24 +17,24 @@ from src.build.core.exceptions import ModelLoadError, EmbeddingError
 
 class ESM2Strategy(BaseProteinStrategy):
     """
-    Estratégia de implementação para modelos ESM-2 (Meta AI).
+    Implementation strategy for ESM-2 models (Meta AI).
     
-    Características:
-    - Suporta modelos de 8M a 15B parâmetros
-    - CPU offloading automático para modelos grandes (3B, 15B)
-    - Mean pooling sobre sequência (não usa CLS token)
-    - Gestão de memória otimizada (gc + empty_cache)
-    - Suporta CUDA, MPS (Apple Silicon) e CPU
+    Features:
+    - Supports models from 8M to 15B parameters
+    - Automatic CPU offloading for large models (3B, 15B)
+    - Mean pooling over sequence (does not use CLS token)
+    - Optimized memory management (gc + empty_cache)
+    - Supports CUDA, MPS (Apple Silicon) and CPU
     
-    Responsabilidades:
-    - Carregar modelo ESM-2 com configurações apropriadas
-    - Gerar embeddings com truncamento automático
-    - Gerenciar memória GPU/CPU de forma eficiente
+    Responsibilities:
+    - Load ESM-2 model with appropriate configurations
+    - Generate embeddings with automatic truncation
+    - Manage GPU/CPU memory efficiently
     """
     
     def __init__(self):
-        """Inicializa estratégia ESM-2."""
-        self.logger = None  # Será configurado quando necessário
+        """Initialize ESM-2 strategy."""
+        self.logger = None  # Will be configured when needed
         self._cache_dir = None
         self._offload_folder = None
     
@@ -46,47 +46,47 @@ class ESM2Strategy(BaseProteinStrategy):
         **kwargs
     ) -> Tuple[Any, Any]:
         """
-        Carrega modelo ESM-2 com CPU offloading opcional.
+        Load ESM-2 model with optional CPU offloading.
         
         Args:
-            model_name: Nome do modelo (ex: "esm2_t48_15B_UR50D")
-            device: Dispositivo PyTorch (cuda/cpu/mps)
-            offload_folder: Pasta customizada para offloading (opcional)
-            **kwargs: Parâmetros adicionais (logger, etc.)
+            model_name: Model name (e.g., "esm2_t48_15B_UR50D")
+            device: PyTorch device (cuda/cpu/mps)
+            offload_folder: Custom folder for offloading (optional)
+            **kwargs: Additional parameters (logger, etc.)
             
         Returns:
-            Tuple (model, alphabet) onde alphabet é o tokenizer do ESM-2
+            Tuple (model, alphabet) where alphabet is the ESM-2 tokenizer
             
         Raises:
-            ValueError: Se modelo não for ESM-2 válido
-            ModelLoadError: Se falhar ao carregar modelo
+            ValueError: If model is not a valid ESM-2
+            ModelLoadError: If failed to load model
         """
-        # Configurar logger se fornecido
+        # Configure logger if provided
         self.logger = kwargs.get('logger')
         
-        # Validar modelo
+        # Validate model
         if model_name not in ESM_MODELS:
             raise ValueError(
-                f"Modelo ESM-2 '{model_name}' não encontrado. "
-                f"Modelos disponíveis: {list(ESM_MODELS.keys())}"
+                f"ESM-2 model '{model_name}' not found. "
+                f"Available models: {list(ESM_MODELS.keys())}"
             )
         
-        # Configurar cache local
+        # Configure local cache
         self._setup_cache_dirs(offload_folder)
         
-        # Configurar memória CUDA (nova variável desde PyTorch 2.0)
+        # Configure CUDA memory (new variable since PyTorch 2.0)
         os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
         
-        # Determinar se precisa de CPU offloading
+        # Determine if CPU offloading is needed
         large_models = ['esm2_t48_15B_UR50D', 'esm2_t36_3B_UR50D']
         needs_offload = model_name in large_models and str(device) == 'cuda'
         
         try:
             if self.logger:
-                self.logger.info(f"Carregando modelo ESM-2: {model_name}")
-                self.logger.info(f"Cache de modelos: {self._cache_dir}")
+                self.logger.info(f"Loading ESM-2 model: {model_name}")
+                self.logger.info(f"Model cache: {self._cache_dir}")
             
-            # Importar ESM - tentar local primeiro, depois instalado
+            # Import ESM - try local first, then installed
             esm = self._import_esm()
             
             if needs_offload:
@@ -97,14 +97,14 @@ class ESM2Strategy(BaseProteinStrategy):
             model = model.eval()
             
             if self.logger:
-                self.logger.info("✅ Modelo ESM-2 carregado com sucesso")
+                self.logger.info("✅ ESM-2 model loaded successfully")
             
             return model, alphabet
             
         except ImportError as e:
             raise ModelLoadError(
-                f"ESM não está disponível. Erro: {e}\n"
-                f"Verifique se a pasta ESM/ existe no repositório."
+                f"ESM is not available. Error: {e}\n"
+                f"Check if the ESM/ folder exists in the repository."
             )
         except Exception as e:
             self._handle_load_error(e, model_name)
@@ -118,56 +118,56 @@ class ESM2Strategy(BaseProteinStrategy):
         **kwargs
     ) -> np.ndarray:
         """
-        Gera embedding ESM-2 com mean pooling.
+        Generate ESM-2 embedding with mean pooling.
         
         Args:
-            model: Modelo ESM-2 carregado
-            auxiliary_objects: Alphabet (tokenizer) do ESM-2
-            sequence: Sequência de aminoácidos
-            device: Dispositivo PyTorch
-            **kwargs: Parâmetros opcionais (logger, etc.)
+            model: Loaded ESM-2 model
+            auxiliary_objects: Alphabet (tokenizer) from ESM-2
+            sequence: Amino acid sequence
+            device: PyTorch device
+            **kwargs: Optional parameters (logger, etc.)
             
         Returns:
             Embedding numpy array (shape: [embedding_dim])
             
         Raises:
-            EmbeddingError: Se falhar ao gerar embedding
+            EmbeddingError: If failed to generate embedding
         """
         alphabet = auxiliary_objects
         self.logger = kwargs.get('logger', self.logger)
         
-        # Validar sequência
+        # Validate sequence
         if not sequence or not sequence.strip():
-            raise EmbeddingError("Sequência vazia")
+            raise EmbeddingError("Empty sequence")
         
-        # Limpar sequência (apenas aminoácidos válidos)
+        # Clean sequence (only valid amino acids)
         clean_sequence = ''.join(
             c for c in sequence.upper() 
             if c in 'ACDEFGHIKLMNPQRSTVWY'
         )
         
         if not clean_sequence:
-            raise EmbeddingError("Sequência não contém aminoácidos válidos")
+            raise EmbeddingError("Sequence contains no valid amino acids")
         
-        # Truncar se necessário
+        # Truncate if necessary
         max_len = self.get_max_length(model.args.arch if hasattr(model, 'args') else model.__class__.__name__)
         
         if len(clean_sequence) > max_len:
             if self.logger:
                 self.logger.warning(
-                    f"Sequência truncada: {len(clean_sequence)} → {max_len} aa"
+                    f"Sequence truncated: {len(clean_sequence)} → {max_len} aa"
                 )
             clean_sequence = clean_sequence[:max_len]
         
         try:
-            # Preparar tokens
+            # Prepare tokens
             batch_converter = alphabet.get_batch_converter()
             batch_labels, batch_strs, batch_tokens = batch_converter(
                 [("sequence", clean_sequence)]
             )
             batch_tokens = batch_tokens.to(device)
             
-            # Inferência
+            # Inference
             with torch.no_grad():
                 results = model(
                     batch_tokens,
@@ -175,17 +175,17 @@ class ESM2Strategy(BaseProteinStrategy):
                     return_contacts=False
                 )
                 
-                # Extrair embeddings (remover tokens especiais BOS/EOS)
+                # Extract embeddings (remove special BOS/EOS tokens)
                 token_representations = results["representations"][model.num_layers]
                 embedding = token_representations[0, 1:-1]  # [seq_len, embed_dim]
                 
-                # Mean pooling sobre a sequência
+                # Mean pooling over the sequence
                 sequence_embedding = embedding.mean(dim=0)  # [embed_dim]
                 
-                # Mover para CPU
+                # Move to CPU
                 result = sequence_embedding.cpu().numpy()
             
-            # Limpeza de memória CRÍTICA
+            # CRITICAL memory cleanup
             del batch_tokens, results, token_representations, embedding, sequence_embedding
             gc.collect()
             
@@ -196,18 +196,18 @@ class ESM2Strategy(BaseProteinStrategy):
             return result
             
         except Exception as e:
-            # Limpar memória mesmo em erro
+            # Clean memory even on error
             if str(device) == 'cuda':
                 torch.cuda.empty_cache()
             gc.collect()
-            raise EmbeddingError(f"Erro ao gerar embedding ESM-2: {e}")
+            raise EmbeddingError(f"Error generating ESM-2 embedding: {e}")
     
     def get_max_length(self, model_name: str) -> int:
-        """Retorna comprimento máximo de sequência para o modelo."""
+        """Return maximum sequence length for the model."""
         return ESM_MODELS.get(model_name, {}).get('max_len', 1024)
     
     def get_embedding_dim(self, model_name: str) -> int:
-        """Retorna dimensão do embedding do modelo."""
+        """Return embedding dimension for the model."""
         return ESM_MODELS.get(model_name, {}).get('dim', 1280)
     
     def cleanup(self, model: Any, auxiliary_objects: Any) -> None:
@@ -231,56 +231,56 @@ class ESM2Strategy(BaseProteinStrategy):
         **kwargs
     ) -> np.ndarray:
         """
-        Gera matriz de embeddings ESM-2 per-token (sem pooling).
+        Generate ESM-2 embedding matrix per-token (no pooling).
         
         Args:
-            model: Modelo ESM-2 carregado
-            auxiliary_objects: Alphabet (tokenizer) do ESM-2
-            sequence: Sequência de aminoácidos
-            device: Dispositivo PyTorch
-            **kwargs: Parâmetros opcionais (logger, etc.)
+            model: Loaded ESM-2 model
+            auxiliary_objects: Alphabet (tokenizer) from ESM-2
+            sequence: Amino acid sequence
+            device: PyTorch device
+            **kwargs: Optional parameters (logger, etc.)
             
         Returns:
-            Matriz numpy array (shape: [seq_len, embedding_dim])
+            Numpy array matrix (shape: [seq_len, embedding_dim])
             
         Raises:
-            EmbeddingError: Se falhar ao gerar embedding
+            EmbeddingError: If failed to generate embedding
         """
         alphabet = auxiliary_objects
         self.logger = kwargs.get('logger', self.logger)
         
-        # Validar sequência
+        # Validate sequence
         if not sequence or not sequence.strip():
-            raise EmbeddingError("Sequência vazia")
+            raise EmbeddingError("Empty sequence")
         
-        # Limpar sequência (apenas aminoácidos válidos)
+        # Clean sequence (only valid amino acids)
         clean_sequence = ''.join(
             c for c in sequence.upper() 
             if c in 'ACDEFGHIKLMNPQRSTVWY'
         )
         
         if not clean_sequence:
-            raise EmbeddingError("Sequência não contém aminoácidos válidos")
+            raise EmbeddingError("Sequence contains no valid amino acids")
         
-        # Truncar se necessário
+        # Truncate if necessary
         max_len = self.get_max_length(model.args.arch if hasattr(model, 'args') else model.__class__.__name__)
         
         if len(clean_sequence) > max_len:
             if self.logger:
                 self.logger.warning(
-                    f"Sequência truncada: {len(clean_sequence)} → {max_len} aa"
+                    f"Sequence truncated: {len(clean_sequence)} → {max_len} aa"
                 )
             clean_sequence = clean_sequence[:max_len]
         
         try:
-            # Preparar tokens
+            # Prepare tokens
             batch_converter = alphabet.get_batch_converter()
             batch_labels, batch_strs, batch_tokens = batch_converter(
                 [("sequence", clean_sequence)]
             )
             batch_tokens = batch_tokens.to(device)
             
-            # Inferência
+            # Inference
             with torch.no_grad():
                 results = model(
                     batch_tokens,
@@ -288,14 +288,14 @@ class ESM2Strategy(BaseProteinStrategy):
                     return_contacts=False
                 )
                 
-                # Extrair embeddings (remover tokens especiais BOS/EOS)
+                # Extract embeddings (remove special BOS/EOS tokens)
                 token_representations = results["representations"][model.num_layers]
                 embedding_matrix = token_representations[0, 1:-1]  # [seq_len, embed_dim]
                 
-                # Mover para CPU - SEM POOLING (mantém matriz completa)
+                # Move to CPU - NO POOLING (keep complete matrix)
                 result = embedding_matrix.cpu().numpy()
             
-            # Limpeza de memória CRÍTICA
+            # CRITICAL memory cleanup
             del batch_tokens, results, token_representations, embedding_matrix
             gc.collect()
             
@@ -306,20 +306,20 @@ class ESM2Strategy(BaseProteinStrategy):
             return result
             
         except Exception as e:
-            # Limpar memória mesmo em erro
+            # Clean memory even on error
             if str(device) == 'cuda':
                 torch.cuda.empty_cache()
             gc.collect()
-            raise EmbeddingError(f"Erro ao gerar matriz de embedding ESM-2: {e}")
+            raise EmbeddingError(f"Error generating ESM-2 embedding matrix: {e}")
     
     def supports_matrix_output(self) -> bool:
-        """ESM-2 suporta geração de matrizes per-token."""
+        """ESM-2 supports per-token matrix generation."""
         return True
     
-    # ===== Métodos Privados =====
+    # ===== Private Methods =====
     
     def _setup_cache_dirs(self, offload_folder: Optional[str] = None) -> None:
-        """Configura diretórios de cache e offload."""
+        """Configure cache and offload directories."""
         # Cache principal
         self._cache_dir = Path(__file__).parent.parent.parent.parent.parent / "llm" / "models_cache" / "ESM"
         self._cache_dir.mkdir(parents=True, exist_ok=True)

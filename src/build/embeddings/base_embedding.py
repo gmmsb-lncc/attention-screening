@@ -1,5 +1,5 @@
 """
-Interface base para geração de embeddings.
+Base interface for embedding generation.
 """
 
 from abc import ABC, abstractmethod
@@ -12,18 +12,18 @@ from src.build.core.exceptions import EmbeddingError, ModelLoadError, Dependency
 from src.build.utils import ProgressLogger, memory_monitor
 
 class BaseEmbedding(BaseBuilder):
-    """Classe base abstrata para geração de embeddings."""
+    """Abstract base class for embedding generation."""
     
     def __init__(self, model_name: str = None, config=None, **kwargs):
         """
-        Inicializa gerador de embeddings.
+        Initialize embedding generator.
         
         Args:
-            model_name: Nome do modelo a usar
-            config: Configuração do build
-            **kwargs: Argumentos de configuração
+            model_name: Name of the model to use
+            config: Build configuration
+            **kwargs: Configuration arguments
         """
-        # Garantir que temos um model_name ANTES de chamar super
+        # Ensure we have a model_name BEFORE calling super
         if model_name is None:
             model_name = "default"
         
@@ -32,13 +32,13 @@ class BaseEmbedding(BaseBuilder):
         self.embedding_dim = None
         self._model_loaded = False
         
-        # Agora chamar super com tudo definido
+        # Now call super with everything defined
         super().__init__(config=config, **kwargs)
     
     def _validate_config(self) -> None:
-        """Valida configuração específica de embeddings."""
+        """Validate embedding-specific configuration."""
         if not self.model_name:
-            raise EmbeddingError("Nome do modelo é obrigatório")
+            raise EmbeddingError("Model name is required")
     
     def build(self) -> Any:
         """
@@ -56,59 +56,59 @@ class BaseEmbedding(BaseBuilder):
     @abstractmethod
     def _load_model(self) -> Any:
         """
-        Carrega modelo específico.
-        Deve ser implementado por cada subclasse.
+        Load specific model.
+        Must be implemented by each subclass.
         
         Returns:
-            Modelo carregado
+            Loaded model
         """
         pass
     
     @abstractmethod
     def _generate_single_embedding(self, input_data: str) -> np.ndarray:
         """
-        Gera embedding para uma única entrada.
+        Generate embedding for a single input.
         
         Args:
-            input_data: Dados de entrada (sequência, SMILES, etc.)
+            input_data: Input data (sequence, SMILES, etc.)
             
         Returns:
-            Array NumPy com embedding
+            NumPy array with embedding
         """
         pass
     
     @abstractmethod
     def get_supported_models(self) -> Dict[str, Dict[str, Any]]:
         """
-        Retorna modelos suportados.
+        Return supported models.
         
         Returns:
-            Dicionário com modelos e suas propriedades
+            Dictionary with models and their properties
         """
         pass
     
     def _do_initialize(self) -> None:
-        """Inicialização específica de embeddings."""
+        """Embedding-specific initialization."""
         super()._do_initialize()
         
-        # Verificar se modelo é suportado
+        # Check if model is supported
         supported_models = self.get_supported_models()
         if self.model_name not in supported_models:
             raise EmbeddingError(
-                f"Modelo não suportado: {self.model_name}. "
-                f"Disponíveis: {list(supported_models.keys())}"
+                f"Unsupported model: {self.model_name}. "
+                f"Available: {list(supported_models.keys())}"
             )
         
-        # Carregar modelo
+        # Load model
         try:
-            self.logger.info(f"Carregando modelo: {self.model_name}")
+            self.logger.info(f"Loading model: {self.model_name}")
             self.model = self._load_model()
             
-            # Determinar dimensão do embedding
-            # Prioridade: 1) dimensão customizada via config, 2) dimensão padrão do modelo
+            # Determine embedding dimension
+            # Priority: 1) custom dimension via config, 2) model default dimension
             custom_dim = None
             if self.config:
-                # Tentar obter dimensão customizada do config
+                # Try to get custom dimension from config
                 if hasattr(self.config, 'get'):
                     custom_dim = self.config.get('protein_dim') if 'protein' in self.__class__.__name__.lower() else self.config.get('ligand_dim')
                 elif hasattr(self.config, 'protein_dim'):
@@ -116,55 +116,55 @@ class BaseEmbedding(BaseBuilder):
             
             if custom_dim is not None:
                 self.embedding_dim = custom_dim
-                self.logger.info(f"Modelo carregado - Dimensão customizada: {self.embedding_dim}")
+                self.logger.info(f"Model loaded - Custom dimension: {self.embedding_dim}")
             else:
                 self.embedding_dim = supported_models[self.model_name]['dim']
-                self.logger.info(f"Modelo carregado - Dimensão padrão: {self.embedding_dim}")
+                self.logger.info(f"Model loaded - Default dimension: {self.embedding_dim}")
             
             self._model_loaded = True
             
         except Exception as e:
-            raise ModelLoadError(f"Erro ao carregar modelo {self.model_name}: {e}")
+            raise ModelLoadError(f"Error loading model {self.model_name}: {e}")
     
     def _do_cleanup(self) -> None:
-        """Limpeza específica de embeddings."""
+        """Embedding-specific cleanup."""
         if self.model is not None:
             try:
-                # Tentar limpar modelo da memória
+                # Try to clean model from memory
                 del self.model
                 self.model = None
                 self._model_loaded = False
                 
-                # Forçar garbage collection
+                # Force garbage collection
                 import gc
                 gc.collect()
                 
-                self.logger.info("Modelo removido da memória")
+                self.logger.info("Model removed from memory")
             except Exception as e:
-                self.logger.warning(f"Erro na limpeza do modelo: {e}")
+                self.logger.warning(f"Error during model cleanup: {e}")
         
         super()._do_cleanup()
     
     def generate_embedding(self, input_data: str) -> np.ndarray:
         """
-        Gera embedding para entrada individual.
+        Generate embedding for individual input.
         
         Args:
-            input_data: Dados de entrada
+            input_data: Input data
             
         Returns:
-            Array NumPy com embedding
+            NumPy array with embedding
         """
         if not self._model_loaded:
-            raise EmbeddingError("Modelo não carregado. Execute initialize() primeiro.")
+            raise EmbeddingError("Model not loaded. Run initialize() first.")
         
         if not input_data or not input_data.strip():
-            raise EmbeddingError("Dados de entrada vazios")
+            raise EmbeddingError("Empty input data")
         
         try:
             return self._generate_single_embedding(input_data.strip())
         except Exception as e:
-            raise EmbeddingError(f"Erro ao gerar embedding: {e}")
+            raise EmbeddingError(f"Error generating embedding: {e}")
     
     @memory_monitor(threshold_percent=85.0)
     def generate_batch_embeddings(self, 
@@ -172,66 +172,66 @@ class BaseEmbedding(BaseBuilder):
                                  batch_size: Optional[int] = None,
                                  show_progress: bool = True) -> List[np.ndarray]:
         """
-        Gera embeddings para múltiplas entradas.
+        Generate embeddings for multiple inputs.
         
         Args:
-            input_list: Lista de dados de entrada
-            batch_size: Tamanho do batch (usa configuração se None)
-            show_progress: Se deve mostrar progresso
+            input_list: List of input data
+            batch_size: Batch size (uses config if None)
+            show_progress: Whether to show progress
             
         Returns:
-            Lista de arrays NumPy com embeddings
+            List of NumPy arrays with embeddings
         """
         if not self._model_loaded:
-            raise EmbeddingError("Modelo não carregado. Execute initialize() primeiro.")
+            raise EmbeddingError("Model not loaded. Run initialize() first.")
         
         if not input_list:
             return []
         
-        # Usar batch size da configuração se não especificado
+        # Use batch size from config if not specified
         if batch_size is None:
             batch_size = self.get_config('batch_size', 32)
         
-        # Otimizar batch size baseado na memória disponível
+        # Optimize batch size based on available memory
         from src.build.utils import optimize_batch_size
         batch_size = optimize_batch_size(batch_size)
         
         embeddings = []
         total_items = len(input_list)
         
-        # Logger de progresso
+        # Progress logger
         if show_progress:
             progress_logger = ProgressLogger(
                 self.logger, 
                 total_items, 
-                f"Gerando embeddings ({self.model_name})"
+                f"Generating embeddings ({self.model_name})"
             )
         
         try:
-            # Processar em batches
+            # Process in batches
             for i in range(0, total_items, batch_size):
                 batch = input_list[i:i + batch_size]
                 
-                # Gerar embeddings do batch
+                # Generate batch embeddings
                 batch_embeddings = []
                 for item in batch:
                     try:
                         embedding = self.generate_embedding(item)
                         batch_embeddings.append(embedding)
                     except Exception as e:
-                        self.logger.warning(f"Erro ao gerar embedding para item {i}: {e}")
-                        # Usar embedding zero em caso de erro
+                        self.logger.warning(f"Error generating embedding for item {i}: {e}")
+                        # Use zero embedding in case of error
                         zero_embedding = np.zeros(self.embedding_dim)
                         batch_embeddings.append(zero_embedding)
                 
                 embeddings.extend(batch_embeddings)
                 
-                # Atualizar progresso
+                # Update progress
                 if show_progress:
                     progress_logger.update(len(batch))
                 
-                # Limpeza de memória entre batches
-                if i % (batch_size * 10) == 0:  # A cada 10 batches
+                # Memory cleanup between batches
+                if i % (batch_size * 10) == 0:  # Every 10 batches
                     import gc
                     gc.collect()
             
@@ -241,7 +241,7 @@ class BaseEmbedding(BaseBuilder):
             return embeddings
             
         except Exception as e:
-            raise EmbeddingError(f"Erro no processamento em batch: {e}")
+            raise EmbeddingError(f"Error in batch processing: {e}")
     
     def process_file(self, 
                     input_file: Union[str, Path],
@@ -250,37 +250,37 @@ class BaseEmbedding(BaseBuilder):
                     data_column: str = 'sequence',
                     batch_size: Optional[int] = None) -> Tuple[int, int]:
         """
-        Processa arquivo com dados para embeddings.
+        Process file with data for embeddings.
         
         Args:
-            input_file: Arquivo de entrada (TSV)
-            output_dir: Diretório de saída
-            id_column: Nome da coluna com IDs
-            data_column: Nome da coluna com dados
-            batch_size: Tamanho do batch
+            input_file: Input file (TSV)
+            output_dir: Output directory
+            id_column: Name of ID column
+            data_column: Name of data column
+            batch_size: Batch size
             
         Returns:
-            Tupla (sucessos, falhas)
+            Tuple (successes, failures)
         """
         from src.build.utils import load_tsv, ensure_directory, save_numpy
         
-        # Carregar dados
+        # Load data
         try:
             df = load_tsv(input_file)
-            self.logger.info(f"Carregados {len(df)} registros de {input_file}")
+            self.logger.info(f"Loaded {len(df)} records from {input_file}")
         except Exception as e:
-            raise EmbeddingError(f"Erro ao carregar arquivo {input_file}: {e}")
+            raise EmbeddingError(f"Error loading file {input_file}: {e}")
         
-        # Verificar colunas obrigatórias
+        # Check required columns
         if id_column not in df.columns:
-            raise EmbeddingError(f"Coluna '{id_column}' não encontrada")
+            raise EmbeddingError(f"Column '{id_column}' not found")
         if data_column not in df.columns:
-            raise EmbeddingError(f"Coluna '{data_column}' não encontrada")
+            raise EmbeddingError(f"Column '{data_column}' not found")
         
-        # Preparar saída
+        # Prepare output
         output_path = ensure_directory(output_dir)
         
-        # Gerar embeddings
+        # Generate embeddings
         data_list = df[data_column].tolist()
         id_list = df[id_column].tolist()
         
@@ -289,32 +289,32 @@ class BaseEmbedding(BaseBuilder):
             batch_size=batch_size
         )
         
-        # Salvar embeddings individuais
-        sucessos = 0
-        falhas = 0
+        # Save individual embeddings
+        successes = 0
+        failures = 0
         
         for embedding_id, embedding in zip(id_list, embeddings):
             try:
                 output_file = output_path / f"{embedding_id}.npy"
                 save_numpy(embedding, output_file)
-                sucessos += 1
+                successes += 1
             except Exception as e:
-                self.logger.error(f"Erro ao salvar embedding {embedding_id}: {e}")
-                falhas += 1
+                self.logger.error(f"Error saving embedding {embedding_id}: {e}")
+                failures += 1
         
-        self.logger.info(f"Processamento concluído: {sucessos} sucessos, {falhas} falhas")
-        return sucessos, falhas
+        self.logger.info(f"Processing completed: {successes} successes, {failures} failures")
+        return successes, failures
     
     def is_model_loaded(self) -> bool:
-        """Verifica se modelo está carregado."""
+        """Check if model is loaded."""
         return self._model_loaded
     
     def get_embedding_dimension(self) -> Optional[int]:
-        """Obtém dimensão dos embeddings."""
+        """Get embedding dimension."""
         return self.embedding_dim
     
     def get_model_info(self) -> Dict[str, Any]:
-        """Obtém informações do modelo atual."""
+        """Get current model information."""
         supported_models = self.get_supported_models()
         if self.model_name in supported_models:
             return supported_models[self.model_name].copy()
