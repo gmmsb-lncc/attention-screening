@@ -251,12 +251,13 @@ def save_tsv(df: pd.DataFrame,
     
     df.to_csv(path, sep='\t', index=False, **kwargs)
 
-def load_numpy(file_path: Union[str, Path]) -> np.ndarray:
+def load_numpy(file_path: Union[str, Path], allow_pickle: bool = True) -> np.ndarray:
     """
     Carrega arquivo NumPy.
     
     Args:
         file_path: Caminho do arquivo
+        allow_pickle: Se permite carregar object arrays (padrão True para compatibilidade)
         
     Returns:
         Array NumPy
@@ -265,7 +266,7 @@ def load_numpy(file_path: Union[str, Path]) -> np.ndarray:
     if not path.exists():
         raise BuildFileNotFoundError(f"Arquivo NumPy não encontrado: {file_path}")
     
-    return np.load(path)
+    return np.load(path, allow_pickle=allow_pickle)
 
 def save_numpy(array: np.ndarray, 
                file_path: Union[str, Path],
