@@ -6,6 +6,7 @@ Data Manager para Sklearn - Classificação
 Gerencia carregamento e divisão de dados para modelos sklearn.
 """
 
+import warnings
 import numpy as np
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
@@ -41,12 +42,48 @@ class SklearnDataManager:
         if self.labels.ndim > 1:
             self.labels = self.labels.ravel()
         
-        # Validar
+        # Validar tamanhos
         if len(self.embeddings) != len(self.labels):
             raise ValueError(
                 f"Número de embeddings ({len(self.embeddings)}) não "
                 f"corresponde ao número de labels ({len(self.labels)})"
             )
+        
+        # CRITICAL FIX: Filter out invalid labels (-1)
+        # Binary labels may contain -1 for invalid entries
+        self._filter_invalid_labels()
+    
+    def _filter_invalid_labels(self) -> None:
+        """
+        Filter out invalid labels (-1) from embeddings and labels.
+        
+        Binary labels from BinaryLabels class use -1 for invalid entries
+        (e.g., missing or non-numeric standard_value). We must remove
+        these before training to ensure proper binary classification.
+        """
+        original_size = len(self.labels)
+        
+        # Find valid indices (labels that are 0 or 1, not -1 or other values)
+        valid_mask = np.isin(self.labels, [0, 1])
+        
+        if not valid_mask.all():
+            n_invalid = (~valid_mask).sum()
+            unique_invalid = np.unique(self.labels[~valid_mask])
+            
+            warnings.warn(
+                f"Removed {n_invalid} samples with invalid labels {unique_invalid.tolist()}. "
+                f"Only binary labels (0, 1) are kept for classification."
+            )
+            
+            # Filter embeddings and labels
+            self.embeddings = self.embeddings[valid_mask]
+            self.labels = self.labels[valid_mask]
+            
+            print(f"   ⚠️  Filtered: {original_size} → {len(self.labels)} samples "
+                  f"(removed {n_invalid} invalid labels)")
+        
+        # Ensure labels are integers
+        self.labels = self.labels.astype(int)
     
     def split_data(
         self,
