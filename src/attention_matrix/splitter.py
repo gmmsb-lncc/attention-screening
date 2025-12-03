@@ -238,9 +238,9 @@ class LeakageAwareSplitter:
         """Load pre-computed split indices."""
         split_dir = Path(split_dir)
         
-        train_idx = np.load(split_dir / 'train_idx.npy')
-        val_idx = np.load(split_dir / 'val_idx.npy')
-        test_idx = np.load(split_dir / 'test_idx.npy')
+        train_idx = np.load(split_dir / 'train_idx.npy', allow_pickle=True)
+        val_idx = np.load(split_dir / 'val_idx.npy', allow_pickle=True)
+        test_idx = np.load(split_dir / 'test_idx.npy', allow_pickle=True)
         
         return train_idx, val_idx, test_idx
 

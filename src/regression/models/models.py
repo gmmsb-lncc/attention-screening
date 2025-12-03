@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Modelos de Regressão - DockTKinase
-===================================
+Regression Models - DockTKinase
+================================
 
-Define todos os algoritmos de regressão a serem testados.
+Defines all regression algorithms to be tested.
 """
 
 from sklearn.ensemble import (
@@ -23,52 +23,52 @@ from lightgbm import LGBMRegressor
 
 class RegressionModels:
     """
-    Factory para criação de modelos de regressão.
+    Factory for creating regression models.
     
-    Suporta 12 algoritmos de regressão (ordenados do mais rápido ao mais lento):
-    1. Ridge (~2s) - Regressão linear L2
-    2. Lasso (~3s) - Regressão linear L1
+    Supports 12 regression algorithms (ordered from fastest to slowest):
+    1. Ridge (~2s) - L2 linear regression
+    2. Lasso (~3s) - L1 linear regression
     3. ElasticNet (~3s) - L1 + L2
-    4. DecisionTree (~5s) - Árvore única
-    5. LinearSVR (~15s) - SVM linear
-    6. LightGBM (~20s) - Gradient boosting otimizado
+    4. DecisionTree (~5s) - Single tree
+    5. LinearSVR (~15s) - Linear SVM
+    6. LightGBM (~20s) - Optimized gradient boosting
     7. XGBoost (~25s) - State-of-art boosting
-    8. ExtraTrees (~40s) - Ensemble rápido
-    9. RandomForest (~60s) - Ensemble robusto
+    8. ExtraTrees (~40s) - Fast ensemble
+    9. RandomForest (~60s) - Robust ensemble
     10. KNN (~120s) - Instance-based
     11. GradientBoosting (~180s) - Sklearn boosting
-    12. MLP (~300s) - Rede neural
+    12. MLP (~300s) - Neural network
     """
     
     @staticmethod
     def get_all_models(random_state=42, verbose=False):
         """
-        Retorna dicionário com todos os modelos disponíveis.
-        Ordenados do mais rápido ao mais lento.
+        Returns dictionary with all available models.
+        Ordered from fastest to slowest.
         
         Args:
-            random_state: Seed para reprodutibilidade
-            verbose: Mostrar progresso (onde aplicável)
+            random_state: Seed for reproducibility
+            verbose: Show progress (where applicable)
             
         Returns:
-            Dict[str, Regressor]: Dicionário {nome: modelo}
+            Dict[str, Regressor]: Dictionary {name: model}
         """
         models = {}
         
-        # 1. Ridge (~2s) - O mais rápido
+        # 1. Ridge (~2s) - The fastest
         models['Ridge'] = Ridge(
             alpha=1.0,
             random_state=random_state
         )
         
-        # 2. Lasso (~3s) - Muito rápido
+        # 2. Lasso (~3s) - Very fast
         models['Lasso'] = Lasso(
             alpha=1.0,
             max_iter=2000,
             random_state=random_state
         )
         
-        # 3. ElasticNet (~3s) - Rápido
+        # 3. ElasticNet (~3s) - Fast
         models['ElasticNet'] = ElasticNet(
             alpha=1.0,
             l1_ratio=0.5,
@@ -76,7 +76,7 @@ class RegressionModels:
             random_state=random_state
         )
         
-        # 4. Decision Tree (~5s) - Muito rápido
+        # 4. Decision Tree (~5s) - Very fast
         models['DecisionTree'] = DecisionTreeRegressor(
             max_depth=20,
             min_samples_split=5,
@@ -84,7 +84,7 @@ class RegressionModels:
             random_state=random_state
         )
         
-        # 5. LinearSVR (~15s) - SVM linear escalável
+        # 5. LinearSVR (~15s) - Scalable linear SVM
         models['LinearSVR'] = LinearSVR(
             C=1.0,
             epsilon=0.1,
@@ -93,7 +93,7 @@ class RegressionModels:
             random_state=random_state
         )
         
-        # 6. LightGBM (~20s) - Gradient boosting muito otimizado
+        # 6. LightGBM (~20s) - Highly optimized gradient boosting
         models['LightGBM'] = LGBMRegressor(
             n_estimators=100,
             max_depth=6,
@@ -117,7 +117,7 @@ class RegressionModels:
             verbosity=0
         )
         
-        # 8. Extra Trees (~40s) - Ensemble rápido
+        # 8. Extra Trees (~40s) - Fast ensemble
         models['ExtraTrees'] = ExtraTreesRegressor(
             n_estimators=100,
             max_depth=20,
@@ -128,7 +128,7 @@ class RegressionModels:
             verbose=0
         )
         
-        # 9. Random Forest (~60s) - Ensemble robusto
+        # 9. Random Forest (~60s) - Robust ensemble
         models['RandomForest'] = RandomForestRegressor(
             n_estimators=100,
             max_depth=20,
@@ -139,7 +139,7 @@ class RegressionModels:
             verbose=0
         )
         
-        # 10. KNN (~120s) - Instance-based, lento na predição
+        # 10. KNN (~120s) - Instance-based, slow on prediction
         models['KNN'] = KNeighborsRegressor(
             n_neighbors=5,
             weights='distance',
@@ -147,7 +147,7 @@ class RegressionModels:
             n_jobs=-1
         )
         
-        # 11. Gradient Boosting (~180s) - Sklearn boosting sequencial
+        # 11. Gradient Boosting (~180s) - Sklearn sequential boosting
         models['GradientBoosting'] = GradientBoostingRegressor(
             n_estimators=100,
             max_depth=5,
@@ -157,7 +157,7 @@ class RegressionModels:
             verbose=0
         )
         
-        # 12. MLP (~300s) - Rede neural, o mais lento
+        # 12. MLP (~300s) - Neural network, the slowest
         models['MLP'] = MLPRegressor(
             hidden_layer_sizes=(100, 50),
             activation='relu',
@@ -174,28 +174,28 @@ class RegressionModels:
     @staticmethod
     def get_model(name, random_state=42, **kwargs):
         """
-        Retorna modelo específico com parâmetros customizados.
+        Returns specific model with custom parameters.
         
         Args:
-            name: Nome do modelo
-            random_state: Seed para reprodutibilidade
-            **kwargs: Parâmetros adicionais do modelo
+            name: Model name
+            random_state: Seed for reproducibility
+            **kwargs: Additional model parameters
             
         Returns:
-            Modelo configurado
+            Configured model
         """
         all_models = RegressionModels.get_all_models(random_state=random_state)
         
         if name not in all_models:
             available = ', '.join(all_models.keys())
             raise ValueError(
-                f"Modelo '{name}' não disponível. "
-                f"Modelos disponíveis: {available}"
+                f"Model '{name}' not available. "
+                f"Available models: {available}"
             )
         
         model = all_models[name]
         
-        # Atualizar parâmetros se fornecidos
+        # Update parameters if provided
         if kwargs:
             model.set_params(**kwargs)
         
@@ -204,18 +204,18 @@ class RegressionModels:
     @staticmethod
     def get_available_models():
         """
-        Retorna lista de modelos disponíveis no sistema.
+        Returns list of available models in the system.
         
         Returns:
-            List[str]: Lista de nomes dos modelos
+            List[str]: List of model names
         """
         models = RegressionModels.get_all_models()
         return list(models.keys())
     
     @staticmethod
     def print_available_models():
-        """Imprime lista de modelos disponíveis com status (ordenados por velocidade)."""
-        print('Modelos de Regressão Disponíveis (mais rápido → mais lento):')
+        """Prints list of available models with status (ordered by speed)."""
+        print('Available Regression Models (fastest → slowest):')
         print('=' * 60)
         
         # Ordenados do mais rápido ao mais lento
@@ -238,7 +238,7 @@ class RegressionModels:
             print(f'  {i:2d}. ✅ {model:<20} {time}')
         
         print('=' * 60)
-        print(f'Total: 12 modelos')
+        print(f'Total: 12 models')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 """
-Gerenciador de dependências opcionais com graceful degradation.
-Permite que o sistema funcione mesmo sem todas as dependências instaladas.
+Optional dependencies manager with graceful degradation.
+Allows the system to work even without all dependencies installed.
 """
 
 import logging
@@ -15,15 +15,15 @@ AVAILABLE_DEPS = {}
 
 def check_dependency(name: str, package: str, fallback_msg: str = None) -> Optional[Any]:
     """
-    Verifica se uma dependência está disponível e a importa.
+    Checks if a dependency is available and imports it.
     
     Args:
-        name: Nome da dependência para cache
-        package: Nome do pacote para importar
-        fallback_msg: Mensagem de fallback opcional
+        name: Dependency name for cache
+        package: Package name to import
+        fallback_msg: Optional fallback message
         
     Returns:
-        Módulo importado ou None se não disponível
+        Imported module or None if not available
     """
     if name in AVAILABLE_DEPS:
         return AVAILABLE_DEPS[name]
@@ -31,43 +31,43 @@ def check_dependency(name: str, package: str, fallback_msg: str = None) -> Optio
     try:
         module = __import__(package)
         AVAILABLE_DEPS[name] = module
-        logger.debug(f"✅ {name} disponível")
+        logger.debug(f"✅ {name} available")
         return module
     except ImportError:
         AVAILABLE_DEPS[name] = None
-        msg = fallback_msg or f"⚠️  {name} não disponível - funcionalidade limitada"
+        msg = fallback_msg or f"⚠️  {name} not available - limited functionality"
         logger.warning(msg)
         return None
 
 
-# Verificar dependências principais na inicialização
+# Check main dependencies at initialization
 def check_main_dependencies() -> Dict[str, bool]:
-    """Verifica todas as dependências principais."""
+    """Checks all main dependencies."""
     deps_status = {}
     
-    # PyTorch - CRÍTICO
+    # PyTorch - CRITICAL
     torch = check_dependency('torch', 'torch', 
-                           "PyTorch não encontrado - sistema não funcionará!")
+                           "PyTorch not found - system will not work!")
     deps_status['torch'] = torch is not None
     
-    # Sklearn - CRÍTICO
+    # Sklearn - CRITICAL
     sklearn = check_dependency('sklearn', 'sklearn',
-                             "Scikit-learn não encontrado - métricas limitadas")  
+                             "Scikit-learn not found - limited metrics")  
     deps_status['sklearn'] = sklearn is not None
     
-    # Optuna - OPCIONAL
+    # Optuna - OPTIONAL
     optuna = check_dependency('optuna', 'optuna',
-                            "Optuna não disponível - otimização de hiperparâmetros desabilitada")
+                            "Optuna not available - hyperparameter optimization disabled")
     deps_status['optuna'] = optuna is not None
     
-    # NumPy - CRÍTICO  
+    # NumPy - CRITICAL  
     numpy = check_dependency('numpy', 'numpy',
-                           "NumPy não encontrado - sistema não funcionará!")
+                           "NumPy not found - system will not work!")
     deps_status['numpy'] = numpy is not None
     
-    # Pandas - SEMI-OPCIONAL
+    # Pandas - SEMI-OPTIONAL
     pandas = check_dependency('pandas', 'pandas',
-                            "Pandas não disponível - carregamento de CSV limitado")
+                            "Pandas not available - limited CSV loading")
     deps_status['pandas'] = pandas is not None
     
     return deps_status
@@ -75,57 +75,57 @@ def check_main_dependencies() -> Dict[str, bool]:
 
 def require_dependency(name: str) -> Any:
     """
-    Requer uma dependência crítica, falha gracefully se não disponível.
+    Requires a critical dependency, fails gracefully if not available.
     """
     if name not in AVAILABLE_DEPS:
-        raise RuntimeError(f"Dependência {name} deve ser verificada primeiro com check_dependency()")
+        raise RuntimeError(f"Dependency {name} must be checked first with check_dependency()")
     
     if AVAILABLE_DEPS[name] is None:
-        raise RuntimeError(f"Dependência crítica {name} não está disponível!")
+        raise RuntimeError(f"Critical dependency {name} is not available!")
     
     return AVAILABLE_DEPS[name]
 
 
 def is_available(name: str) -> bool:
-    """Verifica se uma dependência está disponível."""
+    """Checks if a dependency is available."""
     return AVAILABLE_DEPS.get(name, False) is not None
 
 
 def get_available_features() -> Dict[str, str]:
-    """Retorna lista de funcionalidades disponíveis baseada nas dependências."""
+    """Returns list of available features based on dependencies."""
     features = {}
     
     if is_available('torch'):
-        features['neural_networks'] = "Redes neurais PyTorch"
+        features['neural_networks'] = "PyTorch neural networks"
     else:
-        features['neural_networks'] = "❌ PyTorch requerido"
+        features['neural_networks'] = "❌ PyTorch required"
         
     if is_available('optuna'):
-        features['hyperopt'] = "Otimização de hiperparâmetros"
+        features['hyperopt'] = "Hyperparameter optimization"
     else:
-        features['hyperopt'] = "❌ Instale Optuna para otimização"
+        features['hyperopt'] = "❌ Install Optuna for optimization"
         
     if is_available('sklearn'):
-        features['metrics'] = "Métricas completas de avaliação"
+        features['metrics'] = "Complete evaluation metrics"
     else:
-        features['metrics'] = "❌ Métricas limitadas sem sklearn"
+        features['metrics'] = "❌ Limited metrics without sklearn"
         
     if is_available('pandas'):
-        features['data_loading'] = "Carregamento CSV/Excel completo"
+        features['data_loading'] = "Complete CSV/Excel loading"
     else:
-        features['data_loading'] = "⚠️ Apenas arrays NumPy"
+        features['data_loading'] = "⚠️ NumPy arrays only"
     
     return features
 
 
-# Inicializar verificação na importação
+# Initialize check on import
 _DEPS_STATUS = check_main_dependencies()
 
-# Avisos sobre dependências críticas faltantes
+# Warnings about missing critical dependencies
 if not _DEPS_STATUS.get('torch', False):
-    warnings.warn("PyTorch não encontrado! Sistema não funcionará.", 
+    warnings.warn("PyTorch not found! System will not work.", 
                   ImportWarning, stacklevel=2)
 
 if not _DEPS_STATUS.get('sklearn', False):
-    warnings.warn("Scikit-learn não encontrado! Funcionalidade limitada.", 
+    warnings.warn("Scikit-learn not found! Limited functionality.", 
                   ImportWarning, stacklevel=2)

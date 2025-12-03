@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Interface CLI Modular de Regressão - DockTKinase
-=================================================
+Modular Regression CLI Interface - DockTKinase
+==============================================
 
-Interface de linha de comando 100% compatível com o pipeline
-original, mas usando a implementação modular.
+Command line interface 100% compatible with the original
+pipeline, but using the modular implementation.
 
-Uso:
+Usage:
     python modular_regression.py embeddings.npy targets.npy
     python modular_regression.py embeddings.npy targets.npy --models RandomForest XGBoost
     python modular_regression.py embeddings.npy targets.npy --output results/my_test
@@ -25,36 +25,36 @@ from regression.modular_pipeline import RegressionPipeline, run_regression_pipel
 
 
 def parse_args():
-    """Parse argumentos da linha de comando."""
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Pipeline Modular de Regressão - DockTKinase',
+        description='Modular Regression Pipeline - DockTKinase',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Exemplos de uso:
+Usage examples:
 
-  # Treinar todos os modelos:
+  # Train all models:
   python modular_regression.py embeddings.npy targets.npy
   
-  # Treinar modelos específicos:
+  # Train specific models:
   python modular_regression.py embeddings.npy targets.npy \\
       --models RandomForest GradientBoosting XGBoost
   
-  # Especificar diretório de saída:
+  # Specify output directory:
   python modular_regression.py embeddings.npy targets.npy \\
       --output results/my_experiment
   
-  # Configurar splits:
+  # Configure splits:
   python modular_regression.py embeddings.npy targets.npy \\
       --test-size 0.15 --val-size 0.15
   
-  # Seed customizada:
+  # Custom seed:
   python modular_regression.py embeddings.npy targets.npy \\
       --random-state 123
   
-Modelos disponíveis:
+Available models:
   - RandomForest
   - GradientBoosting
-  - XGBoost (se instalado)
+  - XGBoost (if installed)
   - Ridge
   - Lasso
   - ElasticNet
@@ -62,31 +62,31 @@ Modelos disponíveis:
   - KNN
   - DecisionTree
   - MLP
-  - LightGBM (se instalado)
-  - CatBoost (se instalado)
+  - LightGBM (if installed)
+  - CatBoost (if installed)
         """
     )
     
-    # Argumentos posicionais
+    # Positional arguments
     parser.add_argument(
         'embeddings',
         type=str,
-        help='Caminho para arquivo de embeddings (.npy ou .npz)'
+        help='Path to embeddings file (.npy or .npz)'
     )
     
     parser.add_argument(
         'targets',
         type=str,
-        help='Caminho para arquivo de targets (.npy)'
+        help='Path to targets file (.npy)'
     )
     
-    # Argumentos opcionais
+    # Optional arguments
     parser.add_argument(
         '--models',
         type=str,
         nargs='+',
         default=None,
-        help='Lista de modelos a treinar (padrão: todos)'
+        help='List of models to train (default: all)'
     )
     
     parser.add_argument(
@@ -94,21 +94,21 @@ Modelos disponíveis:
         '-o',
         type=str,
         default='results/regression',
-        help='Diretório de saída para resultados (padrão: results/regression)'
+        help='Output directory for results (default: results/regression)'
     )
     
     parser.add_argument(
         '--test-size',
         type=float,
         default=0.2,
-        help='Proporção do conjunto de teste (padrão: 0.2)'
+        help='Test set proportion (default: 0.2)'
     )
     
     parser.add_argument(
         '--val-size',
         type=float,
         default=0.1,
-        help='Proporção do conjunto de validação (padrão: 0.1)'
+        help='Validation set proportion (default: 0.1)'
     )
     
     parser.add_argument(
@@ -129,53 +129,53 @@ Modelos disponíveis:
 
 
 def validate_args(args):
-    """Validar argumentos."""
-    # Validar arquivos de entrada
+    """Validate arguments."""
+    # Validate input files
     embeddings_path = Path(args.embeddings)
     if not embeddings_path.exists():
-        print(f"❌ Erro: Arquivo de embeddings não encontrado: {embeddings_path}")
+        print(f"❌ Error: Embeddings file not found: {embeddings_path}")
         sys.exit(1)
     
     targets_path = Path(args.targets)
     if not targets_path.exists():
-        print(f"❌ Erro: Arquivo de targets não encontrado: {targets_path}")
+        print(f"❌ Error: Targets file not found: {targets_path}")
         sys.exit(1)
     
-    # Validar splits
+    # Validate splits
     if not 0 < args.test_size < 1:
-        print(f"❌ Erro: test-size deve estar entre 0 e 1")
+        print(f"❌ Error: test-size must be between 0 and 1")
         sys.exit(1)
     
     if not 0 < args.val_size < 1:
-        print(f"❌ Erro: val-size deve estar entre 0 e 1")
+        print(f"❌ Error: val-size must be between 0 and 1")
         sys.exit(1)
     
     if args.test_size + args.val_size >= 1:
-        print(f"❌ Erro: test-size + val-size deve ser menor que 1")
+        print(f"❌ Error: test-size + val-size must be less than 1")
         sys.exit(1)
 
 
 def main():
-    """Função principal."""
-    # Parse argumentos
+    """Main function."""
+    # Parse arguments
     args = parse_args()
     
-    # Validar
+    # Validate
     validate_args(args)
     
-    # Configurar verbosidade
+    # Configure verbosity
     verbose = not args.quiet
     
     if verbose:
-        print("🚀 Pipeline Modular de Regressão - DockTKinase")
+        print("🚀 Modular Regression Pipeline - DockTKinase")
         print("=" * 70)
         print(f"   Embeddings: {args.embeddings}")
         print(f"   Targets: {args.targets}")
         print(f"   Output: {args.output}")
         if args.models:
-            print(f"   Modelos: {', '.join(args.models)}")
+            print(f"   Models: {', '.join(args.models)}")
         else:
-            print(f"   Modelos: Todos disponíveis")
+            print(f"   Models: All available")
         print(f"   Test size: {args.test_size}")
         print(f"   Val size: {args.val_size}")
         print(f"   Random state: {args.random_state}")
@@ -198,13 +198,13 @@ def main():
         results = pipeline.run()
         
         if verbose:
-            print(f"\n✅ Pipeline executado com sucesso!")
-            print(f"   Resultados salvos em: {args.output}")
+            print(f"\n✅ Pipeline executed successfully!")
+            print(f"   Results saved to: {args.output}")
         
         return 0
         
     except Exception as e:
-        print(f"\n❌ Erro ao executar pipeline: {e}")
+        print(f"\n❌ Error executing pipeline: {e}")
         if verbose:
             import traceback
             traceback.print_exc()
