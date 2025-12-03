@@ -39,7 +39,7 @@ OUTPUT_BASE="${2:-results/protein_model_benchmark_non_human}"
 
 # Shared ligand embeddings directory (compute once, reuse for all protein models)
 # This saves significant time as ligand embeddings are identical across protein models
-SHARED_LIGAND_DIR="${OUTPUT_BASE}/shared_ligand_embeddings"
+SHARED_LIGAND_DIR="/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_olds/protein_model_benchmark_non_human_v4/shared_ligand_embeddings"   #"${OUTPUT_BASE}/shared_ligand_embeddings"
 
 # Optional: Override with pre-computed ligand embeddings from command line
 LIGAND_EMBEDDINGS_DIR="${3:-${SHARED_LIGAND_DIR}}"
@@ -63,7 +63,7 @@ ESM2_MODELS=(
     "esm2_t30_150M_UR50D"   # 640-dim, ~150M params
     "esm2_t33_650M_UR50D"   # 1280-dim, ~650M params
     "esm2_t36_3B_UR50D"     # 2560-dim, ~3B params
-    "esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
+    #"esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
 )
 
 # ESM-C API Models (3 models - require ESM_API_KEY)
