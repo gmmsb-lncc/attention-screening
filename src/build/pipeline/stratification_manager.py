@@ -652,6 +652,8 @@ class StratificationManager:
         Handles:
         - 1D binary arrays (0/1)
         - Multi-column metadata arrays (extracts binary column if present)
+        - interaction_labels format: [molregno, kinase, type, standard_value, pchembl_value]
+          -> creates binary from pchembl >= 6.0 (active) or standard_value <= 1000 nM
         - String labels (attempts conversion)
         
         Returns:
@@ -663,10 +665,32 @@ class StratificationManager:
             
             # Handle multi-dimensional labels
             if labels.ndim > 1:
+                n_cols = labels.shape[1]
+                
+                # Check if this is interaction_labels format (5 columns)
+                # [molregno, kinase, type, standard_value, pchembl_value]
+                if n_cols == 5:
+                    return self._create_binary_from_activity_values(labels)
+                
+                # Check if this is 4-column format without pchembl
+                # [molregno, kinase, type, standard_value]
+                if n_cols == 4:
+                    return self._create_binary_from_standard_value(labels)
+                
                 # Try to find a binary column (likely activity label)
                 for col_idx in range(labels.shape[1]):
                     col = labels[:, col_idx]
-                    unique = np.unique(col)
+                    
+                    # Filter out None values before checking unique values
+                    try:
+                        # Convert to list and filter None values for unique check
+                        col_values = [v for v in col if v is not None]
+                        if len(col_values) == 0:
+                            continue
+                        unique = np.unique(col_values)
+                    except (TypeError, ValueError):
+                        # If comparison fails (mixed types), skip this column
+                        continue
                     
                     # Check if it's binary (0/1 or 'active'/'inactive' etc.)
                     if len(unique) == 2:
@@ -686,15 +710,29 @@ class StratificationManager:
                 )
                 return None
             
-            # 1D labels
-            unique = np.unique(labels)
+            # 1D labels - filter None values before unique check
+            try:
+                labels_filtered = [v for v in labels if v is not None]
+                if len(labels_filtered) == 0:
+                    return None
+                unique = np.unique(labels_filtered)
+            except (TypeError, ValueError):
+                # If comparison fails (mixed types), use fallback
+                logger.warning("Labels contain incompatible types for stratification")
+                return None
             
             # Already binary
             if len(unique) == 2:
                 try:
-                    binary = np.asarray(labels, dtype=np.float32)
-                    if set(np.unique(binary)).issubset({0.0, 1.0}):
-                        return binary.astype(np.int32)
+                    # Replace None with a placeholder, then convert
+                    labels_clean = np.array([v if v is not None else np.nan for v in labels], dtype=np.float32)
+                    # Check if non-NaN values are binary
+                    valid_values = labels_clean[~np.isnan(labels_clean)]
+                    if set(np.unique(valid_values)).issubset({0.0, 1.0}):
+                        # For stratification, treat NaN as the majority class
+                        majority = 1.0 if np.sum(valid_values == 1.0) > np.sum(valid_values == 0.0) else 0.0
+                        labels_clean = np.nan_to_num(labels_clean, nan=majority)
+                        return labels_clean.astype(np.int32)
                 except (ValueError, TypeError):
                     pass
             
@@ -709,6 +747,139 @@ class StratificationManager:
         except Exception as e:
             logger.warning(f"Failed to extract binary labels: {e}")
             return None
+    
+    def _create_binary_from_activity_values(self, labels: np.ndarray) -> np.ndarray:
+        """
+        Create binary labels from interaction_labels format with 5 columns.
+        
+        Uses pchembl_value (column 4) which should ALWAYS be present.
+        pchembl_value is preferred because it normalizes the range of values
+        and facilitates calculations (logarithmic scale, typically 3-12).
+        
+        If pchembl_value is missing, it should have been filled from standard_value
+        during label generation. As a fallback, we calculate from standard_value here.
+        
+        Active: pchembl >= 6.0 (equivalent to IC50 <= 1000 nM)
+        
+        Args:
+            labels: Array with columns [molregno, kinase, type, standard_value, pchembl_value]
+            
+        Returns:
+            Binary labels array (1=active, 0=inactive)
+        """
+        n_samples = len(labels)
+        binary_labels = np.zeros(n_samples, dtype=np.int32)
+        
+        pchembl_threshold = 6.0  # pChEMBL >= 6.0 means <= 1000 nM
+        
+        valid_count = 0
+        converted_count = 0
+        
+        for i in range(n_samples):
+            pchembl_val = labels[i, 4]
+            
+            # Use pchembl_value (should always be present)
+            if self._is_valid_number(pchembl_val):
+                try:
+                    pchembl_float = float(pchembl_val)
+                    binary_labels[i] = 1 if pchembl_float >= pchembl_threshold else 0
+                    valid_count += 1
+                    continue
+                except (ValueError, TypeError):
+                    pass
+            
+            # Fallback: calculate pchembl from standard_value if missing
+            # This should rarely happen as pchembl should be filled during label generation
+            standard_val = labels[i, 3]
+            if self._is_valid_number(standard_val):
+                try:
+                    standard_float = float(standard_val)
+                    if standard_float > 0:
+                        # Convert to pchembl: pchembl = 9 - log10(nM)
+                        pchembl_calculated = 9 - np.log10(standard_float)
+                        binary_labels[i] = 1 if pchembl_calculated >= pchembl_threshold else 0
+                        valid_count += 1
+                        converted_count += 1
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            
+            # No valid value - this should NOT happen according to data requirements
+            # Default to inactive (0) but log warning
+            binary_labels[i] = 0
+            logger.debug(f"Row {i}: No valid pchembl or standard_value, defaulting to inactive")
+        
+        if converted_count > 0:
+            logger.warning(
+                f"Had to convert {converted_count} values from standard_value to pchembl. "
+                f"Consider ensuring pchembl_value is filled during label generation."
+            )
+        
+        logger.info(f"Created binary labels: {valid_count}/{n_samples} valid from pchembl_value")
+        
+        active_count = np.sum(binary_labels == 1)
+        inactive_count = np.sum(binary_labels == 0)
+        logger.info(f"Binary distribution: {active_count} active, {inactive_count} inactive")
+        
+        return binary_labels
+    
+    def _create_binary_from_standard_value(self, labels: np.ndarray) -> np.ndarray:
+        """
+        Create binary labels from 4-column interaction_labels format.
+        
+        Uses standard_value (column 3) with threshold of 1000 nM.
+        
+        Args:
+            labels: Array with columns [molregno, kinase, type, standard_value]
+            
+        Returns:
+            Binary labels array (1=active, 0=inactive)
+        """
+        n_samples = len(labels)
+        binary_labels = np.zeros(n_samples, dtype=np.int32)
+        
+        nm_threshold = 1000.0  # 1000 nM = 1 µM
+        valid_count = 0
+        
+        for i in range(n_samples):
+            standard_val = labels[i, 3]
+            
+            if self._is_valid_number(standard_val):
+                try:
+                    standard_float = float(standard_val)
+                    if standard_float > 0:
+                        binary_labels[i] = 1 if standard_float <= nm_threshold else 0
+                        valid_count += 1
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            
+            # No valid value - default to inactive (0)
+            binary_labels[i] = 0
+        
+        logger.info(f"Created binary labels from standard_value: {valid_count}/{n_samples} valid")
+        
+        active_count = np.sum(binary_labels == 1)
+        inactive_count = np.sum(binary_labels == 0)
+        logger.info(f"Binary distribution: {active_count} active, {inactive_count} inactive")
+        
+        return binary_labels
+    
+    def _is_valid_number(self, value) -> bool:
+        """Check if value is a valid number (not None, NaN, or invalid string)."""
+        if value is None:
+            return False
+        if isinstance(value, float) and np.isnan(value):
+            return False
+        if isinstance(value, str):
+            val_lower = value.lower().strip()
+            if val_lower in ('none', 'nan', 'null', '', 'na', 'n/a'):
+                return False
+        try:
+            float(value)
+            return True
+        except (ValueError, TypeError):
+            return False
     
     def _log_split_distribution(
         self,
