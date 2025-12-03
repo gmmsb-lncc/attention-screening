@@ -7,9 +7,14 @@ Gerencia treinamento de múltiplos modelos com validação.
 """
 
 import time
+import warnings
 import numpy as np
 from pathlib import Path
 import joblib
+
+# Suppress sklearn warning about feature names (harmless - happens when 
+# training with DataFrame but predicting with numpy array)
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
 
 # Import relativo corrigido
 try:
