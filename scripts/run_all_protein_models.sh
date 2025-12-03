@@ -35,7 +35,7 @@ set -e  # Exit on error
 
 # Default paths (can be overridden via command line)
 INPUT_FILE="${1:-tests/datasets/kinase_non_human_compounds.tsv}"
-OUTPUT_BASE="${2:-results/protein_model_benchmark_non_human}"
+OUTPUT_BASE="${2:-results/protein_model_benchmark_non_human_v2}"
 
 # Shared ligand embeddings directory (compute once, reuse for all protein models)
 # This saves significant time as ligand embeddings are identical across protein models
