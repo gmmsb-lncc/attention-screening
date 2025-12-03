@@ -97,16 +97,14 @@ class RegressionEvaluator:
         covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
         ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
         
-        # MAPE (cuidado com divisão por zero)
-        try:
-            mape = mean_absolute_percentage_error(y_true, y_pred)
-        except (ValueError, ZeroDivisionError):
-            # Se y_true tem zeros, calcular manualmente excluindo-os
-            mask = y_true != 0
-            if mask.sum() > 0:
-                mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
-            else:
-                mape = np.nan
+        # MAPE (handle division by zero properly)
+        # sklearn doesn't raise exception, returns inf/large values, so check explicitly
+        mask = y_true != 0
+        if mask.sum() > 0:
+            # Calculate MAPE manually excluding zeros for robustness
+            mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+        else:
+            mape = np.nan
         
         # Métricas adicionais
         residuals = y_true - y_pred
@@ -128,7 +126,7 @@ class RegressionEvaluator:
             'model_name': model_name,
             'n_samples': len(y_true),
             
-            # Métricas principais
+            # Main metrics
             'MAE': float(mae),
             'MSE': float(mse),
             'RMSE': float(rmse),
@@ -137,21 +135,21 @@ class RegressionEvaluator:
             'MAPE': float(mape) if not np.isnan(mape) else None,
             'ExplainedVariance': float(explained_var),
             
-            # Correlation metrics
-            'Pearson_R': float(pearson_r),
-            'Pearson_P': float(pearson_p),
-            'Spearman_R': float(spearman_r),
-            'Spearman_P': float(spearman_p),
-            'Kendall_Tau': float(kendall_tau),
-            'Kendall_P': float(kendall_p),
-            'CCC': float(ccc),
+            # Correlation metrics - convert NaN to None for valid JSON
+            'Pearson_R': float(pearson_r) if not np.isnan(pearson_r) else None,
+            'Pearson_P': float(pearson_p) if not np.isnan(pearson_p) else None,
+            'Spearman_R': float(spearman_r) if not np.isnan(spearman_r) else None,
+            'Spearman_P': float(spearman_p) if not np.isnan(spearman_p) else None,
+            'Kendall_Tau': float(kendall_tau) if not np.isnan(kendall_tau) else None,
+            'Kendall_P': float(kendall_p) if not np.isnan(kendall_p) else None,
+            'CCC': float(ccc) if not np.isnan(ccc) else None,
             
-            # Estatísticas dos resíduos
+            # Residual statistics
             'mean_residual': float(mean_residual),
             'std_residual': float(std_residual),
             'max_error': float(max_error),
             
-            # Percentis
+            # Percentiles
             **{f'error_{k}': float(v) for k, v in percentile_errors.items()}
         }
         
