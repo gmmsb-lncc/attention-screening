@@ -12,6 +12,12 @@ import numpy as np
 from pathlib import Path
 import joblib
 
+# Import scipy's LinAlgWarning for proper filtering
+try:
+    from scipy.linalg import LinAlgWarning
+except ImportError:
+    LinAlgWarning = UserWarning
+
 # Suppress harmless sklearn/LGBM warnings
 # Feature names warning (happens when training with DataFrame but predicting with numpy array)
 warnings.filterwarnings('ignore', message='X does not have valid feature names')
@@ -19,8 +25,10 @@ warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
 # Convergence warnings (LinearSVC may not converge with default iterations)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Liblinear failed to converge.*')
 warnings.filterwarnings('ignore', message='.*ConvergenceWarning.*')
-# Suppress scipy ConstantInputWarning
+# Suppress scipy ConstantInputWarning and ill-conditioned matrix warnings
 warnings.filterwarnings('ignore', message='An input array is constant')
+warnings.filterwarnings('ignore', category=LinAlgWarning)
+warnings.filterwarnings('ignore', message='.*Ill-conditioned matrix.*')
 
 # Import relativo corrigido
 try:

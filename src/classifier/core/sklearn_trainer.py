@@ -11,6 +11,13 @@ import time
 import warnings
 import numpy as np
 from typing import Dict, Any, Optional, List
+
+# Import scipy's LinAlgWarning for proper filtering
+try:
+    from scipy.linalg import LinAlgWarning
+except ImportError:
+    LinAlgWarning = UserWarning
+
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -162,8 +169,11 @@ class SklearnClassificationTrainer:
         if self.verbose:
             print(f'\n   🔧 Training {model_name}...')
         
-        # Train
-        model.fit(X_train, y_train)
+        # Train with suppressed harmless warnings (scipy ill-conditioned matrix)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=LinAlgWarning)
+            warnings.filterwarnings('ignore', message='.*Ill-conditioned matrix.*')
+            model.fit(X_train, y_train)
         train_time = time.time() - start_time
         
         # Evaluate on training
