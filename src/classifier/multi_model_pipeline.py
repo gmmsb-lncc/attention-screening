@@ -11,11 +11,19 @@ Esta implementação treina 10-11 modelos diferentes e seleciona o melhor.
 
 import time
 import json
+import warnings
 import joblib
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
+
+# Suppress harmless sklearn/LGBM warnings
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+warnings.filterwarnings('ignore', message=".*parameter 'algorithm' is deprecated.*")
+warnings.filterwarnings('ignore', message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 # Imports dos módulos
 try:

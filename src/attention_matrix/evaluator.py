@@ -4,9 +4,14 @@ Evaluator for Attention Matrix Models.
 Single Responsibility: Metrics computation only.
 """
 
+import warnings
 import numpy as np
 from typing import Dict, Any
 import logging
+
+# Suppress scipy ConstantInputWarning for correlation calculations
+warnings.filterwarnings('ignore', message='An input array is constant')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered')
 
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,

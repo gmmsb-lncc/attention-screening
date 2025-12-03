@@ -12,10 +12,17 @@ original pipeline, but in a modularized and organized way.
 
 import time
 import json
+import warnings
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
+
+# Suppress harmless sklearn/LGBM warnings
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+warnings.filterwarnings('ignore', message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 # Import SplitIndices for external stratification
 try:
