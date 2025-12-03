@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Visualizador de Regressão - DockTKinase
-========================================
+Regression Visualizer - DockTKinase
+=====================================
 
-Gera gráficos e visualizações para análise de modelos de regressão.
+Generates plots and visualizations for regression model analysis.
 """
 
 import numpy as np
@@ -17,9 +17,9 @@ from pathlib import Path
 
 class RegressionVisualizer:
     """
-    Cria visualizações para análise de regressão.
+    Creates visualizations for regression analysis.
     
-    Gera scatter plots, residual plots, comparações de modelos, etc.
+    Generates scatter plots, residual plots, model comparisons, etc.
     """
     
     @staticmethod
@@ -31,14 +31,14 @@ class RegressionVisualizer:
         figsize=(10, 8)
     ):
         """
-        Scatter plot: Valores Preditos vs Valores Reais.
+        Scatter plot: Predicted Values vs Actual Values.
         
         Args:
-            y_true: Valores reais
-            y_pred: Valores preditos
-            model_name: Nome do modelo
-            save_path: Path para salvar figura
-            figsize: Tamanho da figura
+            y_true: Actual values
+            y_pred: Predicted values
+            model_name: Model name
+            save_path: Path to save figure
+            figsize: Figure size
         """
         try:
             # Configurar estilo
@@ -54,16 +54,16 @@ class RegressionVisualizer:
             min_val = min(y_true.min(), y_pred.min())
             max_val = max(y_true.max(), y_pred.max())
             ax.plot([min_val, max_val], [min_val, max_val], 
-                   'r--', lw=2, label='Predição Perfeita', alpha=0.8)
+                   'r--', lw=2, label='Perfect Prediction', alpha=0.8)
             
-            # Calcular R²
+            # Calculate R²
             from sklearn.metrics import r2_score
             r2 = r2_score(y_true, y_pred)
             
-            # Labels e título
-            ax.set_xlabel('Valor Real (nM)', fontsize=14, fontweight='bold')
-            ax.set_ylabel('Valor Predito (nM)', fontsize=14, fontweight='bold')
-            ax.set_title(f'Predições vs Valores Reais - {model_name}\nR² = {r2:.4f}', 
+            # Labels and title
+            ax.set_xlabel('Actual Value (nM)', fontsize=14, fontweight='bold')
+            ax.set_ylabel('Predicted Value (nM)', fontsize=14, fontweight='bold')
+            ax.set_title(f'Predictions vs Actual Values - {model_name}\nR² = {r2:.4f}', 
                         fontsize=16, fontweight='bold')
             ax.legend(loc='upper left', fontsize=12)
             ax.grid(alpha=0.3)
@@ -82,7 +82,7 @@ class RegressionVisualizer:
                 plt.show()
                 
         except Exception as e:
-            print(f'⚠️  Erro ao gerar plot predições vs real: {e}')
+            print(f'⚠️  Error generating predictions vs actual plot: {e}')
             plt.close()
     
     @staticmethod
@@ -94,14 +94,14 @@ class RegressionVisualizer:
         figsize=(12, 5)
     ):
         """
-        Plot de resíduos (erros).
+        Residuals (errors) plot.
         
         Args:
-            y_true: Valores reais
-            y_pred: Valores preditos
-            model_name: Nome do modelo
-            save_path: Path para salvar figura
-            figsize: Tamanho da figura
+            y_true: Actual values
+            y_pred: Predicted values
+            model_name: Model name
+            save_path: Path to save figure
+            figsize: Figure size
         """
         try:
             residuals = y_true - y_pred
@@ -111,9 +111,9 @@ class RegressionVisualizer:
             # ===== SUBPLOT 1: Residuals vs Predicted =====
             ax1.scatter(y_pred, residuals, alpha=0.5, s=30, edgecolors='k', linewidths=0.5)
             ax1.axhline(y=0, color='r', linestyle='--', lw=2, label='Zero Residual')
-            ax1.set_xlabel('Valor Predito (nM)', fontsize=12, fontweight='bold')
-            ax1.set_ylabel('Resíduo (nM)', fontsize=12, fontweight='bold')
-            ax1.set_title(f'Resíduos vs Predições - {model_name}', 
+            ax1.set_xlabel('Predicted Value (nM)', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Residual (nM)', fontsize=12, fontweight='bold')
+            ax1.set_title(f'Residuals vs Predictions - {model_name}', 
                          fontsize=14, fontweight='bold')
             ax1.legend()
             ax1.grid(alpha=0.3)
@@ -121,9 +121,9 @@ class RegressionVisualizer:
             # ===== SUBPLOT 2: Histogram of Residuals =====
             ax2.hist(residuals, bins=50, edgecolor='black', alpha=0.7)
             ax2.axvline(x=0, color='r', linestyle='--', lw=2, label='Zero')
-            ax2.set_xlabel('Resíduo (nM)', fontsize=12, fontweight='bold')
-            ax2.set_ylabel('Frequência', fontsize=12, fontweight='bold')
-            ax2.set_title(f'Distribuição dos Resíduos - {model_name}', 
+            ax2.set_xlabel('Residual (nM)', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+            ax2.set_title(f'Residual Distribution - {model_name}', 
                          fontsize=14, fontweight='bold')
             ax2.legend()
             ax2.grid(alpha=0.3)
@@ -139,7 +139,7 @@ class RegressionVisualizer:
                 plt.show()
                 
         except Exception as e:
-            print(f'⚠️  Erro ao gerar plot de resíduos: {e}')
+            print(f'⚠️  Error generating residuals plot: {e}')
             plt.close()
     
     @staticmethod
@@ -150,13 +150,13 @@ class RegressionVisualizer:
         figsize=(14, 8)
     ):
         """
-        Bar chart comparando todos os modelos.
+        Bar chart comparing all models.
         
         Args:
             results_dict: Dict {model_name: metrics_dict}
-            metric: Métrica para comparar (MAE, RMSE, R2, etc)
-            save_path: Path para salvar figura
-            figsize: Tamanho da figura
+            metric: Metric to compare (MAE, RMSE, R2, etc)
+            save_path: Path to save figure
+            figsize: Figure size
         """
         try:
             # Extrair dados
@@ -192,8 +192,8 @@ class RegressionVisualizer:
             
             # Labels
             ax.set_xlabel(f'{metric}', fontsize=14, fontweight='bold')
-            ax.set_ylabel('Modelo', fontsize=14, fontweight='bold')
-            ax.set_title(f'Comparação de Modelos - {metric}', 
+            ax.set_ylabel('Model', fontsize=14, fontweight='bold')
+            ax.set_title(f'Model Comparison - {metric}', 
                         fontsize=16, fontweight='bold')
             ax.grid(axis='x', alpha=0.3)
             
@@ -208,7 +208,7 @@ class RegressionVisualizer:
                 plt.show()
                 
         except Exception as e:
-            print(f'⚠️  Erro ao gerar comparação de modelos: {e}')
+            print(f'⚠️  Error generating model comparison: {e}')
             plt.close()
     
     @staticmethod
@@ -220,14 +220,14 @@ class RegressionVisualizer:
         figsize=(12, 5)
     ):
         """
-        Distribuição dos erros (absoluto e relativo).
+        Error distribution (absolute and relative).
         
         Args:
-            y_true: Valores reais
-            y_pred: Valores preditos
-            model_name: Nome do modelo
-            save_path: Path para salvar figura
-            figsize: Tamanho da figura
+            y_true: Actual values
+            y_pred: Predicted values
+            model_name: Model name
+            save_path: Path to save figure
+            figsize: Figure size
         """
         try:
             absolute_errors = np.abs(y_true - y_pred)
@@ -238,10 +238,10 @@ class RegressionVisualizer:
             # ===== SUBPLOT 1: Absolute Errors =====
             ax1.hist(absolute_errors, bins=50, edgecolor='black', alpha=0.7, color='skyblue')
             ax1.axvline(x=np.median(absolute_errors), color='r', linestyle='--', 
-                       lw=2, label=f'Mediana: {np.median(absolute_errors):.2f} nM')
-            ax1.set_xlabel('Erro Absoluto (nM)', fontsize=12, fontweight='bold')
-            ax1.set_ylabel('Frequência', fontsize=12, fontweight='bold')
-            ax1.set_title(f'Distribuição do Erro Absoluto - {model_name}', 
+                       lw=2, label=f'Median: {np.median(absolute_errors):.2f} nM')
+            ax1.set_xlabel('Absolute Error (nM)', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+            ax1.set_title(f'Absolute Error Distribution - {model_name}', 
                          fontsize=14, fontweight='bold')
             ax1.legend()
             ax1.grid(alpha=0.3)
@@ -249,10 +249,10 @@ class RegressionVisualizer:
             # ===== SUBPLOT 2: Relative Errors =====
             ax2.hist(relative_errors, bins=50, edgecolor='black', alpha=0.7, color='lightcoral')
             ax2.axvline(x=np.median(relative_errors), color='r', linestyle='--', 
-                       lw=2, label=f'Mediana: {np.median(relative_errors):.2f}%')
-            ax2.set_xlabel('Erro Relativo (%)', fontsize=12, fontweight='bold')
-            ax2.set_ylabel('Frequência', fontsize=12, fontweight='bold')
-            ax2.set_title(f'Distribuição do Erro Relativo - {model_name}', 
+                       lw=2, label=f'Median: {np.median(relative_errors):.2f}%')
+            ax2.set_xlabel('Relative Error (%)', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+            ax2.set_title(f'Relative Error Distribution - {model_name}', 
                          fontsize=14, fontweight='bold')
             ax2.legend()
             ax2.grid(alpha=0.3)
@@ -268,7 +268,7 @@ class RegressionVisualizer:
                 plt.show()
                 
         except Exception as e:
-            print(f'⚠️  Erro ao gerar distribuição de erros: {e}')
+            print(f'⚠️  Error generating error distribution: {e}')
             plt.close()
     
     @staticmethod
@@ -281,20 +281,20 @@ class RegressionVisualizer:
         figsize=(10, 8)
     ):
         """
-        Plot de importância de features (se o modelo suportar).
+        Feature importance plot (if model supports it).
         
         Args:
-            model: Modelo treinado
-            feature_names: Nomes das features
-            model_name: Nome do modelo
-            save_path: Path para salvar figura
-            top_n: Número de top features para mostrar
-            figsize: Tamanho da figura
+            model: Trained model
+            feature_names: Feature names
+            model_name: Model name
+            save_path: Path to save figure
+            top_n: Number of top features to show
+            figsize: Figure size
         """
         try:
-            # Verificar se modelo tem feature_importances_
+            # Check if model has feature_importances_
             if not hasattr(model, 'feature_importances_'):
-                print(f'⚠️  Modelo {model_name} não suporta feature importance')
+                print(f'⚠️  Model {model_name} does not support feature importance')
                 return
             
             importances = model.feature_importances_
@@ -317,7 +317,7 @@ class RegressionVisualizer:
             
             ax.set_yticks(range(len(top_names)))
             ax.set_yticklabels(top_names)
-            ax.set_xlabel('Importância', fontsize=12, fontweight='bold')
+            ax.set_xlabel('Importance', fontsize=12, fontweight='bold')
             ax.set_title(f'Top {top_n} Features - {model_name}', 
                         fontsize=14, fontweight='bold')
             ax.grid(axis='x', alpha=0.3)
@@ -333,7 +333,7 @@ class RegressionVisualizer:
                 plt.show()
                 
         except Exception as e:
-            print(f'⚠️  Erro ao gerar feature importance: {e}')
+            print(f'⚠️  Error generating feature importance: {e}')
             plt.close()
 
 

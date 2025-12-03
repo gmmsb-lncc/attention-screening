@@ -1,47 +1,47 @@
 #!/usr/bin/env python3
 # ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
 # ESM-C (local): python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
-# ESM-C 6B (API): ESM_API_KEY="sua_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
+# ESM-C 6B (API): ESM_API_KEY="your_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
 # Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
 """
-DockTKinase - Pipeline Completo Integrado
-=========================================
+DockTKinase - Complete Integrated Pipeline
+==========================================
 
-Pipeline end-to-end com checkpoints automáticos:
+End-to-end pipeline with automatic checkpoints:
 1. Build: Embeddings (ESM + FM4M) + Matrix
-2. Classification: Multi-Model (10 modelos sklearn)
-3. Regression: Multi-Model (10 modelos)
+2. Classification: Multi-Model (10 sklearn models)
+3. Regression: Multi-Model (10 models)
 
-Uso:
-    # Básico
+Usage:
+    # Basic
     python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
     
-    # Com opções
+    # With options
     python run_complete_pipeline.py \\
         --input tests/datasets/kinase_human_compounds.tsv \\
         --output results/my_experiment \\
         --device cuda \\
         --no-checkpoints
     
-    # Apenas regressão (pular classificação)
+    # Regression only (skip classification)
     python run_complete_pipeline.py \\
         --input data.tsv \\
         --no-classification
     
-    # ESM-C 6B (requer API key do EvolutionaryScale Forge)
-    export ESM_API_KEY="sua_api_key"
+    # ESM-C 6B (requires EvolutionaryScale Forge API key)
+    export ESM_API_KEY="your_api_key"
     python run_complete_pipeline.py \\
         --input data.tsv \\
         --protein-model esmc-6b-2024-12
 
 Features:
-    • Sistema de checkpoints automático (evita recálculo)
-    • Suporta CPU e GPU (CUDA/MPS)
-    • Multi-modelo para classificação E regressão
-    • Validação robusta com 3 splits (train/val/test)
-    • Métricas completas e visualizações
-    • ESM-C 6B via Forge API (solicita key interativamente se não configurada)
+    • Automatic checkpoint system (avoids recalculation)
+    • Supports CPU and GPU (CUDA/MPS)
+    • Multi-model for classification AND regression
+    • Robust validation with 3 splits (train/val/test)
+    • Complete metrics and visualizations
+    • ESM-C 6B via Forge API (requests key interactively if not configured)
 """
 
 import os
@@ -51,88 +51,88 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-# Adicionar path do projeto
+# Add project path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / 'src'))
 
 
 # =============================================================================
-# Modelos que requerem API externa (Forge API)
+# Models that require external API (Forge API)
 # =============================================================================
 FORGE_API_MODELS = {'esmc-6b-2024-12'}
 
 
 def validate_forge_api_key(model_name: str, api_key: Optional[str] = None) -> bool:
     """
-    Valida se a API key do Forge está configurada para modelos que requerem acesso remoto.
+    Validates if the Forge API key is configured for models that require remote access.
     
     Args:
-        model_name: Nome do modelo selecionado
-        api_key: API key passada via --api (opcional)
+        model_name: Name of the selected model
+        api_key: API key passed via --api (optional)
         
     Returns:
-        True se a API key está válida ou não é necessária, False caso contrário
+        True if the API key is valid or not needed, False otherwise
     """
     if model_name not in FORGE_API_MODELS:
         return True
     
     print()
     print('=' * 80)
-    print('🔐 AUTENTICAÇÃO REQUERIDA - ESM-C 6B (EvolutionaryScale Forge API)')
+    print('🔐 AUTHENTICATION REQUIRED - ESM-C 6B (EvolutionaryScale Forge API)')
     print('=' * 80)
     print()
-    print('O modelo ESM-C 6B (esmc-6b-2024-12) requer acesso à API do EvolutionaryScale Forge.')
-    print('Este modelo NÃO está disponível localmente devido ao seu tamanho (6 bilhões de parâmetros).')
+    print('The ESM-C 6B model (esmc-6b-2024-12) requires access to the EvolutionaryScale Forge API.')
+    print('This model is NOT available locally due to its size (6 billion parameters).')
     print()
-    print('📋 Para obter sua API key:')
-    print('   1. Acesse: https://forge.evolutionaryscale.ai')
-    print('   2. Crie uma conta ou faça login')
-    print('   3. Navegue até Settings > API Keys')
-    print('   4. Gere uma nova API key')
+    print('📋 To obtain your API key:')
+    print('   1. Go to: https://forge.evolutionaryscale.ai')
+    print('   2. Create an account or log in')
+    print('   3. Navigate to Settings > API Keys')
+    print('   4. Generate a new API key')
     print()
     
-    # Prioridade: 1) --api parameter, 2) ESM_API_KEY env var
+    # Priority: 1) --api parameter, 2) ESM_API_KEY env var
     if api_key:
         os.environ['ESM_API_KEY'] = api_key
-        print(f'✅ API key fornecida via --api (***{api_key[-4:]})')
+        print(f'✅ API key provided via --api (***{api_key[-4:]})')
         print()
         return True
     
-    # Verificar se já está configurada via variável de ambiente
+    # Check if already configured via environment variable
     env_key = os.environ.get('ESM_API_KEY', '').strip()
     
     if env_key:
-        print(f'✅ ESM_API_KEY encontrada no ambiente (***{env_key[-4:]})')
+        print(f'✅ ESM_API_KEY found in environment (***{env_key[-4:]})')
         print()
         return True
     
-    # Solicitar API key interativamente
-    print('⚠️  ESM_API_KEY não encontrada no ambiente.')
+    # Request API key interactively
+    print('⚠️  ESM_API_KEY not found in environment.')
     print()
-    print('Opções:')
-    print('   1. Digite sua API key agora (será usada apenas nesta sessão)')
-    print('   2. Configure permanentemente: export ESM_API_KEY="sua_api_key"')
-    print('   3. Pressione Enter para cancelar e usar outro modelo')
+    print('Options:')
+    print('   1. Enter your API key now (will be used only for this session)')
+    print('   2. Configure permanently: export ESM_API_KEY="your_api_key"')
+    print('   3. Press Enter to cancel and use another model')
     print()
     
     try:
-        user_input = input('🔑 Cole sua API key (ou Enter para cancelar): ').strip()
+        user_input = input('🔑 Paste your API key (or Enter to cancel): ').strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        print('❌ Operação cancelada pelo usuário.')
+        print('❌ Operation cancelled by user.')
         return False
     
     if not user_input:
         print()
-        print('❌ API key não fornecida.')
-        print('💡 Dica: Use --protein-model esmc-600m-2024-12 para a versão local (1152-dim)')
-        print('         ou --protein-model esm2_t33_650M_UR50D para ESM-2 (1280-dim)')
+        print('❌ API key not provided.')
+        print('💡 Tip: Use --protein-model esmc-600m-2024-12 for the local version (1152-dim)')
+        print('        or --protein-model esm2_t33_650M_UR50D for ESM-2 (1280-dim)')
         return False
     
-    # Configurar API key para esta sessão
+    # Configure API key for this session
     os.environ['ESM_API_KEY'] = user_input
     print()
-    print(f'✅ API key configurada para esta sessão (***{user_input[-4:]})')
+    print(f'✅ API key configured for this session (***{user_input[-4:]})')
     print()
     
     return True
@@ -141,41 +141,41 @@ from integrated_pipeline import IntegratedPipeline, IntegratedConfig
 
 
 def parse_args():
-    """Parse argumentos da linha de comando."""
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='DockTKinase - Pipeline Completo Integrado',
+        description='DockTKinase - Complete Integrated Pipeline',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Exemplos:
-  # Teste rápido com dataset pequeno
+Examples:
+  # Quick test with small dataset
   python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
   
-  # Produção com dataset completo
+  # Production with full dataset
   python run_complete_pipeline.py \\
       --input tests/datasets/kinase_all_compounds.tsv \\
       --output results/production_run \\
       --device cuda
   
-  # Apenas regressão (pular classificação)
+  # Regression only (skip classification)
   python run_complete_pipeline.py \\
       --input data.tsv \\
       --no-classification
   
-  # Modelos específicos
+  # Specific models
   python run_complete_pipeline.py \\
       --input data.tsv \\
       --classification-models RandomForest GradientBoosting \\
       --regression-models RandomForest XGBoost
 
 Checkpoints:
-  Por padrão, o pipeline salva checkpoints após cada fase.
-  Em execuções subsequentes, fases completas são carregadas do cache.
-  Use --no-checkpoints para forçar recálculo completo.
+  By default, the pipeline saves checkpoints after each phase.
+  In subsequent runs, completed phases are loaded from cache.
+  Use --no-checkpoints to force full recalculation.
 
-Dispositivos:
-  - auto: Detecta automaticamente (GPU se disponível)
-  - cpu: Força CPU
-  - cuda: NVIDIA GPU (requer CUDA)
+Devices:
+  - auto: Detects automatically (GPU if available)
+  - cpu: Force CPU
+  - cuda: NVIDIA GPU (requires CUDA)
   - mps: Apple Silicon GPU (Mac M1/M2/M3)
         """
     )
@@ -185,23 +185,23 @@ Dispositivos:
         '--input',
         type=str,
         required=True,
-        help='Path para arquivo TSV de entrada'
+        help='Path to input TSV file'
     )
     
     parser.add_argument(
         '--output',
         type=str,
         default='results/pipeline_output',
-        help='Diretório para salvar resultados (default: results/pipeline_output)'
+        help='Directory to save results (default: results/pipeline_output)'
     )
     
-    # Build (Fase 1)
+    # Build (Phase 1)
     parser.add_argument(
         '--ligand-model',
         type=str,
         default='SMI-TED',
         choices=['SMI-TED'],
-        help='Modelo FM4M para embeddings de ligantes (default: SMI-TED, 768-dim)'
+        help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim)'
     )
     
     parser.add_argument(
@@ -212,28 +212,28 @@ Dispositivos:
                  'esm2_t33_650M_UR50D', 'esm2_t36_3B_UR50D', 'esm2_t48_15B_UR50D',
                  'esmc-300m-2024-12', 'esmc-600m-2024-12', 'esmc-6b-2024-12',
                  'boltz2'],
-        help='Modelo para embeddings de proteínas (default: esm2_t6_8M_UR50D). esmc-6b requer ESM_API_KEY.'
+        help='Model for protein embeddings (default: esm2_t6_8M_UR50D). esmc-6b requires ESM_API_KEY.'
     )
     
     parser.add_argument(
         '--protein-dim',
         type=int,
         default=None,
-        help='Dimensão do embedding de proteína (ex: 320, 384, 480, 640, 1280). Default: automática baseada no modelo'
+        help='Protein embedding dimension (e.g.: 320, 384, 480, 640, 1280). Default: automatic based on model'
     )
     
     parser.add_argument(
         '--api',
         type=str,
         default=None,
-        help='API key para modelos que requerem acesso remoto (ex: ESM-C 6B via Forge API)'
+        help='API key for models that require remote access (e.g.: ESM-C 6B via Forge API)'
     )
     
-    # Classification (Fase 2)
+    # Classification (Phase 2)
     parser.add_argument(
         '--no-classification',
         action='store_true',
-        help='Pular fase de classificação'
+        help='Skip classification phase'
     )
     
     parser.add_argument(
@@ -241,14 +241,14 @@ Dispositivos:
         type=str,
         nargs='+',
         default=None,
-        help='Modelos de classificação específicos (default: todos os 10)'
+        help='Specific classification models (default: all 10)'
     )
     
-    # Regression (Fase 3)
+    # Regression (Phase 3)
     parser.add_argument(
         '--no-regression',
         action='store_true',
-        help='Pular fase de regressão'
+        help='Skip regression phase'
     )
     
     parser.add_argument(
@@ -256,37 +256,37 @@ Dispositivos:
         type=str,
         nargs='+',
         default=None,
-        help='Modelos de regressão específicos (default: todos os 10)'
+        help='Specific regression models (default: all 10)'
     )
     
-    # Configurações gerais
+    # General settings
     parser.add_argument(
         '--device',
         type=str,
         default='auto',
         choices=['auto', 'cpu', 'cuda', 'mps'],
-        help='Dispositivo de computação (default: auto)'
+        help='Computing device (default: auto)'
     )
     
     parser.add_argument(
         '--test-size',
         type=float,
         default=0.1,
-        help='Proporção do conjunto de teste (default: 0.1 = 10%%)'
+        help='Test set proportion (default: 0.1 = 10%%)'
     )
     
     parser.add_argument(
         '--val-size',
         type=float,
         default=0.1,
-        help='Proporção do conjunto de validação (default: 0.1 = 10%%)'
+        help='Validation set proportion (default: 0.1 = 10%%)'
     )
     
     parser.add_argument(
         '--seed',
         type=int,
         default=42,
-        help='Random seed para reprodutibilidade (default: 42)'
+        help='Random seed for reproducibility (default: 42)'
     )
     
     # Stratification options
@@ -294,7 +294,7 @@ Dispositivos:
         '--stratifier-threshold',
         type=float,
         default=None,
-        help='Threshold manual para clustering de estratificação (0.0-1.0). Se não especificado, usa auto-threshold.'
+        help='Manual threshold for stratification clustering (0.0-1.0). If not specified, uses auto-threshold.'
     )
     
     parser.add_argument(
@@ -302,41 +302,41 @@ Dispositivos:
         type=str,
         default='target',
         choices=['silhouette', 'elbow', 'target', 'percentile', 'leakage_aware'],
-        help='Método para determinar threshold automático (default: target). leakage_aware otimiza separação train/val/test. Ignorado se --stratifier-threshold for especificado.'
+        help='Method to determine automatic threshold (default: target). leakage_aware optimizes train/val/test separation. Ignored if --stratifier-threshold is specified.'
     )
     
     parser.add_argument(
         '--no-checkpoints',
         action='store_true',
-        help='Desabilitar sistema de checkpoints (forçar recálculo)'
+        help='Disable checkpoint system (force recalculation)'
     )
     
     parser.add_argument(
         '--quiet',
         action='store_true',
-        help='Modo silencioso (menos output)'
+        help='Quiet mode (less output)'
     )
     
-    # Embedding directories (reutilização de embeddings pré-computados)
+    # Embedding directories (reuse of pre-computed embeddings)
     parser.add_argument(
         '--protein-embeddings-dir',
         type=str,
         default=None,
-        help='Diretório com embeddings de proteínas pré-computados. Se especificado e existir, pula geração.'
+        help='Directory with pre-computed protein embeddings. If specified and exists, skips generation.'
     )
     
     parser.add_argument(
         '--ligand-embeddings-dir',
         type=str,
         default=None,
-        help='Diretório com embeddings de ligantes pré-computados. Pode ser compartilhado entre experimentos com diferentes modelos de proteína.'
+        help='Directory with pre-computed ligand embeddings. Can be shared across experiments with different protein models.'
     )
     
     # Attention Matrix options
     parser.add_argument(
         '--save-matrices',
         action='store_true',
-        help='Salvar matrizes de embedding per-residue/per-token (para Cross-Attention model). Gera protein_matrices/ e ligand_matrices/.'
+        help='Save per-residue/per-token embedding matrices (for Cross-Attention model). Generates protein_matrices/ and ligand_matrices/.'
     )
     
     return parser.parse_args()
@@ -362,7 +362,7 @@ def main():
     print(f'   Output: {args.output}')
     print(f'   Ligand Model: {args.ligand_model} (768-dim)')
     
-    # Determinar dimensão do modelo de proteína (single representation)
+    # Determine protein model dimension (single representation)
     protein_dims = {
         # ESM-2 models (mean pooling)
         'esm2_t6_8M_UR50D': 320,
@@ -387,10 +387,10 @@ def main():
         protein_dim = protein_dims.get(args.protein_model, 320)
         dim_source = 'default'
     
-    ligand_dim = 768  # FM4M SMI-TED fixo
+    ligand_dim = 768  # FM4M SMI-TED fixed
     total_dim = ligand_dim + protein_dim
     
-    # Detectar dispositivo real
+    # Detect actual device
     import torch
     if args.device == 'auto':
         if torch.cuda.is_available():
@@ -474,16 +474,16 @@ def main():
         stratifier_threshold=args.stratifier_threshold,
         stratifier_method=args.stratifier_method,
         
-        # Classification (Fase 2)
+        # Classification (Phase 2)
         run_classification=run_classification,
-        use_multi_model_classification=True,  # Sempre usar multi-modelo
+        use_multi_model_classification=True,  # Always use multi-model
         classification_models=args.classification_models,
         
-        # Regression (Fase 3)
+        # Regression (Phase 3)
         run_regression=run_regression,
         regression_models=args.regression_models,
         
-        # Geral
+        # General
         device=args.device,
         test_size=args.test_size,
         val_size=args.val_size,
