@@ -103,8 +103,16 @@ class InteractionLabels(BaseLabels):
             labels_data = df_selected.collect()
             
             # Convert to numpy array
-            self.interaction_data = np.array(labels_data)
+            self.interaction_data = np.array(labels_data, dtype=object)
             self.raw_labels = self.interaction_data
+            
+            # Fill missing pchembl_value by calculating from standard_value
+            # pchembl_value = 9 - log10(standard_value_nM)
+            if self.interaction_data.shape[1] == 5:
+                self._fill_missing_pchembl_values()
+            elif self.interaction_data.shape[1] == 4:
+                # Add pchembl column calculated from standard_value
+                self._add_pchembl_column()
             
             # Store structured labels
             self.labels = self.interaction_data
@@ -117,6 +125,134 @@ class InteractionLabels(BaseLabels):
             raise
         finally:
             self.spark_manager.stop()
+    
+    def _calculate_pchembl_from_nm(self, value_nm) -> Optional[float]:
+        """
+        Calculate pChEMBL value from standard_value in nM.
+        
+        Formula: pChEMBL = 9 - log10(nM) = -log10(M)
+        
+        Args:
+            value_nm: Activity value in nM (nanomolar)
+            
+        Returns:
+            pChEMBL value or None if calculation fails
+        """
+        try:
+            if value_nm is None:
+                return None
+            
+            value_nm_float = float(value_nm)
+            
+            if value_nm_float <= 0:
+                self.logger.debug(f"Invalid value for pChEMBL calculation: {value_nm}")
+                return None
+            
+            # pChEMBL = 9 - log10(nM) = -log10(nM * 1e-9) = -log10(M)
+            pchembl = 9 - np.log10(value_nm_float)
+            
+            # Sanity check: pChEMBL values typically range from ~3 to ~12
+            if pchembl < 0 or pchembl > 15:
+                self.logger.debug(f"Unusual pChEMBL value {pchembl:.2f} from {value_nm} nM")
+            
+            return round(pchembl, 2)
+            
+        except (ValueError, TypeError) as e:
+            self.logger.debug(f"Could not calculate pChEMBL from {value_nm}: {e}")
+            return None
+    
+    def _fill_missing_pchembl_values(self) -> None:
+        """
+        Fill missing pChEMBL values by calculating from standard_value.
+        
+        IMPORTANT: pchembl_value is ALWAYS required for this pipeline.
+        Either the value exists in pchembl_value column OR it exists in
+        standard_value column (and will be converted).
+        
+        pchembl_value is preferred because:
+        - It normalizes the range of values (typically 3-12)
+        - It's a logarithmic scale which facilitates ML calculations
+        - It's directly comparable across different assay types
+        
+        For rows where pchembl_value (column 4) is None or NaN,
+        calculate it from standard_value (column 3).
+        """
+        if self.interaction_data is None or self.interaction_data.shape[1] < 5:
+            return
+        
+        filled_count = 0
+        already_present = 0
+        failed_count = 0
+        
+        for i in range(len(self.interaction_data)):
+            pchembl_val = self.interaction_data[i, 4]
+            
+            # Check if pchembl is missing
+            is_missing = (
+                pchembl_val is None or 
+                (isinstance(pchembl_val, float) and np.isnan(pchembl_val)) or
+                pchembl_val == '' or
+                str(pchembl_val).lower() == 'nan' or
+                str(pchembl_val).lower() == 'none'
+            )
+            
+            if is_missing:
+                # Calculate from standard_value (MUST exist if pchembl is missing)
+                standard_val = self.interaction_data[i, 3]
+                calculated_pchembl = self._calculate_pchembl_from_nm(standard_val)
+                
+                if calculated_pchembl is not None:
+                    self.interaction_data[i, 4] = calculated_pchembl
+                    filled_count += 1
+                else:
+                    # This should not happen - log error but continue
+                    failed_count += 1
+                    self.logger.error(
+                        f"Row {i}: Neither pchembl_value nor valid standard_value found! "
+                        f"standard_value={standard_val}"
+                    )
+            else:
+                already_present += 1
+        
+        self.logger.info(
+            f"pChEMBL values: {already_present} already present, "
+            f"{filled_count} calculated from standard_value, "
+            f"{failed_count} could not be calculated"
+        )
+    
+    def _add_pchembl_column(self) -> None:
+        """
+        Add pChEMBL column calculated from standard_value for 4-column data.
+        
+        Transforms [molregno, kinase, type, standard_value] into
+        [molregno, kinase, type, standard_value, pchembl_value]
+        """
+        if self.interaction_data is None or self.interaction_data.shape[1] != 4:
+            return
+        
+        n_samples = len(self.interaction_data)
+        pchembl_column = np.empty(n_samples, dtype=object)
+        
+        successful = 0
+        failed = 0
+        
+        for i in range(n_samples):
+            standard_val = self.interaction_data[i, 3]
+            pchembl = self._calculate_pchembl_from_nm(standard_val)
+            pchembl_column[i] = pchembl
+            
+            if pchembl is not None:
+                successful += 1
+            else:
+                failed += 1
+        
+        # Add the new column
+        self.interaction_data = np.column_stack([self.interaction_data, pchembl_column])
+        
+        self.logger.info(
+            f"Added pChEMBL column: {successful} calculated successfully, "
+            f"{failed} could not be calculated"
+        )
     
     def validate_labels(self) -> bool:
         """
