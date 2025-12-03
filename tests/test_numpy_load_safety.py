@@ -433,3 +433,224 @@ class TestEdgeCases:
         assert loaded[2, 3] is None
         assert loaded[3, 4] == float('inf')
 
+
+class TestPchemblConversion:
+    """Test pChEMBL value calculation and filling."""
+    
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        import tempfile
+        import shutil
+        temp_path = Path(tempfile.mkdtemp())
+        yield temp_path
+        shutil.rmtree(temp_path)
+    
+    def test_pchembl_calculation_formula(self):
+        """Test the pChEMBL calculation formula: pChEMBL = 9 - log10(nM)."""
+        # Test values
+        test_cases = [
+            (1.0, 9.0),      # 1 nM -> pChEMBL 9
+            (10.0, 8.0),     # 10 nM -> pChEMBL 8
+            (100.0, 7.0),    # 100 nM -> pChEMBL 7
+            (1000.0, 6.0),   # 1000 nM -> pChEMBL 6
+            (10000.0, 5.0),  # 10000 nM -> pChEMBL 5
+        ]
+        
+        for nm_value, expected_pchembl in test_cases:
+            calculated = 9 - np.log10(nm_value)
+            assert np.isclose(calculated, expected_pchembl, atol=0.01), \
+                f"Expected pChEMBL {expected_pchembl} for {nm_value} nM, got {calculated}"
+    
+    def test_stratification_manager_binary_extraction_with_none(self):
+        """Test that stratification handles None values in pchembl column."""
+        from src.build.pipeline.stratification_manager import StratificationManager
+        from src.build.core import BuildConfig
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        manager = StratificationManager(config)
+        
+        # Create interaction_labels with some None pchembl values
+        labels = np.array([
+            [1, "K1", "IC50", 100.0, 7.0],    # Active (pchembl 7.0 >= 6.0)
+            [2, "K2", "Ki", 50.0, None],       # None pchembl, should use standard_value
+            [3, "K3", "Kd", 2000.0, None],     # Inactive (2000 nM > 1000)
+            [4, "K4", "IC50", 500.0, 6.3],     # Active
+        ], dtype=object)
+        
+        # Should not raise an error
+        binary = manager._extract_binary_labels(labels)
+        
+        assert binary is not None
+        assert len(binary) == 4
+        assert binary[0] == 1  # Active (pchembl 7.0)
+        assert binary[1] == 1  # Active (50 nM <= 1000)
+        assert binary[2] == 0  # Inactive (2000 nM > 1000)
+        assert binary[3] == 1  # Active (pchembl 6.3)
+    
+    def test_stratification_manager_all_none_pchembl(self):
+        """Test stratification when all pchembl values are None."""
+        from src.build.pipeline.stratification_manager import StratificationManager
+        from src.build.core import BuildConfig
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        manager = StratificationManager(config)
+        
+        # All pchembl values are None - should use standard_value
+        labels = np.array([
+            [1, "K1", "IC50", 100.0, None],   # Active (100 nM <= 1000)
+            [2, "K2", "Ki", 5000.0, None],    # Inactive (5000 nM > 1000)
+            [3, "K3", "Kd", 500.0, None],     # Active (500 nM <= 1000)
+        ], dtype=object)
+        
+        binary = manager._extract_binary_labels(labels)
+        
+        assert binary is not None
+        assert len(binary) == 3
+        assert binary[0] == 1  # Active
+        assert binary[1] == 0  # Inactive
+        assert binary[2] == 1  # Active
+    
+    def test_stratification_manager_4_column_format(self):
+        """Test stratification with 4-column format (no pchembl column)."""
+        from src.build.pipeline.stratification_manager import StratificationManager
+        from src.build.core import BuildConfig
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        manager = StratificationManager(config)
+        
+        # 4-column format: [molregno, kinase, type, standard_value]
+        labels = np.array([
+            [1, "K1", "IC50", 100.0],    # Active
+            [2, "K2", "Ki", 5000.0],     # Inactive
+            [3, "K3", "Kd", 1000.0],     # Active (exactly at threshold)
+        ], dtype=object)
+        
+        binary = manager._extract_binary_labels(labels)
+        
+        assert binary is not None
+        assert len(binary) == 3
+        assert binary[0] == 1  # Active
+        assert binary[1] == 0  # Inactive
+        assert binary[2] == 1  # Active (at threshold)
+    
+    def test_is_valid_number_helper(self):
+        """Test the _is_valid_number helper function."""
+        from src.build.pipeline.stratification_manager import StratificationManager
+        from src.build.core import BuildConfig
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        manager = StratificationManager(config)
+        
+        # Valid numbers
+        assert manager._is_valid_number(100.0) == True
+        assert manager._is_valid_number(0.0) == True
+        assert manager._is_valid_number("100.5") == True
+        assert manager._is_valid_number(7) == True
+        
+        # Invalid values
+        assert manager._is_valid_number(None) == False
+        assert manager._is_valid_number(float('nan')) == False
+        assert manager._is_valid_number("None") == False
+        assert manager._is_valid_number("nan") == False
+        assert manager._is_valid_number("") == False
+        assert manager._is_valid_number("N/A") == False
+    
+    def test_real_dataset_pchembl_filling(self):
+        """Test pchembl filling with data similar to real dataset structure."""
+        from src.build.pipeline.stratification_manager import StratificationManager
+        from src.build.core import BuildConfig
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        manager = StratificationManager(config)
+        
+        # Simulate real dataset: some rows have pchembl, some only have standard_value
+        # This is exactly like the kinase_non_human_compounds.tsv dataset
+        labels = np.array([
+            # Rows with both pchembl and standard_value
+            [250, "Calcium-dependent protein kinase 1", "Kd", 850.0, 6.07],
+            [250, "MAP kinase p38 alpha", "Kd", 20.0, 7.70],
+            [250, "Mitogen-activated protein kinase 1", "IC50", 100.0, 7.00],
+            [250, "Mitogen-activated protein kinase 2", "IC50", 105.0, 6.98],
+            # Rows with standard_value but NO pchembl (NaN)
+            [250, "Myosin light chain kinase, smooth muscle", "Kd", 10000.0, np.nan],
+            [250, "Serine/threonine-protein kinase pknB", "Kd", 10000.0, np.nan],
+            [160532, "Protein kinase C, PKC; classical", "IC50", 540.0, 6.27],
+            [163291, "Some kinase", "IC50", 10000.0, np.nan],
+        ], dtype=object)
+        
+        # Should handle NaN pchembl values by calculating from standard_value
+        binary = manager._extract_binary_labels(labels)
+        
+        assert binary is not None
+        assert len(binary) == 8
+        
+        # Verify each row
+        # Row 0: pchembl 6.07 >= 6.0 -> Active
+        assert binary[0] == 1, f"Row 0: expected active (pchembl=6.07), got {binary[0]}"
+        # Row 1: pchembl 7.70 >= 6.0 -> Active
+        assert binary[1] == 1, f"Row 1: expected active (pchembl=7.70), got {binary[1]}"
+        # Row 2: pchembl 7.00 >= 6.0 -> Active
+        assert binary[2] == 1, f"Row 2: expected active (pchembl=7.00), got {binary[2]}"
+        # Row 3: pchembl 6.98 >= 6.0 -> Active
+        assert binary[3] == 1, f"Row 3: expected active (pchembl=6.98), got {binary[3]}"
+        # Row 4: standard_value 10000 nM -> pchembl 5.0 < 6.0 -> Inactive
+        assert binary[4] == 0, f"Row 4: expected inactive (10000nM -> pchembl=5.0), got {binary[4]}"
+        # Row 5: standard_value 10000 nM -> pchembl 5.0 < 6.0 -> Inactive
+        assert binary[5] == 0, f"Row 5: expected inactive (10000nM -> pchembl=5.0), got {binary[5]}"
+        # Row 6: pchembl 6.27 >= 6.0 -> Active
+        assert binary[6] == 1, f"Row 6: expected active (pchembl=6.27), got {binary[6]}"
+        # Row 7: standard_value 10000 nM -> pchembl 5.0 < 6.0 -> Inactive
+        assert binary[7] == 0, f"Row 7: expected inactive (10000nM -> pchembl=5.0), got {binary[7]}"
+    
+    def test_interaction_labels_fill_missing_pchembl(self):
+        """Test InteractionLabels._fill_missing_pchembl_values method."""
+        from src.build.labels.interaction_labels import InteractionLabels
+        from src.build.core import BuildConfig
+        import tempfile
+        
+        config = BuildConfig(output_dir="/tmp/test")
+        
+        # Create a temporary TSV file for initialization (required by InteractionLabels)
+        with tempfile.NamedTemporaryFile(suffix='.tsv', delete=False, mode='w') as f:
+            f.write("molregno\ttarget_kinase\tstandard_type\tstandard_value\tpchembl_value\n")
+            f.write("1\tK1\tIC50\t100\t7.0\n")
+            temp_path = f.name
+        
+        try:
+            labels_gen = InteractionLabels(config, temp_path)
+            
+            # Manually set interaction_data to test _fill_missing_pchembl_values
+            labels_gen.interaction_data = np.array([
+                [1, "K1", "IC50", 100.0, 7.0],      # Has pchembl
+                [2, "K2", "Ki", 1000.0, None],       # Missing pchembl
+                [3, "K3", "Kd", 10000.0, np.nan],    # Missing pchembl (NaN)
+                [4, "K4", "IC50", 50.0, ""],         # Empty string
+                [5, "K5", "Kd", 500.0, "nan"],       # String "nan"
+            ], dtype=object)
+            
+            # Call the method
+            labels_gen._fill_missing_pchembl_values()
+            
+            # Verify results
+            data = labels_gen.interaction_data
+            
+            # Row 0: already has pchembl 7.0
+            assert data[0, 4] == 7.0
+            
+            # Row 1: 1000 nM -> pchembl = 6.0
+            assert np.isclose(float(data[1, 4]), 6.0, atol=0.01), f"Expected 6.0, got {data[1, 4]}"
+            
+            # Row 2: 10000 nM -> pchembl = 5.0
+            assert np.isclose(float(data[2, 4]), 5.0, atol=0.01), f"Expected 5.0, got {data[2, 4]}"
+            
+            # Row 3: 50 nM -> pchembl = 7.3
+            assert np.isclose(float(data[3, 4]), 7.3, atol=0.01), f"Expected 7.3, got {data[3, 4]}"
+            
+            # Row 4: 500 nM -> pchembl = 6.3
+            assert np.isclose(float(data[4, 4]), 6.3, atol=0.01), f"Expected 6.3, got {data[4, 4]}"
+            
+        finally:
+            import os
+            os.unlink(temp_path)
+
