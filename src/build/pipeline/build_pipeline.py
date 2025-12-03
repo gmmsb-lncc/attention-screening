@@ -506,7 +506,8 @@ class BuildPipeline(BaseBuilder):
             # Load labels
             if labels_path:
                 import numpy as np
-                labels = np.load(labels_path)
+                # Use allow_pickle=True because labels may contain object arrays
+                labels = np.load(labels_path, allow_pickle=True)
             else:
                 # Generate dummy labels if not available (for testing)
                 labels = np.random.randint(0, 2, size=(concatenated_embeddings.shape[0],))

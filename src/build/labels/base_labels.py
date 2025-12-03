@@ -145,7 +145,7 @@ class BaseLabels(BaseBuilder):
             input_path = Path(input_path)
             
             if input_path.with_suffix('.npy').exists():
-                self.labels = np.load(str(input_path.with_suffix('.npy')))
+                self.labels = np.load(str(input_path.with_suffix('.npy')), allow_pickle=True)
                 self.logger.info(f"Labels loaded from {input_path}")
                 return True
             else:
