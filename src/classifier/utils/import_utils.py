@@ -1,8 +1,8 @@
 """
-Utilitário para gerenciar imports relativos e absolutos de forma robusta.
+Utility for managing relative and absolute imports robustly.
 
-Este módulo resolve o problema comum de imports relativos que falham quando
-módulos são executados diretamente vs. como parte de um pacote.
+This module solves the common problem of relative imports that fail when
+modules are executed directly vs. as part of a package.
 """
 
 import sys
@@ -13,17 +13,17 @@ import importlib.util
 
 
 def get_classifier_root() -> Path:
-    """Retorna o diretório raiz do classificador."""
+    """Returns the classifier root directory."""
     current_file = Path(__file__).resolve()
-    # Subir até encontrar o diretório classifier
+    # Go up until finding the classifier directory
     classifier_root = current_file.parent.parent
     if classifier_root.name != 'classifier':
-        raise RuntimeError(f"Não foi possível encontrar o diretório classifier. Atual: {classifier_root}")
+        raise RuntimeError(f"Could not find classifier directory. Current: {classifier_root}")
     return classifier_root
 
 
 def ensure_classifier_in_path():
-    """Garante que o diretório classifier está no sys.path."""
+    """Ensures the classifier directory is in sys.path."""
     classifier_root = get_classifier_root()
     classifier_str = str(classifier_root)
     
@@ -35,61 +35,61 @@ def ensure_classifier_in_path():
 
 def safe_import(module_name: str, package: Optional[str] = None, fallback_module: Optional[str] = None):
     """
-    Importa um módulo de forma segura, tentando imports relativos e absolutos.
+    Imports a module safely, trying relative and absolute imports.
     
     Args:
-        module_name: Nome do módulo (ex: '.config.mlp_config' ou 'config.mlp_config')
-        package: Pacote base para imports relativos
-        fallback_module: Módulo alternativo se o principal falhar
+        module_name: Module name (e.g.: '.config.mlp_config' or 'config.mlp_config')
+        package: Base package for relative imports
+        fallback_module: Alternative module if main fails
     
     Returns:
-        Módulo importado
+        Imported module
     
     Raises:
-        ImportError: Se nenhuma forma de import funcionar
+        ImportError: If no import method works
     """
     errors = []
     
-    # Tentativa 1: Import relativo
+    # Attempt 1: Relative import
     if module_name.startswith('.') and package:
         try:
             return importlib.import_module(module_name, package)
         except ImportError as e:
-            errors.append(f"Import relativo falhou: {e}")
+            errors.append(f"Relative import failed: {e}")
     
-    # Tentativa 2: Import absoluto (remover ponto inicial se houver)
+    # Attempt 2: Absolute import (remove leading dot if present)
     abs_module_name = module_name.lstrip('.')
     try:
         ensure_classifier_in_path()
         return importlib.import_module(abs_module_name)
     except ImportError as e:
-        errors.append(f"Import absoluto falhou: {e}")
+        errors.append(f"Absolute import failed: {e}")
     
-    # Tentativa 3: Fallback module
+    # Attempt 3: Fallback module
     if fallback_module:
         try:
             ensure_classifier_in_path()
             return importlib.import_module(fallback_module)
         except ImportError as e:
-            errors.append(f"Import de fallback falhou: {e}")
+            errors.append(f"Fallback import failed: {e}")
     
-    # Falhou tudo
-    error_msg = f"Falha ao importar {module_name}:\n" + "\n".join(errors)
+    # All failed
+    error_msg = f"Failed to import {module_name}:\n" + "\n".join(errors)
     raise ImportError(error_msg)
 
 
 def safe_import_from(module_name: str, *items, package: Optional[str] = None, fallback_module: Optional[str] = None):
     """
-    Importa itens específicos de um módulo de forma segura.
+    Imports specific items from a module safely.
     
     Args:
-        module_name: Nome do módulo
-        *items: Itens para importar do módulo
-        package: Pacote base para imports relativos
-        fallback_module: Módulo alternativo
+        module_name: Module name
+        *items: Items to import from the module
+        package: Base package for relative imports
+        fallback_module: Alternative module
     
     Returns:
-        Tupla com os itens importados na mesma ordem
+        Tuple with imported items in the same order
         
     Example:
         MLPConfig, create_default_config = safe_import_from(
@@ -104,7 +104,7 @@ def safe_import_from(module_name: str, *items, package: Optional[str] = None, fa
         if hasattr(module, item):
             results.append(getattr(module, item))
         else:
-            raise ImportError(f"Item '{item}' não encontrado no módulo {module_name}")
+            raise ImportError(f"Item '{item}' not found in module {module_name}")
     
     return tuple(results) if len(results) > 1 else results[0]
 

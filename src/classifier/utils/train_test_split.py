@@ -1,6 +1,6 @@
 """
-Implementação de divisão train/test para o DockTKinase.
-Garante estratificação, reprodutibilidade e validação estatística.
+Train/test split implementation for DockTKinase.
+Ensures stratification, reproducibility and statistical validation.
 """
 
 import torch
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SplitValidationReport:
-    """Relatório de validação da divisão train/test."""
+    """Train/test split validation report."""
     
     is_valid: bool
     train_distribution: Dict[int, float]
@@ -29,14 +29,14 @@ class SplitValidationReport:
 
 class TrainTestSplitter:
     """
-    Divisão train/test cientificamente válida.
+    Scientifically valid train/test split.
     
-    Características:
-    - Estratificação automática
-    - Reprodutibilidade garantida
-    - Validação estatística
-    - Detecção de problemas
-    - Múltiplas estratégias de balanceamento
+    Features:
+    - Automatic stratification
+    - Guaranteed reproducibility
+    - Statistical validation
+    - Problem detection
+    - Multiple balancing strategies
     """
     
     def __init__(self, random_state: int = 42):
@@ -55,64 +55,64 @@ class TrainTestSplitter:
         verbose: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Realiza divisão train/test com validação.
+        Performs train/test split with validation.
         
         Args:
             X: Features tensor
             y: Labels tensor  
-            test_size: Proporção para teste (0.2 = 20%)
-            stratify: Se deve usar estratificação
-            min_samples_per_class: Mínimo de amostras por classe em cada split
-            max_imbalance_ratio: Máximo desbalanceamento aceitável
-            verbose: Se deve imprimir informações detalhadas
+            test_size: Test proportion (0.2 = 20%)
+            stratify: Whether to use stratification
+            min_samples_per_class: Minimum samples per class in each split
+            max_imbalance_ratio: Maximum acceptable imbalance
+            verbose: Whether to print detailed information
             
         Returns:
             X_train, X_test, y_train, y_test
         """
         if verbose:
-            logger.info(f"🔄 Iniciando divisão train/test ({test_size*100:.0f}% teste)")
+            logger.info(f"🔄 Starting train/test split ({test_size*100:.0f}% test)")
         
-        # Converter para numpy para usar sklearn
+        # Convert to numpy for sklearn
         X_np = X.cpu().numpy()
         y_np = y.cpu().numpy()
         
-        # 1. VALIDAÇÕES PRÉ-DIVISÃO
+        # 1. PRE-SPLIT VALIDATIONS
         issues = []
         
-        # Verificar classes únicas
+        # Check unique classes
         unique_classes, class_counts = np.unique(y_np, return_counts=True)
-        logger.info(f"📊 Classes encontradas: {len(unique_classes)}")
+        logger.info(f"📊 Classes found: {len(unique_classes)}")
         
         for cls, count in zip(unique_classes, class_counts):
-            logger.info(f"  Classe {cls}: {count} amostras ({count/len(y_np)*100:.1f}%)")
+            logger.info(f"  Class {cls}: {count} samples ({count/len(y_np)*100:.1f}%)")
             
-            # Verificar se haverá amostras suficientes após divisão
+            # Check if there will be enough samples after split
             expected_test = int(count * test_size)
             expected_train = count - expected_test
             
             if expected_test < min_samples_per_class:
-                issues.append(f"Classe {cls}: apenas {expected_test} amostras no teste (mín: {min_samples_per_class})")
+                issues.append(f"Class {cls}: only {expected_test} samples in test (min: {min_samples_per_class})")
             if expected_train < min_samples_per_class:
-                issues.append(f"Classe {cls}: apenas {expected_train} amostras no treino (mín: {min_samples_per_class})")
+                issues.append(f"Class {cls}: only {expected_train} samples in train (min: {min_samples_per_class})")
         
-        # Verificar desbalanceamento
+        # Check imbalance
         imbalance_ratio = max(class_counts) / min(class_counts)
         if imbalance_ratio > max_imbalance_ratio:
-            issues.append(f"Alto desbalanceamento: {imbalance_ratio:.1f}:1 (máx: {max_imbalance_ratio:.1f}:1)")
+            issues.append(f"High imbalance: {imbalance_ratio:.1f}:1 (max: {max_imbalance_ratio:.1f}:1)")
         
-        # 2. ESTRATÉGIA DE DIVISÃO BASEADA NAS VALIDAÇÕES
+        # 2. SPLIT STRATEGY BASED ON VALIDATIONS
         if len(unique_classes) == 1:
             if verbose:
-                logger.warning("⚠️  Apenas uma classe detectada - usando divisão aleatória")
+                logger.warning("⚠️  Only one class detected - using random split")
             X_train, X_test, y_train, y_test = train_test_split(
                 X_np, y_np, 
                 test_size=test_size,
                 random_state=self.random_state,
                 shuffle=True
             )
-        elif any("apenas" in issue for issue in issues):
+        elif any("only" in issue for issue in issues):
             if verbose:
-                logger.warning("⚠️  Poucas amostras por classe - usando divisão proporcional ajustada")
+                logger.warning("⚠️  Few samples per class - using adjusted proportional split")
             # Ajustar test_size para garantir mínimo por classe
             adjusted_test_size = self._calculate_adjusted_test_size(class_counts, min_samples_per_class)
             X_train, X_test, y_train, y_test = train_test_split(
@@ -124,41 +124,41 @@ class TrainTestSplitter:
             )
         else:
             if verbose:
-                logger.info("✅ Usando divisão estratificada padrão")
+                logger.info("✅ Using standard stratified split")
             X_train, X_test, y_train, y_test = train_test_split(
                 X_np, y_np,
                 test_size=test_size,
-                stratify=y_np if stratify else None,  # 🎯 ESTRATIFICAÇÃO
+                stratify=y_np if stratify else None,  # 🎯 STRATIFICATION
                 random_state=self.random_state,
                 shuffle=True
             )
         
-        # 3. CONVERTER DE VOLTA PARA TENSORES
+        # 3. CONVERT BACK TO TENSORS
         device = X.device
         X_train = torch.from_numpy(X_train).to(device)
         X_test = torch.from_numpy(X_test).to(device)
         y_train = torch.from_numpy(y_train).to(device)
         y_test = torch.from_numpy(y_test).to(device)
         
-        # 4. LOG DOS RESULTADOS  
+        # 4. LOG RESULTS  
         if verbose:
-            logger.info(f"✅ Divisão concluída:")
-            logger.info(f"  📈 Treino: {len(X_train)} amostras")
-            logger.info(f"  📊 Teste: {len(X_test)} amostras")  
-            logger.info(f"  📉 Proporção real: {len(X_test)/(len(X_train)+len(X_test))*100:.1f}% teste")
-            logger.info(f"  🎯 Classes treino: {torch.bincount(y_train.long())}")
-            logger.info(f"  🎯 Classes teste: {torch.bincount(y_test.long())}")
+            logger.info(f"✅ Split completed:")
+            logger.info(f"  📈 Train: {len(X_train)} samples")
+            logger.info(f"  📊 Test: {len(X_test)} samples")  
+            logger.info(f"  📉 Actual ratio: {len(X_test)/(len(X_train)+len(X_test))*100:.1f}% test")
+            logger.info(f"  🎯 Train classes: {torch.bincount(y_train.long())}")
+            logger.info(f"  🎯 Test classes: {torch.bincount(y_test.long())}"
         
         return X_train, X_test, y_train, y_test
     
     def _calculate_adjusted_test_size(self, class_counts: np.ndarray, min_samples: int) -> float:
-        """Calcula test_size ajustado para garantir mínimo de amostras por classe."""
+        """Calculates adjusted test_size to ensure minimum samples per class."""
         total_samples = sum(class_counts)
         min_class_size = min(class_counts)
         
-        # Garantir pelo menos min_samples no teste para a classe minoritária
-        max_test_from_min_class = min_class_size - min_samples  # Deixar min_samples no treino
-        max_test_total = len(class_counts) * max_test_from_min_class  # Aproximação
+        # Ensure at least min_samples in test for the minority class
+        max_test_from_min_class = min_class_size - min_samples  # Leave min_samples in train
+        max_test_total = len(class_counts) * max_test_from_min_class  # Approximation
         
         adjusted_test_size = min(0.3, max_test_total / total_samples)  # Máximo 30%
         adjusted_test_size = max(0.1, adjusted_test_size)  # Mínimo 10%
@@ -174,41 +174,41 @@ class TrainTestSplitter:
         original_imbalance: float,
         pre_issues: list
     ) -> SplitValidationReport:
-        """Valida estatisticamente a divisão realizada."""
+        """Statistically validates the performed split."""
         
-        # Converter para numpy
+        # Convert to numpy
         y_train_np = y_train.cpu().numpy()
         y_test_np = y_test.cpu().numpy()
         
-        # Distribuições por conjunto
+        # Distributions per set
         train_unique, train_counts = np.unique(y_train_np, return_counts=True)
         test_unique, test_counts = np.unique(y_test_np, return_counts=True)
         
         train_dist = {int(cls): count/len(y_train_np) for cls, count in zip(train_unique, train_counts)}
         test_dist = {int(cls): count/len(y_test_np) for cls, count in zip(test_unique, test_counts)}
         
-        # Teste chi-quadrado para comparar distribuições
+        # Chi-square test to compare distributions
         chi2_p_value = self._chi_square_test(train_counts, test_counts)
         
-        # Validações
+        # Validations
         issues = pre_issues.copy()
         recommendations = []
         
-        # 1. Verificar se todas as classes estão presentes
+        # 1. Check if all classes are present
         missing_in_train = set(original_classes) - set(train_unique)
         missing_in_test = set(original_classes) - set(test_unique)
         
         if missing_in_train:
-            issues.append(f"Classes ausentes no treino: {missing_in_train}")
+            issues.append(f"Classes missing in train: {missing_in_train}")
         if missing_in_test:
-            issues.append(f"Classes ausentes no teste: {missing_in_test}")
+            issues.append(f"Classes missing in test: {missing_in_test}")
         
-        # 2. Verificar similaridade de distribuições
+        # 2. Check distribution similarity
         if chi2_p_value < 0.05:
-            issues.append(f"Distribuições train/test significativamente diferentes (p={chi2_p_value:.4f})")
-            recommendations.append("Considere aumentar o dataset ou usar cross-validation")
+            issues.append(f"Train/test distributions significantly different (p={chi2_p_value:.4f})")
+            recommendations.append("Consider increasing the dataset or using cross-validation")
         
-        # 3. Verificar se estratificação funcionou
+        # 3. Check if stratification worked
         max_diff = 0
         for cls in original_classes:
             train_prop = train_dist.get(cls, 0)
@@ -216,16 +216,16 @@ class TrainTestSplitter:
             diff = abs(train_prop - test_prop)
             max_diff = max(max_diff, diff)
         
-        if max_diff > 0.05:  # Diferença > 5%
-            issues.append(f"Estratificação imperfeita: máx diferença {max_diff*100:.1f}%")
-            recommendations.append("Verificar se estratificação foi aplicada corretamente")
+        if max_diff > 0.05:  # Difference > 5%
+            issues.append(f"Imperfect stratification: max difference {max_diff*100:.1f}%")
+            recommendations.append("Check if stratification was applied correctly")
         
-        # 4. Recomendações baseadas no tamanho
+        # 4. Size-based recommendations
         total_samples = len(y_train_np) + len(y_test_np)
         if total_samples < 1000:
-            recommendations.append("Dataset pequeno: considere cross-validation em vez de train/test")
+            recommendations.append("Small dataset: consider cross-validation instead of train/test")
         elif len(y_test_np) < 100:
-            recommendations.append("Conjunto de teste pequeno: considere aumentar test_size")
+            recommendations.append("Small test set: consider increasing test_size"
         
         is_valid = len([i for i in issues if "ausentes" in i or "diferentes" in i]) == 0
         
@@ -240,26 +240,26 @@ class TrainTestSplitter:
         )
     
     def _chi_square_test(self, train_counts: np.ndarray, test_counts: np.ndarray) -> float:
-        """Teste chi-quadrado para comparar distribuições."""
+        """Chi-square test to compare distributions."""
         try:
-            # Normalizar contagens para comparar proporções
+            # Normalize counts to compare proportions
             train_prop = train_counts / train_counts.sum()
             test_prop = test_counts / test_counts.sum()
             
-            # Chi-quadrado
+            # Chi-square
             if len(train_prop) == len(test_prop) and len(train_prop) > 1:
                 chi2, p_value = stats.chisquare(test_prop, train_prop)
                 return p_value
             else:
-                return 1.0  # Não significativo se apenas uma classe
-        # FIX #40: Especificar exceções esperadas ao invés de bare except
+                return 1.0  # Not significant if only one class
+        # FIX #40: Specify expected exceptions instead of bare except
         except (ValueError, ZeroDivisionError, RuntimeError) as e:
             if hasattr(self, 'verbose') and self.verbose:
-                print(f'   ⚠️  Erro ao calcular chi-quadrado: {e}')
-            return 1.0  # Em caso de erro, assumir não significativo
+                print(f'   ⚠️  Error calculating chi-square: {e}')
+            return 1.0  # On error, assume not significant
     
     def _create_minimal_report(self) -> SplitValidationReport:
-        """Cria relatório mínimo quando validação está desabilitada."""
+        """Creates minimal report when validation is disabled."""
         return SplitValidationReport(
             is_valid=True,
             train_distribution={},

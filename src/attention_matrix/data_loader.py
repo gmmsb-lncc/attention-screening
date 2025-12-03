@@ -140,7 +140,7 @@ class EmbeddingDataLoader:
         # Load labels
         labels_file = build_dir / 'binary_labels.npy'
         if labels_file.exists():
-            self.binary_labels = np.load(labels_file)
+            self.binary_labels = np.load(labels_file, allow_pickle=True)
         else:
             # Compute from dataset
             pchembl = self.df['pchembl_value'].fillna(5.0).values
@@ -364,9 +364,9 @@ class EmbeddingDataLoader:
         if split_names is None:
             split_names = ('train_idx.npy', 'val_idx.npy', 'test_idx.npy')
         
-        train_idx_orig = np.load(splits_path / split_names[0])
-        val_idx_orig = np.load(splits_path / split_names[1])
-        test_idx_orig = np.load(splits_path / split_names[2])
+        train_idx_orig = np.load(splits_path / split_names[0], allow_pickle=True)
+        val_idx_orig = np.load(splits_path / split_names[1], allow_pickle=True)
+        test_idx_orig = np.load(splits_path / split_names[2], allow_pickle=True)
         
         # Remap indices to valid samples if needed
         if self.valid_indices is not None and len(self.valid_indices) < len(train_idx_orig) + len(val_idx_orig) + len(test_idx_orig):

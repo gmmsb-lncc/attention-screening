@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Sistema de Logging - Regressão DockTKinase
-===========================================
+Logging System - DockTKinase Regression
+=======================================
 
-Sistema de logging estruturado para o pipeline de regressão.
+Structured logging system for the regression pipeline.
 """
 
 import logging
@@ -15,13 +15,13 @@ from typing import Optional
 
 class RegressionLogger:
     """
-    Logger personalizado para pipeline de regressão.
+    Custom logger for regression pipeline.
     
     Features:
-    - Logs para arquivo e console
-    - Formatação colorida no console
-    - Níveis de verbosidade
-    - Timestamps automáticos
+    - Logs to file and console
+    - Colored formatting on console
+    - Verbosity levels
+    - Automatic timestamps
     """
     
     # Códigos ANSI para cores
@@ -43,14 +43,14 @@ class RegressionLogger:
         use_colors: bool = True
     ):
         """
-        Inicializa logger.
+        Initializes logger.
         
         Args:
-            name: Nome do logger
-            log_file: Path para arquivo de log (opcional)
-            console_level: Nível de log para console
-            file_level: Nível de log para arquivo
-            use_colors: Usar cores no console
+            name: Logger name
+            log_file: Path to log file (optional)
+            console_level: Log level for console
+            file_level: Log level for file
+            use_colors: Use colors on console
         """
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
@@ -106,32 +106,32 @@ class RegressionLogger:
             return result
     
     def debug(self, msg: str):
-        """Log de debug."""
+        """Debug log."""
         self.logger.debug(msg)
     
     def info(self, msg: str):
-        """Log de informação."""
+        """Information log."""
         self.logger.info(msg)
     
     def warning(self, msg: str):
-        """Log de warning."""
+        """Warning log."""
         self.logger.warning(msg)
     
     def error(self, msg: str):
-        """Log de erro."""
+        """Error log."""
         self.logger.error(msg)
     
     def critical(self, msg: str):
-        """Log crítico."""
+        """Critical log."""
         self.logger.critical(msg)
     
     def section(self, title: str, symbol: str = '='):
         """
-        Imprime uma seção destacada.
+        Prints a highlighted section.
         
         Args:
-            title: Título da seção
-            symbol: Caractere para linha
+            title: Section title
+            symbol: Line character
         """
         line = symbol * 60
         self.info('')
@@ -141,11 +141,11 @@ class RegressionLogger:
     
     def metrics(self, metrics_dict: dict, prefix: str = ''):
         """
-        Imprime métricas formatadas.
+        Prints formatted metrics.
         
         Args:
-            metrics_dict: Dicionário com métricas
-            prefix: Prefixo para cada linha
+            metrics_dict: Dictionary with metrics
+            prefix: Prefix for each line
         """
         for key, value in metrics_dict.items():
             if isinstance(value, float):
@@ -155,37 +155,37 @@ class RegressionLogger:
     
     def step(self, step_num: int, total_steps: int, description: str):
         """
-        Log de progresso de etapa.
+        Step progress log.
         
         Args:
-            step_num: Número da etapa atual
-            total_steps: Total de etapas
-            description: Descrição da etapa
+            step_num: Current step number
+            total_steps: Total number of steps
+            description: Step description
         """
         self.info(f'[{step_num}/{total_steps}] {description}')
     
     def success(self, msg: str):
-        """Log de sucesso (usando INFO com emoji)."""
+        """Success log (using INFO with emoji)."""
         self.info(f'✅ {msg}')
     
     def failure(self, msg: str):
-        """Log de falha (usando ERROR com emoji)."""
+        """Failure log (using ERROR with emoji)."""
         self.error(f'❌ {msg}')
     
     def model_training(self, model_name: str, status: str = 'start'):
         """
-        Log específico para treinamento de modelo.
+        Model training specific log.
         
         Args:
-            model_name: Nome do modelo
+            model_name: Model name
             status: 'start', 'end', 'error'
         """
         if status == 'start':
-            self.info(f'🔄 Treinando {model_name}...')
+            self.info(f'🔄 Training {model_name}...')
         elif status == 'end':
-            self.success(f'Modelo {model_name} treinado')
+            self.success(f'Model {model_name} trained')
         elif status == 'error':
-            self.failure(f'Erro ao treinar {model_name}')
+            self.failure(f'Error training {model_name}')
 
 
 def create_logger(
