@@ -157,14 +157,15 @@ class RegressionModels:
             verbose=0
         )
         
-        # 12. MLP (~300s) - Neural network, the slowest
+        # 12. MLP - Neural network with early stopping
         models['MLP'] = MLPRegressor(
             hidden_layer_sizes=(100, 50),
             activation='relu',
             solver='adam',
-            max_iter=500,
+            max_iter=50,
             early_stopping=True,
             validation_fraction=0.1,
+            n_iter_no_change=10,
             random_state=random_state,
             verbose=False
         )

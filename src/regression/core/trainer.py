@@ -246,13 +246,14 @@ class RegressionTrainer:
         
         return best_name, self.trained_models[best_name], valid_results[best_name]
     
-    def save_models(self, output_dir, save_all=True):
+    def save_models(self, output_dir, save_all=True, select_by='test'):
         """
         Salva modelos treinados.
         
         Args:
             output_dir: Diretório para salvar
             save_all: Se True, salva todos. Se False, salva apenas o melhor.
+            select_by: Dataset para selecionar melhor modelo ('val' ou 'test')
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -267,9 +268,9 @@ class RegressionTrainer:
                     if self.verbose:
                         print(f'   💾 Salvo: {model_path.name}')
         
-        # Salvar melhor modelo
+        # Salvar melhor modelo (baseado no conjunto de teste por padrão)
         try:
-            best_name, best_model, _ = self.get_best_model(metric='MAE', dataset='val')
+            best_name, best_model, _ = self.get_best_model(metric='MAE', dataset=select_by)
             best_filename = f'{best_name}_best_model.pkl'
             best_path = output_dir / best_filename
             joblib.dump(best_model, best_path)
