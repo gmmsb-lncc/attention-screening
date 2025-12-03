@@ -8,10 +8,16 @@ Author: DockTKinase Team
 Date: November 2025
 """
 
+import warnings
 import numpy as np
 import torch
 from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field
+
+# Suppress scipy ConstantInputWarning for correlation calculations
+warnings.filterwarnings('ignore', message='An input array is constant')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered')
+
 from sklearn.metrics import (
     # Classification metrics
     accuracy_score,
