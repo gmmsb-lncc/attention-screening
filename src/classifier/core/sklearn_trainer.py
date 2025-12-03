@@ -24,9 +24,17 @@ from sklearn.metrics import (
     brier_score_loss
 )
 
-# Suppress sklearn warning about feature names (harmless - happens when 
-# training with DataFrame but predicting with numpy array)
+# Suppress harmless sklearn/LGBM warnings
+# Feature names warning (happens when training with DataFrame but predicting with numpy array)
 warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+# AdaBoost deprecated 'algorithm' parameter
+warnings.filterwarnings('ignore', message=".*parameter 'algorithm' is deprecated.*")
+# Convergence warnings (LinearSVC may not converge with default iterations)
+warnings.filterwarnings('ignore', category=UserWarning, message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='.*ConvergenceWarning.*')
+# Suppress scipy ConstantInputWarning  
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 
 class ClassificationMetricsCalculator:
