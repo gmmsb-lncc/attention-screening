@@ -106,9 +106,12 @@ class ClassificationModels:
         ), use_scaler)
         
         # 3. Logistic Regression (~10s) - Fast linear baseline (BENEFITS from scaling)
+        # solver='lbfgs' with higher tol avoids ill-conditioned matrix warnings
         models['LogisticRegression'] = _make_pipeline(LogisticRegression(
             C=1.0,
             penalty='l2',
+            solver='lbfgs',
+            tol=1e-4,
             max_iter=1000,
             class_weight='balanced',
             n_jobs=-1,
