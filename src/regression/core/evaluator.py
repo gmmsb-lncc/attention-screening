@@ -67,10 +67,26 @@ class RegressionEvaluator:
         median_ae = median_absolute_error(y_true, y_pred)
         explained_var = explained_variance_score(y_true, y_pred)
         
-        # Correlation metrics
-        pearson_r, pearson_p = pearsonr(y_true, y_pred)
-        spearman_r, spearman_p = spearmanr(y_true, y_pred)
-        kendall_tau, kendall_p = kendalltau(y_true, y_pred)
+        # Correlation metrics - handle constant arrays
+        # If either array is constant, correlation is undefined (NaN)
+        std_true = np.std(y_true)
+        std_pred = np.std(y_pred)
+        
+        if std_true < 1e-10 or std_pred < 1e-10:
+            # One or both arrays are constant - correlation undefined
+            pearson_r, pearson_p = np.nan, np.nan
+            spearman_r, spearman_p = np.nan, np.nan
+            kendall_tau, kendall_p = np.nan, np.nan
+            if std_pred < 1e-10:
+                self.logger.warning(
+                    f"Model predictions are constant (std={std_pred:.2e}). "
+                    f"All predictions ≈ {np.mean(y_pred):.4f}. "
+                    "This may indicate the model didn't learn properly."
+                )
+        else:
+            pearson_r, pearson_p = pearsonr(y_true, y_pred)
+            spearman_r, spearman_p = spearmanr(y_true, y_pred)
+            kendall_tau, kendall_p = kendalltau(y_true, y_pred)
         
         # Concordance Correlation Coefficient (Lin's CCC)
         mean_true = np.mean(y_true)
