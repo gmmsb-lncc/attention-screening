@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Teste completo do pipeline modularizado.
+Complete test of the modularized pipeline.
 """
 
 import os
@@ -9,29 +9,29 @@ import numpy as np
 import torch
 import logging
 
-# Configurar logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def test_modular_pipeline():
-    """Teste completo do pipeline modularizado."""
+    """Complete test of the modularized pipeline."""
     
-    print("🧪 Testando Pipeline Modularizado Completo...")
+    print("🧪 Testing Complete Modularized Pipeline...")
     print("=" * 60)
     
-    # Criar dados sintéticos
+    # Create synthetic data
     n_samples = 300
     n_features = 256
     
-    print(f"📊 Gerando dados sintéticos: {n_samples} amostras x {n_features} features")
+    print(f"📊 Generating synthetic data: {n_samples} samples x {n_features} features")
     
-    # Embeddings aleatórios
+    # Random embeddings
     embeddings = np.random.randn(n_samples, n_features).astype(np.float32)
     
-    # Labels balanceados
+    # Balanced labels
     labels = np.random.choice([0, 1], size=n_samples, p=[0.65, 0.35])
     
-    print(f"✅ Labels: {np.bincount(labels)} (classe 0: {np.bincount(labels)[0]}, classe 1: {np.bincount(labels)[1]})")
+    print(f"✅ Labels: {np.bincount(labels)} (class 0: {np.bincount(labels)[0]}, class 1: {np.bincount(labels)[1]})")
     
     # Salvar em arquivos temporários
     with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f_emb:
@@ -43,36 +43,36 @@ def test_modular_pipeline():
         lab_path = f_lab.name
     
     try:
-        print("\n🔧 Testando componentes individuais...")
+        print("\n🔧 Testing individual components...")
         
-        # 1. Testar modelo
+        # 1. Test model
         from models.mlp_classifier import MLPEmbeddingClassifier
         model = MLPEmbeddingClassifier(n_features, hidden_dim=128)
-        print("✅ Modelo MLP criado")
+        print("✅ MLP Model created")
         
-        # 2. Testar data manager
+        # 2. Test data manager
         from core.data_loader import DataManager
-        device = torch.device("cpu")  # CPU para teste
+        device = torch.device("cpu")  # CPU for testing
         data_manager = DataManager(emb_path, lab_path, device)
         
         info = data_manager.get_dataset_info()
-        print(f"✅ DataManager - {info['n_samples']} amostras, dim {info['embedding_dim']}")
+        print(f"✅ DataManager - {info['n_samples']} samples, dim {info['embedding_dim']}")
         
-        # 3. Testar evaluator
+        # 3. Test evaluator
         from core.evaluator import ModelEvaluator
         evaluator = ModelEvaluator(device)
-        print("✅ ModelEvaluator criado")
+        print("✅ ModelEvaluator created")
         
-        print("\n🚀 Testando Pipeline Simplificado (sem PySpark)...")
+        print("\n🚀 Testing Simplified Pipeline (without PySpark)...")
         
-        # Criar versão simplificada do pipeline para teste
+        # Create simplified version of pipeline for testing
         class SimplePipeline:
             def __init__(self, embeddings_path, labels_path, **kwargs):
                 self.embeddings_path = embeddings_path
                 self.labels_path = labels_path
                 self.batch_size = kwargs.get('batch_size', 32)
                 self.lr = kwargs.get('lr', 0.001)
-                self.epochs = kwargs.get('epochs', 3)  # Poucas épocas para teste
+                self.epochs = kwargs.get('epochs', 3)  # Few epochs for testing
                 self.device = torch.device("cpu")
                 
                 self.data_manager = DataManager(embeddings_path, labels_path, self.device)
@@ -80,18 +80,18 @@ def test_modular_pipeline():
                 self.input_dim = self.data_manager.get_embedding_dim()
                 
             def quick_train_test(self):
-                """Teste rápido de treinamento."""
-                # Carregar dados
+                """Quick training test."""
+                # Load data
                 train_loader, val_loader, test_loader = self.data_manager.create_data_loaders(
                     batch_size=self.batch_size
                 )
                 
-                # Criar modelo
+                # Create model
                 model = MLPEmbeddingClassifier(self.input_dim, hidden_dim=64).to(self.device)
                 criterion = torch.nn.BCELoss()
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
                 
-                print(f"🏋️ Treinando por {self.epochs} épocas...")
+                print(f"🏋️ Training for {self.epochs} epochs...")
                 
                 for epoch in range(self.epochs):
                     model.train()
@@ -108,15 +108,15 @@ def test_modular_pipeline():
                         
                         total_loss += loss.item()
                     
-                    # Avaliar
+                    # Evaluate
                     train_metrics = self.evaluator.evaluate(model, train_loader)
                     val_metrics = self.evaluator.evaluate(model, val_loader)
                     
-                    print(f"  Época {epoch+1}/{self.epochs}: "
+                    print(f"  Epoch {epoch+1}/{self.epochs}: "
                           f"Train Loss={train_metrics['Loss']:.4f}, "
                           f"Val AUC={val_metrics['ROC_AUC']:.4f}")
                 
-                # Avaliação final
+                # Final evaluation
                 if test_loader:
                     test_metrics = self.evaluator.evaluate(model, test_loader)
                     print(f"🎯 Teste final: AUC={test_metrics['ROC_AUC']:.4f}, "
@@ -126,7 +126,7 @@ def test_modular_pipeline():
                 else:
                     return val_metrics
         
-        # Testar pipeline simplificado
+        # Test simplified pipeline
         simple_pipeline = SimplePipeline(
             emb_path, 
             lab_path,
@@ -137,30 +137,30 @@ def test_modular_pipeline():
         
         final_metrics = simple_pipeline.quick_train_test()
         
-        print("\n📊 Métricas finais:")
+        print("\n📊 Final metrics:")
         for key, value in final_metrics.items():
             if isinstance(value, float):
                 print(f"   {key}: {value:.4f}")
             else:
                 print(f"   {key}: {value}")
         
-        print("\n🎉 TESTE COMPLETO COM SUCESSO!")
+        print("\n🎉 TEST COMPLETED SUCCESSFULLY!")
         print("=" * 60)
-        print("✅ Todos os componentes modularizados funcionando")
-        print("✅ Pipeline de treinamento executado")
-        print("✅ Métricas calculadas corretamente")
-        print("✅ Compatibilidade mantida com original")
+        print("✅ All modularized components working")
+        print("✅ Training pipeline executed")
+        print("✅ Metrics calculated correctly")
+        print("✅ Compatibility maintained with original")
         
         return True
         
     except Exception as e:
-        print(f"\n❌ Erro no teste: {e}")
+        print(f"\n❌ Error in test: {e}")
         import traceback
         traceback.print_exc()
         return False
         
     finally:
-        # Limpar arquivos temporários
+        # Clean up temporary files
         if os.path.exists(emb_path):
             os.unlink(emb_path)
         if os.path.exists(lab_path):

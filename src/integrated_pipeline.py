@@ -451,8 +451,11 @@ class RegressionPhase:
     def _print_results(self, results: Dict[str, Any]) -> None:
         """Print regression results."""
         print("✅ Regression completed")
-        print(f"   Best: {results['best_model']}")
-        print(f"   Test MAE: {results['best_test_mae']:.3f}, R²: {results['best_test_r2']:.4f}")
+        if 'best_model' in results:
+            print(f"   Best: {results['best_model']}")
+            print(f"   Test MAE: {results.get('best_test_mae', 0):.3f}, R²: {results.get('best_test_r2', 0):.4f}")
+        else:
+            print(f"   Models trained: {results.get('models_trained', 0)}")
 
 
 # =============================================================================

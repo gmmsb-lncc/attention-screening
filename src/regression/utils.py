@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Funções Utilitárias - Regressão DockTKinase
-============================================
+Utility Functions - DockTKinase Regression
+===========================================
 
-Funções auxiliares para pipeline de regressão.
+Helper functions for regression pipeline.
 """
 
 import numpy as np
@@ -14,26 +14,26 @@ from pathlib import Path
 
 def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, use_pchembl=True):
     """
-    Prepara targets de regressão com priorização de medidas.
+    Prepares regression targets with measurement prioritization.
     
-    Se um composto tem múltiplas medidas, usa apenas a de maior prioridade.
+    If a compound has multiple measurements, uses only the highest priority one.
     
     Args:
-        df: DataFrame com colunas 'standard_type' e 'standard_value'
-        priority: Lista de prioridade das medidas (default: ['Ki', 'Kd', 'IC50'])
-        verbose: Mostrar informações
-        keep_all: Se True, mantém TODAS as medidas (sem remover duplicatas).
-                  Use True quando já tiver splits pré-definidos.
-        use_pchembl: Se True, usa pChEMBL value (-log10 do valor em Molar).
-                     Isso é RECOMENDADO para regressão pois os valores de
-                     Ki/IC50 variam em várias ordens de magnitude.
-                     Se pchembl_value não existir, calcula automaticamente.
+        df: DataFrame with 'standard_type' and 'standard_value' columns
+        priority: List of measurement priorities (default: ['Ki', 'Kd', 'IC50'])
+        verbose: Show information
+        keep_all: If True, keeps ALL measurements (no duplicates removed).
+                  Use True when you already have pre-defined splits.
+        use_pchembl: If True, uses pChEMBL value (-log10 of value in Molar).
+                     This is RECOMMENDED for regression as Ki/IC50 values
+                     vary over several orders of magnitude.
+                     If pchembl_value doesn't exist, calculates automatically.
         
     Returns:
-        y: Array com valores (pChEMBL se use_pchembl=True, senão nM)
-        df_filtered: DataFrame filtrado (1 linha por composto se keep_all=False)
-        measure_types: Array com tipo de medida usada para cada amostra
-        kept_indices: Índices das linhas mantidas no DataFrame original
+        y: Array with values (pChEMBL if use_pchembl=True, else nM)
+        df_filtered: Filtered DataFrame (1 row per compound if keep_all=False)
+        measure_types: Array with measurement type used for each sample
+        kept_indices: Indices of rows kept from original DataFrame
     """
     # FIX: Mutable default argument - criar nova lista a cada chamada
     if priority is None:
@@ -42,32 +42,32 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, 
     if 'standard_type' not in df.columns or 'standard_value' not in df.columns:
         raise ValueError("DataFrame deve ter colunas 'standard_type' e 'standard_value'")
     
-    # Filtrar apenas medidas válidas
+    # Filter only valid measurements
     valid_mask = df['standard_type'].isin(priority)
     df_valid = df[valid_mask].copy()
-    df_valid['_original_index'] = df_valid.index  # Guardar índices originais
+    df_valid['_original_index'] = df_valid.index  # Save original indices
     
     if verbose:
-        print(f'📊 Preparando targets de regressão...')
-        print(f'   Amostras originais: {len(df):,}')
-        print(f'   Amostras com medidas válidas: {len(df_valid):,}')
+        print(f'📊 Preparing regression targets...')
+        print(f'   Original samples: {len(df):,}')
+        print(f'   Samples with valid measurements: {len(df_valid):,}')
     
     # Criar coluna de prioridade
     priority_map = {measure: idx for idx, measure in enumerate(priority)}
     df_valid['_priority'] = df_valid['standard_type'].map(priority_map)
     
     if keep_all:
-        # Modo: manter TODAS as medidas (não remover duplicatas)
-        # Ordenar por prioridade para ter ordem consistente
+        # Mode: keep ALL measurements (no duplicates removed)
+        # Sort by priority for consistent order
         df_filtered = df_valid.sort_values('_priority')
         
         if verbose:
-            print(f'   ℹ️  Modo keep_all=True: mantendo todas as medidas')
+            print(f'   ℹ️  Mode keep_all=True: keeping all measurements')
     else:
-        # Modo padrão: remover duplicatas por (molregno, seq_id)
-        # Se existir 'molregno', agrupar por composto e pegar medida de maior prioridade
+        # Default mode: remove duplicates by (molregno, seq_id)
+        # If 'molregno' exists, group by compound and get highest priority measurement
         if 'molregno' in df_valid.columns and 'seq_id' in df_valid.columns:
-            # Ordenar por prioridade e pegar primeira ocorrência de cada par (molregno, seq_id)
+            # Sort by priority and get first occurrence of each (molregno, seq_id) pair
             df_valid = df_valid.sort_values('_priority')
             df_filtered = df_valid.groupby(['molregno', 'seq_id'], as_index=False).first()
             
@@ -77,13 +77,13 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, 
         else:
             df_filtered = df_valid.copy()
     
-    # Extrair targets e índices originais
+    # Extract targets and original indices
     measure_types = df_filtered['standard_type'].values
     kept_indices = df_filtered['_original_index'].values
     
-    # Escolher entre pChEMBL (logarítmico) ou valor bruto (nM)
+    # Choose between pChEMBL (logarithmic) or raw value (nM)
     if use_pchembl:
-        # Usar pchembl_value se disponível, senão calcular a partir de standard_value
+        # Use pchembl_value if available, else calculate from standard_value
         if 'pchembl_value' in df_filtered.columns:
             # Tentar usar pchembl_value existente
             pchembl_series = pd.to_numeric(df_filtered['pchembl_value'], errors='coerce')
@@ -93,12 +93,12 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, 
             missing_mask = pchembl_series.isna() & standard_series.notna() & (standard_series > 0)
             pchembl_series.loc[missing_mask] = 9 - np.log10(standard_series.loc[missing_mask])
             
-            # Filtrar amostras com valores válidos
+            # Filter samples with valid values
             valid_mask = pchembl_series.notna()
             if valid_mask.sum() < len(df_filtered):
                 n_invalid = len(df_filtered) - valid_mask.sum()
                 if verbose:
-                    print(f'   ⚠️  Removendo {n_invalid} amostras sem pChEMBL válido')
+                    print(f'   ⚠️  Removing {n_invalid} samples without valid pChEMBL')
                 df_filtered = df_filtered[valid_mask].copy()
                 pchembl_series = pchembl_series[valid_mask]
                 measure_types = measure_types[valid_mask.values]
@@ -113,7 +113,7 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, 
             if valid_mask.sum() < len(df_filtered):
                 n_invalid = len(df_filtered) - valid_mask.sum()
                 if verbose:
-                    print(f'   ⚠️  Removendo {n_invalid} amostras com standard_value inválido')
+                    print(f'   ⚠️  Removing {n_invalid} samples with invalid standard_value')
                 df_filtered = df_filtered[valid_mask].copy()
                 standard_series = standard_series[valid_mask]
                 measure_types = measure_types[valid_mask.values]
@@ -128,45 +128,45 @@ def prepare_regression_targets(df, priority=None, verbose=True, keep_all=False, 
         y = df_filtered['standard_value'].values
         value_unit = 'nM'
     
-    # Remover colunas temporárias
+    # Remove temporary columns
     columns_to_drop = ['_priority', '_original_index']
     df_filtered = df_filtered.drop(columns=columns_to_drop, errors='ignore')
     
     if verbose:
-        print(f'   ✅ Amostras finais: {len(y):,}')
-        print(f'\n   Distribuição por tipo de medida:')
+        print(f'   ✅ Final samples: {len(y):,}')
+        print(f'\n   Distribution by measurement type:')
         for measure in priority:
             count = (measure_types == measure).sum()
             pct = (count / len(measure_types)) * 100
             print(f'      {measure}: {count:,} ({pct:.1f}%)')
         
-        print(f'\n   Estatísticas dos valores ({value_unit}):')
+        print(f'\n   Value statistics ({value_unit}):')
         print(f'      Min:    {y.min():.2f}')
-        print(f'      Mediana: {np.median(y):.2f}')
-        print(f'      Média:  {y.mean():.2f}')
+        print(f'      Median: {np.median(y):.2f}')
+        print(f'      Mean:   {y.mean():.2f}')
         print(f'      Max:    {y.max():.2f}')
         
         if use_pchembl:
-            print(f'\n   ℹ️  Usando escala pChEMBL (logarítmica) - recomendado para regressão')
+            print(f'\n   ℹ️  Using pChEMBL scale (logarithmic) - recommended for regression')
     
     return y, df_filtered, measure_types, kept_indices
 
 
 def load_embeddings_cache(cache_path):
     """
-    Carrega embeddings do cache.
+    Loads embeddings from cache.
     
     Args:
-        cache_path: Path para arquivo .npz
+        cache_path: Path to .npz file
         
     Returns:
-        embeddings: Array de embeddings
-        metadata: Dict com metadados (se disponível)
+        embeddings: Embeddings array
+        metadata: Dict with metadata (if available)
     """
     cache_path = Path(cache_path)
     
     if not cache_path.exists():
-        raise FileNotFoundError(f'Cache de embeddings não encontrado: {cache_path}')
+        raise FileNotFoundError(f'Embeddings cache not found: {cache_path}')
     
     data = np.load(cache_path, allow_pickle=True)
     embeddings = data['embeddings']
@@ -181,13 +181,13 @@ def load_embeddings_cache(cache_path):
 
 def save_embeddings_cache(embeddings, sequences, cache_path, model_name=None):
     """
-    Salva embeddings em cache.
+    Saves embeddings to cache.
     
     Args:
-        embeddings: Array de embeddings
-        sequences: Lista de sequências
-        cache_path: Path para salvar
-        model_name: Nome do modelo ESM-2
+        embeddings: Embeddings array
+        sequences: List of sequences
+        cache_path: Path to save
+        model_name: ESM-2 model name
     """
     cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,36 +208,36 @@ def save_embeddings_cache(embeddings, sequences, cache_path, model_name=None):
 
 def load_split_indices(stats_file):
     """
-    Carrega índices dos splits do arquivo de stats da classificação.
+    Loads split indices from the classification stats file.
     
-    Isso garante que a regressão use EXATAMENTE os mesmos splits.
+    This ensures regression uses EXACTLY the same splits.
     
     Args:
-        stats_file: Path para pipeline_stats.json da classificação
+        stats_file: Path to pipeline_stats.json from classification
         
     Returns:
-        idx_train, idx_val, idx_test: Arrays com índices
+        idx_train, idx_val, idx_test: Arrays with indices
         
     Raises:
-        FileNotFoundError: Se arquivo não existir
-        KeyError: Se arquivo não tiver informações de split
+        FileNotFoundError: If file doesn't exist
+        KeyError: If file doesn't have split information
     """
     stats_file = Path(stats_file)
     
     if not stats_file.exists():
         raise FileNotFoundError(
-            f'Arquivo de stats não encontrado: {stats_file}\n'
-            f'Execute o pipeline de classificação primeiro.'
+            f'Stats file not found: {stats_file}\n'
+            f'Run the classification pipeline first.'
         )
     
     with open(stats_file, 'r') as f:
         stats = json.load(f)
     
-    # Verificar se tem informações de split
+    # Check if has split information
     if 'split_indices' not in stats:
         raise KeyError(
-            'Arquivo de stats não contém informações de split.\n'
-            'Atualize o pipeline de classificação para salvar índices dos splits.'
+            'Stats file does not contain split information.\n'
+            'Update the classification pipeline to save split indices.'
         )
     
     split_info = stats['split_indices']
@@ -250,22 +250,22 @@ def load_split_indices(stats_file):
 
 def save_split_indices(idx_train, idx_val, idx_test, stats_file):
     """
-    Salva índices dos splits no arquivo de stats.
+    Saves split indices to stats file.
     
     Args:
-        idx_train, idx_val, idx_test: Arrays com índices
-        stats_file: Path para arquivo JSON
+        idx_train, idx_val, idx_test: Arrays with indices
+        stats_file: Path to JSON file
     """
     stats_file = Path(stats_file)
     
-    # Carregar stats existentes ou criar novo
+    # Load existing stats or create new
     if stats_file.exists():
         with open(stats_file, 'r') as f:
             stats = json.load(f)
     else:
         stats = {}
     
-    # Adicionar índices de split
+    # Add split indices
     stats['split_indices'] = {
         'train': idx_train.tolist(),
         'val': idx_val.tolist(),
@@ -285,10 +285,10 @@ if __name__ == '__main__':
         'seq_id': [10, 10, 20, 30],
         'standard_type': ['IC50', 'Ki', 'Kd', 'Ki'],
         'standard_value': [500, 300, 800, 1200],
-        'pchembl_value': [6.3, 6.52, None, 5.92]  # Alguns com pchembl, outros sem
+        'pchembl_value': [6.3, 6.52, None, 5.92]  # Some with pchembl, others without
     })
     
-    print('=== Teste com use_pchembl=True (padrão) ===')
+    print('=== Test with use_pchembl=True (default) ===')
     y, df_filtered, types, indices = prepare_regression_targets(df_test, keep_all=False, use_pchembl=True)
     print('\nResultados:')
     print(f'y (pChEMBL): {y}')
