@@ -4,8 +4,12 @@ Regression Models - DockTKinase
 ================================
 
 Defines all regression algorithms to be tested.
+All models include StandardScaler preprocessing via sklearn Pipeline
+to ensure proper scaling of embeddings.
 """
 
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import (
     RandomForestRegressor,
     GradientBoostingRegressor,
@@ -21,9 +25,38 @@ from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 
 
+def _make_pipeline(model, use_scaler=True):
+    """
+    Wrap a model in a Pipeline with StandardScaler.
+    
+    Args:
+        model: sklearn-compatible regressor
+        use_scaler: Whether to include StandardScaler (default True)
+        
+    Returns:
+        Pipeline with scaler + model, or just the model if use_scaler=False
+    """
+    if use_scaler:
+        return Pipeline([
+            ('scaler', StandardScaler()),
+            ('model', model)
+        ])
+    return model
+
+
 class RegressionModels:
     """
     Factory for creating regression models.
+    
+    All models are wrapped in sklearn Pipelines with StandardScaler
+    to ensure embeddings are properly normalized. This benefits:
+    - Linear models (Ridge, Lasso, ElasticNet): faster convergence
+    - SVR: proper kernel computation
+    - KNN: fair distance calculations
+    - MLP: stable gradient updates
+    
+    Tree-based models (RF, XGB, LGBM, etc) don't need scaling,
+    but including it doesn't hurt performance.
     
     Supports 12 regression algorithms (ordered from fastest to slowest):
     1. Ridge (~2s) - L2 linear regression
@@ -41,60 +74,64 @@ class RegressionModels:
     """
     
     @staticmethod
-    def get_all_models(random_state=42, verbose=False):
+    def get_all_models(random_state=42, verbose=False, use_scaler=True):
         """
         Returns dictionary with all available models.
         Ordered from fastest to slowest.
         
+        All models are wrapped in sklearn Pipeline with StandardScaler
+        for proper feature normalization.
+        
         Args:
             random_state: Seed for reproducibility
             verbose: Show progress (where applicable)
+            use_scaler: Include StandardScaler in pipeline (default True)
             
         Returns:
-            Dict[str, Regressor]: Dictionary {name: model}
+            Dict[str, Pipeline]: Dictionary {name: pipeline(scaler + model)}
         """
         models = {}
         
-        # 1. Ridge (~2s) - The fastest
-        models['Ridge'] = Ridge(
+        # 1. Ridge (~2s) - The fastest (BENEFITS from scaling)
+        models['Ridge'] = _make_pipeline(Ridge(
             alpha=1.0,
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 2. Lasso (~3s) - Very fast
-        models['Lasso'] = Lasso(
+        # 2. Lasso (~3s) - Very fast (BENEFITS from scaling)
+        models['Lasso'] = _make_pipeline(Lasso(
             alpha=1.0,
             max_iter=2000,
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 3. ElasticNet (~3s) - Fast
-        models['ElasticNet'] = ElasticNet(
+        # 3. ElasticNet (~3s) - Fast (BENEFITS from scaling)
+        models['ElasticNet'] = _make_pipeline(ElasticNet(
             alpha=1.0,
             l1_ratio=0.5,
             max_iter=2000,
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 4. Decision Tree (~5s) - Very fast
-        models['DecisionTree'] = DecisionTreeRegressor(
+        # 4. Decision Tree (~5s) - Very fast (scale invariant)
+        models['DecisionTree'] = _make_pipeline(DecisionTreeRegressor(
             max_depth=20,
             min_samples_split=5,
             min_samples_leaf=2,
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 5. LinearSVR (~15s) - Scalable linear SVM
-        models['LinearSVR'] = LinearSVR(
+        # 5. LinearSVR (~15s) - Scalable linear SVM (BENEFITS from scaling)
+        models['LinearSVR'] = _make_pipeline(LinearSVR(
             C=1.0,
             epsilon=0.1,
             max_iter=2000,
             dual='auto',
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 6. LightGBM (~20s) - Highly optimized gradient boosting
-        models['LightGBM'] = LGBMRegressor(
+        # 6. LightGBM (~20s) - Highly optimized gradient boosting (scale invariant)
+        models['LightGBM'] = _make_pipeline(LGBMRegressor(
             n_estimators=100,
             max_depth=6,
             learning_rate=0.1,
@@ -103,10 +140,10 @@ class RegressionModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=-1
-        )
+        ), use_scaler)
         
-        # 7. XGBoost (~25s) - State-of-art gradient boosting
-        models['XGBoost'] = XGBRegressor(
+        # 7. XGBoost (~25s) - State-of-art gradient boosting (scale invariant)
+        models['XGBoost'] = _make_pipeline(XGBRegressor(
             n_estimators=100,
             max_depth=6,
             learning_rate=0.1,
@@ -115,10 +152,10 @@ class RegressionModels:
             n_jobs=-1,
             random_state=random_state,
             verbosity=0
-        )
+        ), use_scaler)
         
-        # 8. Extra Trees (~40s) - Fast ensemble
-        models['ExtraTrees'] = ExtraTreesRegressor(
+        # 8. Extra Trees (~40s) - Fast ensemble (scale invariant)
+        models['ExtraTrees'] = _make_pipeline(ExtraTreesRegressor(
             n_estimators=100,
             max_depth=20,
             min_samples_split=5,
@@ -126,10 +163,10 @@ class RegressionModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 9. Random Forest (~60s) - Robust ensemble
-        models['RandomForest'] = RandomForestRegressor(
+        # 9. Random Forest (~60s) - Robust ensemble (scale invariant)
+        models['RandomForest'] = _make_pipeline(RandomForestRegressor(
             n_estimators=100,
             max_depth=20,
             min_samples_split=5,
@@ -137,28 +174,28 @@ class RegressionModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 10. KNN (~120s) - Instance-based, slow on prediction
-        models['KNN'] = KNeighborsRegressor(
+        # 10. KNN (~120s) - Instance-based, slow on prediction (BENEFITS from scaling)
+        models['KNN'] = _make_pipeline(KNeighborsRegressor(
             n_neighbors=5,
             weights='distance',
             algorithm='auto',
             n_jobs=-1
-        )
+        ), use_scaler)
         
-        # 11. Gradient Boosting (~180s) - Sklearn sequential boosting
-        models['GradientBoosting'] = GradientBoostingRegressor(
+        # 11. Gradient Boosting (~180s) - Sklearn sequential boosting (scale invariant)
+        models['GradientBoosting'] = _make_pipeline(GradientBoostingRegressor(
             n_estimators=100,
             max_depth=5,
             learning_rate=0.1,
             subsample=0.8,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 12. MLP - Neural network with early stopping
-        models['MLP'] = MLPRegressor(
+        # 12. MLP - Neural network with early stopping (BENEFITS from scaling)
+        models['MLP'] = _make_pipeline(MLPRegressor(
             hidden_layer_sizes=(100, 50),
             activation='relu',
             solver='adam',
@@ -168,7 +205,7 @@ class RegressionModels:
             n_iter_no_change=10,
             random_state=random_state,
             verbose=False
-        )
+        ), use_scaler)
         
         return models
     
