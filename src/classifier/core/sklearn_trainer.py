@@ -8,6 +8,7 @@ Equivalent to regression trainer, but for binary classification.
 """
 
 import time
+import warnings
 import numpy as np
 from typing import Dict, Any, Optional, List
 from sklearn.metrics import (
@@ -22,6 +23,10 @@ from sklearn.metrics import (
     average_precision_score,
     brier_score_loss
 )
+
+# Suppress sklearn warning about feature names (harmless - happens when 
+# training with DataFrame but predicting with numpy array)
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
 
 
 class ClassificationMetricsCalculator:
