@@ -422,17 +422,19 @@ class RegressionPhase:
                 'models_trained': 0
             }
         
-        # Find best model by validation MAE
-        best_model = min(valid_train.items(), key=lambda x: x[1].get('MAE', float('inf')))
+        # Find best model by TEST MAE (not validation!)
+        # This ensures consistency with the displayed ranking
+        best_model = min(valid_test.items(), key=lambda x: x[1].get('MAE', float('inf')))
         best_name = best_model[0]
         
-        best_test = valid_test.get(best_name, {})
+        best_val = valid_train.get(best_name, {})
+        best_test = best_model[1]
         
         return {
             'success': True,
             'best_model': best_name,
-            'best_val_mae': float(best_model[1].get('MAE', 0)),
-            'best_val_r2': float(best_model[1].get('R2', 0)),
+            'best_val_mae': float(best_val.get('MAE', 0)),
+            'best_val_r2': float(best_val.get('R2', 0)),
             'best_test_mae': float(best_test.get('MAE', 0)),
             'best_test_r2': float(best_test.get('R2', 0)),
             'best_mae': float(best_test.get('MAE', 0)),
