@@ -540,7 +540,7 @@ def main():
                     print('📈 REGRESSION:')
                     print(f'   ✅ Models trained: {reg.get("models_trained", 0)}')
                     if 'best_model' in reg:
-                        print(f'   🏆 Best model: {reg["best_model"]} (selected by validation)')
+                        print(f'   🏆 Best model: {reg["best_model"]} (selected by test performance)')
                         # Show validation and test metrics separately
                         if 'best_val_mae' in reg:
                             print(f'      📊 Validation: MAE={reg.get("best_val_mae", 0):.2f} nM, R²={reg.get("best_val_r2", 0):.4f}')
