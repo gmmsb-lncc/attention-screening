@@ -8,6 +8,7 @@ Equivalent to regression trainer, but for binary classification.
 """
 
 import time
+import warnings
 import numpy as np
 from typing import Dict, Any, Optional, List
 from sklearn.metrics import (
@@ -22,6 +23,18 @@ from sklearn.metrics import (
     average_precision_score,
     brier_score_loss
 )
+
+# Suppress harmless sklearn/LGBM warnings
+# Feature names warning (happens when training with DataFrame but predicting with numpy array)
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+# AdaBoost deprecated 'algorithm' parameter
+warnings.filterwarnings('ignore', message=".*parameter 'algorithm' is deprecated.*")
+# Convergence warnings (LinearSVC may not converge with default iterations)
+warnings.filterwarnings('ignore', category=UserWarning, message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='.*ConvergenceWarning.*')
+# Suppress scipy ConstantInputWarning  
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 
 class ClassificationMetricsCalculator:
@@ -73,9 +86,15 @@ class ClassificationMetricsCalculator:
         # Probability-based metrics
         if y_pred_proba is not None:
             try:
-                metrics['ROC_AUC'] = roc_auc_score(y_true, y_pred_proba)
-                metrics['Average_Precision'] = average_precision_score(y_true, y_pred_proba)
-                metrics['Brier_Score'] = brier_score_loss(y_true, y_pred_proba)
+                roc_auc = roc_auc_score(y_true, y_pred_proba)
+                # Check for NaN (happens when only one class present)
+                metrics['ROC_AUC'] = float(roc_auc) if not np.isnan(roc_auc) else 0.0
+                
+                avg_prec = average_precision_score(y_true, y_pred_proba)
+                metrics['Average_Precision'] = float(avg_prec) if not np.isnan(avg_prec) else 0.0
+                
+                brier = brier_score_loss(y_true, y_pred_proba)
+                metrics['Brier_Score'] = float(brier) if not np.isnan(brier) else 0.0
             except Exception as e:
                 # If there's only one class, some metrics may fail
                 metrics['ROC_AUC'] = 0.0

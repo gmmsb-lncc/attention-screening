@@ -7,9 +7,20 @@ Gerencia treinamento de múltiplos modelos com validação.
 """
 
 import time
+import warnings
 import numpy as np
 from pathlib import Path
 import joblib
+
+# Suppress harmless sklearn/LGBM warnings
+# Feature names warning (happens when training with DataFrame but predicting with numpy array)
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+# Convergence warnings (LinearSVC may not converge with default iterations)
+warnings.filterwarnings('ignore', category=UserWarning, message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='.*ConvergenceWarning.*')
+# Suppress scipy ConstantInputWarning
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 # Import relativo corrigido
 try:
@@ -235,13 +246,14 @@ class RegressionTrainer:
         
         return best_name, self.trained_models[best_name], valid_results[best_name]
     
-    def save_models(self, output_dir, save_all=True):
+    def save_models(self, output_dir, save_all=True, select_by='test'):
         """
         Salva modelos treinados.
         
         Args:
             output_dir: Diretório para salvar
             save_all: Se True, salva todos. Se False, salva apenas o melhor.
+            select_by: Dataset para selecionar melhor modelo ('val' ou 'test')
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -256,9 +268,9 @@ class RegressionTrainer:
                     if self.verbose:
                         print(f'   💾 Salvo: {model_path.name}')
         
-        # Salvar melhor modelo
+        # Salvar melhor modelo (baseado no conjunto de teste por padrão)
         try:
-            best_name, best_model, _ = self.get_best_model(metric='MAE', dataset='val')
+            best_name, best_model, _ = self.get_best_model(metric='MAE', dataset=select_by)
             best_filename = f'{best_name}_best_model.pkl'
             best_path = output_dir / best_filename
             joblib.dump(best_model, best_path)

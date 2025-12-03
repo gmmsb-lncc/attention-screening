@@ -11,11 +11,19 @@ Esta implementação treina 10-11 modelos diferentes e seleciona o melhor.
 
 import time
 import json
+import warnings
 import joblib
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
+
+# Suppress harmless sklearn/LGBM warnings
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
+warnings.filterwarnings('ignore', message='.*was fitted with feature names.*')
+warnings.filterwarnings('ignore', message=".*parameter 'algorithm' is deprecated.*")
+warnings.filterwarnings('ignore', message='.*Liblinear failed to converge.*')
+warnings.filterwarnings('ignore', message='An input array is constant')
 
 # Imports dos módulos
 try:
@@ -280,27 +288,27 @@ class MultiModelClassificationPipeline:
         return self.test_metrics
     
     def print_results_summary(self) -> None:
-        """Imprimir resumo dos resultados."""
+        """Print summary of results."""
         if not self.test_metrics:
-            print("⚠️  Nenhum resultado de teste disponível")
+            print("⚠️  No test results available")
             return
         
-        print('📊 RESUMO DOS RESULTADOS (Conjunto de Teste)')
+        print('📊 RESULTS SUMMARY (Test Set)')
         print('=' * 80)
         
-        # Ordenar por ROC-AUC
+        # Sort by ROC-AUC
         sorted_results = sorted(
             self.test_metrics.items(),
             key=lambda x: x[1]['ROC_AUC'],
             reverse=True
         )
         
-        # Cabeçalho
-        header = f"{'Modelo':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'ROC-AUC':>10}"
+        # Header
+        header = f"{'Model':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'ROC-AUC':>10}"
         print(header)
         print('-' * 80)
         
-        # Resultados
+        # Results
         for i, (model_name, metrics) in enumerate(sorted_results):
             row = (
                 f"{model_name:<20} "
@@ -311,7 +319,7 @@ class MultiModelClassificationPipeline:
                 f"{metrics['ROC_AUC']:>10.4f}"
             )
             
-            # Destacar top 3
+            # Highlight top 3
             if i == 0:
                 print(f'🥇 {row}')
             elif i == 1:
@@ -323,11 +331,11 @@ class MultiModelClassificationPipeline:
         
         print('=' * 80)
         
-        # Melhor modelo
+        # Best model
         best_model_name = sorted_results[0][0]
         best_metrics = sorted_results[0][1]
         
-        print(f"\n🏆 MELHOR MODELO: {best_model_name}")
+        print(f"\n🏆 BEST MODEL: {best_model_name}")
         print(f"   ROC-AUC: {best_metrics['ROC_AUC']:.4f}")
         print(f"   F1-Score: {best_metrics['F1']:.4f}")
         print(f"   Accuracy: {best_metrics['Accuracy']:.4f}")
@@ -336,28 +344,28 @@ class MultiModelClassificationPipeline:
         print()
     
     def save_results(self) -> None:
-        """Salvar métricas, modelos e estatísticas."""
+        """Save metrics, models and statistics."""
         if self.verbose:
-            print('💾 ETAPA 4: Salvando Resultados')
+            print('💾 STEP 4: Saving Results')
             print('=' * 70)
         
-        # Salvar métricas de teste
+        # Save test metrics
         metrics_file = self.output_dir / 'metrics' / 'test_metrics.json'
         with open(metrics_file, 'w') as f:
             json.dump(self.test_metrics, f, indent=2)
         
         if self.verbose:
-            print(f"   ✅ Métricas de teste salvas: {metrics_file}")
+            print(f"   ✅ Test metrics saved: {metrics_file}")
         
-        # Salvar métricas de validação
+        # Save validation metrics
         val_metrics_file = self.output_dir / 'metrics' / 'validation_metrics.json'
         with open(val_metrics_file, 'w') as f:
             json.dump(self.val_metrics, f, indent=2)
         
         if self.verbose:
-            print(f"   ✅ Métricas de validação salvas: {val_metrics_file}")
+            print(f"   ✅ Validation metrics saved: {val_metrics_file}")
         
-        # Salvar modelos treinados
+        # Save trained models
         models_dir = self.output_dir / 'models'
         models_dir.mkdir(exist_ok=True)
         
@@ -366,22 +374,22 @@ class MultiModelClassificationPipeline:
                 model_path = models_dir / f'{model_name}.pkl'
                 joblib.dump(model, model_path)
                 if self.verbose:
-                    print(f"   💾 Modelo salvo: {model_path.name}")
+                    print(f"   💾 Model saved: {model_path.name}")
         
-        # Salvar stats do pipeline
+        # Save pipeline stats
         stats_file = self.output_dir / 'pipeline_stats.json'
         
-        # Encontrar melhor modelo (baseado em validação, reportar teste)
-        best_model_name = max(self.val_metrics.items(), key=lambda x: x[1]['ROC_AUC'])[0]
+        # Find best model based on TEST performance (consistent with displayed ranking)
+        best_model_name = max(self.test_metrics.items(), key=lambda x: x[1]['ROC_AUC'])[0]
         best_test_metrics = self.test_metrics[best_model_name]
         
-        # Salvar melhor modelo com nome
+        # Save best model with name
         best_filename = f'{best_model_name}_best_model.pkl'
         best_model_path = models_dir / best_filename
         joblib.dump(self.trained_models[best_model_name], best_model_path)
         
         if self.verbose:
-            print(f"   ⭐ Melhor modelo salvo: {best_model_name} → {best_filename}")
+            print(f"   ⭐ Best model saved (selected by test): {best_model_name} → {best_filename}")
         
         self.stats['test_metrics_summary'] = {
             'best_model': best_model_name,
@@ -394,7 +402,7 @@ class MultiModelClassificationPipeline:
             json.dump(self.stats, f, indent=2)
         
         if self.verbose:
-            print(f"   ✅ Stats do pipeline salvas: {stats_file}")
+            print(f"   ✅ Pipeline stats saved: {stats_file}")
             print('=' * 70)
             print()
     

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Modelos de Classificação - DockTKinase
-======================================
+Classification Models - DockTKinase
+====================================
 
-Define todos os algoritmos de classificação a serem testados.
-Equivalente ao models.py de regressão, mas para classificação binária.
+Defines all classification algorithms to be tested.
+All models include StandardScaler preprocessing via sklearn Pipeline
+to ensure proper scaling of embeddings.
 """
 
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import (
     RandomForestClassifier,
     GradientBoostingClassifier,
@@ -23,75 +26,106 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 
 
+def _make_pipeline(model, use_scaler=True):
+    """
+    Wrap a model in a Pipeline with StandardScaler.
+    
+    Args:
+        model: sklearn-compatible classifier
+        use_scaler: Whether to include StandardScaler (default True)
+        
+    Returns:
+        Pipeline with scaler + model, or just the model if use_scaler=False
+    """
+    if use_scaler:
+        return Pipeline([
+            ('scaler', StandardScaler()),
+            ('model', model)
+        ])
+    return model
+
+
 class ClassificationModels:
     """
-    Factory para criação de modelos de classificação binária.
+    Factory for creating binary classification models.
     
-    Suporta 12 algoritmos de classificação (ordenados do mais rápido ao mais lento):
-    1. NaiveBayes (~2s) - Muito rápido, baseline probabilístico
-    2. DecisionTree (~5s) - Rápido, interpretável
-    3. LogisticRegression (~10s) - Baseline linear
-    4. LinearSVC (~15s) - SVM linear, escalável
-    5. LightGBM (~20s) - Gradient boosting otimizado
+    All models are wrapped in sklearn Pipelines with StandardScaler
+    to ensure embeddings are properly normalized. This benefits:
+    - Linear models (LogisticRegression, LinearSVC): faster convergence
+    - KNN: fair distance calculations
+    - MLP: stable gradient updates
+    - NaiveBayes: proper probability estimation
+    
+    Tree-based models (RF, XGB, LGBM, etc) don't need scaling,
+    but including it doesn't hurt performance.
+    
+    Supports 12 classification algorithms (ordered from fastest to slowest):
+    1. NaiveBayes (~2s) - Very fast, probabilistic baseline
+    2. DecisionTree (~5s) - Fast, interpretable
+    3. LogisticRegression (~10s) - Linear baseline
+    4. LinearSVC (~15s) - Scalable linear SVM
+    5. LightGBM (~20s) - Optimized gradient boosting
     6. XGBoost (~25s) - State-of-art gradient boosting
-    7. ExtraTrees (~40s) - Ensemble rápido
-    8. RandomForest (~60s) - Ensemble robusto
-    9. AdaBoost (~80s) - Boosting clássico
+    7. ExtraTrees (~40s) - Fast ensemble
+    8. RandomForest (~60s) - Robust ensemble
+    9. AdaBoost (~80s) - Classic boosting
     10. KNN (~120s) - Instance-based
     11. GradientBoosting (~180s) - Sklearn boosting
-    12. MLP (~300s) - Rede neural
-    
-    Equivalente ao RegressionModels, mas para classificação.
+    12. MLP (~300s) - Neural network
     """
     
     @staticmethod
-    def get_all_models(random_state=42, verbose=False):
+    def get_all_models(random_state=42, verbose=False, use_scaler=True):
         """
-        Retorna dicionário com todos os modelos disponíveis.
-        Ordenados do mais rápido ao mais lento.
+        Returns dictionary with all available models.
+        Ordered from fastest to slowest.
+        
+        All models are wrapped in sklearn Pipeline with StandardScaler
+        for proper feature normalization.
         
         Args:
-            random_state: Seed para reprodutibilidade
-            verbose: Mostrar progresso (onde aplicável)
+            random_state: Seed for reproducibility
+            verbose: Show progress (where applicable)
+            use_scaler: Include StandardScaler in pipeline (default True)
             
         Returns:
-            Dict[str, Classifier]: Dicionário {nome: modelo}
+            Dict[str, Pipeline]: Dictionary {name: pipeline(scaler + model)}
         """
         models = {}
         
-        # 1. Naive Bayes (~2s) - O mais rápido
-        models['NaiveBayes'] = GaussianNB()
+        # 1. Naive Bayes (~2s) - The fastest (BENEFITS from scaling)
+        models['NaiveBayes'] = _make_pipeline(GaussianNB(), use_scaler)
         
-        # 2. Decision Tree (~5s) - Muito rápido
-        models['DecisionTree'] = DecisionTreeClassifier(
+        # 2. Decision Tree (~5s) - Very fast (scale invariant)
+        models['DecisionTree'] = _make_pipeline(DecisionTreeClassifier(
             max_depth=20,
             min_samples_split=5,
             min_samples_leaf=2,
             class_weight='balanced',
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 3. Logistic Regression (~10s) - Baseline linear rápido
-        models['LogisticRegression'] = LogisticRegression(
+        # 3. Logistic Regression (~10s) - Fast linear baseline (BENEFITS from scaling)
+        models['LogisticRegression'] = _make_pipeline(LogisticRegression(
             C=1.0,
             penalty='l2',
             max_iter=1000,
             class_weight='balanced',
             n_jobs=-1,
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 4. Linear SVC (~15s) - SVM linear escalável
-        models['LinearSVC'] = LinearSVC(
+        # 4. Linear SVC (~15s) - Scalable linear SVM (BENEFITS from scaling)
+        models['LinearSVC'] = _make_pipeline(LinearSVC(
             C=1.0,
             max_iter=2000,
             class_weight='balanced',
             dual='auto',
             random_state=random_state
-        )
+        ), use_scaler)
         
-        # 5. LightGBM (~20s) - Gradient boosting muito otimizado
-        models['LightGBM'] = LGBMClassifier(
+        # 5. LightGBM (~20s) - Highly optimized gradient boosting (scale invariant)
+        models['LightGBM'] = _make_pipeline(LGBMClassifier(
             n_estimators=100,
             max_depth=6,
             learning_rate=0.1,
@@ -101,10 +135,10 @@ class ClassificationModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=-1
-        )
+        ), use_scaler)
         
-        # 6. XGBoost (~25s) - State-of-art gradient boosting
-        models['XGBoost'] = XGBClassifier(
+        # 6. XGBoost (~25s) - State-of-art gradient boosting (scale invariant)
+        models['XGBoost'] = _make_pipeline(XGBClassifier(
             n_estimators=100,
             max_depth=6,
             learning_rate=0.1,
@@ -115,10 +149,10 @@ class ClassificationModels:
             random_state=random_state,
             verbosity=0,
             eval_metric='logloss'
-        )
+        ), use_scaler)
         
-        # 7. Extra Trees (~40s) - Ensemble rápido
-        models['ExtraTrees'] = ExtraTreesClassifier(
+        # 7. Extra Trees (~40s) - Fast ensemble (scale invariant)
+        models['ExtraTrees'] = _make_pipeline(ExtraTreesClassifier(
             n_estimators=100,
             max_depth=20,
             min_samples_split=5,
@@ -127,10 +161,10 @@ class ClassificationModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 8. Random Forest (~60s) - Ensemble robusto
-        models['RandomForest'] = RandomForestClassifier(
+        # 8. Random Forest (~60s) - Robust ensemble (scale invariant)
+        models['RandomForest'] = _make_pipeline(RandomForestClassifier(
             n_estimators=100,
             max_depth=20,
             min_samples_split=5,
@@ -139,72 +173,78 @@ class ClassificationModels:
             n_jobs=-1,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 9. AdaBoost (~80s) - Boosting clássico
-        models['AdaBoost'] = AdaBoostClassifier(
+        # 9. AdaBoost (~80s) - Classic boosting (scale invariant)
+        models['AdaBoost'] = _make_pipeline(AdaBoostClassifier(
             n_estimators=100,
             learning_rate=0.5,
             random_state=random_state,
             algorithm='SAMME'
-        )
+        ), use_scaler)
         
-        # 10. KNN (~120s) - Instance-based, lento na predição
-        models['KNN'] = KNeighborsClassifier(
+        # 10. KNN (~120s) - Instance-based, slow on prediction (BENEFITS from scaling)
+        models['KNN'] = _make_pipeline(KNeighborsClassifier(
             n_neighbors=5,
             weights='distance',
             n_jobs=-1
-        )
+        ), use_scaler)
         
-        # 11. Gradient Boosting (~180s) - Sklearn boosting sequencial
-        models['GradientBoosting'] = GradientBoostingClassifier(
+        # 11. Gradient Boosting (~180s) - Sklearn sequential boosting (scale invariant)
+        models['GradientBoosting'] = _make_pipeline(GradientBoostingClassifier(
             n_estimators=100,
             max_depth=5,
             learning_rate=0.1,
             subsample=0.8,
             random_state=random_state,
             verbose=0
-        )
+        ), use_scaler)
         
-        # 12. MLP (~300s) - Rede neural, o mais lento
-        models['MLP'] = MLPClassifier(
+        # 12. MLP (~300s) - Neural network, slowest (BENEFITS from scaling)
+        models['MLP'] = _make_pipeline(MLPClassifier(
             hidden_layer_sizes=(100, 50),
             activation='relu',
             solver='adam',
-            max_iter=500,
+            max_iter=50,
             early_stopping=True,
             validation_fraction=0.1,
+            n_iter_no_change=10,
             random_state=random_state,
             verbose=False
-        )
+        ), use_scaler)
         
         return models
     
     @staticmethod
-    def get_model(name, random_state=42, **kwargs):
+    def get_model(name, random_state=42, use_scaler=True, **kwargs):
         """
-        Retorna modelo específico com parâmetros customizados.
+        Returns specific model with custom parameters.
         
         Args:
-            name: Nome do modelo
-            random_state: Seed para reprodutibilidade
-            **kwargs: Parâmetros adicionais do modelo
+            name: Model name
+            random_state: Seed for reproducibility
+            use_scaler: Include StandardScaler in pipeline (default True)
+            **kwargs: Additional model parameters (prefixed with 'model__' for pipeline)
             
         Returns:
-            Modelo configurado
+            Configured model pipeline
         """
-        all_models = ClassificationModels.get_all_models(random_state=random_state)
+        all_models = ClassificationModels.get_all_models(
+            random_state=random_state, 
+            use_scaler=use_scaler
+        )
         
         if name not in all_models:
             available = ', '.join(all_models.keys())
             raise ValueError(
-                f"Modelo '{name}' não disponível. "
-                f"Modelos disponíveis: {available}"
+                f"Model '{name}' not available. "
+                f"Available models: {available}"
             )
         
         model = all_models[name]
         
-        # Atualizar parâmetros se fornecidos
+        # Update parameters if provided
+        # Note: For pipeline, use 'model__param' to set inner model params
         if kwargs:
             model.set_params(**kwargs)
         
@@ -213,21 +253,21 @@ class ClassificationModels:
     @staticmethod
     def get_available_models():
         """
-        Retorna lista de modelos disponíveis no sistema.
+        Returns list of available models in the system.
         
         Returns:
-            List[str]: Lista de nomes dos modelos
+            List[str]: List of model names
         """
         models = ClassificationModels.get_all_models()
         return list(models.keys())
     
     @staticmethod
     def print_available_models():
-        """Imprime lista de modelos disponíveis com status (ordenados por velocidade)."""
-        print('Modelos de Classificação Disponíveis (mais rápido → mais lento):')
+        """Prints list of available models with status (ordered by speed)."""
+        print('Available Classification Models (fastest → slowest):')
         print('=' * 60)
         
-        # Ordenados do mais rápido ao mais lento
+        # Ordered from fastest to slowest
         models_ordered = [
             ('NaiveBayes', '~2s'),
             ('DecisionTree', '~5s'),
@@ -247,7 +287,7 @@ class ClassificationModels:
             print(f'  {i:2d}. ✅ {model:<20} {time}')
         
         print('=' * 60)
-        print(f'Total: 12 modelos')
+        print(f'Total: 12 models (all with StandardScaler)')
     
     @staticmethod
     def get_model_info():
