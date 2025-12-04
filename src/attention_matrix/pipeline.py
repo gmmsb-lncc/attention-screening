@@ -20,6 +20,7 @@ from .dataset import ProteinLigandDataset, create_dataloaders
 from .trainer import AttentionTrainer
 from .evaluator import AttentionEvaluator
 from .splitter import LeakageAwareSplitter
+from .attention_analyzer import AttentionAnalyzer, create_attention_heatmap_data
 
 
 logger = logging.getLogger(__name__)
@@ -793,6 +794,22 @@ class AttentionMatrixPipeline:
         with open(self.output_dir / 'results.json', 'w') as f:
             json.dump(results, f, indent=2, default=str)
         
+        # Extract and save attention maps for visualization
+        logger.info("\n  Extracting attention maps for visualization...")
+        try:
+            attention_analysis = self.extract_and_save_attention_maps(
+                test_loader=test_loader,
+                device=device,
+                max_samples=min(100, len(test_idx)),
+                save_raw=True
+            )
+            results['attention_analysis_summary'] = {
+                'n_samples_analyzed': attention_analysis.get('n_samples_analyzed', 0),
+                'n_frequent_interactions': len(attention_analysis.get('frequent_interactions', []))
+            }
+        except Exception as e:
+            logger.warning(f"  Could not extract attention maps: {e}")
+        
         logger.info(f"\n  Results saved to: {self.output_dir}")
         
         return results
@@ -802,3 +819,193 @@ class AttentionMatrixPipeline:
         """Create pipeline from JSON config file."""
         config = AttentionMatrixConfig.load(config_path)
         return cls(config=config)
+    
+    def extract_and_save_attention_maps(
+        self,
+        test_loader,
+        device: torch.device,
+        sample_ids: Optional[list] = None,
+        max_samples: int = 100,
+        save_raw: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Extract attention maps from test samples and save for visualization.
+        
+        This method extracts cross-attention weights that show which protein
+        residues attend to which ligand features, enabling interpretation of
+        predicted protein-ligand interactions.
+        
+        Args:
+            test_loader: DataLoader with test samples
+            device: Device for inference
+            sample_ids: Optional list of sample identifiers
+            max_samples: Maximum number of samples to extract
+            save_raw: Whether to save raw numpy attention arrays
+            
+        Returns:
+            Dictionary with attention analysis results
+        """
+        if self.model is None:
+            logger.warning("No model loaded. Call train() first or load a model.")
+            return {}
+        
+        logger.info("=" * 60)
+        logger.info("Extracting Attention Maps for Visualization")
+        logger.info("=" * 60)
+        
+        self.model.eval()
+        
+        attention_dir = self.output_dir / 'attention_analysis'
+        attention_dir.mkdir(parents=True, exist_ok=True)
+        
+        all_attention_data = []
+        all_residue_importance = []
+        all_ligand_importance = []
+        all_top_interactions = []
+        
+        sample_idx = 0
+        
+        with torch.no_grad():
+            for batch in test_loader:
+                if sample_idx >= max_samples:
+                    break
+                
+                # Handle different batch formats
+                if isinstance(batch, (list, tuple)):
+                    protein_emb, ligand_emb = batch[0], batch[1]
+                elif isinstance(batch, dict):
+                    protein_emb = batch['protein_embedding']
+                    ligand_emb = batch['ligand_embedding']
+                else:
+                    continue
+                
+                protein_emb = protein_emb.to(device)
+                ligand_emb = ligand_emb.to(device)
+                
+                batch_size = protein_emb.size(0)
+                
+                for i in range(batch_size):
+                    if sample_idx >= max_samples:
+                        break
+                    
+                    # Extract attention weights
+                    prot = protein_emb[i:i+1]
+                    lig = ligand_emb[i:i+1]
+                    
+                    # Get attention weights from model
+                    attn_weights = self.model.get_attention_weights(prot, lig)
+                    
+                    if attn_weights is not None:
+                        # attn_weights: (1, num_heads, protein_len, ligand_len)
+                        attn_np = attn_weights.cpu().numpy()[0]  # (num_heads, prot_len, lig_len)
+                        
+                        # Average across heads for main visualization
+                        attn_avg = attn_np.mean(axis=0)  # (prot_len, lig_len)
+                        
+                        # Compute importance scores
+                        residue_importance = attn_avg.mean(axis=1)  # Per-residue
+                        ligand_importance = attn_avg.mean(axis=0)   # Per-ligand-token
+                        
+                        # Get top interactions
+                        flat_indices = np.argsort(attn_avg.flatten())[-20:][::-1]
+                        top_interactions = []
+                        for idx in flat_indices:
+                            res_idx = idx // attn_avg.shape[1]
+                            lig_idx = idx % attn_avg.shape[1]
+                            weight = float(attn_avg[res_idx, lig_idx])
+                            top_interactions.append({
+                                'residue_idx': int(res_idx),
+                                'ligand_idx': int(lig_idx),
+                                'attention_weight': weight
+                            })
+                        
+                        sample_id = sample_ids[sample_idx] if sample_ids else f"sample_{sample_idx}"
+                        
+                        sample_data = {
+                            'sample_id': sample_id,
+                            'protein_length': int(attn_avg.shape[0]),
+                            'ligand_length': int(attn_avg.shape[1]),
+                            'num_heads': int(attn_np.shape[0]),
+                            'residue_importance': residue_importance.tolist(),
+                            'ligand_importance': ligand_importance.tolist(),
+                            'top_interactions': top_interactions,
+                            'attention_stats': {
+                                'mean': float(attn_avg.mean()),
+                                'std': float(attn_avg.std()),
+                                'max': float(attn_avg.max()),
+                                'min': float(attn_avg.min())
+                            }
+                        }
+                        
+                        all_attention_data.append(sample_data)
+                        all_residue_importance.append(residue_importance)
+                        all_ligand_importance.append(ligand_importance)
+                        all_top_interactions.extend(top_interactions)
+                        
+                        # Save raw attention matrix for this sample
+                        if save_raw:
+                            raw_dir = attention_dir / 'raw_matrices'
+                            raw_dir.mkdir(exist_ok=True)
+                            np.save(raw_dir / f'{sample_id}_attention.npy', attn_np)
+                            np.save(raw_dir / f'{sample_id}_attention_avg.npy', attn_avg)
+                    
+                    sample_idx += 1
+        
+        # Aggregate statistics
+        logger.info(f"  Extracted attention from {len(all_attention_data)} samples")
+        
+        # Global residue importance (which residues are most important across all samples)
+        if all_residue_importance:
+            max_len = max(len(r) for r in all_residue_importance)
+            padded = np.array([
+                np.pad(r, (0, max_len - len(r)), constant_values=0) 
+                for r in all_residue_importance
+            ])
+            global_residue_importance = padded.mean(axis=0).tolist()
+        else:
+            global_residue_importance = []
+        
+        # Most frequent top interactions
+        from collections import Counter
+        interaction_counts = Counter(
+            (inter['residue_idx'], inter['ligand_idx']) 
+            for inter in all_top_interactions
+        )
+        frequent_interactions = [
+            {'residue_idx': k[0], 'ligand_idx': k[1], 'frequency': v}
+            for k, v in interaction_counts.most_common(50)
+        ]
+        
+        # Compile final results
+        analysis_results = {
+            'n_samples_analyzed': len(all_attention_data),
+            'global_residue_importance': global_residue_importance,
+            'frequent_interactions': frequent_interactions,
+            'per_sample_data': all_attention_data
+        }
+        
+        # Save analysis to JSON
+        with open(attention_dir / 'attention_analysis.json', 'w') as f:
+            json.dump(analysis_results, f, indent=2)
+        
+        # Save summary for quick reference
+        summary = {
+            'n_samples': len(all_attention_data),
+            'top_residues': [
+                {'residue_idx': i, 'importance': float(v)} 
+                for i, v in sorted(enumerate(global_residue_importance), 
+                                  key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'top_frequent_interactions': frequent_interactions[:20]
+        }
+        
+        with open(attention_dir / 'attention_summary.json', 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        logger.info(f"  Attention analysis saved to: {attention_dir}")
+        logger.info(f"  - attention_analysis.json: Full per-sample data")
+        logger.info(f"  - attention_summary.json: Quick reference summary")
+        if save_raw:
+            logger.info(f"  - raw_matrices/: NumPy arrays for each sample")
+        
+        return analysis_results
