@@ -351,6 +351,7 @@ for i in "${!MODELS_TO_RUN[@]}"; do
             ATTENTION_OUTPUT="${OUTPUT_DIR}/attention_matrix"
             
             ATTENTION_CMD="python attention_matrix.py"
+            ATTENTION_CMD+=" --input ${INPUT_FILE}"
             ATTENTION_CMD+=" --build ${OUTPUT_DIR}/build"
             ATTENTION_CMD+=" --output ${ATTENTION_OUTPUT}"
             ATTENTION_CMD+=" --generate-matrices"
