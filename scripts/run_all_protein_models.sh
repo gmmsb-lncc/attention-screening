@@ -98,6 +98,30 @@ MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 # Option 5: Run only ESM-2 15B + Boltz-2
 # MODELS_TO_RUN=("esm2_t48_15B_UR50D" "boltz2")
 
+# Option 6: Run Cross-Attention Matrix mode (reuses ligand vectors, generates protein matrices)
+# This runs attention_matrix.py after generating protein matrices for each model
+# To use this option, uncomment the lines below:
+# RUN_ATTENTION_MATRIX=true
+# ATTENTION_EPOCHS=50
+# ATTENTION_BATCH_SIZE=32
+# ATTENTION_PATIENCE=10
+# MODELS_TO_RUN=("${ESM2_MODELS[@]}")  # Or any subset you want
+
+# =============================================================================
+# Cross-Attention Matrix Configuration
+# =============================================================================
+
+# Enable/disable attention matrix training after each model
+RUN_ATTENTION_MATRIX="${RUN_ATTENTION_MATRIX:-false}"
+
+# Attention matrix hyperparameters
+ATTENTION_EPOCHS="${ATTENTION_EPOCHS:-50}"
+ATTENTION_BATCH_SIZE="${ATTENTION_BATCH_SIZE:-32}"
+ATTENTION_PATIENCE="${ATTENTION_PATIENCE:-10}"
+ATTENTION_HIDDEN_DIM="${ATTENTION_HIDDEN_DIM:-256}"
+ATTENTION_NUM_HEADS="${ATTENTION_NUM_HEADS:-8}"
+ATTENTION_THRESHOLD="${ATTENTION_THRESHOLD:-6.0}"
+
 # =============================================================================
 # Logging Configuration
 # =============================================================================
@@ -318,10 +342,47 @@ for i in "${!MODELS_TO_RUN[@]}"; do
                 echo "   📝 All subsequent models will reuse these embeddings"
             fi
         fi
+        
+        # Run attention matrix training if enabled
+        if [ "$RUN_ATTENTION_MATRIX" = true ]; then
+            echo ""
+            echo "🧠 Running Cross-Attention Matrix training for ${MODEL}..."
+            ATTENTION_LOG="${LOG_DIR}/${MODEL}_attention.log"
+            ATTENTION_OUTPUT="${OUTPUT_DIR}/attention_matrix"
+            
+            ATTENTION_CMD="python attention_matrix.py"
+            ATTENTION_CMD+=" --input ${INPUT_FILE}"
+            ATTENTION_CMD+=" --build ${OUTPUT_DIR}/build"
+            ATTENTION_CMD+=" --output ${ATTENTION_OUTPUT}"
+            ATTENTION_CMD+=" --generate-matrices"
+            ATTENTION_CMD+=" --esm-model ${MODEL}"
+            ATTENTION_CMD+=" --device ${DEVICE}"
+            ATTENTION_CMD+=" --epochs ${ATTENTION_EPOCHS}"
+            ATTENTION_CMD+=" --batch-size ${ATTENTION_BATCH_SIZE}"
+            ATTENTION_CMD+=" --patience ${ATTENTION_PATIENCE}"
+            ATTENTION_CMD+=" --hidden-dim ${ATTENTION_HIDDEN_DIM}"
+            ATTENTION_CMD+=" --num-heads ${ATTENTION_NUM_HEADS}"
+            ATTENTION_CMD+=" --threshold ${ATTENTION_THRESHOLD}"
+            ATTENTION_CMD+=" --seed ${SEED}"
+            
+            echo "   Command: ${ATTENTION_CMD}"
+            
+            if $ATTENTION_CMD 2>&1 | tee "$ATTENTION_LOG"; then
+                echo "   ✅ Attention matrix training completed for ${MODEL}"
+                echo "   📊 Results saved to: ${ATTENTION_OUTPUT}"
+            else
+                echo "   ⚠️ Attention matrix training failed for ${MODEL}"
+                echo "   📝 Check log: ${ATTENTION_LOG}"
+            fi
+        fi
         echo ""
         
         SUCCESSFUL=$((SUCCESSFUL + 1))
-        echo "✅ ${MODEL} | Duration: ${DURATION_FMT} | Status: SUCCESS" >> "$SUMMARY_FILE"
+        if [ "$RUN_ATTENTION_MATRIX" = true ]; then
+            echo "✅ ${MODEL} | Duration: ${DURATION_FMT} | Status: SUCCESS (+ Attention)" >> "$SUMMARY_FILE"
+        else
+            echo "✅ ${MODEL} | Duration: ${DURATION_FMT} | Status: SUCCESS" >> "$SUMMARY_FILE"
+        fi
     else
         MODEL_END=$(date +%s)
         DURATION=$((MODEL_END - MODEL_START))
