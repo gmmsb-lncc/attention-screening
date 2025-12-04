@@ -134,6 +134,24 @@ class CrossAttentionModel(nn.Module):
             outputs['attention'] = attn_weights
         
         return outputs
+    
+    def get_attention_weights(
+        self,
+        protein: torch.Tensor,
+        ligand: torch.Tensor
+    ) -> Optional[torch.Tensor]:
+        """
+        Get attention weights for visualization.
+        
+        Args:
+            protein: Protein embeddings (batch, seq_len, protein_dim)
+            ligand: Ligand embeddings (batch, seq_len, ligand_dim)
+            
+        Returns:
+            attention: Attention weights (batch, num_heads, protein_len, ligand_len)
+        """
+        outputs = self.forward(protein, ligand, return_attention=True)
+        return outputs.get('attention')
 
 
 class ImprovedCrossAttentionModel(nn.Module):
