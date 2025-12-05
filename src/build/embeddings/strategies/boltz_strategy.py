@@ -270,16 +270,16 @@ class BoltzStrategy(BaseProteinStrategy):
         # If local not available, try global CLI
         if not self.cli_available:
             try:
+                # Try 'boltz --help' since boltz doesn't have --version
                 result = subprocess.run(
-                    [BOLTZ_CLI, '--version'],
+                    [BOLTZ_CLI, '--help'],
                     capture_output=True,
                     text=True,
                     timeout=10
                 )
                 self.cli_available = (result.returncode == 0)
                 if self.cli_available:
-                    version = result.stdout.strip() or result.stderr.strip()
-                    self.logger.info(f"✓ Boltz CLI found (global): {version}")
+                    self.logger.info(f"✓ Boltz CLI found (global): {BOLTZ_CLI}")
                     self.boltz_cli_cmd = [BOLTZ_CLI]
             except (subprocess.SubprocessError, FileNotFoundError) as e:
                 # Provide helpful error message with local path info
@@ -297,9 +297,24 @@ class BoltzStrategy(BaseProteinStrategy):
         
         # Set up CLI command for local installation
         if self.use_local_boltz:
-            # Use Python to run the boltz module directly
-            self.boltz_cli_cmd = [sys.executable, "-m", "boltz"]
-            self.logger.info(f"✓ Using local Boltz via: {' '.join(self.boltz_cli_cmd)}")
+            # Try direct 'boltz' command first (works when installed via pip)
+            # Falls back to 'python -m boltz' if needed
+            try:
+                result = subprocess.run(
+                    ['boltz', '--help'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    self.boltz_cli_cmd = ['boltz']
+                    self.logger.info(f"✓ Using Boltz CLI directly: boltz")
+                else:
+                    raise subprocess.SubprocessError("boltz command failed")
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fallback to python -m boltz.main.predict or similar
+                self.boltz_cli_cmd = [sys.executable, "-m", "boltz"]
+                self.logger.info(f"✓ Using local Boltz via: {' '.join(self.boltz_cli_cmd)}")
         
         # Create temporary output directory
         self.output_dir = Path(tempfile.mkdtemp(prefix='boltz_'))
