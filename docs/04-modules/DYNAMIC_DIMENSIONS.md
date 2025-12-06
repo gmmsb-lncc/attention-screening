@@ -30,6 +30,21 @@ Agora o `BuildConfig` **sincroniza automaticamente** as dimensões baseado nos m
 | `esm2_t12_35M_UR50D` | 480 | 35M |
 | `esm2_t6_8M_UR50D` | 320 | 8M |
 
+#### ESM-C (EvolutionaryScale Cambrian)
+
+| Modelo | Dimensões | Parâmetros |
+|--------|-----------|------------|
+| `esmc-300m-2024-12` | 960 | 300M |
+| `esmc-600m-2024-12` | 1152 | 600M |
+| `esmc-6b-2024-12` | 3072 | 6B |
+
+#### Outros Modelos de Proteína
+
+| Modelo | Dimensões | Tipo |
+|--------|-----------|------|
+| `openfold3` | 384 | Structure-aware |
+| `boltz2` | 384 | Structure + Affinity |
+
 #### FM4M (Ligantes)
 
 | Modelo | Dimensões | Tipo |

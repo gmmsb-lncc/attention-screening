@@ -49,10 +49,10 @@ python run_complete_pipeline.py \
 
 ### Regression (Quantitative Prediction)
 ```bash
-python run_regression_pipeline.py \
-    --data results/exp1/matrix/embedding_matrix.npz \
-    --output results/exp1/regression \
-    --activity-type Ki
+python run_complete_pipeline.py \
+    --input src/database/data.tsv \
+    --output results/exp1 \
+    --no-classification
 ```
 
 ---
@@ -73,10 +73,9 @@ python run_complete_pipeline.py \
 python run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/experiment1 \
-    --model esm2_t36_3B_UR50D \
+    --protein-model esm2_t36_3B_UR50D \
     --device cuda \
-    --batch-size 8 \
-    --threshold 1000
+    --seed 42
 ```
 
 ### Python API
