@@ -391,16 +391,25 @@ Standard random splitting assumes independent and identically distributed (i.i.d
 To address this, DockTKinase implements a rigorous **Clustering-based Stratification** strategy. The goal is to ensure that no cluster of similar proteins spans across the train/test boundary.
 
 #### 7.2.1 Algorithm
-We employ unsupervised clustering algorithms (DBSCAN or K-means) on the protein embedding space to identify families.
+We employ a rigorous **Clustering-based Stratification** strategy using **MiniBatchKMeans** with **k-means++** initialization. This approach ensures robust cluster centers and computational efficiency ($O(n)$) for large datasets.
 
-1.  **Embedding**: Compute protein embeddings $E_P$ using ESM-2.
-2.  **Dimensionality Reduction**: Apply PCA or UMAP to reduce noise.
-3.  **Clustering**: Group proteins into clusters $C = \{c_1, c_2, ..., c_k\}$ such that proteins within a cluster share high similarity.
-4.  **Splitting**: Assign entire clusters to either Train, Validation, or Test sets.
+1.  **Multi-Modal Embedding Integration**: We construct a unified representation vector for each interaction pair by concatenating the protein embedding ($E_P$) and ligand embedding ($E_L$), weighted by hyperparameters $\alpha$ and $\beta$ (typically 0.6 and 0.4):
+    $$ V_{joint} = [\alpha \cdot E_P ; \beta \cdot E_L] $$
+
+2.  **Cosine Similarity Approximation**: To cluster based on directional similarity (cosine similarity) rather than magnitude, we apply **L2-normalization** to the joint vectors:
+    $$ \hat{V}_{joint} = \frac{V_{joint}}{||V_{joint}||_2} $$
+    Clustering these normalized vectors with K-means is mathematically equivalent to clustering based on cosine similarity.
+
+3.  **Adaptive Clustering**: We determine the optimal number of clusters $k$ adaptively based on dataset size ($k \approx \sqrt{N}$), bounded between 10 and 1000. This ensures that clusters are neither too coarse (high variance) nor too fine (overfitting).
+
+4.  **Greedy Cluster Assignment**: To populate the Train, Validation, and Test sets, we employ a **Greedy Assignment Strategy**:
+    *   Clusters are sorted by size (number of samples) in descending order.
+    *   Iterating through the sorted clusters, we assign each *entire* cluster to the split (Test, Validation, or Train) that is currently furthest below its target quota (e.g., 10%, 10%, 80%).
+    *   **Constraint**: A cluster is never split. All samples belonging to Cluster $C_i$ are assigned to the same set.
 
 $$ \forall x \in \text{Train}, \forall y \in \text{Test}, \text{Cluster}(x) \neq \text{Cluster}(y) $$
 
-This forces the model to generalize to unseen protein families, providing a realistic estimate of its performance in drug discovery scenarios where novel targets are common.
+This methodology guarantees that chemically and biologically similar instances are strictly separated, preventing the model from "memorizing" molecular families and ensuring that performance metrics reflect true generalization to novel chemical space.
 
 ### 7.3 Validation Metrics
 
