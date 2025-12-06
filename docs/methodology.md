@@ -70,7 +70,7 @@ Small molecule drugs (ligands) are fundamentally different from proteins. They a
 
 A SMILES string encodes the molecular graph into a sequence of characters. For example, Benzene is represented as `c1ccccc1`.
 
-$$ L = \{s_1, s_2, \dots, s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, \text{\#}, (, ), \dots\} $$
+$$ L = \{s_1, s_2, \dots, s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, (, ), \dots\} $$
 
 #### 2.2.2 Chemical Foundation Models
 Similar to pLMs, **Chemical Foundation Models** are trained on massive databases of chemical structures (like PubChem or ChEMBL). They learn to understand chemical syntax and semantics, generating vector representations that capture molecular properties such as solubility, toxicity, and binding potential.
@@ -144,7 +144,6 @@ The `ProteinEmbedding` class acts as the context, delegating the actual computat
     *   `ESM2Strategy`: Wraps Meta AI's `fair-esm` library for models ranging from 8M to 15B parameters.
     *   `ESMCStrategy`: Integrates EvolutionaryScale's generative models (300M, 600M, 6B).
     *   `BoltzStrategy`: Adapts the Boltz-2 foundation model for structure-aware embeddings.
-    *   `OpenFoldStrategy`: Extracts representations from the OpenFold3 trunk.
 
 This design allows researchers to experiment with cutting-edge models simply by changing a configuration string (e.g., `--protein-model boltz2`), without modifying the core pipeline code.
 
