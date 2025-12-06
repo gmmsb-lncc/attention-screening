@@ -58,24 +58,24 @@ LIGAND_EMBEDDINGS_GENERATED=false
 
 # ESM-2 Local Models (6 models)
 ESM2_MODELS=(
-    "esm2_t6_8M_UR50D"      # 320-dim, ~8M params
-    "esm2_t12_35M_UR50D"    # 480-dim, ~35M params
-    "esm2_t30_150M_UR50D"   # 640-dim, ~150M params
-    "esm2_t33_650M_UR50D"   # 1280-dim, ~650M params
-    "esm2_t36_3B_UR50D"     # 2560-dim, ~3B params
-    #"esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
+   # "esm2_t6_8M_UR50D"      # 320-dim, ~8M params
+   # "esm2_t12_35M_UR50D"    # 480-dim, ~35M params
+   # "esm2_t30_150M_UR50D"   # 640-dim, ~150M params
+   # "esm2_t33_650M_UR50D"   # 1280-dim, ~650M params
+   # "esm2_t36_3B_UR50D"     # 2560-dim, ~3B params
+   # "esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
 )
 
 # ESM-C API Models (3 models - require ESM_API_KEY)
 ESMC_MODELS=(
     "esmc-300m-2024-12"     # 960-dim, ~300M params
     "esmc-600m-2024-12"     # 1152-dim, ~600M params
-    # "esmc-6b-2024-12"       # 3072-dim, ~6B params (API only)
+   # "esmc-6b-2024-12"       # 3072-dim, ~6B params (API only)
 )
 
 # Structure-based Models (2 models)
 STRUCTURE_MODELS=(
-    #"openfold3"             # 1536-dim, Structure prediction
+   # "openfold3"             # 1536-dim, Structure prediction
     "boltz2"                # 384-dim, Boltz-2 embeddings
 )
 
@@ -84,7 +84,7 @@ STRUCTURE_MODELS=(
 # =============================================================================
 
 # Option 1: Run ALL 11 models (ESM-2 + ESM-C + Structure)
-MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+# MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
 # Option 2: Run only ESM-2 local models (no API key required) - uncomment below
 # MODELS_TO_RUN=("${ESM2_MODELS[@]}")
@@ -101,11 +101,12 @@ MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 # Option 6: Run Cross-Attention Matrix mode (reuses ligand vectors, generates protein matrices)
 # This runs attention_matrix.py after generating protein matrices for each model
 # To use this option, uncomment the lines below:
-# RUN_ATTENTION_MATRIX=true
-# ATTENTION_EPOCHS=50
-# ATTENTION_BATCH_SIZE=32
-# ATTENTION_PATIENCE=10
-# MODELS_TO_RUN=("${ESM2_MODELS[@]}")  # Or any subset you want
+RUN_ATTENTION_MATRIX=true
+ATTENTION_EPOCHS=50
+ATTENTION_BATCH_SIZE=32
+ATTENTION_PATIENCE=10
+# Include ESM-2, ESM-C, and Boltz-2 models for attention matrix extraction
+MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
 
 # =============================================================================
 # Cross-Attention Matrix Configuration

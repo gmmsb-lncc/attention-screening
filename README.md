@@ -211,6 +211,21 @@ This approach is grounded in established research:
 4. **Nguyen, X., Epps, J., & Bailey, J. (2010)**. *Information theoretic measures for clusterings comparison*. Journal of Machine Learning Research, 11, 2837-2854.
    - Framework for evaluating clustering quality in stratification
 
+### Detailed Documentation
+
+For comprehensive technical details on the stratification methodology, see:
+
+| Document | Description |
+|----------|-------------|
+| 📖 **[Stratification Methodology Guide](docs/02-user-guide/stratification-methodology.md)** | User-friendly guide covering cosine similarity, dynamic threshold selection, and cluster assignment |
+| 🔬 **[Technical Deep Dive](docs/03-architecture/clustering-stratification-technical.md)** | Mathematical foundations, Silhouette Score optimization, K-means++ guarantees, complexity analysis |
+
+Key topics covered in detail:
+- **Dynamic Threshold Selection**: How the optimal similarity threshold is automatically determined based on data distribution and Silhouette Score maximization
+- **Greedy Cluster Assignment**: The "Needs AND Fits" algorithm with 120% tolerance for handling indivisible clusters
+- **Homogeneity Classification**: Automatic detection of data characteristics (very_high, high, moderate, low) to adjust search ranges
+- **Edge Cases**: Handling of highly homogeneous data, small datasets, and memory constraints
+
 ### Usage
 
 The K-means++ stratification is automatically used by the pipeline:

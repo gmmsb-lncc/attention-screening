@@ -146,14 +146,14 @@ python run_complete_pipeline.py \
 
 ### **3B.1 Complete Regression Pipeline**
 ```bash
-python run_regression_pipeline.py \
-    --data results/my_experiment/matrix/embedding_matrix.npz \
-    --output results/my_experiment/regression \
-    --activity-type Ki
+python run_complete_pipeline.py \
+    --input src/database/your_file.tsv \
+    --output results/my_experiment \
+    --no-classification
 ```
 
 **Steps executed:**
-1. ✅ Load matrix
+1. ✅ Load matrix (or build if needed)
 2. ✅ Extract activity (Ki/Kd/IC50)
 3. ✅ Data validation (10+ checks)
 4. ✅ Train 11 regression models
@@ -193,16 +193,10 @@ python3 -m venv env
 source env/bin/activate
 python setup.py
 
-# 2. Classification
+# 2. Classification + Regression (Complete)
 python run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1
-
-# 3. Regression (optional)
-python run_regression_pipeline.py \
-    --data results/exp1/matrix/embedding_matrix.npz \
-    --output results/exp1/regression \
-    --activity-type Ki
 ```
 
 ### **Advanced (Custom Configuration)**
@@ -211,16 +205,16 @@ python run_regression_pipeline.py \
 python run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1 \
-    --model esm2_t36_3B_UR50D \
+    --protein-model esm2_t36_3B_UR50D \
     --device cuda \
     --batch-size 8
 
 # Regression with specific models
-python run_regression_pipeline.py \
-    --data results/exp1/matrix/embedding_matrix.npz \
-    --output results/exp1/regression \
-    --activity-type Ki \
-    --models RandomForest,XGBoost,MLP
+python run_complete_pipeline.py \
+    --input src/database/data.tsv \
+    --output results/exp1 \
+    --no-classification \
+    --regression-models RandomForest XGBoost MLP
 ```
 
 ### **Python API (Maximum Control)**
