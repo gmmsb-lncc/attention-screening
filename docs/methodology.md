@@ -16,7 +16,7 @@ The accurate identification of potent kinase inhibitors is a cornerstone of mode
 
 ### 1.1 The Kinase Drug Discovery Challenge
 
-Protein kinases represent one of the most important drug target families, regulating critical cellular pathways. However, developing specific inhibitors is complicated by the high structural conservation of the ATP-binding pocket. Traditional structure-based docking is computationally expensive, while standard ligand-based methods often fail to generalize to novel chemotypes.
+Protein kinases are enzymes that catalyze the transfer of a phosphate group from ATP to specific substrates (phosphorylation). This process acts as a molecular 'on/off' switch for cellular pathways. Dysregulation of kinases is a primary driver of cancer. The challenge is that the ATP-binding pocket is highly conserved across the >500 human kinases, making it difficult to design inhibitors that bind to just one (selectivity).
 
 DockTKinase addresses this by treating the interaction problem as a **multi-modal representation learning task**.
 
@@ -70,7 +70,7 @@ Small molecule drugs (ligands) are fundamentally different from proteins. They a
 
 A SMILES string encodes the molecular graph into a sequence of characters. For example, Benzene is represented as `c1ccccc1`.
 
-$$ L = \{s_1, s_2, ..., s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, \#, (, ), ...\} $$
+$$ L = \{s_1, s_2, \dots, s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, \text{\#}, (, ), \dots\} $$
 
 #### 2.2.2 Chemical Foundation Models
 Similar to pLMs, **Chemical Foundation Models** are trained on massive databases of chemical structures (like PubChem or ChEMBL). They learn to understand chemical syntax and semantics, generating vector representations that capture molecular properties such as solubility, toxicity, and binding potential.
@@ -84,6 +84,37 @@ Computational methods must account for this flexibility.
 2.  **Machine Learning**: Attempts to learn a function $f(Protein, Ligand) \to Affinity$ from data.
 
 DockTKinase represents the next evolution of ML approaches. Instead of using fixed descriptors (hand-engineered features), we use the **contextual embeddings** from Foundation Models. By combining the "protein understanding" of pLMs with the "chemical understanding" of chemical models, we aim to predict interaction compatibility directly from the learned latent spaces.
+
+### 2.4 Mathematical Formulation of Representation Learning
+
+To bridge the gap between biology and computation, we formalize the representation learning process.
+
+#### 2.4.1 The Embedding Function
+Let $\mathcal{V}$ be the vocabulary of amino acids (for proteins) or atoms (for ligands). A sequence $S$ of length $N$ is a tuple $(x_1, \dots, x_N)$ where $x_i \in \mathcal{V}$.
+A Foundation Model $\Phi$ acts as a function mapping this discrete sequence to a sequence of continuous vectors in $\mathbb{R}^d$:
+
+$$ \Phi: \mathcal{V}^N \to \mathbb{R}^{N \times d} $$
+$$ \mathbf{H} = \Phi(S) = [\mathbf{h}_1, \mathbf{h}_2, \dots, \mathbf{h}_N]^T $$
+
+Where $\mathbf{h}_i \in \mathbb{R}^d$ represents the contextual embedding of the $i$-th token.
+
+#### 2.4.2 The Self-Attention Mechanism
+The core engine of $\Phi$ (e.g., ESM-2, SMI-TED) is the **Self-Attention** mechanism. For a given input matrix $\mathbf{X}$, the model computes three projections: Queries ($\mathbf{Q}$), Keys ($\mathbf{K}$), and Values ($\mathbf{V}$):
+
+$$ \mathbf{Q} = \mathbf{X}\mathbf{W}_Q, \quad \mathbf{K} = \mathbf{X}\mathbf{W}_K, \quad \mathbf{V} = \mathbf{X}\mathbf{W}_V $$
+
+The attention weights $\mathbf{A}$ represent the relevance of token $j$ to token $i$:
+
+$$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V} $$
+
+Biologically, this allows the model to "attend" to distant residues that are close in 3D space (contact prediction) or functionally coupled (co-evolution), effectively learning the protein's contact map without explicit supervision.
+
+#### 2.4.3 The Training Objective (Masked Language Modeling)
+The models are trained by minimizing the negative log-likelihood of predicting masked tokens $\tilde{x}$:
+
+$$ \mathcal{L}_{MLM} = - \sum_{i \in \mathcal{M}} \log P(x_i | S_{\setminus \mathcal{M}}; \theta) $$
+
+Where $\mathcal{M}$ is the set of masked indices. This forces the model to learn the underlying probability distribution of protein sequences evolutionarily.
 
 ---
 
@@ -99,11 +130,11 @@ The architecture is composed of the following core subsystems:
 2.  **Classifier Module (`src.classifier`)**: A multi-model ensemble system designed for the binary classification task (Active vs. Inactive). It serves as a high-recall filter to identify potential binders.
 3.  **Regression Module (`src.regression`)**: A precision-focused module that predicts quantitative affinity metrics ($K_i, K_d, IC_{50}$) for the candidates identified by the classifier.
 
-### 2.2 The Strategy Pattern for Model Integration
+### 3.2 The Strategy Pattern for Model Integration
 
 A critical architectural challenge in modern bioinformatics is the rapid pace of model evolution. To accommodate this, DockTKinase employs the **Strategy Design Pattern** for embedding generation. This allows the system to switch between different protein language models (e.g., ESM-2, ESM-C, Boltz-2) and ligand encoders (e.g., SMI-TED) at runtime, while maintaining a consistent API for the downstream pipelines.
 
-#### 2.2.1 Protein Embedding Strategy
+#### 3.2.1 Protein Embedding Strategy
 
 The `ProteinEmbedding` class acts as the context, delegating the actual computation to concrete strategy implementations derived from `BaseProteinStrategy`.
 
@@ -117,7 +148,7 @@ The `ProteinEmbedding` class acts as the context, delegating the actual computat
 
 This design allows researchers to experiment with cutting-edge models simply by changing a configuration string (e.g., `--protein-model boltz2`), without modifying the core pipeline code.
 
-### 2.3 Pipeline Orchestration
+### 3.3 Pipeline Orchestration
 
 The `IntegratedPipeline` class (`src.integrated_pipeline.py`) serves as the master orchestrator. It manages the data flow between modules, handles checkpointing, and ensures that the output of the Build module (embedding matrices) is correctly formatted for the Classifier and Regression modules.
 
@@ -127,7 +158,7 @@ This linear flow is augmented by a robust **Checkpoint System**, which caches in
 
 ---
 
-## Chapter 3: Data Representation & Embeddings
+## Chapter 4: Data Representation & Embeddings
 
 The efficacy of any deep learning model is fundamentally limited by the quality of its input representations. DockTKinase eschews manual feature engineering (e.g., molecular fingerprints, physicochemical descriptors) in favor of learned representations from large-scale foundation models.
 
