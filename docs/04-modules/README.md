@@ -41,13 +41,21 @@ Detailed documentation for each module in the DockTKinase project.
    - Cache management
 
 6. **[FM4M Integration](fm4m-integration.md)** 🔬
-   - FM4M protein features
+   - SMI-TED ligand embeddings
    - Feature extraction
    - Model integration
 
+7. **[Boltz-2 Strategy](BOLTZ_STRATEGY_GUIDE.md)** ⚡
+   - Structure + Affinity prediction
+   - 384-dim embeddings
+
+8. **[OpenFold3 Strategy](OPENFOLD_EMBEDDING_EXTRACTION.md)** 🧬
+   - Structure-aware embeddings
+   - AlphaFold3 reproduction
+
 ### 🆕 Stratification System (NEW - November 2025!)
 
-7. **[ADAPTIVE_CLUSTERING_GUIDE.md](ADAPTIVE_CLUSTERING_GUIDE.md)** 🎯 **← LATEST**
+9. **[ADAPTIVE_CLUSTERING_GUIDE.md](ADAPTIVE_CLUSTERING_GUIDE.md)** 🎯 **← LATEST**
    - **Automatic threshold detection** for homogeneous embeddings
    - 5 optimization methods: silhouette, elbow, target, percentile, manual
    - JSON metrics export (clustering_metrics.json, split_info.json)
