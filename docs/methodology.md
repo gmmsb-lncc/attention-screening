@@ -170,13 +170,24 @@ ESM-2 (Lin et al., 2023) is a BERT-style transformer trained with a Masked Langu
 
 *   **Architecture**: Transformer Encoder with Rotary Position Embeddings (RoPE).
 *   **Scale**: We support the full range of ESM-2 models, from 8M parameters ($D=320$) to 15B parameters ($D=5120$).
+*   **Training Objective**: Masked Language Modeling (MLM). The model randomly masks 15% of amino acids and learns to predict them based on the surrounding context.
+    $$ \mathcal{L}_{MLM} = -\sum_{i \in \mathcal{M}} \log P(x_i | x_{\setminus \mathcal{M}}) $$
 *   **Usage**: We extract the per-residue representations from the final hidden layer, providing a granular view of the protein surface.
 
 #### 3.1.2 ESM-C (Generative Modeling)
 ESM-C (Hayes et al., 2024) represents a shift towards generative modeling. Unlike ESM-2's bidirectional attention, ESM-C uses causal masking, allowing it to model the probability distribution of the next amino acid. This is particularly useful for capturing long-range dependencies and functional motifs that define binding pockets.
 
+*   **Architecture**: Causal Transformer Decoder.
+*   **Training Objective**: Next Token Prediction (NTP). The model predicts the amino acid at position $t$ given the sequence $x_{1:t-1}$.
+    $$ P(x) = \prod_{t=1}^L P(x_t | x_{<t}) $$
+*   **Advantage**: While MLM excels at understanding static structure, NTP captures the generative grammar of evolution, potentially offering better representations for mutational effects.
+
 #### 3.1.3 Boltz-2 (Structure-Aware)
 While ESM models are sequence-based, Boltz-2 (Wohlwend et al., 2024) is a foundation model explicitly trained to predict 3D structures. By extracting embeddings from the **Pairformer** blocks, we obtain representations that are implicitly aware of spatial proximity ($d_{ij}$), even without explicit coordinate input. This provides a critical inductive bias for binding affinity prediction.
+
+*   **Architecture**: Pairformer (Triangle Multiplicative Update + Axial Attention).
+*   **Invariant Point Attention (IPA)**: A specialized attention mechanism that operates on 3D coordinates, ensuring invariance to rotation and translation (SE(3) invariance).
+*   **Output**: Unlike standard Transformers that output a sequence $L \times D$, Boltz produces both single representations ($L \times D$) and pair representations ($L \times L \times C$), encoding the distance map directly.
 
 ### 3.2 Ligand Representation: Chemical Foundation Models
 
@@ -207,52 +218,157 @@ This ensures that the architecture is agnostic to the specific foundation model 
 
 ---
 
-## Chapter 4: Deep Learning Architectures for Affinity Prediction
+## Chapter 5: Deep Learning Architectures for Affinity Prediction
 
 DockTKinase introduces a specialized neural architecture designed to model the physical interaction between a protein target and a ligand molecule. We frame this as a **bipartite interaction problem**, where the goal is to learn a weighting function $w_{ij}$ representing the contribution of protein residue $i$ and ligand atom $j$ to the total binding energy.
 
-### 4.1 The Cross-Attention Mechanism
+### 5.1 The Cross-Attention Mechanism
 
 The core of our architecture (`src.attention_matrix.model.CrossAttentionModel`) is the Cross-Attention mechanism (Vaswani et al., 2017). Unlike self-attention, which models relationships within a sequence, cross-attention models relationships *between* two distinct sequences.
 
-Let $H_P \in \mathbb{R}^{L \times d}$ be the protein embedding sequence and $H_L \in \mathbb{R}^{M \times d}$ be the ligand embedding sequence, projected to a common hidden dimension $d$. The attention weights $A \in \mathbb{R}^{L \times M}$ are computed as:
+Let $H_P \in \mathbb{R}^{L \times d}$ be the protein embedding sequence (acting as **Queries**) and $H_L \in \mathbb{R}^{M \times d}$ be the ligand embedding sequence (acting as **Keys** and **Values**), projected to a common hidden dimension $d$. The attention weights $A \in \mathbb{R}^{L \times M}$ are computed as:
 
-$$ A = \text{softmax}\left(\frac{(H_P W_Q)(H_L W_K)^T}{\sqrt{d_k}}\right) $$
+$$ Q = H_P W_Q, \quad K = H_L W_K, \quad V = H_L W_V $$
 
-Where $W_Q$ and $W_K$ are learnable projection matrices. The output context matrix $C_P$ for the protein is then:
+$$ A_{ij} = \frac{\exp(Q_i \cdot K_j^T / \sqrt{d_k})}{\sum_{k=1}^M \exp(Q_i \cdot K_k^T / \sqrt{d_k})} $$
 
-$$ C_P = A (H_L W_V) $$
+Where $W_Q, W_K, W_V \in \mathbb{R}^{d \times d}$ are learnable projection matrices. The output context matrix $C_P$ for the protein is then:
 
-Intuitively, for each residue in the protein, the model computes a weighted sum of ligand features, where the weights represent the "relevance" or "interaction strength" of that ligand atom to the residue. This mimics the physical process of binding, where specific residues (the binding pocket) interact strongly with specific pharmacophores on the ligand.
+$$ C_P = A V $$
 
-### 4.2 Architecture Variants
+**Biological Interpretation**: The attention weight $A_{ij}$ represents the learned probability of interaction between protein residue $i$ and ligand atom $j$. A high weight implies that the model considers this specific atom-residue pair critical for binding, effectively performing "soft docking" in latent space.
 
-#### 4.2.1 Improved Cross-Attention Model
+**Multi-Head Attention**: We employ $h=8$ parallel attention heads. Each head can specialize in different types of physicochemical interactions (e.g., Head 1 might track hydrogen bonds, Head 2 hydrophobic contacts), allowing the model to capture the multifaceted nature of molecular recognition.
+
+### 5.2 The Hybrid CNN-Attention Architecture
+
+While Transformers excel at capturing global dependencies, Convolutional Neural Networks (CNNs) are superior at extracting local features. In biological sequences, local motifs (e.g., binding sites, functional domains) are critical.
+
+DockTKinase employs a **Hybrid Architecture** that combines the best of both worlds:
+
+1.  **Local Feature Extraction (CNN)**: The raw embeddings from the Foundation Models are first passed through a multi-scale 1D-CNN encoder (`src.classifier.models.cnn_encoder`).
+    *   **Kernels**: We use varying kernel sizes (3, 5, 7) to capture motifs of different lengths.
+    *   **Depthwise Separable Convolutions**: To reduce parameter count and computational cost.
+    *   **Residual Connections**: To facilitate gradient flow across deep networks.
+
+    $$ H_{local} = \text{CNN}(H_{raw}) $$
+
+2.  **Global Interaction Modeling (Cross-Attention)**: The locally enriched features $H_{local}$ are then fed into the Cross-Attention mechanism described above.
+
+This design ensures that the attention mechanism operates on high-level, semantically rich features rather than raw token embeddings.
+
+### 5.3 Architecture Variants
+
+#### 5.3.1 Improved Cross-Attention Model
 To improve gradient flow and capacity, the `ImprovedCrossAttentionModel` incorporates:
 *   **Deep Projections**: Multi-layer perceptrons (MLPs) with GELU activations before the attention block.
 *   **Stacked Layers**: Multiple cross-attention blocks ($N=2$) to model higher-order interactions.
 *   **Feed-Forward Networks (FFN)**: Transformer-style FFNs after each attention block.
 *   **Layer Normalization**: Applied pre- and post-attention (Pre-LN) for training stability.
 
-#### 4.2.2 Vision Transformer (ViT) Adaptation
+#### 5.3.2 Vision Transformer (ViT) Adaptation
 We also explore a global context approach (`VisionTransformerModel`) where the protein and ligand sequences are concatenated into a single sequence $S_{joint} = [H_P; H_L]$. A learnable `[CLS]` token is prepended, and the entire sequence is processed by a standard Transformer Encoder. This allows for bidirectional information flow (Protein $\leftrightarrow$ Ligand) via self-attention, offering an alternative inductive bias.
 
-### 4.3 Multi-Task Learning Head
+### 5.4 The Dual-Task Strategy: Classification & Regression
 
-The model is trained with a multi-task objective to simultaneously predict binary activity (Active/Inactive) and quantitative affinity ($pChEMBL$).
+DockTKinase is designed to solve two distinct but related problems simultaneously: identifying *active* compounds (Classification) and predicting their *potency* (Regression).
 
-$$ \mathcal{L}_{total} = \lambda_1 \mathcal{L}_{BCE}(y_{cls}, \hat{y}_{cls}) + \lambda_2 \mathcal{L}_{MSE}(y_{reg}, \hat{y}_{reg}) $$
+#### 5.4.1 Binary Classification (Activity Prediction)
+The primary goal is to filter the vast chemical space for potential hits. We define a binary label $y_{cls} \in \{0, 1\}$ based on a threshold (typically $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$).
+The model outputs a probability $p = \sigma(z_{cls})$ using a sigmoid activation. We minimize the **Binary Cross-Entropy (BCE)** loss:
+$$ \mathcal{L}_{BCE} = - \frac{1}{N} \sum_{i=1}^N [y_i \log(p_i) + (1-y_i) \log(1-p_i)] $$
 
-Where:
-*   $\mathcal{L}_{BCE}$ is the Binary Cross-Entropy loss for classification.
-*   $\mathcal{L}_{MSE}$ is the Mean Squared Error loss for regression.
-*   $\lambda_1, \lambda_2$ are hyperparameters balancing the tasks.
+#### 5.4.2 Affinity Regression (Potency Prediction)
+For active compounds, we need to rank them by potency. The target variable $y_{reg}$ is the $pChEMBL$ value ($-\log_{10}(IC_{50}/K_i)$).
+The model outputs a continuous scalar $\hat{y}_{reg}$. We minimize the **Mean Squared Error (MSE)** loss:
+$$ \mathcal{L}_{MSE} = \frac{1}{N} \sum_{i=1}^N (y_i - \hat{y}_i)^2 $$
 
-This multi-task approach acts as a regularizer, forcing the model to learn representations that are robust enough to capture both the general distinction between binders/non-binders and the subtle differences in binding strength.
+#### 5.4.3 Multi-Task Learning (MTL)
+By training on both tasks simultaneously, the model learns a shared representation that captures features relevant to both binding (binary) and binding strength (continuous). This acts as a powerful regularizer.
+$$ \mathcal{L}_{total} = \lambda_{cls} \mathcal{L}_{BCE} + \lambda_{reg} \mathcal{L}_{MSE} $$
+Where $\lambda_{cls}$ and $\lambda_{reg}$ are hyperparameters balancing the tasks (typically 1.0).
+
+### 5.5 Hyperparameter Configuration
+
+The architecture is defined by a set of hyperparameters optimized for the kinase interaction task. These parameters balance model capacity with computational efficiency and regularization needs.
+
+| Component | Parameter | Value | Description |
+| :--- | :--- | :--- | :--- |
+| **Inputs** | Protein Dim | 320 | Dimension of ESM-2 (8M) embeddings |
+| | Ligand Dim | 768 | Dimension of SMI-TED embeddings |
+| **Projections** | Hidden Dim | 256 | Common latent space dimension |
+| | Activation | GELU | Gaussian Error Linear Unit |
+| **Attention** | Heads | 8 | Number of parallel attention heads |
+| | Layers | 2 | Number of stacked cross-attention blocks |
+| | Dropout | 0.2 | Regularization rate |
+| **CNN Encoder** | Layers | 3 | Number of convolutional blocks |
+| | Kernels | (3, 5, 7) | Multi-scale kernel sizes |
+| | Filters | 256 | Number of output channels per block |
+
+This configuration results in a model with approximately **1.5M trainable parameters** (excluding the frozen foundation models), which is small enough to train on a single GPU yet expressive enough to capture complex interaction patterns.
 
 ---
 
-## Chapter 5: Stratification & Validation Methodology
+## Chapter 6: Classical Machine Learning Models
+
+While the Deep Learning module focuses on end-to-end representation learning, DockTKinase incorporates a robust **Classical Machine Learning Ensemble** (`src.classifier`) to serve as a high-recall filter and baseline comparator. This module implements 12 distinct algorithms, ranging from probabilistic models to state-of-the-art gradient boosting machines.
+
+These models operate on the fixed-size embeddings generated by the Foundation Models (e.g., ESM-2 + SMI-TED), effectively treating the embeddings as high-quality feature vectors.
+
+### 6.1 Probabilistic & Linear Models
+
+#### 6.1.1 Naive Bayes (GaussianNB)
+The simplest baseline, based on applying Bayes' theorem with the "naive" assumption of conditional independence between features.
+$$ P(y|x_1, \dots, x_n) \propto P(y) \prod_{i=1}^{n} P(x_i|y) $$
+Despite the independence assumption being violated in dense embeddings, it serves as an ultra-fast baseline (~2s training time).
+
+#### 6.1.2 Logistic Regression
+A linear model that models the probability of the positive class using the sigmoid function $\sigma(z) = \frac{1}{1+e^{-z}}$.
+$$ P(y=1|\mathbf{x}) = \sigma(\mathbf{w}^T\mathbf{x} + b) $$
+We employ the L-BFGS solver with L2 regularization to handle the high-dimensionality of the embedding space.
+
+#### 6.1.3 Linear SVC (Support Vector Classifier)
+Finds the optimal hyperplane that maximizes the margin between classes.
+$$ \min_{\mathbf{w}, b} \frac{1}{2}||\mathbf{w}||^2 + C \sum_{i=1}^n \max(0, 1 - y_i(\mathbf{w}^T\mathbf{x}_i + b)) $$
+It is particularly effective in high-dimensional spaces where data is often linearly separable.
+
+### 6.2 Tree-Based Ensembles
+
+#### 6.2.1 Decision Trees & Extra Trees
+Decision Trees recursively partition the feature space to maximize Information Gain (or minimize Gini Impurity). **Extra Trees (Extremely Randomized Trees)** introduce further randomness by selecting cut-points completely at random, which reduces variance and computational cost compared to standard Random Forests.
+
+#### 6.2.2 Random Forest
+An ensemble method that uses **Bagging (Bootstrap Aggregating)**. It trains multiple decision trees on random subsets of the data and features, averaging their predictions to prevent overfitting.
+$$ \hat{y} = \frac{1}{K} \sum_{k=1}^K f_k(\mathbf{x}) $$
+
+### 6.3 Gradient Boosting Machines
+
+Boosting algorithms build an ensemble sequentially, where each new model attempts to correct the errors of the previous ones.
+
+#### 6.3.1 AdaBoost (Adaptive Boosting)
+The first practical boosting algorithm. It adjusts the weights of training instances, focusing subsequent learners on hard-to-classify examples.
+
+#### 6.3.2 Gradient Boosting & XGBoost
+These methods generalize boosting by optimizing an arbitrary differentiable loss function using gradient descent in function space.
+$$ F_{m}(\mathbf{x}) = F_{m-1}(\mathbf{x}) + \gamma_m h_m(\mathbf{x}) $$
+**XGBoost (Extreme Gradient Boosting)** includes regularization terms in the objective function to control model complexity, making it the state-of-the-art for tabular data (and by extension, fixed embeddings).
+
+#### 6.3.3 LightGBM
+A highly efficient implementation of gradient boosting that uses Gradient-based One-Side Sampling (GOSS) and Exclusive Feature Bundling (EFB) to speed up training on large datasets without compromising accuracy.
+
+### 6.4 Instance-Based & Neural Models
+
+#### 6.4.1 K-Nearest Neighbors (KNN)
+A non-parametric method that classifies a sample based on the majority vote of its neighbors in the embedding space. We use the Euclidean distance metric:
+$$ d(\mathbf{x}, \mathbf{z}) = \sqrt{\sum_{i=1}^D (x_i - z_i)^2} $$
+Due to the "Curse of Dimensionality", KNN benefits significantly from the dimensionality reduction properties of the Foundation Models.
+
+#### 6.4.2 Multi-Layer Perceptron (MLP)
+A feedforward artificial neural network. While simpler than our Cross-Attention architecture, the sklearn-based MLP serves as a bridge between classical and deep learning approaches within the ensemble.
+
+---
+
+## Chapter 7: Stratification & Validation Methodology
 
 A pervasive issue in machine learning for biology is **data leakage** caused by evolutionary homology. Proteins often share high sequence similarity; if homologous proteins are distributed across training and test sets, a model can achieve high accuracy simply by "memorizing" the family rather than learning the physics of binding.
 
@@ -292,19 +408,19 @@ We evaluate model performance using a comprehensive suite of metrics:
 
 ---
 
-## Chapter 6: Implementation & Engineering
+## Chapter 8: Implementation & Engineering
 
 DockTKinase is engineered not just as a research prototype, but as a scalable production system capable of handling industrial-scale datasets.
 
-### 6.1 Scalability and Resource Management
+### 8.1 Scalability and Resource Management
 
-#### 6.1.1 CPU Offloading
+#### 8.1.1 CPU Offloading
 Large protein language models (e.g., ESM-2 15B) require VRAM far exceeding the capacity of standard consumer GPUs. We implement **CPU Offloading** using the `accelerate` library, which dynamically moves model layers between CPU RAM and GPU VRAM during the forward pass. This allows 15B parameter models to run on hardware with limited VRAM (e.g., 16GB), trading inference speed for accessibility.
 
-#### 6.1.2 Distributed Processing with Spark
+#### 8.1.2 Distributed Processing with Spark
 For data preprocessing and matrix construction, we utilize **Apache Spark** (via PySpark). This allows for parallel processing of millions of protein-ligand pairs, distributing the workload across available CPU cores. The system automatically configures Spark memory allocation based on the host environment (`src.build.core.constants.SPARK_CONFIG`).
 
-### 6.2 Checkpointing and Caching
+### 8.2 Checkpointing and Caching
 
 Given the computational cost of embedding generation, DockTKinase implements a granular checkpointing system.
 *   **Embedding Cache**: Embeddings for unique proteins and ligands are cached on disk (`.npy` format). If a sequence reappears in a new dataset, its embedding is retrieved rather than recomputed.
