@@ -21,23 +21,27 @@ This document provides a detailed technical explanation of the clustering and st
 
 Protein and ligand embeddings are represented as vectors in high-dimensional spaces:
 
-- **Protein embeddings**: $\vec{p} \in \mathbb{R}^{d_p}$ where $d_p = 1280$ (ESM-2)
-- **Ligand embeddings**: $\vec{l} \in \mathbb{R}^{d_l}$ where $d_l = 768$ (ChemBERTa)
+- **Protein embeddings**: `p ∈ ℝ^d_p` where `d_p = 1280` (ESM-2)
+- **Ligand embeddings**: `l ∈ ℝ^d_l` where `d_l = 768` (ChemBERTa)
 
 ### Combined Embedding
 
 The combined embedding is formed by weighted concatenation:
 
-$$\vec{x} = [\alpha_p \cdot \vec{p} \; || \; \alpha_l \cdot \vec{l}] \in \mathbb{R}^{d_p + d_l}$$
+```
+x = [α_p × p || α_l × l] ∈ ℝ^(d_p + d_l)
+```
 
 Where:
-- $\alpha_p$ = protein weight (default: 1.0)
-- $\alpha_l$ = ligand weight (default: 1.0)
-- $||$ denotes concatenation
+- `α_p` = protein weight (default: 1.0)
+- `α_l` = ligand weight (default: 1.0)
+- `||` denotes concatenation
 
 After L2 normalization:
 
-$$\hat{\vec{x}} = \frac{\vec{x}}{||\vec{x}||_2}$$
+```
+x̂ = x / ||x||₂
+```
 
 ---
 
@@ -45,33 +49,43 @@ $$\hat{\vec{x}} = \frac{\vec{x}}{||\vec{x}||_2}$$
 
 ### Definition
 
-For two vectors $\vec{a}, \vec{b} \in \mathbb{R}^d$:
+For two vectors `a, b ∈ ℝ^d`:
 
-$$\cos(\theta) = \frac{\vec{a} \cdot \vec{b}}{||\vec{a}||_2 \cdot ||\vec{b}||_2} = \frac{\sum_{i=1}^{d} a_i b_i}{\sqrt{\sum_{i=1}^{d} a_i^2} \cdot \sqrt{\sum_{i=1}^{d} b_i^2}}$$
+```
+                    a · b           Σᵢ aᵢbᵢ
+cos(θ) = ───────────────────── = ─────────────────
+          ||a||₂ × ||b||₂      √(Σᵢaᵢ²) × √(Σᵢbᵢ²)
+```
 
 ### Properties
 
-1. **Bounded range**: $\cos(\theta) \in [-1, 1]$
-2. **Symmetry**: $\cos(\vec{a}, \vec{b}) = \cos(\vec{b}, \vec{a})$
-3. **Scale invariance**: $\cos(k\vec{a}, \vec{b}) = \cos(\vec{a}, \vec{b})$ for $k > 0$
+1. **Bounded range**: `cos(θ) ∈ [-1, 1]`
+2. **Symmetry**: `cos(a, b) = cos(b, a)`
+3. **Scale invariance**: `cos(k×a, b) = cos(a, b)` for `k > 0`
 
 ### Conversion to Distance
 
 For clustering algorithms requiring a distance metric:
 
-$$d(\vec{a}, \vec{b}) = 1 - \cos(\vec{a}, \vec{b})$$
+```
+d(a, b) = 1 - cos(a, b)
+```
 
 This yields:
-- $d \in [0, 2]$
-- $d = 0$ when vectors are identical
-- $d = 1$ when vectors are orthogonal
-- $d = 2$ when vectors are opposite
+- `d ∈ [0, 2]`
+- `d = 0` when vectors are identical
+- `d = 1` when vectors are orthogonal
+- `d = 2` when vectors are opposite
 
 ### Why Not Euclidean Distance?
 
 In high-dimensional spaces, Euclidean distance suffers from the **curse of dimensionality**:
 
-$$\lim_{d \to \infty} \frac{d_{max} - d_{min}}{d_{min}} \to 0$$
+```
+         d_max - d_min
+lim      ───────────── → 0
+d→∞         d_min
+```
 
 All points become approximately equidistant. Cosine similarity focuses on **angular difference**, which remains meaningful in high dimensions.
 
@@ -81,33 +95,37 @@ All points become approximately equidistant. Cosine similarity focuses on **angu
 
 ### Motivation
 
-The similarity threshold $\tau$ determines cluster granularity:
-- **High $\tau$** (e.g., 0.95): Many small, tight clusters
-- **Low $\tau$** (e.g., 0.50): Few large, loose clusters
+The similarity threshold `τ` determines cluster granularity:
+- **High τ** (e.g., 0.95): Many small, tight clusters
+- **Low τ** (e.g., 0.50): Few large, loose clusters
 
-The optimal $\tau$ depends on data distribution.
+The optimal `τ` depends on data distribution.
 
 ### Similarity Distribution Analysis
 
-Given embeddings $X = \{\vec{x}_1, ..., \vec{x}_n\}$, compute:
+Given embeddings `X = {x₁, ..., xₙ}`, compute:
 
-$$S_{ij} = \cos(\vec{x}_i, \vec{x}_j) \quad \forall i < j$$
+```
+Sᵢⱼ = cos(xᵢ, xⱼ)  for all i < j
+```
 
-This yields $\frac{n(n-1)}{2}$ pairwise similarities.
+This yields `n(n-1)/2` pairwise similarities.
 
-For large $n$, sample $m$ points ($m \approx 2000$):
+For large `n`, sample `m` points (m ≈ 2000):
 
-$$\hat{S} = \{S_{ij} : i, j \in \text{sample}, i < j\}$$
+```
+Ŝ = {Sᵢⱼ : i, j ∈ sample, i < j}
+```
 
 ### Statistical Measures
 
-From $\hat{S}$, compute:
+From `Ŝ`, compute:
 
 | Statistic | Formula | Purpose |
 |-----------|---------|---------|
-| Minimum | $S_{min} = \min(\hat{S})$ | Homogeneity classification |
-| Mean | $\bar{S} = \frac{1}{|\hat{S}|}\sum_{s \in \hat{S}} s$ | Central tendency |
-| Percentiles | $P_q$ such that $q\%$ of $\hat{S} \leq P_q$ | Threshold candidates |
+| Minimum | `S_min = min(Ŝ)` | Homogeneity classification |
+| Mean | `S̄ = (1/|Ŝ|) × Σ s` | Central tendency |
+| Percentiles | `P_q` such that `q%` of `Ŝ ≤ P_q` | Threshold candidates |
 
 ### Homogeneity Classification
 
@@ -128,10 +146,10 @@ From $\hat{S}$, compute:
 
 ### Search Range Definition
 
-| Homogeneity | $\tau_{min}$ | $\tau_{max}$ | Rationale |
-|-------------|--------------|--------------|-----------|
-| `very_high` | $P_{50}$ | $P_{99}$ | Need high threshold to create any separation |
-| `high` | $P_{25}$ | $P_{95}$ | Moderate range |
+| Homogeneity | τ_min | τ_max | Rationale |
+|-------------|-------|-------|-----------|
+| `very_high` | P₅₀ | P₉₉ | Need high threshold to create any separation |
+| `high` | P₂₅ | P₉₅ | Moderate range |
 | `moderate` | 0.50 | 0.95 | Standard range |
 | `low` | 0.40 | 0.90 | Lower thresholds work |
 
@@ -141,27 +159,46 @@ From $\hat{S}$, compute:
 
 ### Definition
 
-For sample $i$ assigned to cluster $C_a$:
+For sample `i` assigned to cluster `Cₐ`:
 
 **Intra-cluster distance (cohesion):**
-$$a(i) = \frac{1}{|C_a| - 1} \sum_{j \in C_a, j \neq i} d(i, j)$$
+
+```
+              1
+a(i) = ─────────────  Σ  d(i, j)
+        |Cₐ| - 1    j∈Cₐ, j≠i
+```
 
 **Inter-cluster distance (separation):**
-$$b(i) = \min_{C_b \neq C_a} \left[ \frac{1}{|C_b|} \sum_{j \in C_b} d(i, j) \right]$$
+
+```
+b(i) = min   [ 1/|Cᵦ|  Σ  d(i, j) ]
+      Cᵦ≠Cₐ          j∈Cᵦ
+```
 
 **Silhouette coefficient:**
-$$s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}$$
+
+```
+        b(i) - a(i)
+s(i) = ─────────────
+       max(a(i), b(i))
+```
 
 **Global score:**
-$$S = \frac{1}{n} \sum_{i=1}^{n} s(i)$$
+
+```
+      1   n
+S = ───  Σ  s(i)
+      n  i=1
+```
 
 ### Interpretation
 
-| $s(i)$ value | Interpretation |
-|--------------|----------------|
-| $\approx +1$ | Sample is far from neighboring clusters (well-clustered) |
-| $\approx 0$ | Sample is on cluster boundary |
-| $\approx -1$ | Sample is closer to another cluster (misclassified) |
+| s(i) value | Interpretation |
+|------------|----------------|
+| ≈ +1 | Sample is far from neighboring clusters (well-clustered) |
+| ≈ 0 | Sample is on cluster boundary |
+| ≈ -1 | Sample is closer to another cluster (misclassified) |
 
 ### Optimization Algorithm
 
@@ -218,9 +255,9 @@ Score
                  Optimal τ*
 ```
 
-- **Too low τ**: Few large clusters → poor cohesion → low $S$
-- **Too high τ**: Many singleton clusters → poor separation metric → low $S$
-- **Optimal τ**: Balance between cohesion and separation → maximum $S$
+- **Too low τ**: Few large clusters → poor cohesion → low S
+- **Too high τ**: Many singleton clusters → poor separation metric → low S
+- **Optimal τ**: Balance between cohesion and separation → maximum S
 
 ---
 
@@ -230,9 +267,13 @@ Score
 
 Minimize within-cluster sum of squares (WCSS):
 
-$$\min_{\mu_1, ..., \mu_k} \sum_{j=1}^{k} \sum_{\vec{x} \in C_j} ||\vec{x} - \mu_j||^2$$
+```
+         k
+min     Σ      Σ    ||x - μⱼ||²
+μ₁...μₖ j=1  x∈Cⱼ
+```
 
-Where $\mu_j$ is the centroid of cluster $C_j$.
+Where `μⱼ` is the centroid of cluster `Cⱼ`.
 
 ### K-means++ Initialization
 
@@ -240,29 +281,31 @@ Where $\mu_j$ is the centroid of cluster $C_j$.
 
 **K-means++** provides probabilistic guarantees:
 
-1. Choose first centroid $\mu_1$ uniformly at random from $X$
-2. For $j = 2, ..., k$:
-   - Compute $D(\vec{x}) = \min_{i<j} ||\vec{x} - \mu_i||^2$ for each $\vec{x} \in X$
-   - Choose $\mu_j = \vec{x}$ with probability $\frac{D(\vec{x})}{\sum_{\vec{y}} D(\vec{y})}$
+1. Choose first centroid `μ₁` uniformly at random from X
+2. For `j = 2, ..., k`:
+   - Compute `D(x) = min_{i<j} ||x - μᵢ||²` for each `x ∈ X`
+   - Choose `μⱼ = x` with probability `D(x) / Σ_y D(y)`
 
 ### Theoretical Result (Arthur & Vassilvitskii, 2007)
 
-Let $\phi_{OPT}$ be the optimal WCSS. K-means++ initialization gives expected WCSS:
+Let `φ_OPT` be the optimal WCSS. K-means++ initialization gives expected WCSS:
 
-$$\mathbb{E}[\phi] \leq 8(\ln k + 2) \cdot \phi_{OPT}$$
+```
+E[φ] ≤ 8(ln k + 2) × φ_OPT
+```
 
-This is $O(\log k)$ competitive ratio.
+This is `O(log k)` competitive ratio.
 
 ### Why MiniBatchKMeans?
 
-For large datasets, standard K-means is $O(n \cdot k \cdot d \cdot I)$ where $I$ = iterations.
+For large datasets, standard K-means is `O(n × k × d × I)` where I = iterations.
 
 MiniBatchKMeans uses stochastic updates:
-1. Sample mini-batch $B$ of size $b$ (e.g., 1024)
-2. Update centroids using only $B$
+1. Sample mini-batch B of size b (e.g., 1024)
+2. Update centroids using only B
 3. Repeat
 
-Time complexity: $O(b \cdot k \cdot d \cdot I)$ — independent of $n$.
+Time complexity: `O(b × k × d × I)` — independent of n.
 
 ---
 
@@ -271,12 +314,12 @@ Time complexity: $O(b \cdot k \cdot d \cdot I)$ — independent of $n$.
 ### Problem Formulation
 
 **Given:**
-- Clusters $C = \{C_1, ..., C_k\}$ with sizes $|C_1|, ..., |C_k|$
-- Target proportions: $p_{train} = 0.80$, $p_{val} = 0.10$, $p_{test} = 0.10$
-- Total samples: $n = \sum_j |C_j|$
+- Clusters `C = {C₁, ..., Cₖ}` with sizes `|C₁|, ..., |Cₖ|`
+- Target proportions: `p_train = 0.80`, `p_val = 0.10`, `p_test = 0.10`
+- Total samples: `n = Σⱼ |Cⱼ|`
 
 **Find:**
-- Assignment $\pi: C \to \{train, val, test\}$
+- Assignment `π: C → {train, val, test}`
 - Minimizing deviation from target proportions
 - Subject to: each cluster assigned to exactly one split
 
@@ -404,31 +447,31 @@ def rebalance(assignment, sizes, targets, max_iterations=50):
 
 | Step | Complexity | Notes |
 |------|------------|-------|
-| Similarity matrix | $O(m^2 \cdot d)$ | $m$ = sample size (≤5000), $d$ = embedding dim |
-| Threshold search | $O(k \cdot m^2)$ | $k$ = threshold candidates (≈10) |
-| K-means++ | $O(n \cdot c \cdot d \cdot I)$ | $c$ = clusters, $I$ = iterations |
-| Cluster assignment | $O(c \log c)$ | Sorting + linear scan |
-| Index mapping | $O(n)$ | Map clusters to sample indices |
+| Similarity matrix | `O(m² × d)` | m = sample size (≤5000), d = embedding dim |
+| Threshold search | `O(k × m²)` | k = threshold candidates (≈10) |
+| K-means++ | `O(n × c × d × I)` | c = clusters, I = iterations |
+| Cluster assignment | `O(c log c)` | Sorting + linear scan |
+| Index mapping | `O(n)` | Map clusters to sample indices |
 
-**Overall**: $O(n \cdot c \cdot d)$ — linear in dataset size.
+**Overall**: `O(n × c × d)` — linear in dataset size.
 
 ### Space Complexity
 
 | Component | Space | Notes |
 |-----------|-------|-------|
-| Embeddings | $O(n \cdot d)$ | Input data |
-| Sample similarity matrix | $O(m^2)$ | For threshold optimization |
-| Cluster centroids | $O(c \cdot d)$ | K-means output |
-| Cluster labels | $O(n)$ | Assignment output |
+| Embeddings | `O(n × d)` | Input data |
+| Sample similarity matrix | `O(m²)` | For threshold optimization |
+| Cluster centroids | `O(c × d)` | K-means output |
+| Cluster labels | `O(n)` | Assignment output |
 
-**Overall**: $O(n \cdot d + m^2)$ — dominated by input embeddings.
+**Overall**: `O(n × d + m²)` — dominated by input embeddings.
 
 ### Scalability for Large Datasets
 
-For $n > 40,000$:
+For n > 40,000:
 
-1. **Threshold optimization**: Sample $m = 2000-5000$ points
-2. **K-means**: Use MiniBatchKMeans (independent of $n$)
+1. **Threshold optimization**: Sample m = 2000-5000 points
+2. **K-means**: Use MiniBatchKMeans (independent of n)
 3. **Cluster assignment**: Process clusters, not individual samples
 
 Tested on datasets up to 1M samples.

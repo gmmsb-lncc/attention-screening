@@ -74,7 +74,16 @@ Result: AUC reflects real-world performance on novel compounds
 
 Cosine similarity measures the angle between two embedding vectors:
 
-$$\text{cosine\_similarity}(\vec{A}, \vec{B}) = \frac{\vec{A} \cdot \vec{B}}{||\vec{A}|| \cdot ||\vec{B}||} = \cos(\theta)$$
+```
+                        A · B              Σ(Aᵢ × Bᵢ)
+cosine_similarity = ───────────── = ─────────────────────────
+                    ||A|| × ||B||   √Σ(Aᵢ²) × √Σ(Bᵢ²)
+```
+
+Where:
+- `A · B` is the dot product of vectors A and B
+- `||A||` and `||B||` are the L2 norms (magnitudes) of A and B
+- The result equals `cos(θ)` where θ is the angle between the vectors
 
 ### Properties
 
@@ -94,7 +103,9 @@ $$\text{cosine\_similarity}(\vec{A}, \vec{B}) = \frac{\vec{A} \cdot \vec{B}}{||\
 
 For clustering algorithms that require distances:
 
-$$d(\vec{A}, \vec{B}) = 1 - \text{cosine\_similarity}(\vec{A}, \vec{B})$$
+```
+distance(A, B) = 1 - cosine_similarity(A, B)
+```
 
 ---
 
@@ -174,32 +185,45 @@ def classify_homogeneity(min_similarity):
 
 #### Step 4: Optimize Using Silhouette Score
 
-The **Silhouette Score** measures clustering quality:
+The **Silhouette Score** measures clustering quality.
 
-For each sample $i$:
+For each sample `i`:
 
-$$s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}$$
+```
+        b(i) - a(i)
+s(i) = ─────────────
+       max(a(i), b(i))
+```
 
 Where:
-- $a(i)$ = mean intra-cluster distance (cohesion)
-- $b(i)$ = mean distance to nearest cluster (separation)
+- `a(i)` = mean intra-cluster distance (cohesion) — average distance from sample i to other samples in the same cluster
+- `b(i)` = mean distance to nearest cluster (separation) — average distance to samples in the nearest neighboring cluster
 
 **Interpretation:**
-- $s(i) \approx +1$: Sample is well-clustered
-- $s(i) \approx 0$: Sample is on cluster boundary
-- $s(i) \approx -1$: Sample is likely in wrong cluster
+- `s(i) ≈ +1`: Sample is well-clustered (far from other clusters)
+- `s(i) ≈ 0`: Sample is on cluster boundary
+- `s(i) ≈ -1`: Sample is likely in wrong cluster
 
 **Global Silhouette Score:**
 
-$$S = \frac{1}{n} \sum_{i=1}^{n} s(i)$$
+```
+      1   n
+S = ───  Σ  s(i)
+      n  i=1
+```
 
 **Optimization Problem:**
 
-$$\tau^* = \arg\max_{\tau \in [\tau_{min}, \tau_{max}]} S(\tau)$$
+Find the threshold τ* that maximizes S(τ):
+
+```
+τ* = argmax  S(τ)
+     τ ∈ [τ_min, τ_max]
+```
 
 Subject to:
-- $k(\tau) \geq k_{min}$ (minimum number of clusters)
-- $|C_j| \geq n_{min}$ for all clusters $C_j$ (minimum cluster size)
+- `k(τ) ≥ k_min` (minimum number of clusters)
+- `|Cⱼ| ≥ n_min` for all clusters Cⱼ (minimum cluster size)
 
 ### Example Threshold Selection
 
@@ -306,8 +330,8 @@ Standard K-means uses random initialization, which can lead to poor convergence.
 
 1. Choose first centroid uniformly at random
 2. For each subsequent centroid:
-   - Compute distance $D(x)$ from each point to nearest existing centroid
-   - Choose next centroid with probability proportional to $D(x)^2$
+   - Compute distance `D(x)` from each point to nearest existing centroid
+   - Choose next centroid with probability proportional to `D(x)²`
 3. Repeat until k centroids are chosen
 
 This ensures centroids are spread out, leading to better clustering.
@@ -485,39 +509,60 @@ def rebalance_clusters(test_clusters, val_clusters, train_clusters, sizes):
 **Objective:** Maximize clustering quality (Silhouette Score) while achieving balanced splits.
 
 **Variables:**
-- $\tau$ = similarity threshold (for hierarchical clustering) or $k$ = number of clusters (for K-means)
-- $C = \{C_1, C_2, ..., C_k\}$ = resulting clusters
-- $\pi: C \rightarrow \{train, val, test\}$ = cluster assignment function
+- `τ` = similarity threshold (for hierarchical clustering) or `k` = number of clusters (for K-means)
+- `C = {C₁, C₂, ..., Cₖ}` = resulting clusters
+- `π: C → {train, val, test}` = cluster assignment function
 
 **Objective Function:**
 
-$$\max_{\tau, \pi} S(\tau) \cdot B(\pi)$$
+```
+maximize:  S(τ) × B(π)
+```
 
 Where:
-- $S(\tau)$ = Silhouette Score for clustering with threshold $\tau$
-- $B(\pi)$ = Balance score for assignment $\pi$
+- `S(τ)` = Silhouette Score for clustering with threshold τ
+- `B(π)` = Balance score for assignment π
 
 **Constraints:**
 
-1. **Minimum clusters**: $k(\tau) \geq k_{min}$
-2. **Minimum cluster size**: $|C_j| \geq n_{min}$ for all $j$
+1. **Minimum clusters**: `k(τ) ≥ k_min`
+2. **Minimum cluster size**: `|Cⱼ| ≥ n_min` for all j
 3. **Split proportions**: 
-   - $0.76 \leq \frac{|\{i: \pi(C_i) = train\}|}{n} \leq 0.84$
-   - $0.08 \leq \frac{|\{i: \pi(C_i) = val\}|}{n} \leq 0.12$
-   - $0.08 \leq \frac{|\{i: \pi(C_i) = test\}|}{n} \leq 0.12$
+   - `0.76 ≤ |{i: π(Cᵢ) = train}| / n ≤ 0.84`
+   - `0.08 ≤ |{i: π(Cᵢ) = val}| / n ≤ 0.12`
+   - `0.08 ≤ |{i: π(Cᵢ) = test}| / n ≤ 0.12`
 4. **Cluster integrity**: Each cluster assigned to exactly one split
 
 ### Silhouette Score Computation
 
-For sample $i$ in cluster $C_a$:
+For sample `i` in cluster `Cₐ`:
 
-$$a(i) = \frac{1}{|C_a| - 1} \sum_{j \in C_a, j \neq i} d(i, j)$$
+**Intra-cluster distance (cohesion):**
+```
+              1
+a(i) = ─────────────  Σ  d(i, j)
+        |Cₐ| - 1    j∈Cₐ, j≠i
+```
 
-$$b(i) = \min_{C_b \neq C_a} \frac{1}{|C_b|} \sum_{j \in C_b} d(i, j)$$
+**Inter-cluster distance (separation):**
+```
+b(i) = min   [ 1/|Cᵦ|  Σ  d(i, j) ]
+      Cᵦ≠Cₐ          j∈Cᵦ
+```
 
-$$s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}$$
+**Silhouette coefficient:**
+```
+        b(i) - a(i)
+s(i) = ─────────────
+       max(a(i), b(i))
+```
 
-$$S = \frac{1}{n} \sum_{i=1}^{n} s(i)$$
+**Global score:**
+```
+      1   n
+S = ───  Σ  s(i)
+      n  i=1
+```
 
 ---
 
@@ -559,7 +604,7 @@ For datasets > 40,000 samples, full distance matrix computation is infeasible (O
 
 1. **Representative sampling**: Select ~5,000 representative samples
 2. **Sample clustering**: Cluster the sample
-3. **Label propagation**: Assign all points to nearest centroid (O(n·k))
+3. **Label propagation**: Assign all points to nearest centroid (O(n×k))
 
 ---
 
