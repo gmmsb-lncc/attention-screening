@@ -439,6 +439,11 @@ class EmbeddingDataLoader:
     def _log_split_info(self):
         """Log split statistics."""
         total = len(self.train_idx) + len(self.val_idx) + len(self.test_idx)
+        
+        if total == 0:
+            logger.warning("No samples in splits!")
+            return
+            
         logger.info(f"Splits: train={len(self.train_idx)} ({100*len(self.train_idx)/total:.1f}%), "
                    f"val={len(self.val_idx)} ({100*len(self.val_idx)/total:.1f}%), "
                    f"test={len(self.test_idx)} ({100*len(self.test_idx)/total:.1f}%)")

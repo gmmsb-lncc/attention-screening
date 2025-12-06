@@ -339,6 +339,107 @@ def get_system_cuda_version() -> str:
         pass
     return None
 
+
+def check_gpu_available() -> bool:
+    """Check if CUDA GPU is available."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True,
+            timeout=10
+        )
+        return result.returncode == 0
+    except:
+        return False
+
+
+def install_boltz(pip_exe: str, python_exe: str) -> bool:
+    """
+    Install Boltz-2 biomolecular foundation model.
+    
+    Boltz-2 is used for protein structure prediction and embedding generation.
+    If GPU (CUDA) is available, installs with CUDA support for faster inference.
+    
+    Returns:
+        True if installation successful, False otherwise.
+    """
+    print("\n🧬 Installing Boltz-2 (Biomolecular Foundation Model)...")
+    
+    # Check if already installed
+    try:
+        result = subprocess.run(
+            [python_exe, "-c", "import boltz; print(boltz.__version__)"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            version = result.stdout.strip()
+            print(f"✅ Boltz already installed: v{version}")
+            return True
+    except:
+        pass
+    
+    # Check if GPU is available
+    has_gpu = check_gpu_available()
+    
+    if has_gpu:
+        print("🖥️  CUDA GPU detected - installing Boltz with CUDA support...")
+        boltz_package = "boltz[cuda]"
+    else:
+        print("💻 No CUDA GPU detected - installing Boltz CPU version...")
+        boltz_package = "boltz"
+    
+    # Install Boltz
+    success, output = run_command(
+        [pip_exe, "install", boltz_package],
+        f"Installing {boltz_package}"
+    )
+    
+    if success:
+        # Verify installation
+        try:
+            result = subprocess.run(
+                [python_exe, "-c", "import boltz; print('OK')"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                print("✅ Boltz installed and verified successfully!")
+                
+                # Test CLI availability
+                try:
+                    cli_result = subprocess.run(
+                        ["boltz", "--help"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    if cli_result.returncode == 0:
+                        print("✅ Boltz CLI available: 'boltz predict'")
+                    else:
+                        print("⚠️  Boltz CLI not available (but Python API works)")
+                except:
+                    print("⚠️  Boltz CLI not in PATH (but Python API works)")
+                
+                return True
+            else:
+                print(f"⚠️  Boltz installation verification failed: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"⚠️  Error verifying Boltz: {e}")
+            return False
+    else:
+        print(f"❌ Failed to install Boltz: {output}")
+        print("\n💡 To install manually:")
+        if has_gpu:
+            print("   pip install 'boltz[cuda]'")
+        else:
+            print("   pip install boltz")
+        return False
+
+
 def install_dependencies() -> bool:
     """Install project dependencies (only those not already installed)."""
     print_section("DEPENDENCY INSTALLATION")
@@ -437,8 +538,7 @@ def install_dependencies() -> bool:
         "mordred",                # Molecular descriptors
         "numba",                  # JIT compiler (required for umap)
         
-        # Graph Neural Networks
-        "torch-geometric>=2.3.1", # Graph neural networks
+        # Graph Processing (networkx only - PyG is optional)
         "networkx>=2.8",          # Graph processing
         
         # Machine Learning and Optimization  
@@ -459,13 +559,10 @@ def install_dependencies() -> bool:
         "ase",                    # Atomic simulation environment
     ]
     
-    # PyTorch Geometric extensions (MUST be installed AFTER torch)
-    # These dependencies need to compile against the installed PyTorch
-    pyg_extensions = [
-        "torch-scatter",          # Scatter operations for PyG
-        "torch-sparse",           # Sparse operations for PyG
-        "torch-cluster",          # Clustering for PyG
-    ]
+    # PyTorch Geometric extensions - OPTIONAL (only needed for ESM inverse_folding or FM4M MHG/PosEGNN)
+    # These are NOT required for the main pipeline (embeddings, classifiers, attention matrix)
+    # To install manually if needed: pip install torch-geometric torch-scatter torch-sparse torch-cluster
+    pyg_extensions = []  # Disabled by default - not needed for main functionality
     
     print("📦 Checking and installing basic dependencies...")
     to_install_basic = []
@@ -509,26 +606,17 @@ def install_dependencies() -> bool:
     else:
         print("✅ All optional dependencies are already installed!")
     
-    # Install PyG extensions (AFTER torch is installed)
-    print("\n🔧 Checking PyTorch Geometric extensions...")
+    # PyG extensions are OPTIONAL - skip installation by default
+    # Only needed for: ESM inverse_folding, FM4M MHG/PosEGNN models
+    # Main pipeline (embeddings, classifiers, attention matrix) does NOT require PyG
+    failed_pyg = []
+    print("\nℹ️  PyTorch Geometric: Skipped (optional - not needed for main pipeline)")
+    print("   To install if needed: pip install torch-geometric torch-scatter torch-sparse torch-cluster")
     
-    # First, check PyTorch and CUDA version to use pre-compiled wheels
-    torch_info = get_torch_cuda_info(python_exe)
-    
-    if torch_info is None:
-        print("⚠️  PyTorch not found, skipping PyG extensions")
-        failed_pyg = pyg_extensions.copy()
-    else:
-        torch_version = torch_info['torch_version']
-        cuda_version = torch_info['cuda_version']
-        
-        print(f"🔍 PyTorch: {torch_version}")
-        print(f"🔍 CUDA (PyTorch): {cuda_version if cuda_version else 'CPU'}")
-        
-        # Try to install using PyG pre-compiled wheels
-        failed_pyg = install_pyg_extensions_with_wheels(
-            pip_exe, python_exe, pyg_extensions, torch_version, cuda_version
-        )
+    # ==========================================================================
+    # Install Boltz-2 (Biomolecular Foundation Model)
+    # ==========================================================================
+    boltz_installed = install_boltz(pip_exe, python_exe)
     
     # Installation summary
     print("\n" + "=" * 60)
@@ -536,7 +624,8 @@ def install_dependencies() -> bool:
     print("=" * 60)
     print(f"✅ Basic installed: {len(to_install_basic)}/{len(basic_deps)}")
     print(f"🔧 Optional installed: {len(to_install_optional) - len(failed_optional)}/{len(optional_deps)}")
-    print(f"🧩 PyG extensions: {len(pyg_extensions) - len(failed_pyg)}/{len(pyg_extensions)}")
+    print(f"🧬 Boltz-2: {'✅ Installed' if boltz_installed else '❌ Not installed'}")
+    print(f"🧩 PyG: Skipped (optional)")
     print(f"♻️  Already present: {len(basic_deps) - len(to_install_basic) + len(already_installed_optional)}")
     
     if failed_optional:
@@ -550,7 +639,15 @@ def install_dependencies() -> bool:
         print("\n📝 NOTE about rdkit:")
         print("   If rdkit fails via pip, you can try:")
         print("   pip install rdkit-pypi")
-    else:
+    
+    if not boltz_installed:
+        print("\n📝 NOTE about Boltz-2:")
+        print("   To install manually with GPU support:")
+        print("   pip install 'boltz[cuda]'")
+        print("   Or for CPU-only:")
+        print("   pip install boltz")
+    
+    if not failed_optional and boltz_installed:
         print("\n🎉 All dependencies were installed successfully!")
     
     return True
