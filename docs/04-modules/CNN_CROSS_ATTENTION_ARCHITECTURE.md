@@ -899,6 +899,33 @@ encoder = create_encoder(input_dim=2560, optimized=True)
 
 ---
 
+## Model Variants
+
+The architecture supports multiple variants to balance performance and complexity:
+
+### 1. Base Cross-Attention Model (`CrossAttentionModel`)
+The standard implementation described above.
+- **Projections**: Linear -> LayerNorm -> ReLU
+- **Attention**: Single layer MultiheadAttention
+- **Heads**: Separate regression and classification heads
+
+### 2. Improved Cross-Attention Model (`ImprovedCrossAttentionModel`)
+A deeper architecture designed for better gradient flow and regularization.
+- **Deep Projections**: 2-layer MLP with GELU and LayerNorm
+- **Multiple Layers**: Stacked cross-attention layers (default: 2)
+- **Feed-Forward**: Transformer-style FFN blocks after attention
+- **Regularization**: Increased dropout and gradient clipping friendly design
+
+### 3. Vision Transformer Model (`VisionTransformerModel`)
+An alternative architecture treating the protein-ligand pair as a single sequence.
+- **Input**: Concatenated protein and ligand tokens
+- **Modality Embeddings**: Learnable embeddings to distinguish protein vs ligand
+- **Encoder**: Standard Transformer Encoder (ViT style)
+- **Pooling**: [CLS] token pooling instead of mean pooling
+- **Use Case**: When global context integration is more important than explicit bipartite modeling
+
+---
+
 ## Summary
 
 ### Key Contributions

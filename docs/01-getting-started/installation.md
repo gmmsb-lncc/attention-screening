@@ -26,6 +26,7 @@ python -m pytest tests/
 **O script `setup.py` instala automaticamente**:
 - ✅ PyTorch (com CUDA se disponível)
 - ✅ ESM-2 (fair-esm, transformers)
+- ✅ Novos modelos de proteína (ESM-C, Boltz-2)
 - ✅ Dependências de classificação (scikit-learn, XGBoost)
 - ✅ Dependências de regressão (joblib, seaborn)
 - ✅ Molecular tools (RDKit, PyTorch Geometric)
@@ -44,7 +45,10 @@ source env/bin/activate
 # 2. Instalar dependências específicas Mac
 pip install -r requirements-mac.txt
 
-# 3. Testar instalação
+# 3. Instalar dependências adicionais e baixar modelos
+python scripts/post_install.py
+
+# 4. Testar instalação
 python -m pytest tests/
 ```
 
@@ -60,7 +64,10 @@ conda install -c conda-forge rdkit
 # 3. Instalar demais dependências
 pip install -r requirements-mac.txt
 
-# 4. Testar instalação
+# 4. Instalar dependências adicionais e baixar modelos
+python scripts/post_install.py
+
+# 5. Testar instalação
 python -m pytest tests/
 ```
 
