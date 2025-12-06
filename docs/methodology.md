@@ -2,13 +2,13 @@
 
 **Author**: DockTKinase Development Team  
 **Date**: December 6, 2025  
-**Version**: 1.1
+**Version**: 1.3
 
 ---
 
 ## Abstract
 
-The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This dissertation presents **DockTKinase**, a modular, scalable, and scientifically rigorous deep learning framework designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-C) and Chemical Foundation Models (SMI-TED) within a novel Cross-Attention Convolutional architecture, DockTKinase learns to predict both **binary activity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the DockTKinase system.
+The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This dissertation presents **DockTKinase**, a modular, scalable, and scientifically rigorous deep learning framework designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-C) and Chemical Foundation Models (SMI-TED) within a novel Cross-Attention Convolutional architecture, DockTKinase learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the DockTKinase system.
 
 ---
 
@@ -16,29 +16,29 @@ The accurate identification of potent kinase inhibitors is a cornerstone of mode
 
 ### 1.1 The Kinase Drug Discovery Challenge
 
-Protein kinases are enzymes that catalyze the transfer of a phosphate group from ATP to specific substrates (phosphorylation). This process acts as a molecular 'on/off' switch for cellular pathways. Dysregulation of kinases is a primary driver of cancer. The challenge is that the ATP-binding pocket is highly conserved across the >500 human kinases, making it difficult to design inhibitors that bind to just one (selectivity).
+Protein kinases are enzymes that catalyze the transfer of a phosphate group from ATP to specific substrates (phosphorylation). This process acts as a molecular 'on/off' switch for cellular pathways. Dysregulation of kinases is a primary driver of cancer. The central pharmacological challenge lies in the **ATP-binding pocket**, which is highly conserved across the >500 human kinases. This structural similarity makes it notoriously difficult to design **selective inhibitors** that target a specific kinase without causing off-target toxicity.
 
-DockTKinase addresses this by treating the interaction problem as a **multi-modal representation learning task**.
+DockTKinase addresses this by treating the interaction problem as a **multi-modal representation learning task**, aiming to capture subtle sequence variations that dictate selectivity.
 
 ### 1.2 Defining the Prediction Tasks
 
 To effectively prioritize drug candidates, DockTKinase solves two distinct but complementary problems:
 
-1.  **Binary Activity Prediction (Classification)**:
+1.  **Binary Bioactivity Prediction (Classification)**:
     *   **Goal**: Filter the vast chemical space to identify "Active" compounds.
     *   **Definition**: A compound is labeled $y=1$ (Active) if its affinity exceeds a threshold (e.g., $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$), and $y=0$ otherwise.
-    *   **Role**: High-recall screening.
+    *   **Role**: High-recall screening to reduce the search space.
 
 2.  **Binding Affinity Prediction (Regression)**:
     *   **Goal**: Quantify the strength of the interaction for active candidates.
     *   **Definition**: Predict the precise thermodynamic value, typically represented as $pChEMBL = -\log_{10}(IC_{50}/K_i/K_d)$.
-    *   **Role**: High-precision ranking.
+    *   **Role**: High-precision ranking for lead optimization.
 
 ### 1.3 From Docking to Language Modeling: The DockTKinase Philosophy
 
 The name **DockTKinase** pays homage to **DockThor**, the renowned molecular docking platform developed by the GMMSB-LNCC group. However, a fundamental distinction exists in their methodologies. While DockThor relies on physics-based simulations and explicit 3D coordinate sampling to find optimal binding poses, DockTKinase adopts a purely **Natural Language Processing (NLP)** approach.
 
-We treat biological interaction not as a geometric puzzle, but as a **semantic compatibility problem** between the "language" of protein sequences (amino acids) and the "language" of chemical structures (SMILES). By leveraging the attention mechanisms of Transformer models, DockTKinase infers interaction patterns from the evolutionary and chemical context embedded in these sequences, effectively performing "semantic docking" in a high-dimensional latent semantic space rather than in Euclidean space.
+We treat biological interaction not as a geometric puzzle, but as a **semantic compatibility problem** between the "language" of protein sequences (amino acids) and the "language" of chemical structures (SMILES). By leveraging the attention mechanisms of Transformer models, DockTKinase infers interaction patterns from the evolutionary and chemical context embedded in these sequences. While we do not explicitly simulate the conformational changes of induced fit, our model learns to weight residue-atom pairs dynamically, effectively approximating the **energetic favorability** of the bound state in a high-dimensional latent space.
 
 ### 1.4 Motivation and Contribution
 
@@ -87,7 +87,7 @@ Computational methods must account for this flexibility.
 1.  **Molecular Docking**: Simulates the physical process of binding, exploring thousands of orientations (poses) and conformations. It is accurate but computationally expensive ($O(N^3)$ or worse).
 2.  **Machine Learning**: Attempts to learn a function $f(Protein, Ligand) \to Affinity$ from data.
 
-DockTKinase represents the next evolution of ML approaches. Instead of using fixed descriptors (hand-engineered features), we use the **contextual embeddings** from Foundation Models. By combining the "protein understanding" of pLMs with the "chemical understanding" of chemical models, we aim to predict interaction compatibility directly from the learned latent spaces.
+DockTKinase represents the next evolution of ML approaches. Unlike earlier models (e.g., DeepDTA) that relied on simple CNNs over one-hot encodings, we use **contextual embeddings** from Foundation Models. By combining the "protein understanding" of pLMs with the "chemical understanding" of chemical models, we aim to predict interaction compatibility directly from the learned latent spaces, approximating the thermodynamics of induced fit without explicit simulation.
 
 ### 2.4 Mathematical Formulation of Representation Learning
 
@@ -111,7 +111,7 @@ The attention weights $\mathbf{A}$ represent the relevance of token $j$ to token
 
 $$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V} $$
 
-Biologically, this allows the model to "attend" to distant residues that are close in 3D space (contact prediction) or functionally coupled (co-evolution), effectively learning the protein's contact map without explicit supervision.
+Where $d_k$ is the dimension of the attention head, serving as a scaling factor to prevent vanishing gradients in the softmax function. Biologically, this allows the model to "attend" to distant residues that are close in 3D space (contact prediction) or functionally coupled (co-evolution), effectively learning the protein's contact map without explicit supervision.
 
 ---
 
@@ -124,7 +124,7 @@ The DockTKinase system adheres to the **Separation of Concerns** principle, divi
 The architecture is composed of the following core subsystems:
 
 1.  **Build Module (`src.build`)**: Responsible for data ingestion, embedding generation, and matrix construction. It acts as the ETL (Extract, Transform, Load) layer of the pipeline.
-2.  **Classifier Module (`src.classifier`)**: A multi-model ensemble system designed for the **Binary Activity Prediction** task (see 1.2). It serves as a high-recall filter to identify potential binders.
+2.  **Classifier Module (`src.classifier`)**: A multi-model benchmarking suite designed for the **Binary Bioactivity Prediction** task (see 1.2). It serves as a high-recall filter to identify potential binders.
 3.  **Regression Module (`src.regression`)**: A precision-focused module that predicts quantitative **Binding Affinity** (see 1.2) for the candidates identified by the classifier.
 
 ### 3.2 The Strategy Pattern for Model Integration
@@ -212,13 +212,13 @@ To bridge this gap, we employ **Pooling Strategies** to aggregate the sequence i
 
 3.  **Max Pooling**: Takes the maximum value across the sequence dimension for each feature. This is effective for detecting the presence of specific motifs (e.g., a specific binding site residue) regardless of its position.
 
-These aggregated vectors serve as the input features for the Classical Machine Learning Ensemble described in the next chapter.
+These aggregated vectors serve as the input features for the Classical Machine Learning Suite described in the next chapter.
 
 ---
 
-## Chapter 5: Classical Machine Learning Models
+## Chapter 5: Classical Machine Learning Suite
 
-While the Deep Learning module focuses on end-to-end representation learning, DockTKinase incorporates a robust **Classical Machine Learning Ensemble** (`src.classifier`) to serve as a high-recall filter and baseline comparator. This module implements 12 distinct algorithms, ranging from probabilistic models to state-of-the-art gradient boosting machines.
+While the Deep Learning module focuses on end-to-end representation learning, DockTKinase incorporates a robust **Classical Machine Learning Suite** (`src.classifier`) to serve as a high-recall filter and baseline comparator. This module implements 12 distinct algorithms, ranging from probabilistic models to state-of-the-art gradient boosting machines.
 
 **Input**: These models operate on the **fixed-size aggregated vectors** derived from the Foundation Models (as described in Section 4.3), effectively treating the embeddings as high-quality, pre-computed feature vectors.
 
@@ -277,7 +277,7 @@ A feedforward artificial neural network. While simpler than our Cross-Attention 
 
 ## Chapter 6: Deep Learning Architectures for Affinity Prediction
 
-DockTKinase introduces a specialized neural architecture designed to model the physical interaction between a protein target and a ligand molecule. We frame this as a **bipartite interaction problem**, where the goal is to learn a weighting function $w_{ij}$ representing the contribution of protein residue $i$ and ligand atom $j$ to the total binding energy.
+DockTKinase introduces a specialized neural architecture designed to model the physical interaction between a protein target and a ligand molecule. Unlike previous approaches (e.g., DeepDTA, GraphDTA) that rely on shallow representations or fixed descriptors, our model leverages the rich, contextual embeddings from Foundation Models to learn a **bipartite interaction function**.
 
 **Input**: Unlike the classical models, this architecture processes the **full sequence embeddings** ($L \times D$) from Chapter 4, preserving the spatial and sequential context of every residue and atom.
 
@@ -297,24 +297,25 @@ $$ C_P = A V $$
 
 **Biological Interpretation**: The attention weight $A_{ij}$ represents the learned probability of interaction between protein residue $i$ and ligand atom $j$. A high weight implies that the model considers this specific atom-residue pair critical for binding, effectively performing "soft docking" in latent space.
 
-**Multi-Head Attention**: We employ $h=8$ parallel attention heads. Each head can specialize in different types of physicochemical interactions (e.g., Head 1 might track hydrogen bonds, Head 2 hydrophobic contacts), allowing the model to capture the multifaceted nature of molecular recognition.
-
 ### 6.2 The Hybrid CNN-Attention Architecture
 
 While Transformers excel at capturing global dependencies, Convolutional Neural Networks (CNNs) are superior at extracting local features. In biological sequences, local motifs (e.g., binding sites, functional domains) are critical.
+
+**Why CNNs on top of Transformers?**
+While ESM-2 captures global evolutionary context, its embeddings are trained on the objective of *masked language modeling*, not binding. The CNN layers serve a critical dual purpose:
+1.  **Task Adaptation**: They project the general-purpose evolutionary features into a binding-specific latent space.
+2.  **Local Motif Enhancement**: They explicitly emphasize local physicochemical motifs (e.g., hydrophobic patches, charge clusters) that drive the initial stages of molecular recognition, filtering out evolutionary noise that is irrelevant to the specific binding task.
 
 DockTKinase employs a **Hybrid Architecture** that combines the best of both worlds:
 
 1.  **Local Feature Extraction (CNN)**: The raw embeddings from the Foundation Models are first passed through a multi-scale 1D-CNN encoder (`src.classifier.models.cnn_encoder`).
     *   **Kernels**: We use varying kernel sizes (3, 5, 7) to capture motifs of different lengths.
-    *   **Depthwise Separable Convolutions**: To reduce parameter count and computational cost.
+    *   **Length-Preserving Convolutions**: To ensure that the learned features can be mapped back to specific residues for interpretability, we employ padding strategies (e.g., `padding='same'`) that preserve the original sequence length $L$.
     *   **Residual Connections**: To facilitate gradient flow across deep networks.
 
 $$ H_{local} = \text{CNN}(H_{raw}) $$
 
 2.  **Global Interaction Modeling (Cross-Attention)**: The locally enriched features $H_{local}$ are then fed into the Cross-Attention mechanism described above.
-
-This design ensures that the attention mechanism operates on high-level, semantically rich features rather than raw token embeddings.
 
 ### 6.3 Architecture Variants
 
@@ -332,10 +333,12 @@ We also explore a global context approach (`VisionTransformerModel`) where the p
 
 DockTKinase is designed to solve two distinct but related problems simultaneously: identifying *active* compounds (Classification) and predicting their *potency* (Regression).
 
-#### 6.4.1 Binary Classification (Activity Prediction)
+#### 6.4.1 Binary Bioactivity Prediction
 The primary goal is to filter the vast chemical space for potential hits. We define a binary label $y_{cls} \in \{0, 1\}$ based on a threshold (typically $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$).
-The model outputs a probability $p = \sigma(z_{cls})$ using a sigmoid activation. We minimize the **Binary Cross-Entropy (BCE)** loss:
-$$ \mathcal{L}_{BCE} = - \frac{1}{N} \sum_{i=1}^N [y_i \log(p_i) + (1-y_i) \log(1-p_i)] $$
+The model outputs a probability $p = \sigma(z_{cls})$ using a sigmoid activation.
+
+**Handling Class Imbalance**: To address the inherent imbalance (inactives $\gg$ actives) typical of screening libraries, we employ a **Weighted Binary Cross-Entropy (BCE)** loss, assigning a higher penalty to false negatives:
+$$ \mathcal{L}_{BCE} = - \frac{1}{N} \sum_{i=1}^N [w_{pos} \cdot y_i \log(p_i) + (1-y_i) \log(1-p_i)] $$
 
 #### 6.4.2 Affinity Regression (Potency Prediction)
 For active compounds, we need to rank them by potency. The target variable $y_{reg}$ is the $pChEMBL$ value ($-\log_{10}(IC_{50}/K_i)$).
@@ -347,13 +350,20 @@ By training on both tasks simultaneously, the model learns a shared representati
 $$ \mathcal{L}_{total} = \lambda_{cls} \mathcal{L}_{BCE} + \lambda_{reg} \mathcal{L}_{MSE} $$
 Where $\lambda_{cls}$ and $\lambda_{reg}$ are hyperparameters balancing the tasks (typically 1.0).
 
-### 6.5 Hyperparameter Configuration
+### 6.5 Training Strategy & Hyperparameters
 
 The architecture is defined by a set of hyperparameters optimized for the kinase interaction task. These parameters balance model capacity with computational efficiency and regularization needs.
 
+#### 6.5.1 Optimization Dynamics
+*   **Optimizer**: We use **AdamW** (Adam with Decoupled Weight Decay) to prevent overfitting in the high-dimensional parameter space.
+*   **Scheduler**: A **Linear Warmup** (first 10% of steps) followed by **Cosine Decay** is used to ensure stable convergence and escape local minima.
+*   **Regularization**: In addition to Dropout ($p=0.2$), we apply Weight Decay ($1e-2$) to the projection layers.
+
+#### 6.5.2 Hyperparameter Configuration (Base Model)
+
 | Component | Parameter | Value | Description |
 | :--- | :--- | :--- | :--- |
-| **Inputs** | Protein Dim | 320 | Dimension of ESM-2 (8M) embeddings |
+| **Inputs** | Protein Dim | 320 | Dimension of ESM-2 (8M) embeddings (Configurable) |
 | | Ligand Dim | 768 | Dimension of SMI-TED embeddings |
 | **Projections** | Hidden Dim | 256 | Common latent space dimension |
 | | Activation | GELU | Gaussian Error Linear Unit |
