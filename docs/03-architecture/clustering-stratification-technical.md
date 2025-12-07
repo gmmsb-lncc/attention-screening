@@ -6,7 +6,7 @@ This document provides a detailed technical explanation of the clustering and st
 
 1. [Mathematical Foundations](#mathematical-foundations)
 2. [Cosine Similarity in High-Dimensional Spaces](#cosine-similarity-in-high-dimensional-spaces)
-3. [Dynamic Threshold Optimization](#dynamic-threshold-optimization)
+3. [MiniBatchKMeans with k-means++](#minibatchkmeans-with-k-means)
 4. [Silhouette Score Analysis](#silhouette-score-analysis)
 5. [K-means++ Theoretical Guarantees](#k-means-theoretical-guarantees)
 6. [Greedy Cluster Assignment Algorithm](#greedy-cluster-assignment-algorithm)
@@ -22,7 +22,7 @@ This document provides a detailed technical explanation of the clustering and st
 Protein and ligand embeddings are represented as vectors in high-dimensional spaces:
 
 - **Protein embeddings**: `p ∈ ℝ^d_p` where `d_p = 1280` (ESM-2)
-- **Ligand embeddings**: `l ∈ ℝ^d_l` where `d_l = 768` (ChemBERTa)
+- **Ligand embeddings**: `l ∈ ℝ^d_l` where `d_l = 768` (SMI-TED)
 
 ### Combined Embedding
 
@@ -91,67 +91,14 @@ All points become approximately equidistant. Cosine similarity focuses on **angu
 
 ---
 
-## Dynamic Threshold Optimization
+## MiniBatchKMeans with k-means++
 
-### Motivation
+### Current pipeline (cnn-optm)
 
-The similarity threshold `τ` determines cluster granularity:
-- **High τ** (e.g., 0.95): Many small, tight clusters
-- **Low τ** (e.g., 0.50): Few large, loose clusters
-
-The optimal `τ` depends on data distribution.
-
-### Similarity Distribution Analysis
-
-Given embeddings `X = {x₁, ..., xₙ}`, compute:
-
-```
-Sᵢⱼ = cos(xᵢ, xⱼ)  for all i < j
-```
-
-This yields `n(n-1)/2` pairwise similarities.
-
-For large `n`, sample `m` points (m ≈ 2000):
-
-```
-Ŝ = {Sᵢⱼ : i, j ∈ sample, i < j}
-```
-
-### Statistical Measures
-
-From `Ŝ`, compute:
-
-| Statistic | Formula | Purpose |
-|-----------|---------|---------|
-| Minimum | `S_min = min(Ŝ)` | Homogeneity classification |
-| Mean | `S̄ = (1/|Ŝ|) × Σ s` | Central tendency |
-| Percentiles | `P_q` such that `q%` of `Ŝ ≤ P_q` | Threshold candidates |
-
-### Homogeneity Classification
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                    S_min values and classification                  │
-├────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  0.0        0.5        0.7        0.9        1.0                   │
-│   │──────────│──────────│──────────│──────────│                    │
-│   │          │          │          │          │                    │
-│   │   LOW    │ MODERATE │   HIGH   │VERY HIGH │                    │
-│   │          │          │          │          │                    │
-│   │  τ: 0.4-0.7   τ: 0.5-0.9   τ: P25-P95  τ: P50-P99             │
-│   │          │          │          │          │                    │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-### Search Range Definition
-
-| Homogeneity | τ_min | τ_max | Rationale |
-|-------------|-------|-------|-----------|
-| `very_high` | P₅₀ | P₉₉ | Need high threshold to create any separation |
-| `high` | P₂₅ | P₉₅ | Moderate range |
-| `moderate` | 0.50 | 0.95 | Standard range |
-| `low` | 0.40 | 0.90 | Lower thresholds work |
+- **Embedding prep**: Protein (ESM-2) and ligand (SMI-TED) embeddings are weighted, concatenated, and L2-normalized so Euclidean distance matches cosine geometry.
+- **Clustering**: MiniBatchKMeans with k-means++ seeding; `k ≈ sqrt(n)` bounded to `[10, 1000]` to keep runtimes predictable.
+- **No similarity threshold**: The former threshold-optimization flow is deprecated; there is no τ tuning in this branch.
+- **Batching**: `batch_size = min(1024, n_samples)` to bound memory while maintaining centroid quality.
 
 ---
 
@@ -200,64 +147,34 @@ S = ───  Σ  s(i)
 | ≈ 0 | Sample is on cluster boundary |
 | ≈ -1 | Sample is closer to another cluster (misclassified) |
 
-### Optimization Algorithm
+### Optimization Heuristic (for k)
 
-```python
-def optimize_threshold(embeddings, threshold_candidates):
-    """
-    Find τ* that maximizes Silhouette Score.
-    
-    Time complexity: O(k × n² × d)
-    where k = number of candidates, n = samples, d = dimensions
-    """
-    best_score = -1
-    best_threshold = None
-    
-    # Precompute distance matrix (O(n² × d))
-    D = pairwise_distances(embeddings, metric='cosine')
-    
-    for τ in threshold_candidates:  # O(k) iterations
-        # Cluster with threshold τ
-        labels = agglomerative_clustering(D, distance_threshold=1-τ)
-        
-        # Compute Silhouette Score (O(n²))
-        score = silhouette_score(D, labels, metric='precomputed')
-        
-        # Validate constraints
-        n_clusters = len(set(labels) - {-1})
-        if n_clusters >= min_clusters and score > best_score:
-            best_score = score
-            best_threshold = τ
-    
-    return best_threshold
-```
+In the current flow, Silhouette is used to **validate** the chosen `k` (≈√n) rather than to sweep thresholds. A light heuristic is to compute Silhouette for a few nearby `k` values (e.g., `k-5, k, k+5`) on a sample to confirm separation without over-fragmenting clusters.
 
-### Silhouette Score vs Threshold
+### Silhouette Score vs Cluster Granularity
 
-Typical relationship:
+Typical relationship (sampling nearby k values):
 
 ```
 Silhouette
 Score
-   ▲
+    ▲
 1.0│
-   │                    ●
-   │                 ●     ●
+    │                    ●
+    │                 ●     ●
 0.5│              ●           ●
-   │           ●                 ●
-   │        ●                       ●
+    │           ●                 ●
+    │        ●                       ●
 0.0│     ●                             ●
-   │  ●                                   ●
+    │  ●                                   ●
 -0.5│
-   └──────────────────────────────────────────► Threshold (τ)
-     0.5   0.6   0.7   0.8   0.9   1.0
-                       ↑
-                 Optimal τ*
+    └──────────────────────────────────────────► k (cluster count)
+          small           medium             large
 ```
 
-- **Too low τ**: Few large clusters → poor cohesion → low S
-- **Too high τ**: Many singleton clusters → poor separation metric → low S
-- **Optimal τ**: Balance between cohesion and separation → maximum S
+- **Too small k**: Few coarse clusters → poor cohesion → low S
+- **Too large k**: Many tiny clusters → poor separation metric → low S
+- **Good k range**: Balance between cohesion and separation → higher S
 
 ---
 

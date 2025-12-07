@@ -46,7 +46,7 @@ DockTKinase was developed to bridge the gap between high-throughput sequence dat
 
 1.  **Unified Embedding Space**: We leverage large-scale pre-trained transformers (ESM-2, Boltz-2, SMI-TED) to map biological entities into dense vector spaces that capture evolutionary and physicochemical properties.
 2.  **Bipartite Interaction Modeling**: We propose a hybrid CNN-Cross-Attention architecture that explicitly models the pairwise interactions between protein residues and ligand atoms, mimicking the physical reality of binding interfaces.
-3.  **Rigorous Validation**: We implement an adaptive clustering-based stratification strategy (using DBSCAN and K-means) to enforce strict separation of homologous sequences between training and evaluation sets.
+3.  **Rigorous Validation**: We implement an adaptive clustering-based stratification strategy using MiniBatchKMeans with k-means++ initialization to enforce strict separation of homologous sequences between training and evaluation sets.
 4.  **Scalable Engineering**: The system is built on a modular architecture supporting CPU offloading, dynamic dimension synchronization, and multi-GPU training, enabling the processing of datasets with millions of interactions.
 
 ---
