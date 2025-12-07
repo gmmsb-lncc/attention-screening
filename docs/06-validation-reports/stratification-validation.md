@@ -73,7 +73,7 @@ p_value_train = 1 - χ²_cdf(chi2_train, df=n_classes-1)
 #### 3.1. Stratifier Baseado em Clustering (`src/build/stratification/`)
 
 Este é um método **ALTERNATIVO** mais sofisticado que:
-- Usa clustering (DBSCAN/KMeans) nos embeddings
+- Usa clustering (MiniBatchKMeans com k-means++ nos embeddings; DBSCAN era legado)
 - Estratifica por similaridade de proteína/ligante
 - **NÃO está sendo usado** nos scripts principais
 

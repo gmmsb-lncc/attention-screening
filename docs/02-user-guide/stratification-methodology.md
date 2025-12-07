@@ -7,11 +7,10 @@ This document provides a comprehensive explanation of the stratification methodo
 1. [Overview](#overview)
 2. [The Data Leakage Problem](#the-data-leakage-problem)
 3. [Cosine Similarity](#cosine-similarity)
-4. [Dynamic Threshold Selection](#dynamic-threshold-selection)
-5. [K-means++ Clustering](#k-means-clustering)
-6. [Cluster Assignment to Train/Val/Test](#cluster-assignment-to-trainvaltest)
-7. [Mathematical Formulation](#mathematical-formulation)
-8. [Implementation Details](#implementation-details)
+4. [K-means++ Clustering](#k-means-clustering)
+5. [Cluster Assignment to Train/Val/Test](#cluster-assignment-to-trainvaltest)
+6. [Mathematical Formulation](#mathematical-formulation)
+7. [Implementation Details](#implementation-details)
 
 ---
 
@@ -24,7 +23,7 @@ The pipeline consists of three main steps:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  1. EMBEDDING GENERATION                                                 │
-│     Protein (ESM-2) + Ligand (ChemBERTa) → Combined embedding           │
+│     Protein (ESM-2) + Ligand (SMI-TED) → Combined embedding             │
 │                              │                                           │
 │                              ▼                                           │
 │  2. K-MEANS++ CLUSTERING                                                 │
@@ -111,161 +110,7 @@ distance(A, B) = 1 - cosine_similarity(A, B)
 
 ## Dynamic Threshold Selection
 
-### The Problem with Fixed Thresholds
-
-A fixed similarity threshold (e.g., 0.7) fails because datasets have different similarity distributions:
-
-```
-Scenario 1: Homogeneous data (all kinases)
-─────────────────────────────────────────
-All proteins are kinases → very similar embeddings
-Typical similarities: 0.88 to 0.99
-
-With fixed threshold = 0.7:
-→ ALL pairs have similarity > 0.7
-→ Result: 1 giant cluster (useless for splitting)
-
-
-Scenario 2: Diverse data (kinases + GPCRs + enzymes)
-────────────────────────────────────────────────────
-Different protein families → varied embeddings
-Typical similarities: 0.30 to 0.85
-
-With fixed threshold = 0.95:
-→ Almost no pairs have similarity > 0.95
-→ Result: Each sample is its own cluster (trivial)
-```
-
-### Adaptive Threshold Algorithm
-
-The system analyzes the similarity distribution and selects an appropriate threshold:
-
-#### Step 1: Analyze Similarity Distribution
-
-```python
-# Compute pairwise similarities for a sample
-sim_matrix = cosine_similarity(embeddings)
-similarities = sim_matrix[upper_triangle]  # Exclude diagonal
-
-# Calculate statistics
-stats = {
-    'min': np.min(similarities),
-    'max': np.max(similarities),
-    'mean': np.mean(similarities),
-    'p25': np.percentile(similarities, 25),
-    'p50': np.percentile(similarities, 50),  # median
-    'p75': np.percentile(similarities, 75),
-    'p90': np.percentile(similarities, 90),
-    'p95': np.percentile(similarities, 95),
-    'p99': np.percentile(similarities, 99),
-}
-```
-
-#### Step 2: Classify Data Homogeneity
-
-```python
-def classify_homogeneity(min_similarity):
-    if min_similarity > 0.9:
-        return 'very_high'  # All samples very similar
-    elif min_similarity > 0.7:
-        return 'high'       # Most samples similar
-    elif min_similarity > 0.5:
-        return 'moderate'   # Moderate diversity
-    else:
-        return 'low'        # High diversity
-```
-
-#### Step 3: Define Search Range
-
-| Homogeneity | Search Range | Rationale |
-|-------------|--------------|-----------|
-| `very_high` | [p50, p99] | Need high threshold to separate similar samples |
-| `high` | [p25, p95] | Moderate threshold range |
-| `moderate` / `low` | [0.5, 0.95] | Standard range |
-
-#### Step 4: Optimize Using Silhouette Score
-
-The **Silhouette Score** measures clustering quality.
-
-For each sample `i`:
-
-```
-        b(i) - a(i)
-s(i) = ─────────────
-       max(a(i), b(i))
-```
-
-Where:
-- `a(i)` = mean intra-cluster distance (cohesion) — average distance from sample i to other samples in the same cluster
-- `b(i)` = mean distance to nearest cluster (separation) — average distance to samples in the nearest neighboring cluster
-
-**Interpretation:**
-- `s(i) ≈ +1`: Sample is well-clustered (far from other clusters)
-- `s(i) ≈ 0`: Sample is on cluster boundary
-- `s(i) ≈ -1`: Sample is likely in wrong cluster
-
-**Global Silhouette Score:**
-
-```
-      1   n
-S = ───  Σ  s(i)
-      n  i=1
-```
-
-**Optimization Problem:**
-
-Find the threshold τ* that maximizes S(τ):
-
-```
-τ* = argmax  S(τ)
-     τ ∈ [τ_min, τ_max]
-```
-
-Subject to:
-- `k(τ) ≥ k_min` (minimum number of clusters)
-- `|Cⱼ| ≥ n_min` for all clusters Cⱼ (minimum cluster size)
-
-### Example Threshold Selection
-
-```
-Dataset: 1000 protein embeddings (dim=1280)
-
-Step 1: Similarity Statistics
-─────────────────────────────
-min  = 0.72    ← Used to classify homogeneity
-mean = 0.84
-max  = 0.99
-p25  = 0.78
-p75  = 0.89
-p95  = 0.95
-
-Step 2: Homogeneity Classification
-──────────────────────────────────
-min = 0.72 > 0.70 → homogeneity = 'high'
-
-Step 3: Search Range
-────────────────────
-range = (p25, p95) = (0.78, 0.95)
-
-Step 4: Grid Search with Silhouette Optimization
-────────────────────────────────────────────────
-┌───────────┬───────────┬─────────────┬───────────────┐
-│ Threshold │ Distance  │ Num Clusters│ Silhouette    │
-│    (τ)    │  (1-τ)    │             │ Score         │
-├───────────┼───────────┼─────────────┼───────────────┤
-│   0.78    │   0.22    │      8      │    0.42       │
-│   0.80    │   0.20    │     12      │    0.51       │
-│   0.82    │   0.18    │     18      │    0.58       │
-│   0.84    │   0.16    │     25      │    0.64       │
-│   0.86    │   0.14    │     35      │    0.71  ◄── BEST │
-│   0.88    │   0.12    │     52      │    0.68       │
-│   0.90    │   0.10    │     78      │    0.61       │
-│   0.92    │   0.08    │    124      │    0.53       │
-│   0.94    │   0.06    │    215      │    0.41       │
-└───────────┴───────────┴─────────────┴───────────────┘
-
-Result: τ* = 0.86 (Silhouette = 0.71)
-```
+The current implementation does **not** tune a similarity threshold. Embeddings are L2-normalized (yielding cosine geometry), and MiniBatchKMeans with k-means++ initialization is run directly with an adaptive cluster count (√n bounded to [10, 1000]).
 
 ---
 
@@ -509,23 +354,23 @@ def rebalance_clusters(test_clusters, val_clusters, train_clusters, sizes):
 **Objective:** Maximize clustering quality (Silhouette Score) while achieving balanced splits.
 
 **Variables:**
-- `τ` = similarity threshold (for hierarchical clustering) or `k` = number of clusters (for K-means)
+- `k` = number of clusters (MiniBatchKMeans)
 - `C = {C₁, C₂, ..., Cₖ}` = resulting clusters
 - `π: C → {train, val, test}` = cluster assignment function
 
 **Objective Function:**
 
 ```
-maximize:  S(τ) × B(π)
+maximize:  S(k) × B(π)
 ```
 
 Where:
-- `S(τ)` = Silhouette Score for clustering with threshold τ
+- `S(k)` = Silhouette Score for clustering with k clusters
 - `B(π)` = Balance score for assignment π
 
 **Constraints:**
 
-1. **Minimum clusters**: `k(τ) ≥ k_min`
+1. **Minimum clusters**: `k ≥ k_min`
 2. **Minimum cluster size**: `|Cⱼ| ≥ n_min` for all j
 3. **Split proportions**: 
    - `0.76 ≤ |{i: π(Cᵢ) = train}| / n ≤ 0.84`
@@ -572,11 +417,11 @@ S = ───  Σ  s(i)
 
 | File | Purpose |
 |------|---------|
-| `src/build/pipeline/stratification_manager.py` | Main orchestrator |
+| `src/build/stratification/stratifier.py` | Main orchestrator |
 | `src/build/stratification/similarity_analysis.py` | Similarity distribution analysis |
-| `src/build/stratification/threshold_optimization.py` | Dynamic threshold selection |
-| `src/build/stratification/adaptive_clustering.py` | Clustering algorithms |
-| `src/build/stratification/scalable_clustering.py` | Memory-efficient clustering for large datasets |
+| `src/build/stratification/scalable_clustering.py` | MiniBatchKMeans with k-means++ seeding |
+| `src/build/stratification/adaptive_clustering.py` | Clustering utilities |
+| `src/build/stratification/cluster_splitter.py` | Greedy 80/10/10 split assignment |
 
 ### Configuration Parameters
 
@@ -621,8 +466,8 @@ For datasets > 40,000 samples, full distance matrix computation is infeasible (O
 | Component | Method | Rationale |
 |-----------|--------|-----------|
 | **Similarity metric** | Cosine similarity | Scale-invariant, suitable for high-dimensional embeddings |
-| **Threshold** | Dynamic (Silhouette-optimized) | Adapts to dataset homogeneity |
-| **Clustering** | K-means++ | Theoretical guarantees, reproducibility |
+| **Threshold** | None (direct K-means++) | L2-normalization yields cosine geometry |
+| **Clustering** | MiniBatchKMeans (k-means++) | Stable seeding and scalable batches |
 | **Cluster count** | √n (bounded 10-1000) | Scales with dataset size |
 | **Split assignment** | Greedy with 120% tolerance | Achieves target proportions with indivisible clusters |
 | **Cluster integrity** | Never split clusters | Prevents data leakage |
