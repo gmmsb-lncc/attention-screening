@@ -131,7 +131,7 @@ This index provides a comprehensive overview of all stratification-related docum
 #### Supporting Modules
 - **clustering.py** (140 lines)
   - ClusteringStrategy abstract base
-  - 4 implementations: DBSCAN, Hierarchical, KMeans, Random
+  - Implementations: MiniBatchKMeans (default), legacy DBSCAN/Hierarchical, Random
   - EmbeddingClusterer coordinator
 
 - **cluster_splitter.py** (110 lines)

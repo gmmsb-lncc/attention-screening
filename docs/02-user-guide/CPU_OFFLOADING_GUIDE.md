@@ -149,7 +149,7 @@ config = {
     
     # Embedding configuration
     'esm_model_name': 'esm2_t36_3B_UR50D',  # Modelo grande
-    'ligand_model': 'ChemBERTa',
+    'ligand_model': 'fm4m',
     
     # Memory optimization
     'enable_offload': True,           # ✅ CPU offloading
