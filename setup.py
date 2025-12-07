@@ -10,7 +10,7 @@ import subprocess
 import platform
 import re
 from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional, Callable
 
 def print_header(title: str) -> None:
     """Print formatted header."""
@@ -64,7 +64,7 @@ def check_system_requirements() -> bool:
     # Check pip
     try:
         import pip
-        print(f"📦 pip: Available")
+        print(f"📦 pip: Available ({pip.__version__})")
     except ImportError:
         print("❌ pip not found")
         return False
@@ -165,7 +165,7 @@ def check_package_installed(python_exe: str, package_name: str) -> bool:
         return False
 
 
-def get_torch_cuda_info(python_exe: str) -> Dict[str, Any]:
+def get_torch_cuda_info(python_exe: str) -> Optional[Dict[str, Any]]:
     """Get information about installed PyTorch and CUDA."""
     try:
         result = subprocess.run(
@@ -203,7 +203,7 @@ def install_pyg_extensions_with_wheels(pip_exe: str, python_exe: str,
     IMPORTANT: PyG extensions must be compiled for the SAME PyTorch version.
     Using wheels from a different version causes segmentation fault.
     """
-    failed = []
+    failed: List[str] = []
     
     # Check system CUDA vs PyTorch CUDA incompatibility
     system_cuda = get_system_cuda_version()
@@ -321,7 +321,7 @@ def install_pyg_extensions_with_wheels(pip_exe: str, python_exe: str,
     return failed
 
 
-def get_system_cuda_version() -> str:
+def get_system_cuda_version() -> Optional[str]:
     """Detect system CUDA version via nvcc."""
     try:
         result = subprocess.run(
@@ -562,10 +562,9 @@ def install_dependencies() -> bool:
     # PyTorch Geometric extensions - OPTIONAL (only needed for ESM inverse_folding or FM4M MHG/PosEGNN)
     # These are NOT required for the main pipeline (embeddings, classifiers, attention matrix)
     # To install manually if needed: pip install torch-geometric torch-scatter torch-sparse torch-cluster
-    pyg_extensions = []  # Disabled by default - not needed for main functionality
     
     print("📦 Checking and installing basic dependencies...")
-    to_install_basic = []
+    to_install_basic: List[str] = []
     for dep in basic_deps:
         if check_package_installed(python_exe, dep):
             print(f"✅ {dep}: Already installed")
@@ -584,8 +583,8 @@ def install_dependencies() -> bool:
         print("✅ All basic dependencies are already installed!")
     
     print("\n🔧 Checking and installing optional dependencies...")
-    to_install_optional = []
-    already_installed_optional = []
+    to_install_optional: List[str] = []
+    already_installed_optional: List[str] = []
     
     for dep in optional_deps:
         if check_package_installed(python_exe, dep):
@@ -595,7 +594,7 @@ def install_dependencies() -> bool:
             print(f"📥 {dep}: Will be installed")
             to_install_optional.append(dep)
     
-    failed_optional = []
+    failed_optional: List[str] = []
     if to_install_optional:
         print(f"\n🔨 Installing {len(to_install_optional)} optional dependencies...")
         for dep in to_install_optional:
@@ -609,7 +608,6 @@ def install_dependencies() -> bool:
     # PyG extensions are OPTIONAL - skip installation by default
     # Only needed for: ESM inverse_folding, FM4M MHG/PosEGNN models
     # Main pipeline (embeddings, classifiers, attention matrix) does NOT require PyG
-    failed_pyg = []
     print("\nℹ️  PyTorch Geometric: Skipped (optional - not needed for main pipeline)")
     print("   To install if needed: pip install torch-geometric torch-scatter torch-sparse torch-cluster")
     
@@ -697,7 +695,7 @@ def download_model_files() -> bool:
             print("   • SMI-TED models (~4.1 GB)")
             print("   ⏱️  Estimated time: 5-10 minutes")
             
-            success_fm4m, output = run_command(
+            success_fm4m, _ = run_command(
                 [python_exe, str(download_script)], 
                 "Downloading FM4M models"
             )
@@ -726,7 +724,7 @@ def download_model_files() -> bool:
         print("   • ESM model (~2.6 GB)")
         print("   ⏱️  Estimated time: 5-10 minutes")
         
-        success_post_install, output = run_command(
+        success_post_install, _ = run_command(
             [python_exe, str(post_install_script)], 
             "Running post_install.py"
         )
@@ -1001,7 +999,7 @@ def validate_build_dependencies() -> bool:
     ]
     
     print("🔍 Checking essential dependencies...")
-    essential_failed = []
+    essential_failed: List[str] = []
     for dep_name, import_cmd in essential_build_deps:
         success, _ = run_command([python_exe, "-c", import_cmd], 
                                f"Testing {dep_name}")
@@ -1012,7 +1010,7 @@ def validate_build_dependencies() -> bool:
             essential_failed.append(dep_name)
     
     print("\n🔧 Checking optional dependencies...")
-    optional_failed = []
+    optional_failed: List[str] = []
     for dep_name, import_cmd in optional_build_deps:
         success, _ = run_command([python_exe, "-c", import_cmd], 
                                f"Testing {dep_name}")
@@ -1062,7 +1060,7 @@ def main() -> int:
     print("📁 Project directory detected")
     
     # List of steps
-    steps = [
+    steps: List[Tuple[str, Callable[[], bool]]] = [
         ("Check system requirements", check_system_requirements),
         ("Configure virtual environment", setup_virtual_environment),
         ("Install dependencies", install_dependencies),
