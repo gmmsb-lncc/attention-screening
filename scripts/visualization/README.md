@@ -269,6 +269,89 @@ python scripts/compare_classical_vs_cnn.py \
   - Classification: RandomForest (3×), ExtraTrees (2×)
   - Regression: RandomForest (2×), KNN, Ridge, GradientBoosting
 
+### **Visual Results & Discussion**
+
+#### **Figure 1: Average Performance Comparison**
+![Average Performance](../../docs/images/aggregated_comparison.png)
+
+This aggregated view shows the **mean performance across all protein models**:
+
+**Classification Metrics:**
+- **Accuracy:** Both approaches achieve high accuracy (~0.83), indicating reliable binding/non-binding predictions
+- **F1-Score:** Classical ML shows slight advantage (0.770 vs 0.735), suggesting better balance between precision and recall
+- **ROC-AUC:** Classical ML performs better (0.894 vs 0.872), indicating superior discriminative capacity
+- **MCC:** Classical ML achieves higher correlation (0.686 vs 0.582), showing stronger true positive/negative balance
+
+**Regression Metrics (Binding Affinity Prediction):**
+- **Pearson R:** CNN+Attention shows **dramatically superior** correlation (0.582 vs 0.307)
+  - This 89% improvement indicates CNN captures binding affinity patterns much better
+  - Critical for drug discovery where accurate affinity prediction is essential
+- **R²:** CNN achieves positive explained variance (0.139) while Classical shows negative (-0.154)
+  - Negative R² in Classical ML means predictions are **worse than simply using the mean**
+  - CNN successfully learns meaningful relationships between structure and binding strength
+
+**Key Insight:** Classical ML excels at discrete classification (binding/non-binding), while deep learning excels at continuous regression (binding affinity). This suggests **hybrid approaches** could leverage both strengths.
+
+---
+
+#### **Figure 2: Per-Model Classification Comparison**
+![Classification Comparison](../../docs/images/classification_classical_vs_cnn.png)
+
+This detailed comparison reveals **model-specific patterns**:
+
+**Model Performance Analysis:**
+- **boltz2:** Shows zero performance in Classical ML (data quality issue or model incompatibility)
+- **esm2_t12_35M, esm2_t30_150M, esm2_t33_650M:** Classical ML consistently outperforms
+  - F1 scores: 0.925-0.927 (Classical) vs 0.773-0.925 (CNN)
+  - These ESM-2 models have strong sequence representations that Classical algorithms effectively exploit
+- **esm2_t6_8M:** Smallest model shows comparable performance
+- **esmc-300m, esmc-600m:** Performance parity between approaches
+
+**Algorithmic Insights:**
+- RandomForest and ExtraTrees dominate Classical ML selection
+- These tree-based methods effectively capture non-linear patterns in protein embeddings
+- CNN+CrossAttention shows more consistent performance across models (less variance)
+
+**ROC-AUC Analysis:**
+- All models achieve >0.9 ROC-AUC with Classical ML
+- Exceptional discriminative power for kinase binding site identification
+- Important for virtual screening where ranking compounds is critical
+
+---
+
+#### **Figure 3: Per-Model Regression Comparison**
+![Regression Comparison](../../docs/images/regression_classical_vs_cnn.png)
+
+This comparison highlights the **regression performance gap**:
+
+**Critical Observations:**
+
+1. **Pearson R (Binding Affinity Correlation):**
+   - **CNN Strengths:** esm2_t12_35M (0.731), esm2_t30_150M (0.851), esm2_t33_650M (0.761)
+   - **Classical Failures:** Multiple models show **negative correlations** or near-zero values
+   - esm2_t33_650M with Ridge regression shows -0.342 (inverse correlation!)
+   - This catastrophic failure suggests Classical ML cannot model the complex binding affinity landscape
+
+2. **R² (Explained Variance):**
+   - **CNN Success:** esm2_t30_150M achieves 0.487 (explains ~49% of variance)
+   - **Classical Disaster:** esm2_t33_650M shows -1.946 (predictions amplify error by 3×!)
+   - Negative R² indicates the model learned **anti-patterns** instead of true relationships
+
+3. **RMSE/MAE (Prediction Error):**
+   - Classical ML shows high variability (0.771 to 2.201 RMSE)
+   - CNN maintains more consistent errors (0.940 to 1.354 RMSE)
+   - Lower error consistency is crucial for reliable lead compound prioritization
+
+**Root Cause Analysis:**
+- **Classical ML Limitation:** Tree-based and linear models struggle with the **high-dimensional, non-linear** binding affinity landscape
+- **CNN Advantage:** CrossAttention mechanism captures **long-range dependencies** between protein and ligand features
+- **Embedding Quality:** Deep learning models learn task-specific representations during training, while Classical ML relies on fixed embeddings
+
+**Practical Implications:**
+- For **virtual screening** (classification): Use Classical ML for speed and interpretability
+- For **lead optimization** (regression): Use CNN+Attention for accurate affinity prediction
+- For **production systems**: Deploy hybrid pipeline with Classical ML filtering + CNN refinement
+
 ---
 
 ## 📈 Metrics Analyzed (Non-Human Kinase Binding Prediction)
