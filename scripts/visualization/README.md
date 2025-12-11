@@ -348,22 +348,6 @@ This comparison highlights the **regression performance gap**:
 
 ---
 
-## ⚠️ Critical Fixes Applied (2025-12-10)
-
-### **Problem Identified:**
-The system was **distorting regression metrics** using `max(0, pearson)` and `abs(pearson)`, destroying information about negative correlations.
-
-### **Corrections Applied:**
-1. ✅ Removed `max(0, pearson_r)` - now preserves negative correlations
-2. ✅ Removed `abs(pearson_r)` - now distinguishes correlation direction
-3. ✅ Correct transformation: `(value + 1) / 2` for scoring
-4. ✅ Added qualitative interpretation: "Excellent", "Weak", "Worse than baseline"
-5. ✅ Automatic warnings when performance < 40
-
-**See details in:** `CRITICAL_FIXES_APPLIED.md`
-
----
-
 ## 🎨 Visual Features
 
 ### **Color Palette**
