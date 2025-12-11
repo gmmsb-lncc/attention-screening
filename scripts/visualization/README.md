@@ -22,36 +22,6 @@ scripts/visualization/
 
 ---
 
-## 🎯 Design Principles
-
-### SOLID
-
-- **Single Responsibility**: Each module has one responsibility
-  - `data_loader`: loads data only
-  - `metrics_extractor`: extracts metrics only
-  - `basic_plots`: creates basic plots only
-  - `advanced_plots`: creates advanced plots only
-  - `report_generator`: generates reports only
-
-- **Open/Closed**: Easy to extend with new visualizations or metrics without modifying existing code
-
-- **Dependency Inversion**: Main scripts depend on abstractions (classes), not concrete implementations
-
-### KISS (Keep It Simple, Stupid)
-
-- Small, focused functions
-- Clear and direct logic
-- No unnecessary complexity
-
-### Clean Code
-
-- Descriptive, self-explanatory names
-- Single-responsibility functions
-- Comments only where necessary
-- Self-documenting code
-
----
-
 ## 📦 Modules
 
 ### 1. `data_loader.py`
