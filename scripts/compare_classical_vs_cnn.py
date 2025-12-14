@@ -232,12 +232,24 @@ def plot_classification_comparison(df: pd.DataFrame, output_dir: Path) -> Path:
     # Métricas principais
     metrics = ['F1', 'Accuracy', 'ROC_AUC', 'MCC']
     
+    # Mapear protein models para algoritmos clássicos
+    algo_map = {}
+    for _, row in df[df['Type'] == 'Classical ML'].iterrows():
+        algo_map[row['Protein_Model']] = row['Algorithm']
+    
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.subplots_adjust(hspace=0.3, wspace=0.25)
+    fig.subplots_adjust(hspace=0.35, wspace=0.25, top=0.88, bottom=0.08)
     fig.suptitle('Comparação: Modelos Clássicos vs CNN+Atenção Cruzada - Classificação', 
-                 fontsize=16, fontweight='bold', y=0.995)
+                 fontsize=16, fontweight='bold', y=0.985)
     
     colors = {'Classical ML': '#3498db', 'CNN+Attention': '#e74c3c'}
+    
+    # Legenda única no canto superior direito
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors['Classical ML'], alpha=0.8, label='Classical ML (Best)'),
+                      Patch(facecolor=colors['CNN+Attention'], alpha=0.8, label='CNN+Attention')]
+    fig.legend(handles=legend_elements, loc='upper right', ncol=1, fontsize=9, 
+              bbox_to_anchor=(0.98, 0.94), frameon=True, framealpha=0.95)
     
     for idx, metric in enumerate(metrics):
         row = idx // 2
@@ -261,13 +273,20 @@ def plot_classification_comparison(df: pd.DataFrame, output_dir: Path) -> Path:
         bars2 = ax.bar(x + width/2, df_pivot.get('CNN+Attention', [0]*len(x)), 
                        width, label='CNN+Attention', color=colors['CNN+Attention'], alpha=0.8)
         
-        # Adicionar valores nas barras
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
-                           f'{height:.3f}', ha='center', va='bottom', fontsize=8)
+        # Adicionar valores e algoritmos nas barras
+        for i, bar in enumerate(bars1):
+            height = bar.get_height()
+            if height > 0:
+                protein_model = df_pivot.index[i]
+                algo_name = algo_map.get(protein_model, '')
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                       f'{height:.3f}\n({algo_name})', ha='center', va='bottom', fontsize=7)
+        
+        for bar in bars2:
+            height = bar.get_height()
+            if height > 0:
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                       f'{height:.3f}', ha='center', va='bottom', fontsize=8)
         
         # Configurações
         ax.set_title(metric, fontweight='bold', fontsize=13, pad=10)
@@ -276,13 +295,12 @@ def plot_classification_comparison(df: pd.DataFrame, output_dir: Path) -> Path:
         ax.set_xticklabels(df_pivot.index, rotation=45, ha='right', fontsize=9)
         
         if metric == 'MCC':
-            ax.set_ylim(-0.2, 1.05)
-            ax.axhline(y=0, color='gray', linestyle='--', alpha=0.3)
+            ax.set_ylim(0, 1.1)
+            ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.3)
         else:
-            ax.set_ylim(0, 1.05)
+            ax.set_ylim(0, 1.1)
         
         ax.grid(axis='y', alpha=0.3, linestyle='--')
-        ax.legend(loc='upper left', fontsize=9)
         
         # Linhas de referência
         if metric != 'MCC':
@@ -304,12 +322,24 @@ def plot_regression_comparison(df: pd.DataFrame, output_dir: Path) -> Path:
     
     metrics = ['Pearson_R', 'R2', 'RMSE', 'MAE']
     
+    # Mapear protein models para algoritmos clássicos
+    algo_map = {}
+    for _, row in df[df['Type'] == 'Classical ML'].iterrows():
+        algo_map[row['Protein_Model']] = row['Algorithm']
+    
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.subplots_adjust(hspace=0.3, wspace=0.25)
+    fig.subplots_adjust(hspace=0.35, wspace=0.25, top=0.88, bottom=0.08)
     fig.suptitle('Comparação: Modelos Clássicos vs CNN+Atenção Cruzada - Regressão', 
-                 fontsize=16, fontweight='bold', y=0.995)
+                 fontsize=16, fontweight='bold', y=0.985)
     
     colors = {'Classical ML': '#3498db', 'CNN+Attention': '#e74c3c'}
+    
+    # Legenda única no canto superior direito
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors['Classical ML'], alpha=0.8, label='Classical ML (Best)'),
+                      Patch(facecolor=colors['CNN+Attention'], alpha=0.8, label='CNN+Attention')]
+    fig.legend(handles=legend_elements, loc='upper right', ncol=1, fontsize=9, 
+              bbox_to_anchor=(0.98, 0.94), frameon=True, framealpha=0.95)
     
     for idx, metric in enumerate(metrics):
         row = idx // 2
@@ -331,29 +361,36 @@ def plot_regression_comparison(df: pd.DataFrame, output_dir: Path) -> Path:
         bars2 = ax.bar(x + width/2, df_pivot.get('CNN+Attention', [0]*len(x)), 
                        width, label='CNN+Attention', color=colors['CNN+Attention'], alpha=0.8)
         
-        # Adicionar valores
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
-                       f'{height:.3f}', ha='center', va='bottom', fontsize=8)
+        # Adicionar valores e algoritmos
+        for i, bar in enumerate(bars1):
+            height = bar.get_height()
+            protein_model = df_pivot.index[i]
+            algo_name = algo_map.get(protein_model, '')
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                   f'{height:.3f}\n({algo_name})', ha='center', va='bottom', fontsize=7)
+        
+        for bar in bars2:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                   f'{height:.3f}', ha='center', va='bottom', fontsize=8)
         
         ax.set_title(metric, fontweight='bold', fontsize=13, pad=10)
         ax.set_ylabel('Score', fontweight='bold', fontsize=11)
         ax.set_xticks(x)
         ax.set_xticklabels(df_pivot.index, rotation=45, ha='right', fontsize=9)
         
-        # Ajustar limites baseado na métrica
+        # Ajustar limites baseado na métrica com escala padronizada
         if metric in ['Pearson_R', 'R2']:
-            y_min = min(df[metric].min() - 0.1, -0.1)
-            y_max = max(df[metric].max() + 0.1, 1.0)
-            ax.set_ylim(y_min, y_max)
-            ax.axhline(y=0, color='gray', linestyle='--', alpha=0.3)
+            ax.set_ylim(0, 1.1)
+            ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.3)
+            # Linhas de referência
+            ax.axhline(y=0.7, color='orange', linestyle='--', alpha=0.2, linewidth=1)
+            ax.axhline(y=0.9, color='green', linestyle='--', alpha=0.2, linewidth=1)
         else:  # RMSE, MAE
-            ax.set_ylim(0, df[metric].max() * 1.2)
+            y_max = max(2.0, df[metric].max() * 1.2)
+            ax.set_ylim(0, y_max)
         
         ax.grid(axis='y', alpha=0.3, linestyle='--')
-        ax.legend(loc='best', fontsize=9)
     
     plt.tight_layout()
     output_path = output_dir / 'regression_classical_vs_cnn.png'
@@ -368,16 +405,53 @@ def plot_aggregated_comparison(df_class: pd.DataFrame, df_reg: pd.DataFrame, out
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Filtrar CNN para usar apenas modelo 150M
+    df_class_cnn_150m = df_class[
+        (df_class['Type'] == 'CNN+Attention') & 
+        (df_class['Protein_Model'].str.contains('150M|t30_150M', case=False))
+    ]
+    df_reg_cnn_150m = df_reg[
+        (df_reg['Type'] == 'CNN+Attention') & 
+        (df_reg['Protein_Model'].str.contains('150M|t30_150M', case=False))
+    ]
+    
+    # Combinar Classical ML (todos) com CNN (apenas 150M)
+    df_class_filtered = pd.concat([
+        df_class[df_class['Type'] == 'Classical ML'],
+        df_class_cnn_150m
+    ])
+    df_reg_filtered = pd.concat([
+        df_reg[df_reg['Type'] == 'Classical ML'],
+        df_reg_cnn_150m
+    ])
+    
+    # Mapear melhor algoritmo por métrica para classificação
+    class_algo_map = {}
+    for metric in ['Accuracy', 'F1', 'ROC_AUC', 'MCC']:
+        df_metric = df_class[df_class['Type'] == 'Classical ML']
+        best_idx = df_metric[metric].idxmax()
+        best_algo = df_metric.loc[best_idx, 'Algorithm']
+        class_algo_map[metric] = best_algo
+    
+    # Mapear melhor algoritmo por métrica para regressão
+    reg_algo_map = {}
+    for metric in ['Pearson_R', 'R2']:
+        df_metric = df_reg[df_reg['Type'] == 'Classical ML']
+        best_idx = df_metric[metric].idxmax()
+        best_algo = df_metric.loc[best_idx, 'Algorithm']
+        reg_algo_map[metric] = best_algo
+    
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    fig.subplots_adjust(top=0.88, bottom=0.12)
     fig.suptitle('Performance Média: Classical ML vs CNN+Atenção Cruzada', 
-                 fontsize=16, fontweight='bold')
+                 fontsize=16, fontweight='bold', y=0.98)
     
     colors = {'Classical ML': '#3498db', 'CNN+Attention': '#e74c3c'}
     
     # Classificação
     ax = axes[0]
     class_metrics = ['Accuracy', 'F1', 'ROC_AUC', 'MCC']
-    class_means = df_class.groupby('Type')[class_metrics].mean()
+    class_means = df_class_filtered.groupby('Type')[class_metrics].mean()
     
     x = np.arange(len(class_metrics))
     width = 0.35
@@ -387,22 +461,26 @@ def plot_aggregated_comparison(df_class: pd.DataFrame, df_reg: pd.DataFrame, out
         bars = ax.bar(x + offset, row.values, width, label=type_name, 
                      color=colors[type_name], alpha=0.8)
         
-        for bar, val in zip(bars, row.values):
-            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
-                   f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        for bar, val, metric in zip(bars, row.values, class_metrics):
+            if type_name == 'Classical ML':
+                algos = class_algo_map.get(metric, '')
+                ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                       f'{val:.3f}\n({algos})', ha='center', va='bottom', fontsize=8, fontweight='bold')
+            else:
+                ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                       f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
     
     ax.set_title('Classificação', fontweight='bold', fontsize=14, pad=15)
     ax.set_ylabel('Score Médio', fontweight='bold', fontsize=12)
     ax.set_xticks(x)
     ax.set_xticklabels(class_metrics, fontsize=11)
     ax.set_ylim(0, 1.1)
-    ax.legend(fontsize=11)
     ax.grid(axis='y', alpha=0.3)
     
     # Regressão
     ax = axes[1]
     reg_metrics = ['Pearson_R', 'R2']
-    reg_means = df_reg.groupby('Type')[reg_metrics].mean()
+    reg_means = df_reg_filtered.groupby('Type')[reg_metrics].mean()
     
     x = np.arange(len(reg_metrics))
     
@@ -411,18 +489,33 @@ def plot_aggregated_comparison(df_class: pd.DataFrame, df_reg: pd.DataFrame, out
         bars = ax.bar(x + offset, row.values, width, label=type_name,
                      color=colors[type_name], alpha=0.8)
         
-        for bar, val in zip(bars, row.values):
-            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
-                   f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        for bar, val, metric in zip(bars, row.values, reg_metrics):
+            if type_name == 'Classical ML':
+                algos = reg_algo_map.get(metric, '')
+                ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                       f'{val:.3f}\n({algos})', ha='center', va='bottom', fontsize=8, fontweight='bold')
+            else:
+                ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                       f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
     
     ax.set_title('Regressão', fontweight='bold', fontsize=14, pad=15)
     ax.set_ylabel('Score Médio', fontweight='bold', fontsize=12)
     ax.set_xticks(x)
     ax.set_xticklabels(reg_metrics, fontsize=11)
-    ax.axhline(y=0, color='gray', linestyle='--', alpha=0.3)
-    ax.set_ylim(reg_means.values.min() - 0.1, 1.0)
-    ax.legend(fontsize=11)
+    ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.3)
+    ax.axhline(y=0.7, color='orange', linestyle='--', alpha=0.2, linewidth=1)
+    ax.axhline(y=0.9, color='green', linestyle='--', alpha=0.2, linewidth=1)
+    ax.set_ylim(0, 1.1)
     ax.grid(axis='y', alpha=0.3)
+    
+    # Adicionar legenda padronizada
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=colors['Classical ML'], label='Classical ML (Best)', alpha=0.8),
+        Patch(facecolor=colors['CNN+Attention'], label='CNN+Attention (ESM2-150M)', alpha=0.8)
+    ]
+    fig.legend(handles=legend_elements, loc='upper right', ncol=1, fontsize=9,
+               bbox_to_anchor=(0.98, 0.94), frameon=True, framealpha=0.95)
     
     plt.tight_layout()
     output_path = output_dir / 'aggregated_comparison.png'
@@ -449,8 +542,9 @@ def plot_best_algorithm_distribution(classical: Dict, output_dir: Path) -> Path:
         reg_algos[reg_algo] = reg_algos.get(reg_algo, 0) + 1
     
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    fig.subplots_adjust(top=0.88)
     fig.suptitle('Distribuição dos Melhores Algoritmos Clássicos por Protein Model', 
-                 fontsize=16, fontweight='bold')
+                 fontsize=16, fontweight='bold', y=0.98)
     
     # Classificação
     ax = axes[0]
@@ -515,21 +609,37 @@ def generate_summary_report(df_class: pd.DataFrame, df_reg: pd.DataFrame,
         f.write('## 🎯 Performance Média\n\n')
         f.write('### Classificação\n\n')
         class_means = df_class.groupby('Type')[['Accuracy', 'F1', 'ROC_AUC', 'MCC']].mean()
-        f.write(class_means.to_markdown() + '\n\n')
+        f.write('| Type | Accuracy | F1 | ROC_AUC | MCC |\n')
+        f.write('|---|---|---|---|---|\n')
+        for type_name, row in class_means.iterrows():
+            f.write(f'| {type_name} | {row["Accuracy"]:.3f} | {row["F1"]:.3f} | {row["ROC_AUC"]:.3f} | {row["MCC"]:.3f} |\n')
+        f.write('\n')
         
         f.write('### Regressão\n\n')
         reg_means = df_reg.groupby('Type')[['Pearson_R', 'R2', 'RMSE', 'MAE']].mean()
-        f.write(reg_means.to_markdown() + '\n\n')
+        f.write('| Type | Pearson_R | R2 | RMSE | MAE |\n')
+        f.write('|---|---|---|---|---|\n')
+        for type_name, row in reg_means.iterrows():
+            f.write(f'| {type_name} | {row["Pearson_R"]:.3f} | {row["R2"]:.3f} | {row["RMSE"]:.3f} | {row["MAE"]:.3f} |\n')
+        f.write('\n')
         
         # Melhores modelos
         f.write('## 🏆 Melhores Modelos\n\n')
         f.write('### Classificação (por F1)\n')
         best_class = df_class.nlargest(3, 'F1')[['Protein_Model', 'Type', 'Algorithm', 'F1', 'Accuracy', 'ROC_AUC']]
-        f.write(best_class.to_markdown(index=False) + '\n\n')
+        f.write('| Protein_Model | Type | Algorithm | F1 | Accuracy | ROC_AUC |\n')
+        f.write('|---|---|---|---|---|---|\n')
+        for _, row in best_class.iterrows():
+            f.write(f'| {row["Protein_Model"]} | {row["Type"]} | {row["Algorithm"]} | {row["F1"]:.3f} | {row["Accuracy"]:.3f} | {row["ROC_AUC"]:.3f} |\n')
+        f.write('\n')
         
         f.write('### Regressão (por Pearson R)\n')
         best_reg = df_reg.nlargest(3, 'Pearson_R')[['Protein_Model', 'Type', 'Algorithm', 'Pearson_R', 'R2', 'RMSE']]
-        f.write(best_reg.to_markdown(index=False) + '\n\n')
+        f.write('| Protein_Model | Type | Algorithm | Pearson_R | R2 | RMSE |\n')
+        f.write('|---|---|---|---|---|---|\n')
+        for _, row in best_reg.iterrows():
+            f.write(f'| {row["Protein_Model"]} | {row["Type"]} | {row["Algorithm"]} | {row["Pearson_R"]:.3f} | {row["R2"]:.3f} | {row["RMSE"]:.3f} |\n')
+        f.write('\n')
         
         # Análise comparativa
         f.write('## 🔍 Análise Comparativa\n\n')
@@ -559,7 +669,11 @@ def generate_summary_report(df_class: pd.DataFrame, df_reg: pd.DataFrame,
             })
         
         df_comparison = pd.DataFrame(metrics_comparison)
-        f.write(df_comparison.to_markdown(index=False) + '\n\n')
+        f.write('| Métrica | Vencedor | Diferença |\n')
+        f.write('|---|---|---|\n')
+        for _, row in df_comparison.iterrows():
+            f.write(f'| {row["Métrica"]} | {row["Vencedor"]} | {row["Diferença"]} |\n')
+        f.write('\n')
         
         # Distribuição de algoritmos clássicos
         if classical:
@@ -625,6 +739,12 @@ def main():
         default='results/classical_vs_cnn',
         help='Diretório de saída'
     )
+    parser.add_argument(
+        '--filter-models',
+        nargs='+',
+        default=None,
+        help='Filtrar por nomes específicos de protein models (ex: ESM-2-150M esmc-300M esmc-600M)'
+    )
     
     args = parser.parse_args()
     output_dir = Path(args.output)
@@ -647,6 +767,13 @@ def main():
         return 1
     
     print(f'✅ {len(classical)} modelos clássicos e {len(cnn)} modelos CNN carregados')
+    
+    # 1.5. Filtrar modelos se especificado
+    if args.filter_models:
+        print(f'\n🔍 Filtrando para {len(args.filter_models)} protein models...')
+        classical = {k: v for k, v in classical.items() if k in args.filter_models}
+        cnn = {k: v for k, v in cnn.items() if k in args.filter_models}
+        print(f'✅ {len(classical)} modelos clássicos e {len(cnn)} modelos CNN após filtro')
     
     # 2. Criar DataFrames
     print('\n📊 Criando DataFrames de comparação...')
