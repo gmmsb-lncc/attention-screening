@@ -1,14 +1,14 @@
-# DockTKinase: Semantic Interaction Prediction via Multi-Modal Foundation Models
+# semantic-screening: Semantic Interaction Prediction via Multi-Modal Foundation Models
 
-**Author**: DockTKinase Development Team  
-**Date**: December 6, 2025  
-**Version**: 1.3
+**Author**: Leon Sulfierry (GMMSB-LNCC)  
+**Date**: January 2026  
+**Version**: 2.0 (Aligned with PhD Thesis)
 
 ---
 
 ## Abstract
 
-The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This dissertation presents **DockTKinase**, a modular, scalable, and scientifically rigorous deep learning framework designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-C) and Chemical Foundation Models (SMI-TED) within a novel Cross-Attention Convolutional architecture, DockTKinase learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the DockTKinase system.
+The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-C) and Chemical Foundation Models (SMI-TED) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
 
 ---
 
@@ -16,13 +16,15 @@ The accurate identification of potent kinase inhibitors is a cornerstone of mode
 
 ### 1.1 The Kinase Drug Discovery Challenge
 
-Protein kinases are enzymes that catalyze the transfer of a phosphate group from ATP to specific substrates (phosphorylation). This process acts as a molecular 'on/off' switch for cellular pathways. Dysregulation of kinases is a primary driver of cancer. The central pharmacological challenge lies in the **ATP-binding pocket**, which is highly conserved across the >500 human kinases. This structural similarity makes it notoriously difficult to design **selective inhibitors** that target a specific kinase without causing off-target toxicity.
+Protein kinases constitute approximately 2% of the human proteome (518 genes per Manning et al. taxonomy) but regulate an estimated 30% of all cellular proteins through reversible phosphorylation. This topological centrality in cell signaling networks establishes kinases as **control nodes** whose activation state determines fundamental cellular decisions. Kinase dysregulation—through activating mutations, gene amplification, chromosomal fusions, or loss of negative regulators—constitutes a driver oncogenic event across a broad spectrum of human malignancies. As of 2024, 72 small-molecule kinase inhibitors have obtained regulatory approval (FDA/EMA), generating global revenues exceeding $80 billion annually.
 
-DockTKinase addresses this by treating the interaction problem as a **multi-modal representation learning task**, aiming to capture subtle sequence variations that dictate selectivity.
+The central pharmacological challenge lies in the **Selectivity Paradox**: the ATP-binding pocket is highly conserved across the >500 human kinases (RMSD < 2Å between structurally distant kinases). This structural similarity makes it notoriously difficult to design **selective inhibitors** that target a specific kinase without causing off-target toxicity. Discriminating 10-fold selectivity requires ΔG differences of only 1.4 kcal/mol—below the systematic error of scoring functions (±2-3 kcal/mol).
+
+semantic-screening addresses this paradox by treating the interaction problem as a **multi-modal representation learning task**, aiming to capture subtle sequence variations that dictate selectivity through semantic compatibility in latent space rather than geometric fitting.
 
 ### 1.2 Defining the Prediction Tasks
 
-To effectively prioritize drug candidates, DockTKinase solves two distinct but complementary problems:
+To effectively prioritize drug candidates, semantic-screening solves two distinct but complementary problems:
 
 1.  **Binary Bioactivity Prediction (Classification)**:
     *   **Goal**: Filter the vast chemical space to identify "Active" compounds.
@@ -34,26 +36,29 @@ To effectively prioritize drug candidates, DockTKinase solves two distinct but c
     *   **Definition**: Predict the precise thermodynamic value, typically represented as $pChEMBL = -\log_{10}(IC_{50}/K_i/K_d)$.
     *   **Role**: High-precision ranking for lead optimization.
 
-### 1.3 From Docking to Language Modeling: The DockTKinase Philosophy
+### 1.3 From Docking to Language Modeling: The semantic-screening Philosophy
 
-The name **DockTKinase** pays homage to **DockThor**, the renowned molecular docking platform developed by the GMMSB-LNCC group. However, a fundamental distinction exists in their methodologies. While DockThor relies on physics-based simulations and explicit 3D coordinate sampling to find optimal binding poses, DockTKinase adopts a purely **Natural Language Processing (NLP)** approach.
+The platform name **semantic-screening** reflects the fundamental paradigm shift proposed in this work. While traditional approaches like **DockThor** (the molecular docking platform developed by GMMSB-LNCC) rely on physics-based simulations and explicit 3D coordinate sampling to find optimal binding poses, semantic-screening adopts a purely **semantic** approach based on Protein Language Models.
 
-We treat biological interaction not as a geometric puzzle, but as a **semantic compatibility problem** between the "language" of protein sequences (amino acids) and the "language" of chemical structures (SMILES). By leveraging the attention mechanisms of Transformer models, DockTKinase infers interaction patterns from the evolutionary and chemical context embedded in these sequences. While we do not explicitly simulate the conformational changes of induced fit, our model learns to weight residue-atom pairs dynamically, effectively approximating the **energetic favorability** of the bound state in a high-dimensional latent space.
+We treat biological interaction not as a geometric puzzle, but as a **semantic compatibility problem** between the "language" of protein sequences (amino acids) and the "language" of chemical structures (SMILES). The central hypothesis (PhD Thesis, Chapter 1, Section 1.4) states: **sequence determines structure, which determines function**—and this mapping is computationally recoverable via PLMs. By leveraging the attention mechanisms of Transformer models, semantic-screening infers interaction patterns from the evolutionary and chemical context embedded in these sequences.
 
-### 1.4 Motivation and Contribution
+The **DT-Kinase** architecture, implemented within semantic-screening, operationalizes this hypothesis through bidirectional cross-attention that learns position-specific correspondences between protein residues and ligand atoms, effectively performing "semantic docking" in a high-dimensional latent space.
 
-DockTKinase was developed to bridge the gap between high-throughput sequence data and structural insight. Our primary contributions are:
+### 1.4 Formal Design Criteria (from PhD Thesis, Chapter 2)
 
-1.  **Unified Embedding Space**: We leverage large-scale pre-trained transformers (ESM-2, Boltz-2, SMI-TED) to map biological entities into dense vector spaces that capture evolutionary and physicochemical properties.
-2.  **Bipartite Interaction Modeling**: We propose a hybrid CNN-Cross-Attention architecture that explicitly models the pairwise interactions between protein residues and ligand atoms, mimicking the physical reality of binding interfaces.
-3.  **Rigorous Validation**: We implement an adaptive clustering-based stratification strategy using MiniBatchKMeans with k-means++ initialization to enforce strict separation of homologous sequences between training and evaluation sets.
-4.  **Scalable Engineering**: The system is built on a modular architecture supporting CPU offloading, dynamic dimension synchronization, and multi-GPU training, enabling the processing of datasets with millions of interactions.
+semantic-screening was developed to satisfy five simultaneous requirements:
+
+1.  **Structural Independence**: The system must operate exclusively from primary sequences, eliminating dependence on 3D coordinates and guaranteeing universal applicability to the entire kinome (~40% of kinases lack experimental structures).
+2.  **Rich Semantic Representations**: Proteins and ligands must be encoded through pre-trained contextual embeddings capturing latent structural and functional information (ESM-2 for proteins, SMI-TED for ligands).
+3.  **Explicit Interaction Modeling**: Cross-attention mechanism between protein and ligand representations enables learning which regions of each entity are relevant for specific affinity prediction.
+4.  **Computational Scalability**: Throughput > 10⁶ predictions/hour, enabling ultralarge chemical library screening (10⁹ compounds) against complete kinome.
+5.  **Multi-Task Framework**: Joint prediction of binary bioactivity (classification) and quantitative affinity (regression) through shared training objective improves generalization via learning transferable representations.
 
 ---
 
 ## Chapter 2: Theoretical Foundations
 
-Before detailing the specific architecture of DockTKinase, it is essential to establish the theoretical framework that underpins our approach. This chapter introduces the core concepts of biological language modeling, explaining how proteins and molecules can be treated as linguistic entities and how modern deep learning techniques can extract meaningful representations from them.
+Before detailing the specific architecture of semantic-screening, it is essential to establish the theoretical framework that underpins our approach. This chapter introduces the core concepts of biological language modeling, explaining how proteins and molecules can be treated as linguistic entities and how modern deep learning techniques can extract meaningful representations from them.
 
 ### 2.1 The Language of Life: Proteins as Sequences
 
@@ -87,7 +92,7 @@ Computational methods must account for this flexibility.
 1.  **Molecular Docking**: Simulates the physical process of binding, exploring thousands of orientations (poses) and conformations. It is accurate but computationally expensive ($O(N^3)$ or worse).
 2.  **Machine Learning**: Attempts to learn a function $f(Protein, Ligand) \to Affinity$ from data.
 
-DockTKinase represents the next evolution of ML approaches. Unlike earlier models (e.g., DeepDTA) that relied on simple CNNs over one-hot encodings, we use **contextual embeddings** from Foundation Models. By combining the "protein understanding" of pLMs with the "chemical understanding" of chemical models, we aim to predict interaction compatibility directly from the learned latent spaces, approximating the thermodynamics of induced fit without explicit simulation.
+semantic-screening represents the next evolution of ML approaches. Unlike earlier models (e.g., DeepDTA) that relied on simple CNNs over one-hot encodings, we use **contextual embeddings** from Foundation Models. By combining the "protein understanding" of pLMs with the "chemical understanding" of chemical models, we aim to predict interaction compatibility directly from the learned latent spaces, approximating the thermodynamics of induced fit without explicit simulation.
 
 ### 2.4 Mathematical Formulation of Representation Learning
 
@@ -119,7 +124,7 @@ Where $d_k$ is the dimension of the attention head, serving as a scaling factor 
 
 ### 3.1 Modular Design Philosophy
 
-The DockTKinase system adheres to the **Separation of Concerns** principle, dividing the complex workflow of affinity prediction into three distinct, loosely coupled modules. This modularity ensures maintainability, testability, and the flexibility to upgrade individual components without systemic disruption.
+The semantic-screening system adheres to the **Separation of Concerns** principle, dividing the complex workflow of affinity prediction into three distinct, loosely coupled modules. This modularity ensures maintainability, testability, and the flexibility to upgrade individual components without systemic disruption.
 
 The architecture is composed of the following core subsystems:
 
@@ -129,7 +134,7 @@ The architecture is composed of the following core subsystems:
 
 ### 3.2 The Strategy Pattern for Model Integration
 
-A critical architectural challenge in modern bioinformatics is the rapid pace of model evolution. To accommodate this, DockTKinase employs the **Strategy Design Pattern** for embedding generation. This allows the system to switch between different protein language models (e.g., ESM-2, ESM-C, Boltz-2) and ligand encoders (e.g., SMI-TED) at runtime, while maintaining a consistent API for the downstream pipelines.
+A critical architectural challenge in modern bioinformatics is the rapid pace of model evolution. To accommodate this, semantic-screening employs the **Strategy Design Pattern** for embedding generation. This allows the system to switch between different protein language models (e.g., ESM-2, ESM-C, Boltz-2) and ligand encoders (e.g., SMI-TED) at runtime, while maintaining a consistent API for the downstream pipelines.
 
 #### 3.2.1 Protein Embedding Strategy
 
@@ -156,7 +161,7 @@ This linear flow is augmented by a robust **Checkpoint System**, which caches in
 
 ## Chapter 4: Data Representation & Embeddings
 
-The efficacy of any deep learning model is fundamentally limited by the quality of its input representations. DockTKinase eschews manual feature engineering (e.g., molecular fingerprints, physicochemical descriptors) in favor of learned representations from large-scale foundation models.
+The efficacy of any deep learning model is fundamentally limited by the quality of its input representations. semantic-screening eschews manual feature engineering (e.g., molecular fingerprints, physicochemical descriptors) in favor of learned representations from large-scale foundation models.
 
 ### 4.1 Protein Representation: The Language of Life
 
@@ -218,7 +223,7 @@ These aggregated vectors serve as the input features for the Classical Machine L
 
 ## Chapter 5: Classical Machine Learning Suite
 
-While the Deep Learning module focuses on end-to-end representation learning, DockTKinase incorporates a robust **Classical Machine Learning Suite** (`src.classifier`) to serve as a high-recall filter and baseline comparator. This module implements 12 distinct algorithms, ranging from probabilistic models to state-of-the-art gradient boosting machines.
+While the Deep Learning module focuses on end-to-end representation learning, semantic-screening incorporates a robust **Classical Machine Learning Suite** (`src.classifier`) to serve as a high-recall filter and baseline comparator. This module implements 12 distinct algorithms, ranging from probabilistic models to state-of-the-art gradient boosting machines.
 
 **Input**: These models operate on the **fixed-size aggregated vectors** derived from the Foundation Models (as described in Section 4.3), effectively treating the embeddings as high-quality, pre-computed feature vectors.
 
@@ -277,7 +282,7 @@ A feedforward artificial neural network. While simpler than our Cross-Attention 
 
 ## Chapter 6: Deep Learning Architectures for Affinity Prediction
 
-DockTKinase introduces a specialized neural architecture designed to model the physical interaction between a protein target and a ligand molecule. Unlike previous approaches (e.g., DeepDTA, GraphDTA) that rely on shallow representations or fixed descriptors, our model leverages the rich, contextual embeddings from Foundation Models to learn a **bipartite interaction function**.
+semantic-screening introduces a specialized neural architecture designed to model the physical interaction between a protein target and a ligand molecule. Unlike previous approaches (e.g., DeepDTA, GraphDTA) that rely on shallow representations or fixed descriptors, our model leverages the rich, contextual embeddings from Foundation Models to learn a **bipartite interaction function**.
 
 **Input**: Unlike the classical models, this architecture processes the **full sequence embeddings** ($L \times D$) from Chapter 4, preserving the spatial and sequential context of every residue and atom.
 
@@ -306,7 +311,7 @@ While ESM-2 captures global evolutionary context, its embeddings are trained on 
 1.  **Task Adaptation**: They project the general-purpose evolutionary features into a binding-specific latent space.
 2.  **Local Motif Enhancement**: They explicitly emphasize local physicochemical motifs (e.g., hydrophobic patches, charge clusters) that drive the initial stages of molecular recognition, filtering out evolutionary noise that is irrelevant to the specific binding task.
 
-DockTKinase employs a **Hybrid Architecture** that combines the best of both worlds:
+semantic-screening employs a **Hybrid Architecture** that combines the best of both worlds:
 
 1.  **Local Feature Extraction (CNN)**: The raw embeddings from the Foundation Models are first passed through a multi-scale 1D-CNN encoder (`src.classifier.models.cnn_encoder`).
     *   **Kernels**: We use varying kernel sizes (3, 5, 7) to capture motifs of different lengths.
@@ -331,7 +336,7 @@ We also explore a global context approach (`VisionTransformerModel`) where the p
 
 ### 6.4 The Dual-Task Strategy: Classification & Regression
 
-DockTKinase is designed to solve two distinct but related problems simultaneously: identifying *active* compounds (Classification) and predicting their *potency* (Regression).
+semantic-screening is designed to solve two distinct but related problems simultaneously: identifying *active* compounds (Classification) and predicting their *potency* (Regression).
 
 #### 6.4.1 Binary Bioactivity Prediction
 The primary goal is to filter the vast chemical space for potential hits. We define a binary label $y_{cls} \in \{0, 1\}$ based on a threshold (typically $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$).
@@ -388,7 +393,7 @@ Standard random splitting assumes independent and identically distributed (i.i.d
 
 ### 7.2 Adaptive Clustering Stratification
 
-To address this, DockTKinase implements a rigorous **Clustering-based Stratification** strategy. The goal is to ensure that no cluster of similar proteins spans across the train/test boundary.
+To address this, semantic-screening implements a rigorous **Clustering-based Stratification** strategy. The goal is to ensure that no cluster of similar proteins spans across the train/test boundary.
 
 #### 7.2.1 Algorithm
 We employ a rigorous **Clustering-based Stratification** strategy using **MiniBatchKMeans** with **k-means++** initialization. This approach ensures robust cluster centers and computational efficiency ($O(n)$) for large datasets.
@@ -429,7 +434,7 @@ We evaluate model performance using a comprehensive suite of metrics:
 
 ## Chapter 8: Implementation & Engineering
 
-DockTKinase is engineered not just as a research prototype, but as a scalable production system capable of handling industrial-scale datasets.
+semantic-screening is engineered not just as a research prototype, but as a scalable production system capable of handling industrial-scale datasets.
 
 ### 8.1 Scalability and Resource Management
 
@@ -441,13 +446,13 @@ For data preprocessing and matrix construction, we utilize **Apache Spark** (via
 
 ### 8.2 Checkpointing and Caching
 
-Given the computational cost of embedding generation, DockTKinase implements a granular checkpointing system.
+Given the computational cost of embedding generation, semantic-screening implements a granular checkpointing system.
 *   **Embedding Cache**: Embeddings for unique proteins and ligands are cached on disk (`.npy` format). If a sequence reappears in a new dataset, its embedding is retrieved rather than recomputed.
 ### 8.3 Dynamic Dimension Synchronization
 
 A significant engineering challenge in multi-modal learning is handling the varying dimensionality of upstream models. A 15B parameter protein model outputs 5120-dimensional vectors, while a standard ligand model outputs 768 dimensions.
 
-DockTKinase implements a **Dynamic Dimension Synchronization** system within `src.build.core.config.BuildConfig`. This system automatically detects the selected model configuration and adjusts the input layers of the downstream neural networks accordingly.
+semantic-screening implements a **Dynamic Dimension Synchronization** system within `src.build.core.config.BuildConfig`. This system automatically detects the selected model configuration and adjusts the input layers of the downstream neural networks accordingly.
 
 ```python
 # Conceptual Logic
@@ -466,7 +471,7 @@ This ensures that the architecture is agnostic to the specific foundation model 
 
 ## Chapter 9: Model Inventory & Complexity Analysis
 
-To provide a comprehensive overview of the computational landscape within DockTKinase, we present a consolidated inventory of all machine learning models and transformers utilized. The models are categorized by their role (Representation vs. Prediction) and ordered by architectural complexity.
+To provide a comprehensive overview of the computational landscape within semantic-screening, we present a consolidated inventory of all machine learning models and transformers utilized. The models are categorized by their role (Representation vs. Prediction) and ordered by architectural complexity.
 
 ### 9.1 Foundation Models (Transformers)
 
@@ -504,7 +509,7 @@ These models consume the embeddings generated by the Foundation Models to perfor
 | **KNN** | Instance-based | High | `n_neighbors=5`, `weights='distance'` | Proximity-based classification. |
 | **Gradient Boosting** | Boosting | Very High | `n_estimators=100`, `max_depth=5` | Sequential error correction. |
 | **MLP** | Neural Network | Very High | `hidden=(100, 50)`, `max_iter=50` | Multi-layer perceptron (2 layers). |
-| **DockTKinase-DL** | Hybrid Deep Learning | **Extreme** | `heads=8`, `layers=2`, `hidden=256` | **End-to-End**: CNN (Local) + Cross-Attention (Global). |
+| **DT-Kinase** | Hybrid Deep Learning | **Extreme** | `heads=8`, `layers=2`, `hidden=256` | **End-to-End**: CNN (Local) + Cross-Attention (Global). |
 
 ---
 
@@ -516,7 +521,7 @@ We introduce the **Generative Optimizer**, a module that leverages the bidirecti
 
 ### 10.1 The "Diagnose-and-Repair" Paradigm
 
-Traditional lead optimization relies on medicinal chemists' intuition to modify functional groups. DockTKinase automates this via a two-step process:
+Traditional lead optimization relies on medicinal chemists' intuition to modify functional groups. semantic-screening automates this via a two-step process:
 
 1.  **Diagnosis (Attention-Guided Masking)**: Identifying the "weak links" in the protein-ligand interaction.
 2.  **Repair (Masked Token Prediction)**: Using a chemical language model to suggest semantically valid replacements that improve affinity.
@@ -556,7 +561,7 @@ This closes the loop, creating a self-improving cycle where the model diagnoses 
 
 ## Conclusion
 
-DockTKinase represents a holistic approach to the protein-ligand affinity prediction problem. By synthesizing the representational power of foundation models (ESM, Boltz, SMI-TED) with a physics-inspired Cross-Attention architecture and a rigorous validation methodology, it offers a robust tool for computational drug discovery. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—DockTKinase can evolve, serving as a flexible platform for future research.
+semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-C, Boltz-2, SMI-TED) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology, it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
 
 ---
 

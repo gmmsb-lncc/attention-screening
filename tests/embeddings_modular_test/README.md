@@ -418,5 +418,5 @@ The test suite provides comprehensive coverage from basic validation to advanced
 
 ---
 
-**Maintained by**: DockTKinase Development Team  
+**Maintained by**: semantic-screening Development Team  
 **Contact**: For issues, open a GitHub issue or contact the team
