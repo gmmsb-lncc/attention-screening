@@ -106,9 +106,13 @@ For detailed information:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  STAGE 1: MULTI-SCALE CNN ENCODERS (Local Feature Extraction)               │
 │  • Conv1D with kernels {3, 5, 7} for multi-scale pattern recognition       │
-│  • Residual connections preserve feature hierarchy                          │
+│    - k=3: Local motifs (dipeptides, backbone interactions)                 │
+│    - k=5: Secondary structure elements (turns, loops)                       │
+│    - k=7: Extended motifs (α-helices, functional domains)                  │
+│  • Residual connections + BatchNorm + GELU activation                       │
 │  • LayerNorm for training stability                                         │
-│  └─→ Output: [seq_len/pool, hidden_dim]                                     │
+│  • Positional Encoding: Sinusoidal (default) or RoPE for unlimited length  │
+│  └─→ Output: [seq_len, hidden_dim=256] with local context                   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -123,20 +127,53 @@ For detailed information:
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  STAGE 3: MULTI-TASK PREDICTION HEAD                                        │
-│  • Classification: {Active, Inactive} (binary logits)                       │
-│  • Regression: Affinity value in pChEMBL scale (continuous)                 │
-│  • Joint optimization with task-weighted loss                               │
-│  └─→ Outputs: Classification logits + Regression value + Uncertainty       │
+│  • Pooling: Adaptive average pooling over sequence dimension                │
+│  • Concatenation: z = [z_protein; z_ligand] ∈ ℝ^(2×hidden_dim)             │
+│  • Classification: {Active, Inactive} (binary logits via BCE)               │
+│  • Regression: Affinity value in pChEMBL/pIC50 scale (MSE loss)             │
+│  • Joint optimization: L = α·L_cls + β·L_reg (default α=1.0, β=1.0)        │
+│  • Optional uncertainty weighting (Kendall et al., 2018)                    │
+│  └─→ Outputs: Classification logits + Regression value                      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Principles (from PhD Thesis Ch. 2)
 
-- **Structural Independence**: System must operate exclusively from primary sequences, eliminating dependence on 3D coordinates and guaranteeing universal applicability to the entire kinome
+- **Structural Independence**: System must operate exclusively from primary sequences, eliminating dependence on 3D coordinates and guaranteeing universal applicability to the entire kinome (~40% lack experimental structures)
 - **Rich Semantic Representations**: Proteins and ligands encoded through pre-trained contextual embeddings capturing latent structural and functional information (ESM-2 for proteins, SMI-TED for ligands)
 - **Explicit Interaction Modeling**: Cross-attention mechanism between protein and ligand representations enables learning which regions of each entity are relevant for specific affinity prediction
-- **Computational Scalability**: Throughput > 10⁶ predictions/hour, enabling ultralarge chemical library screening against complete kinome; linear scaling with multi-GPU clusters
-- **Multi-Task Framework**: Joint prediction of binary bioactivity and quantitative affinity through shared training objective improves generalization via learning transferable representations
+- **Computational Scalability**: Throughput > 10⁶ predictions/hour, enabling ultralarge chemical library screening (10⁹ compounds) against complete kinome (518 kinases); linear scaling with multi-GPU clusters
+- **Multi-Task Framework**: Joint prediction of binary bioactivity (BCE) and quantitative affinity (MSE) through shared training objective improves generalization via learning transferable representations
+
+### Implementation Details
+
+**Architecture Configuration** (default 'base' size):
+- Hidden dimension: 256
+- CNN layers: 3 (kernels: 3, 5, 7)
+- Cross-attention layers: 2
+- Attention heads: 8
+- Feed-forward dim: 1024
+- Dropout: 0.1
+- Positional encoding: Sinusoidal (default) or **RoPE** for variable-length sequences
+- Protein dim: 2560 (ESM-2 3B); Ligand dim: 768 (SMI-TED)
+
+**Positional Encoding Options:**
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| **Sinusoidal** | Classical Vaswani (2017); fixed max length | Standard sequences with known max length |
+| **RoPE** | Rotary Position Embedding (Su et al., 2024); unlimited length | Variable-length proteins, long sequences (>2000 residues) |
+
+RoPE (Rotary Position Embedding) encodes position through rotation rather than addition, preserving relative position information in attention. Key advantages:
+- **Unlimited sequence length**: No pre-defined max_len required
+- **Better extrapolation**: Generalizes to longer sequences than training data
+- **Relative position awareness**: Attention depends on position *difference*, not absolute position
+
+**Multi-Task Loss** (customizable weights):
+```
+L_total = α·BCE(classification) + β·MSE(regression)
+```
+Default: α=1.0, β=1.0 (equal weighting); weights are configurable for task prioritization.
 
 **Biological Interpretation:**
 The attention matrix $A_{ij}$ represents how much protein residue $i$ "attends to" ligand atom $j$. High attention weights correlate with physical interactions (H-bonds, hydrophobic contacts) in the binding pocket, enabling "semantic docking" without explicit 3D coordinates.
