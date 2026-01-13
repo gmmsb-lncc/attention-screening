@@ -1,6 +1,6 @@
 # 📦 Datasets de Referência
 
-Esta pasta contém os datasets originais utilizados para desenvolvimento e testes do projeto DockTKinase.
+Esta pasta contém os datasets originais utilizados para desenvolvimento e testes do projeto semantic-screening.
 
 ## 📊 Datasets Disponíveis
 

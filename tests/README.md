@@ -1,6 +1,6 @@
-# 🧪 Testes do DockTKinase
+# 🧪 Testes do semantic-screening
 
-Esta pasta contém todos os testes, validações e relatórios do sistema DockTKinase.
+Esta pasta contém todos os testes, validações e relatórios do sistema semantic-screening.
 
 ## 📋 Estrutura dos Testes
 

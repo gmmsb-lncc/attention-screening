@@ -347,14 +347,22 @@ python tests/benchmark_pipeline.py
 
 ## 📄 **License & Citation**
 
-This project is licensed under the MIT License. If you use semantic-screening in your research, please cite:
+This project is licensed under the MIT License. If you use semantic-screening or the DT-Kinase architecture in your research, please cite:
 
 ```bibtex
+@phdthesis{dtkinase2026,
+  title = {DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings},
+  author = {Leon Sulfierry},
+  year = {2026},
+  school = {Laboratório Nacional de Computação Científica (LNCC)},
+  type = {PhD Thesis}
+}
+
 @software{semanticscreening2025,
-  title={semantic-screening: Platform for semantic screening of protein-ligand interactions},
-  author={GMMSB-LNCC Team},
-  year={2025},
-  url={https://github.com/gmmsb-lncc/semantic-screening}
+  title = {semantic-screening: Open Platform for Semantic Protein-Ligand Interaction Screening},
+  author = {GMMSB-LNCC Team},
+  year = {2025},
+  url = {https://github.com/gmmsb-lncc/semantic-screening}
 }
 ```
 
