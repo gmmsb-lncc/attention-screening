@@ -2,7 +2,7 @@
 
 ## Overview
 
-Boltz-2 is a biomolecular foundation model that combines structure prediction with binding affinity estimation. This guide covers the integration of Boltz-2 into DockTKinase for protein embedding generation.
+Boltz-2 is a biomolecular foundation model that combines structure prediction with binding affinity estimation. This guide covers the integration of Boltz-2 into semantic-screening for protein embedding generation.
 
 ## Key Features
 
@@ -390,7 +390,7 @@ except RuntimeError as e:
 
 - [Boltz-2 Paper](https://arxiv.org/abs/2024.xxxxx)
 - [Boltz GitHub](https://github.com/jwohlwend/boltz)
-- [DockTKinase Documentation](../README.md)
+- [semantic-screening Documentation](../README.md)
 
 ---
 

@@ -1,19 +1,44 @@
-# DockTKinase 🧬
+# semantic-screening 🧬
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub](https://img.shields.io/badge/GitHub-gmmsb--lncc%2Fdocktkinase-green.svg)](https://github.com/gmmsb-lncc/docktkinase)
+[![GitHub](https://img.shields.io/badge/GitHub-gmmsb--lncc%2Fsemantic--screening-green.svg)](https://github.com/gmmsb-lncc/semantic-screening)
 
-**Integrated Pipeline for Protein-Ligand Property Prediction using Deep Learning**
+**Open-source platform for semantic screening of protein-ligand interactions using deep learning**
 
-DockTKinase combines state-of-the-art protein language models (ESM-2, ESM-C, Boltz-2) with molecular embeddings (SMI-TED) to predict compound activity against kinase targets. It features a hybrid CNN + Cross-Attention architecture for interaction modeling and a rigorous K-means++ stratification strategy to prevent data leakage.
+semantic-screening is an extensible platform combining state-of-the-art protein language models (ESM-2, ESM-C, Boltz-2) with molecular embeddings (SMI-TED) to predict compound activity against protein targets. It implements the **DT-Kinase** architecture—a hybrid CNN + Cross-Attention neural network for interaction modeling—alongside classical ML pipelines and rigorous stratification to prevent data leakage.
+
+### 🔬 Scientific Context & Motivation
+
+**Protein kinases** constitute approximately 2% of the human proteome (518 genes per Manning et al. taxonomy) but regulate an estimated 30% of all cellular proteins through reversible phosphorylation of serine, threonine, and tyrosine residues. This topological centrality in cell signaling networks establishes kinases as **control nodes** whose activation state determines fundamental cellular decisions: proliferation vs. quiescence, differentiation vs. pluripotency maintenance, survival vs. apoptosis.
+
+Kinase dysregulation—through activating mutations, gene amplification, chromosomal fusions, or loss of negative regulators—constitutes a driver oncogenic event across a broad spectrum of human malignancies. As of 2024, 72 small-molecule kinase inhibitors have obtained regulatory approval, generating global revenues exceeding $80 billion annually.
+
+**The Selectivity Paradox**: Despite clinical success, kinase pharmacology faces a fundamental paradox: how to achieve therapeutic selectivity across 518 enzymes sharing highly evolutionarily conserved catalytic architecture? The catalytic kinase domain presents extraordinary structural conservation, with RMSD < 2Å between ATP-binding sites of evolutionarily distant kinases. Systematic selectivity profiling reveals that clinically approved inhibitors typically modulate dozens of kinases beyond their primary target—resulting polypharmacology manifests as dose-limiting toxicities that narrow therapeutic windows.
+
+**Traditional approaches fail simultaneous criteria**:
+- **Molecular docking**: Scoring function error (±2-3 kcal/mol) exceeds the 1.4 kcal/mol difference required for 10-fold selectivity discrimination; ~40% of kinases lack experimental 3D structures
+- **Experimental panels**: Cost ~$75-100 per kinase-compound pair ($30-40K for full kinome profiling per compound); coverage limited to ~60% of kinome
+- **First-generation ML (DeepDTA)**: Late fusion via concatenation fails to explicitly model position-specific interactions; limited representations from raw sequences
+
+**The semantic-screening hypothesis** proposes a fundamental paradigm shift: abandon dependence on 3D geometric representations and operate directly on **information space encoded in primary sequences, interpreted through foundation deep learning models**. This reformulation substitutes the geometric question "How well does this ligand fit this site?" with the semantic question "How compatible are the latent representations of this protein and ligand in shared vector space?"
+
+**The DT-Kinase architecture** (implemented within semantic-screening) validates this hypothesis by:
+1. **Contextual encoding**: ESM-2/ESM-C embeddings integrate global sequence context via self-attention—residues in the binding site incorporate information from regulatory domains, activation loops, and distal regions
+2. **Explicit interaction modeling**: Cross-attention learns position-specific correspondences between protein residues and ligand atoms
+3. **Universal coverage**: Applicable to any protein with known sequence, including the ~40% of kinases without experimental structures
+4. **Scalability**: Throughput > 10⁶ predictions/hour enables ultralarge library (10⁹ compounds) screening against complete kinome
 
 ---
 
 ## 📚 Documentation
 
-For detailed information, please refer to the full documentation:
+**Start here to understand the concepts**:
+
+- **[Concepts: semantic-screening vs DT-Kinase](docs/CONCEPTS.md)** ⭐ **START HERE** - Clarifies the distinction between the platform and the neural architecture
+
+For detailed information:
 
 - **[Methodology & Theory](docs/methodology.md)** - Comprehensive scientific background.
 - **[User Guide](docs/02-user-guide/)** - Detailed usage instructions and workflows.
@@ -58,42 +83,60 @@ For detailed information, please refer to the full documentation:
 |-------|---------------|-------------|
 | `fm4m` (SMI-TED) | 768 | Molecular foundation model from IBM Research |
 
-## CNN + Cross-Attention Model
+## The DT-Kinase Architecture
 
-The deep learning component implements a **hybrid CNN-Transformer architecture** that leverages convolutional neural networks for local feature extraction and cross-attention mechanisms for modeling non-local protein-ligand interactions.
+**DT-Kinase** is the neural network architecture implemented within semantic-screening that solves protein-ligand interaction prediction through semantic embeddings. It combines:
 
-### Architecture Overview
+1. **Protein Encoding**: Per-residue embeddings from Protein Language Models (ESM-2, ESM-C, Boltz-2) capture evolutionary constraints and implicit structural information
+2. **Ligand Encoding**: Per-atom embeddings from chemical foundation models (FM4M SMI-TED) encode molecular properties and SMILES syntax
+3. **Local Feature Extraction**: Multi-scale CNN encoders capture local patterns in protein sequences and molecular structures
+4. **Semantic Interaction Modeling**: Bidirectional cross-attention mechanisms model protein-ligand compatibility by learning which residues interact with which atoms
+5. **Multi-Task Prediction**: Simultaneous classification (active/inactive) and regression (affinity quantification) with uncertainty-weighted loss
+
+### Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  INPUT: Per-token Embedding Matrices                                        │
-│  ├── Protein: [batch, seq_prot, d_prot]  (ESM-2 per-residue embeddings)    │
-│  └── Ligand:  [batch, seq_lig, d_lig]    (SMI-TED per-atom embeddings)     │
+│  INPUT: Contextual Embeddings                                               │
+│  ├── Protein: ESM-2/ESM-C per-residue embeddings [seq_len, d_protein]      │
+│  └── Ligand:  SMI-TED per-atom embeddings [mol_len, d_ligand]              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  STAGE 1: CNN ENCODERS (Local Feature Extraction)                           │
-│  • Multi-Scale Conv1D (kernels 3, 5, 7)                                     │
-│  • Residual Connections & LayerNorm                                         │
+│  STAGE 1: MULTI-SCALE CNN ENCODERS (Local Feature Extraction)               │
+│  • Conv1D with kernels {3, 5, 7} for multi-scale pattern recognition       │
+│  • Residual connections preserve feature hierarchy                          │
+│  • LayerNorm for training stability                                         │
+│  └─→ Output: [seq_len/pool, hidden_dim]                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  STAGE 2: BIDIRECTIONAL CROSS-ATTENTION (Interaction Modeling)              │
-│  • Protein → Ligand Attention                                               │
-│  • Ligand → Protein Attention                                               │
-│  • Multi-Head (8 heads) to capture different interaction types              │
+│  STAGE 2: BIDIRECTIONAL CROSS-ATTENTION (Semantic Interaction Modeling)     │
+│  • Query: Protein residues; Key/Value: Ligand atoms → Protein perspectives  │
+│  • Query: Ligand atoms; Key/Value: Protein residues → Ligand perspectives   │
+│  • Multi-Head Attention (8 heads) for diverse interaction types             │
+│  └─→ Output: Learned attention weights indicating residue-atom affinities   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  STAGE 3: MULTI-TASK PREDICTION                                             │
-│  • Classification Head (Active/Inactive)                                    │
-│  • Regression Head (pChEMBL Affinity)                                       │
-│  • Uncertainty-weighted Multi-Task Loss                                     │
+│  STAGE 3: MULTI-TASK PREDICTION HEAD                                        │
+│  • Classification: {Active, Inactive} (binary logits)                       │
+│  • Regression: Affinity value in pChEMBL scale (continuous)                 │
+│  • Joint optimization with task-weighted loss                               │
+│  └─→ Outputs: Classification logits + Regression value + Uncertainty       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Key Design Principles (from PhD Thesis Ch. 2)
+
+- **Structural Independence**: System must operate exclusively from primary sequences, eliminating dependence on 3D coordinates and guaranteeing universal applicability to the entire kinome
+- **Rich Semantic Representations**: Proteins and ligands encoded through pre-trained contextual embeddings capturing latent structural and functional information (ESM-2 for proteins, SMI-TED for ligands)
+- **Explicit Interaction Modeling**: Cross-attention mechanism between protein and ligand representations enables learning which regions of each entity are relevant for specific affinity prediction
+- **Computational Scalability**: Throughput > 10⁶ predictions/hour, enabling ultralarge chemical library screening against complete kinome; linear scaling with multi-GPU clusters
+- **Multi-Task Framework**: Joint prediction of binary bioactivity and quantitative affinity through shared training objective improves generalization via learning transferable representations
 
 **Biological Interpretation:**
 The attention matrix $A_{ij}$ represents how much protein residue $i$ "attends to" ligand atom $j$. High attention weights correlate with physical interactions (H-bonds, hydrophobic contacts) in the binding pocket, enabling "semantic docking" without explicit 3D coordinates.
@@ -134,12 +177,12 @@ docktkinase/
 
 ```bash
 # Clone repository
-git clone https://github.com/gmmsb-lncc/docktkinase.git
-cd docktkinase
+git clone https://github.com/gmmsb-lncc/semantic-screening.git
+cd semantic-screening
 
 # Create conda environment
 conda env create -f environment.yml
-conda activate docktkinase
+conda activate semantic-screening
 
 # Install dependencies
 python scripts/post_install.py
@@ -177,20 +220,30 @@ See [User Guide](docs/02-user-guide/) for full parameter lists.
 
 ## Citation
 
+If you use semantic-screening or the DT-Kinase architecture in your research, please cite:
+
 ```bibtex
-@software{docktkinase2025,
-  title = {DockTKinase: Integrated Pipeline for Protein-Ligand Property Prediction},
-  author = {DockTKinase Development Team},
+@phdthesis{dtkinase2026,
+  title = {DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings},
+  author = {Leon Sulfierry},
+  year = {2026},
+  school = {Laboratório Nacional de Computação Científica (LNCC)},
+  type = {PhD Thesis}
+}
+
+@software{semanticscreening2025,
+  title = {semantic-screening: Open Platform for Semantic Protein-Ligand Interaction Screening},
+  author = {GMMSB-LNCC Team},
   year = {2025},
-  url = {https://github.com/gmmsb-lncc/docktkinase},
+  url = {https://github.com/gmmsb-lncc/semantic-screening},
   version = {2.1}
 }
 ```
 
 ## Contact
 
-- **Repository**: [gmmsb-lncc/docktkinase](https://github.com/gmmsb-lncc/docktkinase)
-- **Issues**: [Bug reports & features](https://github.com/gmmsb-lncc/docktkinase/issues)
+- **Repository**: [gmmsb-lncc/semantic-screening](https://github.com/gmmsb-lncc/semantic-screening)
+- **Issues**: [Bug reports & features](https://github.com/gmmsb-lncc/semantic-screening/issues)
 
 ---
 
