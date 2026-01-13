@@ -1,8 +1,8 @@
-# 🧬 DockTKinase Source Code
+# 🧬 semantic-screening Source Code
 
-**Modular architecture for comprehensive kinase inhibitor analysis and machine learning classification.**
+**Modular architecture for comprehensive protein-ligand analysis and machine learning prediction.**
 
-This directory contains the core source code of DockTKinase, organized into three main modules that work together to provide a complete drug discovery pipeline for non-human kinases.
+This directory contains the core source code of semantic-screening, organized into modules that work together to provide a complete platform for protein-ligand interaction screening.
 
 ---
 
@@ -347,14 +347,14 @@ python tests/benchmark_pipeline.py
 
 ## 📄 **License & Citation**
 
-This project is licensed under the MIT License. If you use DockTKinase in your research, please cite:
+This project is licensed under the MIT License. If you use semantic-screening in your research, please cite:
 
 ```bibtex
-@software{docktkinase2024,
-  title={DockTKinase: Comprehensive Pipeline for Non-Human Kinase Analysis},
+@software{semanticscreening2025,
+  title={semantic-screening: Platform for semantic screening of protein-ligand interactions},
   author={GMMSB-LNCC Team},
-  year={2024},
-  url={https://github.com/gmmsb-lncc/docktkinase}
+  year={2025},
+  url={https://github.com/gmmsb-lncc/semantic-screening}
 }
 ```
 
