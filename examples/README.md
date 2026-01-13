@@ -1,6 +1,6 @@
-# 📚 Exemplos do DockTKinase
+# 📚 Exemplos do semantic-screening
 
-Esta pasta contém exemplos práticos demonstrando as funcionalidades do sistema DockTKinase.
+Esta pasta contém exemplos práticos demonstrando as funcionalidades da plataforma semantic-screening.
 
 ## 🎯 Exemplos Disponíveis
 
@@ -26,7 +26,7 @@ Esta pasta contém exemplos práticos demonstrando as funcionalidades do sistema
 
 ### Executar Exemplo Específico
 ```bash
-cd /path/to/docktkinase
+cd /path/to/semantic-screening
 
 # Exemplo de configuração
 python examples/exemplo_config_management.py
