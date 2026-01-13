@@ -1,4 +1,4 @@
-# Testes do Sistema DockTKinase
+# Testes do Sistema semantic-screening
 
 Este diretório contém todos os testes do sistema de classificação MLP com auto-adaptação dimensional.
 

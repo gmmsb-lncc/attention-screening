@@ -1,4 +1,4 @@
-# Optimized Classification Models - DockTKinase
+# Optimized Classification Models - semantic-screening
 
 ## 📋 Summary of Changes
 
@@ -70,7 +70,7 @@
 - ⚠️ Does not capture complex non-linear relationships
 - ⚠️ Assumes linear (or near-linear) separation
 
-**Why it works well for DockTKinase**:
+**Why it works well for semantic-screening**:
 ```python
 # Embeddings are already high-dimensional representations (1536 features)
 # Linear models work surprisingly well in these spaces!

@@ -361,6 +361,6 @@ These tests should be run:
 ---
 
 **Created**: November 2025  
-**Author**: DockTKinase Team  
+**Author**: semantic-screening Team  
 **Branch**: modules-testing  
 **Status**: 🚧 In Development
