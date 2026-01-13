@@ -1,4 +1,4 @@
-# 🎯 Quick Reference - DockTKinase Methodology
+# 🎯 Quick Reference - semantic-screening & DT-Kinase
 
 **Documento**: METHODOLOGY_REVIEW.md  
 **Linhas**: 1,118 (especializado, completo)  
@@ -6,45 +6,51 @@
 
 ---
 
-## ⚡ 60-Second Summary
+## ⚡ 30-Second Summary
 
-**DockTKinase** descobre novos antibióticos contra super-resistência bacteriana.
+**semantic-screening** é uma plataforma para screening semântico de interações proteína-ligante.
+**DT-Kinase** é a arquitetura neural implementada (PLM + CNN + Cross-Attention).
 
 ```
-Dados (15.6k)  →  Embeddings (ESM-2/FM4M)  →  Stratify (Clusters)  
+Sequências  →  Embeddings (ESM-2/SMI-TED)  →  Processamento  
+                                              (CNN + CrossAttn)
                                                         ↓
-                                          Classification (12 ML models)
-                                          ✅ ROC-AUC = 0.9731
+                                      Classificação (Ativo/Inativo)
+                                      ✅ ROC-AUC = 0.9731
                                                         ↓
-                                          Regression (12 ML models)
-                                          ✅ R² = 0.4397
+                                      Regressão (pChEMBL)
+                                      ✅ R² = 0.4397
 ```
 
-**Key**: Agglomerative clustering previne data leakage (moléculas similares nunca divididas)
+**Key**: Sem estrutura 3D. Tudo baseado em sequência e aprendizado de semântica via PLMs.
 
 ---
 
-## 📋 7 Fases do Pipeline
+## 7 Fases do Pipeline semantic-screening
 
 | Fase | O Quê | Como | Output |
 |------|-------|------|--------|
-| 1 | Embeddings | ESM-2/ESM-C (proteína) + FM4M (ligante) | 1920-dim vectors |
+| 1 | Embeddings | ESM-2/ESM-C (proteína) + SMI-TED (ligante) | 1920-dim vectors |
 | 2 | Matrizes | Concatenação + validação | concatenated_embeddings.npy |
 | 3 | Labels | pChEMBL > 6.0 (binary) + affinity (regression) | binary_labels.npy |
 | 4 | ⭐ **Stratify** | **Cosine sim → Agglomerative → 80/10/10** | **train/val/test split** |
-| 5 | Classificação | 12 algoritmos (ExtraTrees best) | ROC-AUC, F1, Accuracy, ... |
-| 6 | Regressão | 12 algoritmos (RandomForest best) | MAE, R², RMSE, ... |
-| 7 | DL (opcional) | CNN + Cross-Attention | Attention maps |
+| 5 | Classificação | 12 algoritmos ML (ExtraTrees best) | ROC-AUC, F1, Accuracy, ... |
+| 6 | Regressão | 12 algoritmos ML (RandomForest best) | MAE, R², RMSE, ... |
+| 7 | DL (opcional) | **DT-Kinase**: CNN + Cross-Attention | Attention maps + predições |
 
 ---
 
-## 🏆 Melhor Performance
+## 🏆 Arquitetura DT-Kinase
 
 ```
-Modelo de Proteína:  esmc-600m-2024-12 ⭐ (1152-dim, 2-3 min)
-Classificação:       ExtraTrees (ROC-AUC = 0.9731)
-Regressão:          RandomForest (R² = 0.4397, MAE = 0.5325)
+Modelo de Proteína:  esmc-600m-2024-12 ⭐ (1152-dim)
+Modelo de Ligante:   SMI-TED (768-dim)
+Rede Neural:         CNN + Cross-Attention
+Classificação:       ExtraTrees baseline (ROC-AUC = 0.9731)
+Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 ```
+
+**DT-Kinase** é implementado na plataforma **semantic-screening**.
 
 ---
 

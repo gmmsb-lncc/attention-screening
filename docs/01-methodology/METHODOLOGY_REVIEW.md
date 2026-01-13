@@ -1,20 +1,20 @@
-# 📘 DockTKinase Methodology Review - Complete Analysis
+# 📘 semantic-screening: DT-Kinase Methodology Review
 
 **Versão**: 2.0  
-**Data**: Dezembro 2025  
+**Data**: Janeiro 2026  
 **Status**: ✅ Production-Ready  
-**Foco**: Super-resistência bacteriana a antibióticos
+**Foco**: Platform para semantic screening de interações proteína-ligante
 
 ---
 
 ## 🎯 Executive Summary
 
-**DockTKinase** é uma plataforma integrada para **descoberta racional de novos antibióticos** contra quinases bacterianas associadas a mecanismos de super-resistência. O sistema combina:
+**semantic-screening** é uma plataforma aberta para **predição de interações proteína-ligante** implementando a arquitetura neural **DT-Kinase** (CNN + Cross-Attention). O sistema combina:
 
 - **Machine Learning clássico** (12 algoritmos por problema)
-- **Deep Learning** (CNN + Cross-Attention)
+- **Deep Learning** (DT-Kinase: CNN + Cross-Attention)
 - **Estratificação inteligente** (previne data leakage)
-- **Metodologia rigorosa** (5-fold CV, métricas múltiplas)
+- **Metodologia rigorosa** (validação cruzada, métricas múltiplas)
 
 ### Performance Atual (Benchmark 7 Modelos de Proteína)
 
@@ -47,7 +47,7 @@
 
 ### Objetivo Principal
 
-Desenvolver sistema computacional para **triagem de compostos contra super-resistência bacteriana** focando em **inibidores de quinases bacterianas**.
+Desenvolver plataforma computacional para **semantic screening de interações proteína-ligante** usando aprendizado profundo baseado em linguagem de proteína.
 
 ### Por Que Quinases?
 
