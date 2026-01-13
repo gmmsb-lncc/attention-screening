@@ -320,7 +320,24 @@ semantic-screening employs a **Hybrid Architecture** that combines the best of b
 
 $$ H_{local} = \text{CNN}(H_{raw}) $$
 
-2.  **Global Interaction Modeling (Cross-Attention)**: The locally enriched features $H_{local}$ are then fed into the Cross-Attention mechanism described above.
+2.  **Positional Encoding**: Position information is critical for sequence modeling. DT-Kinase supports two encoding strategies:
+    
+    *   **Sinusoidal (Vaswani et al., 2017)**: Classical additive encoding using sine/cosine functions. Fixed maximum length.
+    *   **RoPE (Su et al., 2024)**: Rotary Position Embedding - encodes position through rotation rather than addition.
+
+    **RoPE Mathematical Formulation**: For position $m$ and dimension pair $(2i, 2i+1)$:
+    $$\text{RoPE}(x, m)_{2i} = x_{2i} \cos(m\theta_i) - x_{2i+1} \sin(m\theta_i)$$
+    $$\text{RoPE}(x, m)_{2i+1} = x_{2i} \sin(m\theta_i) + x_{2i+1} \cos(m\theta_i)$$
+    where $\theta_i = 10000^{-2i/d}$.
+
+    **Key RoPE Advantages**:
+    - **Unlimited sequence length**: No pre-defined max_len—proteins of any size can be processed
+    - **Relative position awareness**: Attention depends on position *difference*, not absolute position
+    - **Better extrapolation**: Models trained on shorter sequences generalize to longer ones
+    - **Geometry preservation**: Rotation preserves vector norms, maintaining embedding space structure
+    - **State-of-the-art compatibility**: Used by LLaMA, ESM-2, GPT-NeoX
+
+3.  **Global Interaction Modeling (Cross-Attention)**: The locally enriched features $H_{local}$ (with positional encoding applied) are then fed into the Cross-Attention mechanism described above.
 
 ### 6.3 Architecture Variants
 
@@ -362,7 +379,7 @@ The architecture is defined by a set of hyperparameters optimized for the kinase
 #### 6.5.1 Optimization Dynamics
 *   **Optimizer**: We use **AdamW** (Adam with Decoupled Weight Decay) to prevent overfitting in the high-dimensional parameter space.
 *   **Scheduler**: A **Linear Warmup** (first 10% of steps) followed by **Cosine Decay** is used to ensure stable convergence and escape local minima.
-*   **Regularization**: In addition to Dropout ($p=0.2$), we apply Weight Decay ($1e-2$) to the projection layers.
+*   **Regularization**: In addition to Dropout ($p=0.1$), we apply Weight Decay ($1e-2$) to the projection layers.
 
 #### 6.5.2 Hyperparameter Configuration (Base Model)
 
@@ -374,7 +391,7 @@ The architecture is defined by a set of hyperparameters optimized for the kinase
 | | Activation | GELU | Gaussian Error Linear Unit |
 | **Attention** | Heads | 8 | Number of parallel attention heads |
 | | Layers | 2 | Number of stacked cross-attention blocks |
-| | Dropout | 0.2 | Regularization rate |
+| | Dropout | 0.1 | Regularization rate |
 | **CNN Encoder** | Layers | 3 | Number of convolutional blocks |
 | | Kernels | (3, 5, 7) | Multi-scale kernel sizes |
 | | Filters | 256 | Number of output channels per block |
