@@ -1,6 +1,6 @@
-# 🧪 Testes do DockTKinase Pipeline
+# 🧪 Testes do semantic-screening Pipeline
 
-Este diretório contém todos os testes do sistema DockTKinase, organizados e executáveis a partir da pasta `tests/`.
+Este diretório contém todos os testes do sistema semantic-screening, organizados e executáveis a partir da pasta `tests/`.
 
 ## 📁 Estrutura dos Testes
 
