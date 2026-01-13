@@ -1,4 +1,4 @@
-# DockTKinase - Requirements
+# semantic-screening - Requirements
 # Dependências para o projeto completo incluindo módulo build
 
 # ==============================================================================
