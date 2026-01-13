@@ -28,7 +28,7 @@ from scripts.viz_utils import (
 
 from scripts.viz_plots import (
     compute_pca, compute_tsne, compute_umap,
-    plot_cluster_pca, plot_split_distribution, plot_cluster_integrity, plot_pca_variance
+    plot_test_cluster_analysis
 )
 
 
@@ -183,40 +183,17 @@ Exemplos:
         embeddings_2d = compute_umap(combined_emb, args.n_components, args.n_neighbors)
     
     # Visualizações
-    print("\n🎨 Gerando visualizações...")
+    print("\n🎨 Gerando visualização...")
     
-    # 1. Visualização PCA principal
-    output_pca = output_dir / f"{args.prefix}_{args.method}.png"
-    plot_cluster_pca(
-        embeddings_2d, cluster_labels, pca_model, binary_labels,
-        title=f"Visualização {args.method.upper()} dos Clusters",
-        output_path=str(output_pca),
-        method=args.method
-    )
-    
-    # 2. Distribuição de splits (se disponível)
-    if split_assignment is not None:
-        output_splits = output_dir / f"{args.prefix}_splits_{args.method}.png"
-        plot_split_distribution(
-            embeddings_2d, split_assignment, binary_labels, pca_model,
-            title="Distribuição dos Splits no Espaço Reduzido",
-            output_path=str(output_splits),
-            method=args.method
+    # Análise completa 2x3 (se splits e labels disponíveis)
+    if split_assignment is not None and binary_labels is not None:
+        output_analysis = output_dir / f"{args.prefix}_analysis.png"
+        plot_test_cluster_analysis(
+            embeddings_2d, split_assignment, cluster_labels, binary_labels,
+            output_path=str(output_analysis)
         )
-    
-    # 3. Integridade dos clusters (se splits disponíveis)
-    if split_assignment is not None:
-        output_integrity = output_dir / f"{args.prefix}_cluster_integrity.png"
-        plot_cluster_integrity(
-            cluster_labels, split_assignment, binary_labels,
-            title="Análise de Integridade dos Clusters",
-            output_path=str(output_integrity)
-        )
-    
-    # 4. Variância do PCA
-    if pca_model is not None and args.method == 'pca':
-        output_var = output_dir / f"{args.prefix}_pca_variance.png"
-        plot_pca_variance(pca_model, str(output_var))
+    else:
+        print("⚠️ Splits e labels são necessários para a visualização completa")
     
     # Métricas
     if args.save_metrics:
@@ -232,8 +209,8 @@ Exemplos:
             json.dump(metrics, f, indent=2)
         print(f"✓ Métricas salvas em: {metrics_file}")
     
-    print("\n✅ Visualizações concluídas!")
-    print(f"📁 Arquivos salvos em: {output_dir}")
+    print("\n✅ Visualização concluída!")
+    print(f"📁 Arquivo salvo em: {output_dir}")
     
     if not args.no_show:
         plt.show()
