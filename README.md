@@ -9,6 +9,10 @@
 
 DockTKinase combines state-of-the-art protein language models (ESM-2, ESM-C, Boltz-2) with molecular embeddings (SMI-TED) to predict compound activity against kinase targets. It features a hybrid CNN + Cross-Attention architecture for interaction modeling and a rigorous K-means++ stratification strategy to prevent data leakage.
 
+### 🔬 Scientific Context
+
+As proteínas quinases desempenham papéis terapêuticos fundamentais, sendo alvos cruciais no desenvolvimento de novos tratamentos para câncer, desordens neurológicas, doenças cardiovasculares e autoimunes. **Particularmente, este trabalho se concentra no combate à super-resistência bacteriana a antibióticos**, um dos maiores desafios de saúde global, onde a descoberta racional de inibidores de quinases bacterianas específicas oferece uma nova estratégia promissora. Além disso, quinases também desempenham papéis essenciais no tratamento de doenças infecciosas negligenciadas, consolidando sua importância na medicina moderna.
+
 ---
 
 ## 📚 Documentation

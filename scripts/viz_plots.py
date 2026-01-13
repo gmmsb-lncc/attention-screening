@@ -495,3 +495,210 @@ def plot_pca_variance(pca: PCA, output_path: Optional[str] = None) -> plt.Figure
         print(f"✅ Gráfico de variância salvo em: {output_path}")
     
     return fig
+
+
+def plot_test_cluster_analysis(pca_coords: np.ndarray, 
+                                split_assignment: np.ndarray,
+                                cluster_labels: np.ndarray,
+                                binary_labels: np.ndarray,
+                                output_path: Optional[str] = None) -> plt.Figure:
+    """
+    Análise completa em layout 2x3:
+      Top row: Visão geral, Distribuição Ativo/Inativo, Test origem dos clusters
+      Bottom row: Splits individuais (Train, Val, Test)
+    
+    Args:
+        pca_coords: Coordenadas PCA (N, 2)
+        split_assignment: Array com 0=Train, 1=Val, 2=Test
+        cluster_labels: Labels dos clusters (N,)
+        binary_labels: Labels binários ativos/inativos (N,)
+        output_path: Caminho para salvar figura
+    
+    Returns:
+        fig: Figura matplotlib
+    """
+    from matplotlib.colors import ListedColormap
+    import matplotlib.cm as cm
+    
+    fig = plt.figure(figsize=(20, 12))
+    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.25)
+    fig.suptitle('Análise Completa de Estratificação', fontsize=18, fontweight='bold', y=0.98)
+    
+    train_mask = split_assignment == 0
+    val_mask = split_assignment == 1
+    test_mask = split_assignment == 2
+    
+    # ==================== [0,0] Visão Geral ====================
+    ax00 = fig.add_subplot(gs[0, 0])
+    for split_id in [0, 1, 2]:
+        mask = split_assignment == split_id
+        ax00.scatter(pca_coords[mask, 0], pca_coords[mask, 1],
+                    c=SPLIT_COLORS[split_id], alpha=0.6, s=15, 
+                    label=SPLIT_NAMES[split_id])
+    
+    ax00.set_xlabel('PC1', fontsize=11, fontweight='bold')
+    ax00.set_ylabel('PC2', fontsize=11, fontweight='bold')
+    ax00.set_title('Visão Geral: Splits no Espaço PCA', fontsize=13, fontweight='bold', pad=10)
+    ax00.legend(loc='best', fontsize=9)
+    ax00.grid(True, alpha=0.3)
+    
+    # ==================== [0,1] Scatter Ativo/Inativo no PCA ====================
+    ax01 = fig.add_subplot(gs[0, 1])
+    
+    if binary_labels is not None:
+        # Plotar inativos primeiro (background)
+        inactive_mask = binary_labels == 0
+        ax01.scatter(pca_coords[inactive_mask, 0], pca_coords[inactive_mask, 1],
+                    c='#e74c3c', s=15, alpha=0.5, label='Inativo', edgecolors='none')
+        
+        # Plotar ativos em cima
+        active_mask = binary_labels == 1
+        ax01.scatter(pca_coords[active_mask, 0], pca_coords[active_mask, 1],
+                    c='#2ecc71', s=15, alpha=0.6, label='Ativo', edgecolors='none')
+        
+        # Estatísticas
+        n_active = np.sum(active_mask)
+        n_inactive = np.sum(inactive_mask)
+        total = len(binary_labels)
+        
+        stats_text = f"""Total: {total:,}
+Ativo: {n_active:,} ({n_active/total*100:.1f}%)
+Inativo: {n_inactive:,} ({n_inactive/total*100:.1f}%)"""
+        
+        ax01.text(0.02, 0.98, stats_text, transform=ax01.transAxes,
+                 fontsize=9, verticalalignment='top', horizontalalignment='left',
+                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                 family='monospace')
+        
+        ax01.legend(loc='upper right', fontsize=9, framealpha=0.9)
+        ax01.set_xlabel('PC1', fontsize=11, fontweight='bold')
+        ax01.set_ylabel('PC2', fontsize=11, fontweight='bold')
+        ax01.set_title('Distribuição Ativo/Inativo no PCA', fontsize=13, fontweight='bold', pad=10)
+        ax01.grid(True, alpha=0.3)
+    else:
+        ax01.text(0.5, 0.5, 'Labels não disponíveis', 
+                 ha='center', va='center', transform=ax01.transAxes,
+                 fontsize=11, style='italic', color='gray')
+        ax01.set_title('Distribuição Ativo/Inativo', fontsize=13, fontweight='bold', pad=10)
+    
+    # ==================== [0,2] Test: Origem dos Clusters ====================
+    ax02 = fig.add_subplot(gs[0, 2])
+    
+    # Identificar quais clusters existem em Train e Val
+    train_clusters_set = set(cluster_labels[train_mask])
+    val_clusters_set = set(cluster_labels[val_mask])
+    
+    # Coordenadas e labels do Test
+    test_coords = pca_coords[test_mask]
+    test_cluster_labels = cluster_labels[test_mask]
+    
+    if len(test_coords) > 0:
+        # Paleta Train only: Blues
+        train_cmap = cm.get_cmap('Blues', 256)
+        train_colors = train_cmap(np.linspace(0.4, 0.95, 256))
+        train_palette = ListedColormap(train_colors)
+        
+        # Paleta Val only: Oranges
+        val_cmap = cm.get_cmap('Oranges', 256)
+        val_colors = val_cmap(np.linspace(0.4, 0.95, 256))
+        val_palette = ListedColormap(val_colors)
+        
+        # Paleta Both: Purples
+        both_cmap = cm.get_cmap('Purples', 256)
+        both_colors = both_cmap(np.linspace(0.4, 0.95, 256))
+        both_palette = ListedColormap(both_colors)
+        
+        # Identificar clusters exclusivos e compartilhados
+        train_only_clusters = train_clusters_set - val_clusters_set
+        val_only_clusters = val_clusters_set - train_clusters_set
+        both_clusters = train_clusters_set & val_clusters_set
+        
+        # Separar amostras Test por origem do cluster
+        test_train_only_mask = np.isin(test_cluster_labels, list(train_only_clusters))
+        test_val_only_mask = np.isin(test_cluster_labels, list(val_only_clusters))
+        test_both_mask = np.isin(test_cluster_labels, list(both_clusters))
+        
+        # Plotar Test samples de clusters exclusivos Train (azul)
+        if np.sum(test_train_only_mask) > 0:
+            coords = test_coords[test_train_only_mask]
+            labels = test_cluster_labels[test_train_only_mask]
+            ax02.scatter(coords[:, 0], coords[:, 1],
+                       c=labels, cmap=train_palette,
+                       s=40, alpha=0.7, edgecolors='black', linewidth=0.5,
+                       vmin=cluster_labels.min(), vmax=cluster_labels.max())
+        
+        # Plotar Test samples de clusters exclusivos Val (laranja)
+        if np.sum(test_val_only_mask) > 0:
+            coords = test_coords[test_val_only_mask]
+            labels = test_cluster_labels[test_val_only_mask]
+            ax02.scatter(coords[:, 0], coords[:, 1],
+                       c=labels, cmap=val_palette,
+                       s=40, alpha=0.7, edgecolors='black', linewidth=0.5,
+                       vmin=cluster_labels.min(), vmax=cluster_labels.max())
+        
+        # Plotar Test samples de clusters compartilhados (roxo)
+        if np.sum(test_both_mask) > 0:
+            coords = test_coords[test_both_mask]
+            labels = test_cluster_labels[test_both_mask]
+            ax02.scatter(coords[:, 0], coords[:, 1],
+                       c=labels, cmap=both_palette,
+                       s=40, alpha=0.7, edgecolors='black', linewidth=0.5,
+                       vmin=cluster_labels.min(), vmax=cluster_labels.max())
+        
+        # Estatísticas
+        n_train_only = np.sum(test_train_only_mask)
+        n_val_only = np.sum(test_val_only_mask)
+        n_both = np.sum(test_both_mask)
+        n_total_test = len(test_coords)
+        
+        stats_text = f"""Test: {n_total_test}
+Exclusivos Train: {n_train_only} ({n_train_only/n_total_test*100:.1f}%)
+Exclusivos Val: {n_val_only} ({n_val_only/n_total_test*100:.1f}%)
+Train ∩ Val: {n_both} ({n_both/n_total_test*100:.1f}%)"""
+        
+        ax02.text(0.02, 0.98, stats_text, transform=ax02.transAxes,
+                fontsize=9, verticalalignment='top', horizontalalignment='left',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                family='monospace')
+    
+    # Legenda customizada
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='steelblue', edgecolor='black', label='Exclusivos Train'),
+        Patch(facecolor='orange', edgecolor='black', label='Exclusivos Val'),
+        Patch(facecolor='mediumpurple', edgecolor='black', label='Train ∩ Val')
+    ]
+    
+    ax02.set_xlabel('PC1', fontsize=11, fontweight='bold')
+    ax02.set_ylabel('PC2', fontsize=11, fontweight='bold')
+    ax02.set_title('Test: Origem dos Clusters', fontsize=13, fontweight='bold', pad=10)
+    ax02.legend(handles=legend_elements, loc='upper right', framealpha=0.9, fontsize=9)
+    ax02.grid(True, alpha=0.3)
+    
+    # ==================== Bottom Row: Splits Individuais ====================
+    for i, (split_id, split_name) in enumerate([(0, 'Train'), (1, 'Val'), (2, 'Test')]):
+        ax = fig.add_subplot(gs[1, i])
+        
+        # Background em cinza
+        ax.scatter(pca_coords[:, 0], pca_coords[:, 1],
+                  c='lightgray', s=5, alpha=0.2)
+        
+        # Destacar split específico
+        mask = split_assignment == split_id
+        ax.scatter(pca_coords[mask, 0], pca_coords[mask, 1],
+                  c=SPLIT_COLORS[split_id], s=25, alpha=0.7, 
+                  edgecolors='black', linewidth=0.3)
+        
+        n_samples = np.sum(mask)
+        ax.set_xlabel('PC1', fontsize=11, fontweight='bold')
+        ax.set_ylabel('PC2', fontsize=11, fontweight='bold')
+        ax.set_title(f'{split_name} (n={n_samples:,})', fontsize=13, fontweight='bold', pad=10)
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"✅ Análise completa salva em: {output_path}")
+    
+    return fig
