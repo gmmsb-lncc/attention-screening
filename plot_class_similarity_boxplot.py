@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Configurações
-STATS_FILE = Path('results/class_similarity_analysis/class_similarity_separate_stats.json')
-OUTPUT_DIR = Path('results/class_similarity_analysis')
+STATS_FILE = Path('results/class_similarity_analysis_human/class_similarity_separate_stats.json')
+OUTPUT_DIR = Path('results/class_similarity_analysis_human')
 
 # Cores
 COLORS = {
