@@ -29,10 +29,10 @@ from sklearn.metrics import roc_auc_score, matthews_corrcoef
 from tqdm import tqdm
 
 # Configurações
-EMBEDDINGS_DIR = Path('results/protein_model_benchmark_non_human_v2')
-OUTPUT_DIR = Path('results/baseline_multiseed')
-DATASET_PATH = Path('tests/datasets/kinase_non_human_compounds.tsv')
-BASELINE_RESULTS_FILE = Path('results/baseline_multiseed/baseline_multiseed_results.json')
+EMBEDDINGS_DIR = Path('/data/docktkinase/results/protein_model_benchmark_human_v2')
+OUTPUT_DIR = Path('results/baseline_multiseed_human')
+DATASET_PATH = Path('tests/datasets/kinase_human_compounds.tsv')
+BASELINE_RESULTS_FILE = Path('results/baseline_multiseed_human/baseline_multiseed_results.json')
 
 # Seeds para reprodutibilidade
 SEEDS = [42, 123, 420, 777, 2024]
@@ -155,7 +155,7 @@ def evaluate_model(X_train, X_test, y_train, y_test, classifier_type='KNN'):
         model = MLPClassifier(
             hidden_layer_sizes=(256, 128),
             max_iter=500,
-            random_state=42,
+            random_state=SEEDS[0],
             early_stopping=True
         )
     

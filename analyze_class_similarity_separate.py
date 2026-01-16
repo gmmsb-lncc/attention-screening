@@ -26,8 +26,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 # Configurações
-EMBEDDINGS_DIR = Path('results/protein_model_benchmark_non_human_v2')
-OUTPUT_DIR = Path('results/class_similarity_analysis')
+EMBEDDINGS_DIR = Path('/data/docktkinase/results/protein_model_benchmark_human_v2')
+OUTPUT_DIR = Path('results/class_similarity_analysis_human')
 RANDOM_SEED = 42
 TEST_SIZE = 0.1
 VAL_SIZE = 0.1
