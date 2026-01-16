@@ -19,19 +19,9 @@
 ---
 
 ### DT-Kinase
-**Arquitetura neural específica** implementada na plataforma semantic-screening que soluciona o paradoxo de seletividade de quinases através de reformulação semântica.
+**Arquitetura neural específica** implementada na plataforma semantic-screening que soluciona o problema de predição de seletividade de quinases através de reformulação semântica.
 
-**O Paradoxo de Seletividade** (Capítulo 1, Seção 1.2 da tese):
-- 518 quinases humanas compartilham arquitetura catalítica altamente conservada (RMSD < 2Å entre sítios ATP)
-- Discriminação de 10-fold em seletividade requer diferença de ΔG de apenas 1.4 kcal/mol
-- Erro sistemático de funções de scoring: ±2-3 kcal/mol (insuficiente para discriminar seletividade)
-
-**Resolução Proposta** (Capítulo 3, Seção 3.8 da tese):
-1. Embeddings contextuais integram informação de sequência completa (domínios regulatórios, loops de ativação, porções terminais)
-2. Representação semântica codifica informação evolutiva implícita
-3. Atenção cruzada aprende correspondências posição-específicas
-
-**Componentes Arquiteturais** (Capítulo 3):
+**Componentes**:
 1. **Codificação de Proteína**: Embeddings contextuais per-resíduo de modelos de linguagem de proteína (ESM-2, ESM-C, Boltz-2)
    - Capturam informação evolutiva implícita em sequência
    - Não requerem estrutura 3D experimental
@@ -153,76 +143,51 @@ Use quando você quer:
 
 ## 🔬 Fundamentação Teórica
 
-### Por que semantic-screening? (Capítulo 1, Seção 1.4)
-- **Sequência contém informação estrutural**: O dogma central estabelece que sequência determina estrutura. AlphaFold2 e ESMFold demonstram que este mapeamento é computacionalmente recuperável—informação estrutural está *codificada* na sequência, não adicionada externamente
-- **PLMs aprendem semântica evolutiva**: ESM-2 treinado em ~65M sequências via MLM aprende representações que capturam não apenas estrutura, mas padrões de co-evolução e restrições funcionais de pressão seletiva
-- **Auto-atenção captura dependências globais**: Cada resíduo é representado em função de *toda* a sequência, capturando dependências de longo alcance inacessíveis a métodos que operam em representações locais
-- **Reformulação semântica**: Substitui "Quão bem este ligante se encaixa neste sítio?" por "Quão compatíveis são as representações latentes desta proteína e deste ligante em espaço vetorial compartilhado?"
-- **Universalidade**: Aplicável a qualquer proteína com sequência, incluindo ~40% das quinases sem estrutura experimental
+### Por que semantic-screening?
+- **Sequência contém informação estrutural**: Demonstrado por AlphaFold2, ESMFold, ProtBERT
+- **PLMs aprendem semântica**: Via auto-atenção em centenas de milhões de sequências
+- **Reformulação do problema**: Não "Qual é a geometria?" mas "Quão compatível é a semântica?"
+- **Universalidade**: Aplicável a qualquer proteína com sequência, estrutura ou não
 
-### Por que DT-Kinase como arquitetura específica? (Capítulo 3)
-- **CNN multi-escala (kernels 3,5,7)**: Captura padrões locais em sequências e moléculas em diferentes granularidades
-- **Cross-Attention bidirecional**: Modela compatibilidade semântica entre proteína e ligante com interpretabilidade intrínseca
-- **Multi-Tarefa**: Classificação + Regressão com loss combinada $\mathcal{L} = \alpha \cdot \mathcal{L}_{MSE} + (1-\alpha) \cdot \mathcal{L}_{BCE}$
-- **Escalável**: Complexidade $\mathcal{O}(n^2 d + m^2 d + nmd)$ permite throughput >10⁶ pred/hora
-
----
-
-## 📚 Referências na Tese de Doutorado
-
-### Capítulo 1 - Introdução
-- **Seção 1.1**: Quinases Proteicas - Arquitetura Molecular e Relevância Terapêutica
-  - 518 quinases humanas (taxonomia Manning et al.)
-  - Centralidade topológica em redes de sinalização celular
-  - 72 inibidores aprovados, $80B anuais
-  
-- **Seção 1.2**: O Paradoxo da Seletividade - Desafio Farmacológico Fundamental
-  - Homologia estrutural extraordinária (RMSD < 2Å)
-  - Polifarmacologia e toxicidades dose-limitantes
-  - Mutações de resistência (T790M em EGFR, T315I em BCR-ABL)
-
-- **Seção 1.3**: Formulação do Problema Computacional
-  - Três critérios formais: Precisão (R² > 0.7), Escalabilidade (>10⁶ pred/hora), Cobertura Universal
-  - Definição matemática da função de afinidade φ: K × C → ℝ
-
-- **Seção 1.4**: Hipótese Central - Primado da Sequência
-  - Abandono de representações geométricas 3D
-  - Reformulação semântica via PLMs
-  - Vantagens: Universalidade, Contextualidade, Escalabilidade
-
-- **Seção 1.5**: DT-Kinase - Objetivos e Contribuições
-  - Arquitetura proposta: ESM-2 + SMI-TED + CNN + Cross-Attention
-  - Predição multi-tarefa (classificação + regressão)
-
-### Capítulo 2 - Estado da Arte
-- Paradigmas experimentais de perfilagem (Karaman 2008, Klaeger 2017)
-- Limitações econômicas (~$30-40K por composto para painel completo)
-- Problema do "quinoma escuro" (~200 quinases sem ensaios validados)
-- Métodos de docking: erro sistemático ±2-3 kcal/mol vs 1.4 kcal/mol necessário
-- DeepDTA e limitações de fusão tardia
-- Modelos de Linguagem de Proteínas como paradigma emergente
-
-### Capítulo 3 - Fundamentos Teóricos
-- Arquitetura Transformer e auto-atenção (eq. 3.2)
-- ESM-2: Masked Language Modeling em 65M sequências
-- SMI-TED: Representação molecular via SMILES
-- Mecanismo de Atenção Cruzada (eq. 3.6)
-- Framework Multi-Tarefa com loss combinada (eq. 3.10)
-- Resolução teórica do paradoxo de seletividade
+### Por que DT-Kinase como arquitetura específica?
+- **CNN**: Captura padrões locais em sequências e moléculas
+- **Cross-Attention**: Modela compatibilidade semântica entre proteína e ligante
+- **Multi-Tarefa**: Classificação + Regressão com ponderação de tarefa
+- **Escalonável**: Forward pass puro, sem bottleneck geométrico
 
 ---
 
-## ✅ Checklist Conceitual (Alinhado com Tese)
+## 📚 Referências na Tese
 
-- [ ] **semantic-screening** = Plataforma aberta e modular (independência estrutural, escalabilidade computacional)
-- [ ] **DT-Kinase** = Arquitetura neural específica (ESM-2 + SMI-TED + CNN + Cross-Attention)
-- [ ] **Paradoxo de Seletividade** = 518 quinases com RMSD < 2Å nos sítios ATP requerem abordagem semântica
-- [ ] **Critérios de Design** (Cap. 2): R² > 0.7, Throughput > 10⁶/hora, Cobertura 100% quinoma
-- [ ] **Hipótese Central** (Cap. 1.4): Primado da sequência—informacão estrutural está codificada em sequência via PLMs
-- [ ] **Resolução Teórica** (Cap. 3.8): Contextualidade global + história evolutiva + correspondências posição-específicas
-- [ ] Ambos operam sem requerer estrutura 3D experimental
+- **Capítulo 1, Seção 1.3**: "From Docking to Language Modeling: The DockTKinase Philosophy"
+  - Explica por que abandonar representações 3D
+  - Fundamenta uso de PLMs
+
+- **Capítulo 1, Seção 1.5**: "DT-Kinase: Objetivos e Contribuições"
+  - Define DT-Kinase como arquitetura proposta
+  - Especifica componentes: embeddings + CNN + Cross-Attention
+
+- **Capítulo 2**: Estado da arte
+  - Limitações de docking
+  - Limitações de painéis experimentais
+  - Necessidade de abordagem semântica
+
+- **Capítulo 3**: Fundamentos teóricos
+  - Formação matemática de PLMs
+  - Atenção cruzada
+  - Arquitetura proposta
+
+---
+
+## ✅ Checklist Conceitual
+
+- [ ] semantic-screening = Plataforma aberta e modular
+- [ ] DT-Kinase = Arquitetura neural específica dentro de semantic-screening
+- [ ] semantic-screening implementa múltiplas abordagens (ML clássico + DL)
+- [ ] DT-Kinase é otimizado para quinases e interações proteína-ligante
+- [ ] Ambos operam sem requerer estrutura 3D
 - [ ] semantic-screening fornece infra de embeddings, validação, estratificação
-- [ ] DT-Kinase fornece arquitetura CNN + Cross-Attention para interações proteína-ligante
+- [ ] DT-Kinase fornece arquitetura CNN + Cross-Attention para interações
 
 ---
 
