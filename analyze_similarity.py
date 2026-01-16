@@ -23,8 +23,8 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 # Configurações
-EMBEDDINGS_DIR = Path('results/protein_model_benchmark_non_human_v2')
-OUTPUT_DIR = Path('results/similarity_analysis')
+EMBEDDINGS_DIR = Path('/data/docktkinase/results/protein_model_benchmark_human_v2')
+OUTPUT_DIR = Path('results/similarity_analysis_human')
 RANDOM_SEED = 42
 TEST_SIZE = 0.1
 VAL_SIZE = 0.1
@@ -168,7 +168,7 @@ def plot_similarity_histogram(max_sims_dict, output_file):
         )
     
     plt.suptitle(
-        'Distribuição de Similaridade Máxima: Teste vs Treino\n'
+        'Distribuição de Similaridade Máxima: Teste vs Treino (HUMAN)\n'
         '(Split Aleatório, Seed=42)',
         fontsize=14,
         fontweight='bold',
