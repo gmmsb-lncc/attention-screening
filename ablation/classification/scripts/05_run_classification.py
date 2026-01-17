@@ -4,6 +4,7 @@ Trains KNN and MLP classifiers on all 10 representation combinations.
 Runs 5 random seeds per combination and saves metrics for comparison.
 """
 
+import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -20,11 +21,27 @@ from typing import Dict, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description='Run classification experiments')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str, help='Embeddings directory (unused)')
+    return parser.parse_args()
+
+
 # Configuration
-BASE_DIR = Path('/media/leon/ssd2tb/docktkinase/ablation/classification')
-DATA_DIR = BASE_DIR / 'data' / 'combinations'
-RESULTS_DIR = BASE_DIR / 'results'
+args = parse_args()
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / 'data' / args.results_suffix / 'combinations'
+RESULTS_DIR = BASE_DIR / args.results_suffix
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"Dataset: {args.results_suffix}")
+print(f"Data: {DATA_DIR}")
+print(f"Results: {RESULTS_DIR}\n")
 
 RANDOM_SEEDS = [42, 123, 456, 789, 1024]
 TEST_SIZE = 0.2
