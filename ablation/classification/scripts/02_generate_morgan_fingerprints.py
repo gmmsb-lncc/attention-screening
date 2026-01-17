@@ -152,11 +152,26 @@ class LigandRepresentationPipeline:
 
 def main():
     """Main entry point."""
-    input_path = Path('/media/leon/ssd2tb/docktkinase/ablation/classification/data/processed/ligands.csv')
-    output_path = Path('/media/leon/ssd2tb/docktkinase/ablation/classification/data/embeddings/morgan_fp.npy')
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Generate Morgan fingerprints')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str, help='Embeddings directory (unused)')
+    args = parser.parse_args()
+    
+    base_dir = Path(__file__).parent.parent
+    input_path = base_dir / 'data' / args.results_suffix / 'processed' / 'ligands.csv'
+    output_path = base_dir / 'data' / args.results_suffix / 'embeddings' / 'morgan_fp.npy'
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not input_path.exists():
         raise FileNotFoundError(f"Ligands file not found: {input_path}")
+
+    print(f"Dataset: {args.results_suffix}")
+    print(f"Input: {input_path}")
+    print(f"Output: {output_path}\n")
 
     pipeline = LigandRepresentationPipeline(input_path, output_path)
     pipeline.run()

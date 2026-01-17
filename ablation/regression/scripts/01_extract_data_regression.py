@@ -9,6 +9,7 @@ Author: DockTKinase Team
 Date: January 2026
 """
 
+import argparse
 import json
 import shutil
 from pathlib import Path
@@ -17,19 +18,37 @@ import pandas as pd
 import numpy as np
 
 
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description='Extract data for regression')
+    parser.add_argument('--tsv-path', type=str,
+                       default='/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
+                       help='Path to TSV file')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str, help='Embeddings directory (unused)')
+    return parser.parse_args()
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
+args = parse_args()
 BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR / "data" / args.results_suffix
 PROCESSED_DIR = DATA_DIR / "processed"
 
 # Source data from classification (already extracted)
-CLASSIFICATION_DATA_DIR = BASE_DIR.parent / "classification" / "data" / "processed"
+CLASSIFICATION_DATA_DIR = BASE_DIR.parent / "classification" / "data" / args.results_suffix / "processed"
 
 # Original TSV file
-TSV_PATH = Path("/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv")
+TSV_PATH = Path(args.tsv_path)
+
+print(f"Dataset: {args.results_suffix}")
+print(f"Classification data: {CLASSIFICATION_DATA_DIR}")
+print(f"TSV: {TSV_PATH}")
+print(f"Output: {PROCESSED_DIR}\n")
 
 
 # =============================================================================

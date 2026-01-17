@@ -13,6 +13,7 @@ SOLID Principles:
 - Dependency Inversion: Depends on abstractions (pathlib, pandas)
 """
 
+import argparse
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -147,13 +148,28 @@ class DataExtractor:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description='Extract data for ablation study')
+    parser.add_argument('--tsv-path', type=str, 
+                       default='/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
+                       help='Path to input TSV file')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Suffix for results directory (e.g., results_non_human, results_human)')
+    parser.add_argument('--embeddings-dir', type=str, help='Path to embeddings directory (unused here)')
+    
+    args = parser.parse_args()
+    
     # Paths
-    tsv_path = Path('/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv')
-    output_dir = Path('/media/leon/ssd2tb/docktkinase/ablation/classification/data/processed')
+    tsv_path = Path(args.tsv_path)
+    base_dir = Path(__file__).parent.parent
+    output_dir = base_dir / 'data' / args.results_suffix / 'processed'
 
     # Validate input
     if not tsv_path.exists():
         raise FileNotFoundError(f"TSV file not found: {tsv_path}")
+
+    print(f"Dataset: {args.results_suffix}")
+    print(f"TSV: {tsv_path}")
+    print(f"Output: {output_dir}\n")
 
     # Extract data
     extractor = DataExtractor(tsv_path, output_dir)
