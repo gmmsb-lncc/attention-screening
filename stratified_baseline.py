@@ -79,8 +79,8 @@ ESM_DIMS = {
     'esm2_t36_3B_UR50D': 2560,
 }
 
-TEST_SIZE = 0.1
-VAL_SIZE = 0.1
+TEST_SIZE = 0.1  # 10% para teste
+VAL_SIZE = 0.1   # 10% para validação (do total, não do treino)
 
 
 # =============================================================================
@@ -223,7 +223,7 @@ def stratified_cluster_split(
                 
             if high - low < 0.001:
                 break
-        except:
+        except Exception:
             break
     
     # Clustering final com melhor threshold
