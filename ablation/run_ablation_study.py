@@ -34,7 +34,7 @@ DATASET_CONFIGS = {
         'description': 'Non-human kinases (15,616 interactions, 299 proteins)'
     },
     'human': {
-        'tsv_path': '/data/docktkinase/datasets/kinase_human_compounds.tsv',
+        'tsv_path': '/data/docktkinase/tests/datasets/kinase_human_compounds.tsv',
         'embeddings_dir': '/data/docktkinase/results/protein_model_benchmark_human_v2',
         'results_suffix': 'results_human',
         'description': 'Human kinases'

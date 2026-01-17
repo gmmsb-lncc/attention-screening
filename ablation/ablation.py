@@ -35,7 +35,7 @@ DATASET_CONFIGS = {
     },
     'human': {
         'embeddings_dir': '/data/docktkinase/results/protein_model_benchmark_human_v2',
-        'tsv_path': '/data/docktkinase/datasets/kinase_human_compounds.tsv',
+        'tsv_path': '/data/docktkinase/tests/datasets/kinase_human_compounds.tsv',
         'results_suffix': 'results_human',
         'name': 'Human Kinases'
     }
