@@ -155,22 +155,37 @@ def combine_and_save(
 
 def main():
     """Main entry point."""
-    # Paths
-    ablation_dir = Path('/media/leon/ssd2tb/docktkinase/ablation/classification')
-    embeddings_base = Path('/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2')
+    import argparse
     
-    interactions_path = ablation_dir / 'data/processed/interactions.csv'
-    proteins_csv = ablation_dir / 'data/processed/proteins.csv'
-    ligands_csv = ablation_dir / 'data/processed/ligands.csv'
-    morgan_path = ablation_dir / 'data/embeddings/morgan_fp.npy'
-    onehot_path = ablation_dir / 'data/embeddings/protein_onehot.npy'
-    output_dir = ablation_dir / 'data/combinations'
+    parser = argparse.ArgumentParser(description='Create representation combinations')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str,
+                       default='/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
+                       help='Path to embeddings directory')
+    args = parser.parse_args()
+    
+    # Paths
+    ablation_dir = Path(__file__).parent.parent
+    embeddings_base = Path(args.embeddings_dir)
+    
+    interactions_path = ablation_dir / 'data' / args.results_suffix / 'processed' / 'interactions.csv'
+    proteins_csv = ablation_dir / 'data' / args.results_suffix / 'processed' / 'proteins.csv'
+    ligands_csv = ablation_dir / 'data' / args.results_suffix / 'processed' / 'ligands.csv'
+    morgan_path = ablation_dir / 'data' / args.results_suffix / 'embeddings' / 'morgan_fp.npy'
+    onehot_path = ablation_dir / 'data' / args.results_suffix / 'embeddings' / 'protein_onehot.npy'
+    output_dir = ablation_dir / 'data' / args.results_suffix / 'combinations'
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Load interactions
     print("="*60)
     print("ABLATION STUDY: REPRESENTATION COMBINATIONS")
     print("="*60)
+    print(f"Dataset: {args.results_suffix}")
+    print(f"Embeddings: {embeddings_base}")
+    print(f"Output: {output_dir}\n")
+    
     df = load_interactions(interactions_path)
     
     # ESM-2 models
