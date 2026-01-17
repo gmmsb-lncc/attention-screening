@@ -45,7 +45,7 @@ warnings.filterwarnings('ignore')
 
 
 def parse_args():
-    \"\"\"Parse command-line arguments.\"\"\"
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description='Run regression experiments')
     parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
     parser.add_argument('--results-suffix', type=str, default='results_non_human',
@@ -70,7 +70,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 print(f"Dataset: {args.results_suffix}")
 print(f"Data: {PROCESSED_DIR}")
 print(f"Embeddings: {args.embeddings_dir}")
-print(f"Results: {RESULTS_DIR}\\n")
+print(f"Results: {RESULTS_DIR}\n")
 
 # ESM-2 models to evaluate
 ESM_MODELS = [
