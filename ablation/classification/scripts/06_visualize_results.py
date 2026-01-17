@@ -4,6 +4,7 @@ Script 06: Visualização dos Resultados de Ablação
 Cria gráficos comparativos entre as 4 combinações de representações.
 """
 
+import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -11,11 +12,27 @@ import numpy as np
 from pathlib import Path
 import json
 
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description='Visualize classification results')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str, help='Embeddings directory (unused)')
+    return parser.parse_args()
+
+
 # Configuração
-BASE_DIR = Path('/media/leon/ssd2tb/docktkinase/ablation/classification')
-RESULTS_DIR = BASE_DIR / 'results'
-FIGURES_DIR = BASE_DIR / 'figures'
+args = parse_args()
+BASE_DIR = Path(__file__).parent.parent
+RESULTS_DIR = BASE_DIR / args.results_suffix
+FIGURES_DIR = BASE_DIR / args.results_suffix / 'figures'
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"Dataset: {args.results_suffix}")
+print(f"Results: {RESULTS_DIR}")
+print(f"Figures: {FIGURES_DIR}\n")
 
 # Estilo
 sns.set_style("whitegrid")

@@ -195,6 +195,22 @@ ablation/
 
 ## Running the Studies
 
+### Dual-Dataset Support
+
+**NEW**: All scripts now support running on both non-human and human kinase datasets. See [DUAL_DATASET_GUIDE.md](DUAL_DATASET_GUIDE.md) for details.
+
+Quick start:
+```bash
+# Run for non-human dataset (default, already complete)
+python run_ablation_study.py --dataset non_human
+
+# Run for human dataset
+python run_ablation_study.py --dataset human --embeddings-dir /data/docktkinase/results/protein_model_benchmark_human_v2
+
+# Run for both datasets
+python run_ablation_study.py --dataset both
+```
+
 ### Prerequisites
 ```bash
 # Activate virtual environment

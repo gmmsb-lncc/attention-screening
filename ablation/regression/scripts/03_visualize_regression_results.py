@@ -12,6 +12,7 @@ Author: DockTKinase Team
 Date: January 2026
 """
 
+import argparse
 import json
 from pathlib import Path
 from typing import Dict, List
@@ -23,13 +24,29 @@ import seaborn as sns
 from scipy import stats
 
 
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description='Visualize regression results')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str, help='Embeddings directory (unused)')
+    return parser.parse_args()
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
+args = parse_args()
 BASE_DIR = Path(__file__).parent.parent
-RESULTS_DIR = BASE_DIR / "results"
-FIGURES_DIR = BASE_DIR / "figures"
+RESULTS_DIR = BASE_DIR / args.results_suffix
+FIGURES_DIR = RESULTS_DIR / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"Dataset: {args.results_suffix}")
+print(f"Results: {RESULTS_DIR}")
+print(f"Figures: {FIGURES_DIR}\n")
 
 # Style configuration
 plt.style.use('seaborn-v0_8-whitegrid')
