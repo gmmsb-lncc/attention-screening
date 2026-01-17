@@ -17,6 +17,7 @@ Author: DockTKinase Team
 Date: January 2026
 """
 
+import argparse
 import json
 import sys
 import time
@@ -43,14 +44,33 @@ from sklearn.metrics import (
 warnings.filterwarnings('ignore')
 
 
+def parse_args():
+    \"\"\"Parse command-line arguments.\"\"\"
+    parser = argparse.ArgumentParser(description='Run regression experiments')
+    parser.add_argument('--tsv-path', type=str, help='TSV path (unused)')
+    parser.add_argument('--results-suffix', type=str, default='results_non_human',
+                       help='Results directory suffix')
+    parser.add_argument('--embeddings-dir', type=str,
+                       default='/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
+                       help='Path to embeddings directory')
+    return parser.parse_args()
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
+args = parse_args()
 BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR / "data" / args.results_suffix
 PROCESSED_DIR = DATA_DIR / "processed"
-RESULTS_DIR = BASE_DIR / "results"
+RESULTS_DIR = BASE_DIR / args.results_suffix
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"Dataset: {args.results_suffix}")
+print(f"Data: {PROCESSED_DIR}")
+print(f"Embeddings: {args.embeddings_dir}")
+print(f"Results: {RESULTS_DIR}\\n")
 
 # ESM-2 models to evaluate
 ESM_MODELS = [
@@ -66,7 +86,7 @@ ESM_DIMS = {
 }
 
 # Path to pre-computed embeddings
-EMBEDDINGS_DIR = Path("/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2")
+EMBEDDINGS_DIR = Path(args.embeddings_dir)
 
 # Split configuration
 RANDOM_SEED = 420
