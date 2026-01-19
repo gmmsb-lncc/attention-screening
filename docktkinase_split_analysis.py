@@ -834,7 +834,7 @@ def save_results_json(all_results: dict, split_stats: dict, emb_info: dict,
 # SINGLE ANALYSIS RUNNER
 # =============================================================================
 
-def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str):
+def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str, force: bool = False):
     """
     Run analysis for a single embedding model and dataset type.
 
@@ -842,6 +842,7 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
         embedding_name: Embedding model name (e.g., 'esm2_t30_150M_UR50D' or '150M')
         dataset_type: Dataset type ('human', 'non_human', or 'all')
         output_dir: Output directory
+        force: Force recalculation even if results exist
     """
     # Resolve embedding name if short form provided
     if embedding_name in SUPPORTED_EMBEDDINGS:
@@ -859,6 +860,21 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
         embedding_name
     )
 
+    # Generate prefix from embedding and dataset
+    short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
+    prefix = f"{dataset_type}_{short_name}_"
+
+    # Check if results already exist
+    json_file = os.path.join(output_dir, f'{prefix}embedding_analysis_results.json')
+    plot_file = os.path.join(output_dir, f'{prefix}08_embedding_split_comparison.png')
+
+    if os.path.exists(json_file) and os.path.exists(plot_file) and not force:
+        print(f"\n[CACHE] Resultados já existem para {embedding_name} + {dataset_type}")
+        print(f"        JSON: {json_file}")
+        print(f"        Plot: {plot_file}")
+        print(f"        Use --force para recalcular.")
+        return None
+
     # Check if embedding exists
     if not os.path.exists(embedding_dir):
         print(f"Warning: Embedding directory not found: {embedding_dir}")
@@ -867,10 +883,6 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
     if not os.path.exists(dataset_path):
         print(f"Warning: Dataset not found: {dataset_path}")
         return None
-
-    # Generate prefix from embedding and dataset
-    short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
-    prefix = f"{dataset_type}_{short_name}_"
 
     print(f"\n{'='*70}")
     print(f"ANALYSIS: {embedding_name} + {dataset_type}")
@@ -945,6 +957,8 @@ Examples:
                         help='Dataset type (human, non_human, or all for both)')
     parser.add_argument('--run_all', action='store_true',
                         help='Run all embeddings (8M, 150M, 3B) for the specified dataset(s)')
+    parser.add_argument('--force', action='store_true',
+                        help='Force recalculation even if results already exist')
     parser.add_argument('--output_dir', type=str,
                         default='/media/leon/ssd2tb/docktkinase/leakage_analysis_results',
                         help='Output directory for plots and results')
@@ -964,19 +978,23 @@ Examples:
         print("RUNNING ALL EMBEDDING ANALYSES")
         print(f"Embeddings: 8M, 150M, 3B")
         print(f"Datasets: {', '.join(datasets_to_run)}")
+        if args.force:
+            print("Mode: FORCE (recalculating all)")
+        else:
+            print("Mode: CACHE (skipping existing results)")
         print("=" * 70)
 
         # Run all combinations
         for dataset_type in datasets_to_run:
             for emb_short, emb_full in SUPPORTED_EMBEDDINGS.items():
-                run_single_analysis(emb_full, dataset_type, args.output_dir)
+                run_single_analysis(emb_full, dataset_type, args.output_dir, args.force)
 
         print("\n" + "=" * 70)
         print("ALL ANALYSES COMPLETED!")
         print("=" * 70)
     else:
         # Run single analysis
-        run_single_analysis(args.embedding, args.dataset, args.output_dir)
+        run_single_analysis(args.embedding, args.dataset, args.output_dir, args.force)
 
     print(f"\nResults saved in: {args.output_dir}")
 

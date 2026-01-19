@@ -19,6 +19,7 @@ Uso:
 """
 
 import argparse
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -534,11 +535,21 @@ def plot_inflated_vs_real(all_results: dict, output_dir: str = '.', prefix: str 
 # MAIN
 # =============================================================================
 
-def run_single_dataset(dataset_type: str, output_dir: str):
+def run_single_dataset(dataset_type: str, output_dir: str, force: bool = False):
     """Run analysis for a single dataset type."""
     data_path = DATASET_PATHS.get(dataset_type)
     if not data_path:
         print(f"Error: Unknown dataset type '{dataset_type}'")
+        return None
+
+    # Usar prefixo para diferenciar os arquivos
+    prefix = f"{dataset_type}_" if dataset_type != 'non_human' else ""
+
+    # Verificar se os resultados já existem
+    plot_file = os.path.join(output_dir, f'{prefix}06_split_comparison.png')
+    if os.path.exists(plot_file) and not force:
+        print(f"\n[CACHE] Resultados já existem para {dataset_type}: {plot_file}")
+        print(f"        Use --force para recalcular.")
         return None
 
     print("\n" + "=" * 70)
@@ -563,8 +574,6 @@ def run_single_dataset(dataset_type: str, output_dir: str):
     print("GERANDO GRÁFICOS")
     print("-" * 50)
 
-    # Usar prefixo para diferenciar os arquivos
-    prefix = f"{dataset_type}_" if dataset_type != 'non_human' else ""
     plot_comparison(all_results, split_stats, output_dir, prefix)
 
     # Conclusão
@@ -688,6 +697,8 @@ def main():
                         help='Tipo de dataset (human, non_human, all)')
     parser.add_argument('--run_all', action='store_true',
                         help='Executar análise para todos os datasets sequencialmente')
+    parser.add_argument('--force', action='store_true',
+                        help='Forçar recálculo mesmo se resultados já existem')
     parser.add_argument('--output_dir', type=str,
                         default='/media/leon/ssd2tb/docktkinase/leakage_analysis_results',
                         help='Diretório de saída')
@@ -700,13 +711,13 @@ def main():
         print("=" * 70)
 
         for dataset_type in ['non_human', 'human', 'all']:
-            run_single_dataset(dataset_type, args.output_dir)
+            run_single_dataset(dataset_type, args.output_dir, args.force)
 
         print("\n" + "=" * 70)
         print("TODAS AS ANÁLISES CONCLUÍDAS!")
         print("=" * 70)
     else:
-        run_single_dataset(args.dataset, args.output_dir)
+        run_single_dataset(args.dataset, args.output_dir, args.force)
 
     print(f"\nResultados salvos em: {args.output_dir}")
 
