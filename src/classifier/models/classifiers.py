@@ -182,8 +182,7 @@ class ClassificationModels:
         models['AdaBoost'] = _make_pipeline(AdaBoostClassifier(
             n_estimators=100,
             learning_rate=0.5,
-            random_state=random_state,
-            algorithm='SAMME'
+            random_state=random_state
         ), use_scaler)
         
         # 10. KNN (~120s) - Instance-based, slow on prediction (BENEFITS from scaling)
