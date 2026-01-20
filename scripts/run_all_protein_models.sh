@@ -34,12 +34,12 @@ set -e  # Exit on error
 # =============================================================================
 
 # Default paths (can be overridden via command line)
-INPUT_FILE="${1:-tests/datasets/kinase_non_human_compounds.tsv}"
-OUTPUT_BASE="${2:-results/protein_model_benchmark_non_human_v2}"
+INPUT_FILE="${1:-tests/datasets/kinase_human_compounds.tsv}"
+OUTPUT_BASE="${2:-results/protein_model_benchmark_human_v2}"
 
 # Shared ligand embeddings directory (compute once, reuse for all protein models)
 # This saves significant time as ligand embeddings are identical across protein models
-SHARED_LIGAND_DIR="/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_olds/protein_model_benchmark_non_human_v4/shared_ligand_embeddings"   #"${OUTPUT_BASE}/shared_ligand_embeddings"
+SHARED_LIGAND_DIR="/data/docktkinase/results/protein_model_benchmark_human"   #"${OUTPUT_BASE}/shared_ligand_embeddings"
 
 # Optional: Override with pre-computed ligand embeddings from command line
 LIGAND_EMBEDDINGS_DIR="${3:-${SHARED_LIGAND_DIR}}"
@@ -60,7 +60,7 @@ LIGAND_EMBEDDINGS_GENERATED=false
 ESM2_MODELS=(
    # "esm2_t6_8M_UR50D"      # 320-dim, ~8M params
    # "esm2_t12_35M_UR50D"    # 480-dim, ~35M params
-   # "esm2_t30_150M_UR50D"   # 640-dim, ~150M params
+    "esm2_t30_150M_UR50D"   # 640-dim, ~150M params
    # "esm2_t33_650M_UR50D"   # 1280-dim, ~650M params
    # "esm2_t36_3B_UR50D"     # 2560-dim, ~3B params
    # "esm2_t48_15B_UR50D"    # 5120-dim, ~15B params
@@ -76,7 +76,7 @@ ESMC_MODELS=(
 # Structure-based Models (2 models)
 STRUCTURE_MODELS=(
    # "openfold3"             # 1536-dim, Structure prediction
-    "boltz2"                # 384-dim, Boltz-2 embeddings
+   # "boltz2"                # 384-dim, Boltz-2 embeddings
 )
 
 # =============================================================================
@@ -84,7 +84,7 @@ STRUCTURE_MODELS=(
 # =============================================================================
 
 # Option 1: Run ALL 11 models (ESM-2 + ESM-C + Structure)
-# MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+ MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}")
 
 # Option 2: Run only ESM-2 local models (no API key required) - uncomment below
 # MODELS_TO_RUN=("${ESM2_MODELS[@]}")
@@ -106,7 +106,7 @@ ATTENTION_EPOCHS=50
 ATTENTION_BATCH_SIZE=32
 ATTENTION_PATIENCE=10
 # Include ESM-2, ESM-C, and Boltz-2 models for attention matrix extraction
-MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}" "${STRUCTURE_MODELS[@]}")
+MODELS_TO_RUN=("${ESM2_MODELS[@]}" "${ESMC_MODELS[@]}")
 
 # =============================================================================
 # Cross-Attention Matrix Configuration
