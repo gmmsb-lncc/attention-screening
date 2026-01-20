@@ -319,7 +319,124 @@ class ESM2Strategy(BaseProteinStrategy):
     def supports_matrix_output(self) -> bool:
         """ESM-2 supports per-token matrix generation."""
         return True
-    
+
+    def supports_attention_output(self) -> bool:
+        """ESM-2 supports attention matrix extraction."""
+        return True
+
+    def generate_attention_matrix(
+        self,
+        model: Any,
+        auxiliary_objects: Any,
+        sequence: str,
+        device: torch.device,
+        aggregate_heads: str = 'mean',
+        aggregate_layers: str = 'last',
+        **kwargs
+    ) -> np.ndarray:
+        """
+        Generate ESM-2 attention matrix from self-attention weights.
+
+        Args:
+            model: Loaded ESM-2 model
+            auxiliary_objects: Alphabet (tokenizer) from ESM-2
+            sequence: Amino acid sequence
+            device: PyTorch device
+            aggregate_heads: How to aggregate attention heads ('mean', 'max')
+            aggregate_layers: How to aggregate layers ('last', 'mean', 'all')
+            **kwargs: Optional parameters (logger, etc.)
+
+        Returns:
+            Attention matrix numpy array:
+            - If aggregate_layers='last' and aggregate_heads='mean': [seq_len, seq_len]
+            - If aggregate_layers='all' and aggregate_heads='mean': [num_layers, seq_len, seq_len]
+
+        Raises:
+            EmbeddingError: If failed to generate attention matrix
+        """
+        alphabet = auxiliary_objects
+        self.logger = kwargs.get('logger', self.logger)
+
+        # Validate sequence
+        if not sequence or not sequence.strip():
+            raise EmbeddingError("Empty sequence")
+
+        # Clean sequence (only valid amino acids)
+        clean_sequence = ''.join(
+            c for c in sequence.upper()
+            if c in 'ACDEFGHIKLMNPQRSTVWY'
+        )
+
+        if not clean_sequence:
+            raise EmbeddingError("Sequence contains no valid amino acids")
+
+        # Truncate if necessary
+        max_len = self.get_max_length(self._model_name)
+
+        if len(clean_sequence) > max_len:
+            if self.logger:
+                self.logger.warning(
+                    f"Sequence truncated: {len(clean_sequence)} → {max_len} aa"
+                )
+            clean_sequence = clean_sequence[:max_len]
+
+        try:
+            # Prepare tokens
+            batch_converter = alphabet.get_batch_converter()
+            batch_labels, batch_strs, batch_tokens = batch_converter(
+                [("sequence", clean_sequence)]
+            )
+            batch_tokens = batch_tokens.to(device)
+
+            # Inference with attention weights
+            with torch.no_grad():
+                results = model(
+                    batch_tokens,
+                    repr_layers=[model.num_layers],
+                    need_head_weights=True,  # Request attention weights
+                    return_contacts=False
+                )
+
+                # Extract attention weights: [batch, layers, heads, seq_len+2, seq_len+2]
+                # +2 because of BOS and EOS tokens
+                attentions = results["attentions"]
+
+                # Remove batch dimension and special tokens (BOS/EOS)
+                # attentions: [layers, heads, seq_len+2, seq_len+2] -> [layers, heads, seq_len, seq_len]
+                attentions = attentions[0, :, :, 1:-1, 1:-1]  # [layers, heads, seq_len, seq_len]
+
+                # Aggregate heads
+                if aggregate_heads == 'mean':
+                    attentions = attentions.mean(dim=1)  # [layers, seq_len, seq_len]
+                elif aggregate_heads == 'max':
+                    attentions = attentions.max(dim=1)[0]  # [layers, seq_len, seq_len]
+
+                # Aggregate layers
+                if aggregate_layers == 'last':
+                    attentions = attentions[-1]  # [seq_len, seq_len]
+                elif aggregate_layers == 'mean':
+                    attentions = attentions.mean(dim=0)  # [seq_len, seq_len]
+                # else 'all': keep all layers [num_layers, seq_len, seq_len]
+
+                result = attentions.cpu().numpy()
+
+            # CRITICAL memory cleanup
+            del batch_tokens, results, attentions
+            gc.collect()
+
+            if str(device) == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
+            return result
+
+        except Exception as e:
+            # Clean memory even on error
+            if str(device) == 'cuda':
+                torch.cuda.empty_cache()
+            gc.collect()
+            raise EmbeddingError(f"Error generating ESM-2 attention matrix: {e}")
+
     # ===== Private Methods =====
     
     def _setup_cache_dirs(self, offload_folder: Optional[str] = None) -> None:
