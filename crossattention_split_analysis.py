@@ -479,61 +479,9 @@ def run_analysis(
     all_results = {}
     split_stats = {}
 
-    # SCENARIO 1: Random Split
+    # SCENARIO 03: New Compound + New Kinase (true generalization) - FIRST
     print("\n" + "=" * 60)
-    print("SCENARIO 1: Random Split (with leakage)")
-    print("=" * 60)
-
-    train_idx, val_idx, test_idx = split_random(df)
-
-    train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
-    test_df = df.iloc[test_idx].reset_index(drop=True)
-
-    split_stats['Random Split\n(Original)'] = {
-        'train_size': len(train_idx),
-        'val_size': len(val_idx),
-        'test_size': len(test_idx),
-        'test_compounds': test_df['chembl_id'].nunique()
-    }
-
-    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
-
-    results = run_scenario(
-        'Random Split', train_df, val_df, test_df,
-        protein_matrix_dir, ligand_matrix_dir, config, device
-    )
-    all_results['Random Split\n(Original)'] = {'CNN+CrossAttn': results}
-
-    # SCENARIO 2: Split by Compound
-    print("\n" + "=" * 60)
-    print("SCENARIO 2: Split by Compound (no leakage)")
-    print("=" * 60)
-
-    train_idx, val_idx, test_idx = split_by_compound(df)
-
-    train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
-    test_df = df.iloc[test_idx].reset_index(drop=True)
-
-    split_stats['Split by\nCompound'] = {
-        'train_size': len(train_idx),
-        'val_size': len(val_idx),
-        'test_size': len(test_idx),
-        'test_compounds': test_df['chembl_id'].nunique()
-    }
-
-    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
-
-    results = run_scenario(
-        'Split by Compound', train_df, val_df, test_df,
-        protein_matrix_dir, ligand_matrix_dir, config, device
-    )
-    all_results['Split by\nCompound'] = {'CNN+CrossAttn': results}
-
-    # SCENARIO 3: New Compound + New Kinase
-    print("\n" + "=" * 60)
-    print("SCENARIO 3: New Compound + New Kinase (true generalization)")
+    print("SCENARIO 03: New Compound + New Kinase (true generalization)")
     print("=" * 60)
 
     train_idx, val_idx, test_idx = split_new_compound_new_kinase(df)
@@ -557,6 +505,58 @@ def run_analysis(
         protein_matrix_dir, ligand_matrix_dir, config, device
     )
     all_results['New Comp.\n+ New Kinase'] = {'CNN+CrossAttn': results}
+
+    # SCENARIO 02: Split by Compound (no leakage)
+    print("\n" + "=" * 60)
+    print("SCENARIO 02: Split by Compound (no leakage)")
+    print("=" * 60)
+
+    train_idx, val_idx, test_idx = split_by_compound(df)
+
+    train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
+    test_df = df.iloc[test_idx].reset_index(drop=True)
+
+    split_stats['Split by\nCompound'] = {
+        'train_size': len(train_idx),
+        'val_size': len(val_idx),
+        'test_size': len(test_idx),
+        'test_compounds': test_df['chembl_id'].nunique()
+    }
+
+    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
+
+    results = run_scenario(
+        'Split by Compound', train_df, val_df, test_df,
+        protein_matrix_dir, ligand_matrix_dir, config, device
+    )
+    all_results['Split by\nCompound'] = {'CNN+CrossAttn': results}
+
+    # SCENARIO 01: Random Split (with leakage) - LAST
+    print("\n" + "=" * 60)
+    print("SCENARIO 01: Random Split (with leakage)")
+    print("=" * 60)
+
+    train_idx, val_idx, test_idx = split_random(df)
+
+    train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
+    test_df = df.iloc[test_idx].reset_index(drop=True)
+
+    split_stats['Random Split\n(Original)'] = {
+        'train_size': len(train_idx),
+        'val_size': len(val_idx),
+        'test_size': len(test_idx),
+        'test_compounds': test_df['chembl_id'].nunique()
+    }
+
+    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
+
+    results = run_scenario(
+        'Random Split', train_df, val_df, test_df,
+        protein_matrix_dir, ligand_matrix_dir, config, device
+    )
+    all_results['Random Split\n(Original)'] = {'CNN+CrossAttn': results}
 
     return all_results, split_stats
 
