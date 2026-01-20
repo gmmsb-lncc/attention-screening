@@ -12,8 +12,12 @@ Este script avalia o desempenho de modelos usando embeddings pré-computados
 
 Modelos avaliados:
 - KNN (K-Nearest Neighbors) com distância cosseno
-- MLP (Multi-Layer Perceptron)
-- DeepDTA-style: Rede neural profunda para embeddings concatenados
+- MLP (Multi-Layer Perceptron) - sklearn
+- DNN (Deep Neural Network) - PyTorch, rede mais profunda [512, 256, 128]
+
+Nota: O modelo DockTKinase (CNN + Cross-Attention) requer embeddings per-token,
+não embeddings poolados. Este script avalia apenas classificadores que usam
+embeddings concatenados (protein_pooled + ligand_pooled).
 
 Embeddings suportados (apenas 8M, 150M e 3B):
 - esm2_t6_8M_UR50D
@@ -69,7 +73,7 @@ from sklearn.metrics import accuracy_score, matthews_corrcoef, f1_score, roc_auc
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try importing PyTorch for DeepDTA-style model
+# Try importing PyTorch for DNN-style model
 try:
     import torch
     import torch.nn as nn
@@ -78,7 +82,7 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-    print("Warning: PyTorch not available. DeepDTA-style model will be skipped.")
+    print("Warning: PyTorch not available. DNN-style model will be skipped.")
 
 # Configuration
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -91,9 +95,9 @@ plt.rcParams['font.size'] = 12
 # =============================================================================
 
 if TORCH_AVAILABLE:
-    class DeepDTAClassifier(nn.Module):
+    class DNNClassifier(nn.Module):
         """
-        DeepDTA-style classifier for concatenated protein-ligand embeddings.
+        DNN-style classifier for concatenated protein-ligand embeddings.
 
         Architecture similar to what DockTKinase would use internally,
         but adapted for pre-pooled embeddings (no cross-attention since
@@ -125,7 +129,7 @@ if TORCH_AVAILABLE:
 
     def train_deep_model(X_train, y_train, X_val, y_val, input_dim,
                          epochs=100, batch_size=64, lr=0.001, patience=15):
-        """Train DeepDTA-style model with early stopping."""
+        """Train DNN-style model with early stopping."""
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -140,7 +144,7 @@ if TORCH_AVAILABLE:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
         # Initialize model
-        model = DeepDTAClassifier(input_dim).to(device)
+        model = DNNClassifier(input_dim).to(device)
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
@@ -187,7 +191,7 @@ if TORCH_AVAILABLE:
 
 
     def predict_deep_model(model, X, device):
-        """Make predictions with DeepDTA model."""
+        """Make predictions with DNN model."""
         model.eval()
         with torch.no_grad():
             X_t = torch.FloatTensor(X).to(device)
@@ -414,9 +418,9 @@ def train_and_evaluate(embeddings: np.ndarray, labels: np.ndarray,
         'auc': roc_auc_score(y_test, mlp_proba)
     }
 
-    # DeepDTA-style
+    # DNN-style
     if include_deep and TORCH_AVAILABLE:
-        print("    Training DeepDTA-style...")
+        print("    Training DNN-style...")
         try:
             model, device = train_deep_model(
                 X_train_scaled, y_train,
@@ -426,14 +430,14 @@ def train_and_evaluate(embeddings: np.ndarray, labels: np.ndarray,
             )
             deep_pred, deep_proba = predict_deep_model(model, X_test_scaled, device)
 
-            results['DeepDTA'] = {
+            results['DNN'] = {
                 'accuracy': accuracy_score(y_test, deep_pred),
                 'mcc': matthews_corrcoef(y_test, deep_pred),
                 'f1': f1_score(y_test, deep_pred),
                 'auc': roc_auc_score(y_test, deep_proba)
             }
         except Exception as e:
-            print(f"      DeepDTA training failed: {e}")
+            print(f"      DNN training failed: {e}")
 
     return results
 
@@ -584,7 +588,7 @@ def plot_comparison(all_results: dict, split_stats: dict, emb_info: dict,
     colors = {
         'KNN': '#3498db',
         'MLP': '#e74c3c',
-        'DeepDTA': '#2ecc71'
+        'DNN': '#2ecc71'
     }
 
     test_sizes = [split_stats[s]['test_size'] for s in scenarios]
@@ -682,7 +686,7 @@ def plot_inflated_vs_real(all_results: dict, emb_info: dict, output_dir: str, pr
     colors = {
         'KNN': '#3498db',
         'MLP': '#e74c3c',
-        'DeepDTA': '#2ecc71'
+        'DNN': '#2ecc71'
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
@@ -834,7 +838,7 @@ def save_results_json(all_results: dict, split_stats: dict, emb_info: dict,
 # SINGLE ANALYSIS RUNNER
 # =============================================================================
 
-def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str):
+def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str, force: bool = False):
     """
     Run analysis for a single embedding model and dataset type.
 
@@ -842,6 +846,7 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
         embedding_name: Embedding model name (e.g., 'esm2_t30_150M_UR50D' or '150M')
         dataset_type: Dataset type ('human', 'non_human', or 'all')
         output_dir: Output directory
+        force: Force recalculation even if results exist
     """
     # Resolve embedding name if short form provided
     if embedding_name in SUPPORTED_EMBEDDINGS:
@@ -859,6 +864,21 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
         embedding_name
     )
 
+    # Generate prefix from embedding and dataset
+    short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
+    prefix = f"{dataset_type}_{short_name}_"
+
+    # Check if results already exist
+    json_file = os.path.join(output_dir, f'{prefix}embedding_analysis_results.json')
+    plot_file = os.path.join(output_dir, f'{prefix}08_embedding_split_comparison.png')
+
+    if os.path.exists(json_file) and os.path.exists(plot_file) and not force:
+        print(f"\n[CACHE] Resultados já existem para {embedding_name} + {dataset_type}")
+        print(f"        JSON: {json_file}")
+        print(f"        Plot: {plot_file}")
+        print(f"        Use --force para recalcular.")
+        return None
+
     # Check if embedding exists
     if not os.path.exists(embedding_dir):
         print(f"Warning: Embedding directory not found: {embedding_dir}")
@@ -867,10 +887,6 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str)
     if not os.path.exists(dataset_path):
         print(f"Warning: Dataset not found: {dataset_path}")
         return None
-
-    # Generate prefix from embedding and dataset
-    short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
-    prefix = f"{dataset_type}_{short_name}_"
 
     print(f"\n{'='*70}")
     print(f"ANALYSIS: {embedding_name} + {dataset_type}")
@@ -945,6 +961,8 @@ Examples:
                         help='Dataset type (human, non_human, or all for both)')
     parser.add_argument('--run_all', action='store_true',
                         help='Run all embeddings (8M, 150M, 3B) for the specified dataset(s)')
+    parser.add_argument('--force', action='store_true',
+                        help='Force recalculation even if results already exist')
     parser.add_argument('--output_dir', type=str,
                         default='/media/leon/ssd2tb/docktkinase/leakage_analysis_results',
                         help='Output directory for plots and results')
@@ -964,19 +982,23 @@ Examples:
         print("RUNNING ALL EMBEDDING ANALYSES")
         print(f"Embeddings: 8M, 150M, 3B")
         print(f"Datasets: {', '.join(datasets_to_run)}")
+        if args.force:
+            print("Mode: FORCE (recalculating all)")
+        else:
+            print("Mode: CACHE (skipping existing results)")
         print("=" * 70)
 
         # Run all combinations
         for dataset_type in datasets_to_run:
             for emb_short, emb_full in SUPPORTED_EMBEDDINGS.items():
-                run_single_analysis(emb_full, dataset_type, args.output_dir)
+                run_single_analysis(emb_full, dataset_type, args.output_dir, args.force)
 
         print("\n" + "=" * 70)
         print("ALL ANALYSES COMPLETED!")
         print("=" * 70)
     else:
         # Run single analysis
-        run_single_analysis(args.embedding, args.dataset, args.output_dir)
+        run_single_analysis(args.embedding, args.dataset, args.output_dir, args.force)
 
     print(f"\nResults saved in: {args.output_dir}")
 
