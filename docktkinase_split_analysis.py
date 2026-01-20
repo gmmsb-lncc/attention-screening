@@ -12,8 +12,12 @@ Este script avalia o desempenho de modelos usando embeddings pré-computados
 
 Modelos avaliados:
 - KNN (K-Nearest Neighbors) com distância cosseno
-- MLP (Multi-Layer Perceptron)
-- DeepDTA-style: Rede neural profunda para embeddings concatenados
+- MLP (Multi-Layer Perceptron) - sklearn
+- DNN (Deep Neural Network) - PyTorch, rede mais profunda [512, 256, 128]
+
+Nota: O modelo DockTKinase (CNN + Cross-Attention) requer embeddings per-token,
+não embeddings poolados. Este script avalia apenas classificadores que usam
+embeddings concatenados (protein_pooled + ligand_pooled).
 
 Embeddings suportados (apenas 8M, 150M e 3B):
 - esm2_t6_8M_UR50D
@@ -69,7 +73,7 @@ from sklearn.metrics import accuracy_score, matthews_corrcoef, f1_score, roc_auc
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try importing PyTorch for DeepDTA-style model
+# Try importing PyTorch for DNN-style model
 try:
     import torch
     import torch.nn as nn
@@ -78,7 +82,7 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-    print("Warning: PyTorch not available. DeepDTA-style model will be skipped.")
+    print("Warning: PyTorch not available. DNN-style model will be skipped.")
 
 # Configuration
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -91,9 +95,9 @@ plt.rcParams['font.size'] = 12
 # =============================================================================
 
 if TORCH_AVAILABLE:
-    class DeepDTAClassifier(nn.Module):
+    class DNNClassifier(nn.Module):
         """
-        DeepDTA-style classifier for concatenated protein-ligand embeddings.
+        DNN-style classifier for concatenated protein-ligand embeddings.
 
         Architecture similar to what DockTKinase would use internally,
         but adapted for pre-pooled embeddings (no cross-attention since
@@ -125,7 +129,7 @@ if TORCH_AVAILABLE:
 
     def train_deep_model(X_train, y_train, X_val, y_val, input_dim,
                          epochs=100, batch_size=64, lr=0.001, patience=15):
-        """Train DeepDTA-style model with early stopping."""
+        """Train DNN-style model with early stopping."""
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -140,7 +144,7 @@ if TORCH_AVAILABLE:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
         # Initialize model
-        model = DeepDTAClassifier(input_dim).to(device)
+        model = DNNClassifier(input_dim).to(device)
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
@@ -187,7 +191,7 @@ if TORCH_AVAILABLE:
 
 
     def predict_deep_model(model, X, device):
-        """Make predictions with DeepDTA model."""
+        """Make predictions with DNN model."""
         model.eval()
         with torch.no_grad():
             X_t = torch.FloatTensor(X).to(device)
@@ -414,9 +418,9 @@ def train_and_evaluate(embeddings: np.ndarray, labels: np.ndarray,
         'auc': roc_auc_score(y_test, mlp_proba)
     }
 
-    # DeepDTA-style
+    # DNN-style
     if include_deep and TORCH_AVAILABLE:
-        print("    Training DeepDTA-style...")
+        print("    Training DNN-style...")
         try:
             model, device = train_deep_model(
                 X_train_scaled, y_train,
@@ -426,14 +430,14 @@ def train_and_evaluate(embeddings: np.ndarray, labels: np.ndarray,
             )
             deep_pred, deep_proba = predict_deep_model(model, X_test_scaled, device)
 
-            results['DeepDTA'] = {
+            results['DNN'] = {
                 'accuracy': accuracy_score(y_test, deep_pred),
                 'mcc': matthews_corrcoef(y_test, deep_pred),
                 'f1': f1_score(y_test, deep_pred),
                 'auc': roc_auc_score(y_test, deep_proba)
             }
         except Exception as e:
-            print(f"      DeepDTA training failed: {e}")
+            print(f"      DNN training failed: {e}")
 
     return results
 
@@ -584,7 +588,7 @@ def plot_comparison(all_results: dict, split_stats: dict, emb_info: dict,
     colors = {
         'KNN': '#3498db',
         'MLP': '#e74c3c',
-        'DeepDTA': '#2ecc71'
+        'DNN': '#2ecc71'
     }
 
     test_sizes = [split_stats[s]['test_size'] for s in scenarios]
@@ -682,7 +686,7 @@ def plot_inflated_vs_real(all_results: dict, emb_info: dict, output_dir: str, pr
     colors = {
         'KNN': '#3498db',
         'MLP': '#e74c3c',
-        'DeepDTA': '#2ecc71'
+        'DNN': '#2ecc71'
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
