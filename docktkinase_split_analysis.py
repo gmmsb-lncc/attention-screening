@@ -54,13 +54,13 @@ SUPPORTED_EMBEDDINGS = {
 
 # Dataset paths
 DATASET_PATHS = {
-    'human': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_human_compounds.tsv',
-    'non_human': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
-    'all': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_all_compounds.tsv'
+    'human': './tests/datasets/kinase_human_compounds.tsv',
+    'non_human': './tests/datasets/kinase_non_human_compounds.tsv',
+    'all': './tests/datasets/kinase_all_compounds.tsv'
 }
 
 # Base path for embeddings
-EMBEDDING_BASE_PATH = '/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_{dataset_type}_v2'
+EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
 
 import pandas as pd
 import numpy as np
@@ -964,7 +964,7 @@ Examples:
     parser.add_argument('--force', action='store_true',
                         help='Force recalculation even if results already exist')
     parser.add_argument('--output_dir', type=str,
-                        default='/media/leon/ssd2tb/docktkinase/leakage_analysis_results',
+                        default='./leakage_analysis_results',
                         help='Output directory for plots and results')
 
     args = parser.parse_args()
