@@ -208,29 +208,44 @@ def main():
         # Load ESM-2 and SMI-TED
         esm_proteins = load_esm_proteins(model_path)
         smited_ligands = load_smited_ligands(model_path)
-        
+
         # C1: ESM-2 + SMI-TED
         print(f"C1: ESM-2 + SMI-TED")
-        combine_and_save(
-            df, esm_proteins, smited_ligands, output_dir,
-            f'C1_ESM_{model_name}_SMITED'
-        )
+
+        # Check if we have enough data to proceed
+        if len(esm_proteins) == 0 or len(smited_ligands) == 0:
+            print(f"  ⚠️ Skipping C1 for {model_name} - insufficient data")
+        else:
+            combine_and_save(
+                df, esm_proteins, smited_ligands, output_dir,
+                f'C1_ESM_{model_name}_SMITED'
+            )
         
         # C2: ESM-2 + Morgan FP
         print(f"\nC2: ESM-2 + Morgan FP")
         morgan_ligands = load_morgan_ligands(morgan_path, ligands_csv)
-        combine_and_save(
-            df, esm_proteins, morgan_ligands, output_dir,
-            f'C2_ESM_{model_name}_Morgan'
-        )
+
+        # Check if we have enough data to proceed
+        if len(esm_proteins) == 0 or len(morgan_ligands) == 0:
+            print(f"  ⚠️ Skipping C2 for {model_name} - insufficient data")
+        else:
+            combine_and_save(
+                df, esm_proteins, morgan_ligands, output_dir,
+                f'C2_ESM_{model_name}_Morgan'
+            )
         
         # C3: One-Hot + SMI-TED
         print(f"\nC3: One-Hot + SMI-TED")
         onehot_proteins = load_onehot_proteins(onehot_path, proteins_csv)
-        combine_and_save(
-            df, onehot_proteins, smited_ligands, output_dir,
-            f'C3_OneHot_SMITED_{model_name}'
-        )
+
+        # Check if we have enough data to proceed
+        if len(onehot_proteins) == 0 or len(smited_ligands) == 0:
+            print(f"  ⚠️ Skipping C3 for {model_name} - insufficient data")
+        else:
+            combine_and_save(
+                df, onehot_proteins, smited_ligands, output_dir,
+                f'C3_OneHot_SMITED_{model_name}'
+            )
         
         print()
     
@@ -241,10 +256,15 @@ def main():
     print(f"C4: One-Hot + Morgan FP")
     onehot_proteins = load_onehot_proteins(onehot_path, proteins_csv)
     morgan_ligands = load_morgan_ligands(morgan_path, ligands_csv)
-    combine_and_save(
-        df, onehot_proteins, morgan_ligands, output_dir,
-        'C4_OneHot_Morgan'
-    )
+
+    # Check if we have enough data to proceed
+    if len(onehot_proteins) == 0 or len(morgan_ligands) == 0:
+        print(f"  ⚠️ Skipping C4 - insufficient data")
+    else:
+        combine_and_save(
+            df, onehot_proteins, morgan_ligands, output_dir,
+            'C4_OneHot_Morgan'
+        )
     
     # Final summary
     print("\n" + "="*60)

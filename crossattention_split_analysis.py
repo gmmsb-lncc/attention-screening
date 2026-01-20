@@ -48,7 +48,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 # Add src to path
-sys.path.insert(0, '/media/leon/ssd2tb/docktkinase')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.classifier.models.cross_attention_model import (
     CrossAttentionAffinityModel,
@@ -84,13 +84,13 @@ LIGAND_DIM = 768  # SMI-TED
 
 # Dataset paths
 DATASET_PATHS = {
-    'human': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_human_compounds.tsv',
-    'non_human': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
-    'all': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_all_compounds.tsv'
+    'human': './tests/datasets/kinase_human_compounds.tsv',
+    'non_human': './tests/datasets/kinase_non_human_compounds.tsv',
+    'all': './tests/datasets/kinase_all_compounds.tsv'
 }
 
 # Base path for embeddings
-EMBEDDING_BASE_PATH = '/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_{dataset_type}_v2'
+EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
 
 
 @dataclass
@@ -124,6 +124,74 @@ def get_device(config: TrainingConfig) -> torch.device:
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             return torch.device('mps')
     return torch.device('cpu')
+
+
+# =============================================================================
+# CHECKPOINT MANAGEMENT
+# =============================================================================
+
+def get_checkpoint_path(output_dir: str, prefix: str, scenario_name: str) -> str:
+    """Get checkpoint file path for a scenario."""
+    safe_scenario = scenario_name.replace('\n', '_').replace(' ', '_').replace('+', 'plus')
+    return os.path.join(output_dir, f'{prefix}checkpoint_{safe_scenario}.pt')
+
+
+def save_checkpoint(
+    checkpoint_path: str,
+    model: nn.Module,
+    optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler._LRScheduler,
+    epoch: int,
+    best_val_mcc: float,
+    best_model_state: dict,
+    patience_counter: int,
+    history: Dict,
+    scenario_completed: bool = False
+):
+    """Save training checkpoint to disk."""
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'best_val_mcc': best_val_mcc,
+        'best_model_state': best_model_state,
+        'patience_counter': patience_counter,
+        'history': history,
+        'scenario_completed': scenario_completed,
+        'timestamp': datetime.now().isoformat()
+    }
+
+    # Save to temp file first, then rename (atomic operation)
+    temp_path = checkpoint_path + '.tmp'
+    torch.save(checkpoint, temp_path)
+    os.replace(temp_path, checkpoint_path)
+
+    return checkpoint_path
+
+
+def load_checkpoint(checkpoint_path: str, device: torch.device) -> Optional[Dict]:
+    """Load checkpoint from disk if it exists."""
+    if not os.path.exists(checkpoint_path):
+        return None
+
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        print(f"  [CHECKPOINT] Loaded checkpoint from epoch {checkpoint['epoch']+1}")
+        print(f"               Best val_mcc so far: {checkpoint['best_val_mcc']:.4f}")
+        print(f"               Saved at: {checkpoint['timestamp']}")
+        return checkpoint
+    except Exception as e:
+        print(f"  [WARNING] Failed to load checkpoint: {e}")
+        return None
+
+
+def is_scenario_completed(checkpoint_path: str, device: torch.device) -> bool:
+    """Check if a scenario has been completed (for skipping)."""
+    checkpoint = load_checkpoint(checkpoint_path, device)
+    if checkpoint is None:
+        return False
+    return checkpoint.get('scenario_completed', False)
 
 
 # =============================================================================
@@ -300,9 +368,24 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     config: TrainingConfig,
-    device: torch.device
+    device: torch.device,
+    checkpoint_path: Optional[str] = None,
+    checkpoint_interval: int = 10
 ) -> Tuple[CrossAttentionAffinityModel, Dict]:
-    """Train the model with early stopping."""
+    """Train the model with early stopping and checkpoint support.
+
+    Args:
+        model: The model to train
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        config: Training configuration
+        device: Device to train on
+        checkpoint_path: Path to save/load checkpoints (optional)
+        checkpoint_interval: Save checkpoint every N epochs (default: 10)
+
+    Returns:
+        Trained model and training history
+    """
 
     model = model.to(device)
 
@@ -325,10 +408,34 @@ def train_model(
     best_model_state = None
     patience_counter = 0
     history = {'train_loss': [], 'val_mcc': [], 'val_acc': []}
+    start_epoch = 0
+
+    # Try to load checkpoint if it exists
+    if checkpoint_path is not None:
+        checkpoint = load_checkpoint(checkpoint_path, device)
+        if checkpoint is not None and not checkpoint.get('scenario_completed', False):
+            # Resume from checkpoint
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            best_val_mcc = checkpoint['best_val_mcc']
+            best_model_state = checkpoint['best_model_state']
+            patience_counter = checkpoint['patience_counter']
+            history = checkpoint['history']
+            start_epoch = checkpoint['epoch'] + 1
+            print(f"  [CHECKPOINT] Resuming from epoch {start_epoch}")
+        elif checkpoint is not None and checkpoint.get('scenario_completed', False):
+            # Scenario already completed, load best model and return
+            print(f"  [CHECKPOINT] Scenario already completed, loading best model...")
+            if checkpoint['best_model_state'] is not None:
+                model.load_state_dict(checkpoint['best_model_state'])
+            return model, checkpoint['history']
 
     print(f"  Training for up to {config.num_epochs} epochs (patience={config.patience})...")
+    if start_epoch > 0:
+        print(f"  Continuing from epoch {start_epoch + 1}...")
 
-    for epoch in range(config.num_epochs):
+    for epoch in range(start_epoch, config.num_epochs):
         # Train
         train_metrics = train_epoch(
             model, train_loader, optimizer, loss_fn, device, epoch, config.num_epochs
@@ -344,10 +451,12 @@ def train_model(
         history['val_acc'].append(val_metrics['accuracy'])
 
         # Early stopping check
+        improved = False
         if val_metrics['mcc'] > best_val_mcc:
             best_val_mcc = val_metrics['mcc']
-            best_model_state = model.state_dict().copy()
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             patience_counter = 0
+            improved = True
         else:
             patience_counter += 1
 
@@ -356,6 +465,27 @@ def train_model(
             print(f"    Epoch {epoch+1}: loss={train_metrics['total']:.4f}, "
                   f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}")
 
+        # Save checkpoint periodically or when improved
+        if checkpoint_path is not None:
+            should_save = (
+                (epoch + 1) % checkpoint_interval == 0 or  # Periodic save
+                improved or  # Save when model improved
+                patience_counter >= config.patience  # Save before early stopping
+            )
+            if should_save:
+                save_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    epoch=epoch,
+                    best_val_mcc=best_val_mcc,
+                    best_model_state=best_model_state,
+                    patience_counter=patience_counter,
+                    history=history,
+                    scenario_completed=False
+                )
+
         if patience_counter >= config.patience:
             print(f"    Early stopping at epoch {epoch+1} (best val_mcc={best_val_mcc:.4f})")
             break
@@ -363,6 +493,22 @@ def train_model(
     # Load best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
+
+    # Save final checkpoint marking scenario as completed
+    if checkpoint_path is not None:
+        save_checkpoint(
+            checkpoint_path=checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            best_val_mcc=best_val_mcc,
+            best_model_state=best_model_state,
+            patience_counter=patience_counter,
+            history=history,
+            scenario_completed=True
+        )
+        print(f"  [CHECKPOINT] Saved final checkpoint (scenario completed)")
 
     return model, history
 
@@ -379,9 +525,25 @@ def run_scenario(
     protein_matrix_dir: str,
     ligand_matrix_dir: str,
     config: TrainingConfig,
-    device: torch.device
+    device: torch.device,
+    checkpoint_path: Optional[str] = None
 ) -> Dict:
-    """Run training and evaluation for one scenario."""
+    """Run training and evaluation for one scenario.
+
+    Args:
+        scenario_name: Name of the scenario being run
+        train_df: Training dataframe
+        val_df: Validation dataframe
+        test_df: Test dataframe
+        protein_matrix_dir: Path to protein matrix embeddings
+        ligand_matrix_dir: Path to ligand matrix embeddings
+        config: Training configuration
+        device: Device to train on
+        checkpoint_path: Path to save/load checkpoints (optional)
+
+    Returns:
+        Dictionary with test metrics
+    """
 
     print(f"\n  Creating data loaders...")
 
@@ -420,8 +582,12 @@ def run_scenario(
 
     print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Train
-    model, history = train_model(model, train_loader, val_loader, config, device)
+    # Train with checkpoint support
+    model, history = train_model(
+        model, train_loader, val_loader, config, device,
+        checkpoint_path=checkpoint_path,
+        checkpoint_interval=10  # Save every 10 epochs
+    )
 
     # Evaluate on test set
     print(f"  Evaluating on test set...")
@@ -437,9 +603,21 @@ def run_analysis(
     embedding_name: str,
     dataset_type: str,
     output_dir: str,
-    config: TrainingConfig
+    config: TrainingConfig,
+    prefix: str = ""
 ) -> Tuple[Dict, Dict]:
-    """Run complete analysis for one embedding + dataset combination."""
+    """Run complete analysis for one embedding + dataset combination.
+
+    Args:
+        embedding_name: Name of the embedding model
+        dataset_type: Type of dataset (human, non_human, all)
+        output_dir: Directory to save results and checkpoints
+        config: Training configuration
+        prefix: Prefix for checkpoint files
+
+    Returns:
+        Tuple of (all_results, split_stats) dictionaries
+    """
 
     # Get paths
     dataset_path = DATASET_PATHS.get(dataset_type)
@@ -479,62 +657,14 @@ def run_analysis(
     all_results = {}
     split_stats = {}
 
-    # SCENARIO 1: Random Split
+    # SCENARIO 03: New Compound + New Kinase (true generalization) - FIRST
     print("\n" + "=" * 60)
-    print("SCENARIO 1: Random Split (with leakage)")
+    print("SCENARIO 03: New Compound + New Kinase (true generalization)")
     print("=" * 60)
 
-    train_idx, val_idx, test_idx = split_random(df)
-
-    train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
-    test_df = df.iloc[test_idx].reset_index(drop=True)
-
-    split_stats['Random Split\n(Original)'] = {
-        'train_size': len(train_idx),
-        'val_size': len(val_idx),
-        'test_size': len(test_idx),
-        'test_compounds': test_df['chembl_id'].nunique()
-    }
-
-    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
-
-    results = run_scenario(
-        'Random Split', train_df, val_df, test_df,
-        protein_matrix_dir, ligand_matrix_dir, config, device
-    )
-    all_results['Random Split\n(Original)'] = {'CNN+CrossAttn': results}
-
-    # SCENARIO 2: Split by Compound
-    print("\n" + "=" * 60)
-    print("SCENARIO 2: Split by Compound (no leakage)")
-    print("=" * 60)
-
-    train_idx, val_idx, test_idx = split_by_compound(df)
-
-    train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
-    test_df = df.iloc[test_idx].reset_index(drop=True)
-
-    split_stats['Split by\nCompound'] = {
-        'train_size': len(train_idx),
-        'val_size': len(val_idx),
-        'test_size': len(test_idx),
-        'test_compounds': test_df['chembl_id'].nunique()
-    }
-
-    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
-
-    results = run_scenario(
-        'Split by Compound', train_df, val_df, test_df,
-        protein_matrix_dir, ligand_matrix_dir, config, device
-    )
-    all_results['Split by\nCompound'] = {'CNN+CrossAttn': results}
-
-    # SCENARIO 3: New Compound + New Kinase
-    print("\n" + "=" * 60)
-    print("SCENARIO 3: New Compound + New Kinase (true generalization)")
-    print("=" * 60)
+    scenario_name = 'New Compound + New Kinase'
+    checkpoint_path = get_checkpoint_path(output_dir, prefix, scenario_name)
+    print(f"  Checkpoint: {checkpoint_path}")
 
     train_idx, val_idx, test_idx = split_new_compound_new_kinase(df)
 
@@ -553,10 +683,73 @@ def run_analysis(
     print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
 
     results = run_scenario(
-        'New Compound + New Kinase', train_df, val_df, test_df,
-        protein_matrix_dir, ligand_matrix_dir, config, device
+        scenario_name, train_df, val_df, test_df,
+        protein_matrix_dir, ligand_matrix_dir, config, device,
+        checkpoint_path=checkpoint_path
     )
     all_results['New Comp.\n+ New Kinase'] = {'CNN+CrossAttn': results}
+
+    # SCENARIO 02: Split by Compound (no leakage)
+    print("\n" + "=" * 60)
+    print("SCENARIO 02: Split by Compound (no leakage)")
+    print("=" * 60)
+
+    scenario_name = 'Split by Compound'
+    checkpoint_path = get_checkpoint_path(output_dir, prefix, scenario_name)
+    print(f"  Checkpoint: {checkpoint_path}")
+
+    train_idx, val_idx, test_idx = split_by_compound(df)
+
+    train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
+    test_df = df.iloc[test_idx].reset_index(drop=True)
+
+    split_stats['Split by\nCompound'] = {
+        'train_size': len(train_idx),
+        'val_size': len(val_idx),
+        'test_size': len(test_idx),
+        'test_compounds': test_df['chembl_id'].nunique()
+    }
+
+    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
+
+    results = run_scenario(
+        scenario_name, train_df, val_df, test_df,
+        protein_matrix_dir, ligand_matrix_dir, config, device,
+        checkpoint_path=checkpoint_path
+    )
+    all_results['Split by\nCompound'] = {'CNN+CrossAttn': results}
+
+    # SCENARIO 01: Random Split (with leakage) - LAST
+    print("\n" + "=" * 60)
+    print("SCENARIO 01: Random Split (with leakage)")
+    print("=" * 60)
+
+    scenario_name = 'Random Split'
+    checkpoint_path = get_checkpoint_path(output_dir, prefix, scenario_name)
+    print(f"  Checkpoint: {checkpoint_path}")
+
+    train_idx, val_idx, test_idx = split_random(df)
+
+    train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
+    test_df = df.iloc[test_idx].reset_index(drop=True)
+
+    split_stats['Random Split\n(Original)'] = {
+        'train_size': len(train_idx),
+        'val_size': len(val_idx),
+        'test_size': len(test_idx),
+        'test_compounds': test_df['chembl_id'].nunique()
+    }
+
+    print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
+
+    results = run_scenario(
+        scenario_name, train_df, val_df, test_df,
+        protein_matrix_dir, ligand_matrix_dir, config, device,
+        checkpoint_path=checkpoint_path
+    )
+    all_results['Random Split\n(Original)'] = {'CNN+CrossAttn': results}
 
     return all_results, split_stats
 
@@ -713,8 +906,10 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str,
         batch_size=32
     )
 
-    # Run analysis
-    all_results, split_stats = run_analysis(embedding_name, dataset_type, output_dir, config)
+    # Run analysis with checkpoint support
+    all_results, split_stats = run_analysis(
+        embedding_name, dataset_type, output_dir, config, prefix=prefix
+    )
 
     if all_results is None:
         return None
@@ -763,7 +958,7 @@ def main():
     parser.add_argument('--force', action='store_true',
                         help='Force recalculation even if results exist')
     parser.add_argument('--output_dir', type=str,
-                        default='/media/leon/ssd2tb/docktkinase/leakage_analysis_results',
+                        default='./results/leakage_analysis_results',
                         help='Output directory')
 
     args = parser.parse_args()
