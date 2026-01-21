@@ -1,0 +1,489 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+
+% Tema e cores
+\usetheme{Madrid}
+\usecolortheme{whale}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+% Pacotes
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[portuguese]{babel}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{multirow}
+
+% Cores customizadas
+\definecolor{lnccblue}{RGB}{52, 152, 219}
+\definecolor{alertred}{RGB}{231, 76, 60}
+\definecolor{successgreen}{RGB}{39, 174, 96}
+\definecolor{warningorange}{RGB}{243, 156, 18}
+
+% Configurações
+\setbeamercolor{title}{fg=white,bg=lnccblue}
+\setbeamercolor{frametitle}{fg=white,bg=lnccblue}
+\setbeamercolor{block title}{bg=lnccblue,fg=white}
+\setbeamercolor{block body}{bg=lnccblue!10}
+\setbeamercolor{block title alerted}{bg=alertred,fg=white}
+\setbeamercolor{block body alerted}{bg=alertred!10}
+
+% Informações do documento
+\title[Análise de Vazamento de Dados]{Por que Representações Simples Apresentam\\Performance Elevada?}
+\subtitle{Análise de Vazamento de Dados em Predição de\\Atividade Quinase-Composto}
+\author{Análise Exploratória de Dados}
+\institute{LNCC - Laboratório Nacional de Computação Científica}
+\date{\today}
+
+\begin{document}
+
+% =============================================================================
+% SLIDE DE TÍTULO
+% =============================================================================
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% =============================================================================
+% SUMÁRIO
+% =============================================================================
+\begin{frame}{Sumário}
+    \tableofcontents
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 1: CONTEXTO E PROBLEMA
+% =============================================================================
+\section{Contexto e Problema}
+
+\begin{frame}{Contexto: Predição de Atividade Quinase-Composto}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \textbf{Objetivo:}
+            \begin{itemize}
+                \item Predizer se um composto químico é \textbf{ativo} ou \textbf{inativo} contra uma quinase
+                \item Classificação binária: ativo ($\leq 1\mu M$) vs inativo
+            \end{itemize}
+
+            \vspace{0.5cm}
+            \textbf{Representações Utilizadas:}
+            \begin{itemize}
+                \item \textbf{Quinases:} One-hot encoding
+                \item \textbf{Compostos:} Morgan Fingerprints (2048 bits)
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{block}{Características do Dataset}
+                \begin{itemize}
+                    \item 15.616 pares composto-quinase
+                    \item 8.131 compostos únicos
+                    \item 231 quinases únicas
+                    \item 56,8\% ativos / 43,2\% inativos
+                \end{itemize}
+            \end{block}
+
+            \vspace{0.3cm}
+            \begin{block}{Split Utilizado}
+                80\% treino / 10\% validação / 10\% teste\\
+                (Split aleatório estratificado)
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{O Problema: Performance Inesperadamente Alta}
+    \begin{alertblock}{Resultados Observados}
+        \centering
+        \begin{tabular}{lcc}
+            \toprule
+            \textbf{Modelo} & \textbf{Accuracy} & \textbf{MCC} \\
+            \midrule
+            KNN & 0.876 & 0.747 \\
+            MLP & 0.887 & 0.768 \\
+            \bottomrule
+        \end{tabular}
+    \end{alertblock}
+
+    \vspace{0.5cm}
+    \begin{center}
+        \Large\textcolor{alertred}{\textbf{Questão Central:}}\\[0.3cm]
+        \textit{Por que uma representação tão simples consegue\\performance tão elevada?}\\[0.5cm]
+        \textcolor{warningorange}{\textbf{Expectativa: O problema deveria ser muito mais difícil!}}
+    \end{center}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 2: VAZAMENTO DE DADOS
+% =============================================================================
+\section{Análise de Vazamento de Dados}
+
+\begin{frame}{Problema Crítico: Vazamento de Compostos}
+    \begin{columns}
+        \begin{column}{0.55\textwidth}
+            \includegraphics[width=\textwidth]{01_leakage_analysis.png}
+        \end{column}
+        \begin{column}{0.45\textwidth}
+            \begin{alertblock}{Descoberta Alarmante}
+                \begin{itemize}
+                    \item \textbf{64,7\%} das linhas de teste têm composto vazado
+                    \item \textbf{36,6\%} são duplicatas exatas (mesmo composto + quinase)
+                \end{itemize}
+            \end{alertblock}
+
+            \vspace{0.2cm}
+            \begin{block}{Detalhamento}
+                \small
+                \begin{itemize}
+                    \item 820 de 1.355 compostos únicos do teste (60,5\%) aparecem no treino
+                    \item Esses 820 compostos geram 64,7\% das linhas
+                \end{itemize}
+            \end{block}
+
+            \vspace{0.2cm}
+            \begin{block}{Consequência}
+                O modelo pode estar \textbf{lembrando} ao invés de \textbf{generalizando}!
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 3: BASELINE LOOKUP
+% =============================================================================
+\section{Modelo Lookup Baseline}
+
+\begin{frame}{Hipótese: Modelo Simples de ``Lookup''}
+    \textbf{Ideia:} Se os modelos estão memorizando, um modelo que apenas ``olha'' a classe majoritária deveria ter performance similar.
+
+    \vspace{0.5cm}
+    \begin{block}{Modelos Lookup Implementados}
+        \begin{enumerate}
+            \item \textbf{Lookup por Composto:} Prediz a classe majoritária do composto no treino
+            \item \textbf{Lookup por Quinase:} Prediz a classe majoritária da quinase no treino
+            \item \textbf{Lookup Composto + Quinase:} Combina ambas as estratégias
+        \end{enumerate}
+    \end{block}
+
+    \vspace{0.3cm}
+    \begin{center}
+        \textit{Se o composto/quinase não existe no treino, prediz a classe global majoritária.}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Resultados: Lookup vs KNN}
+    \begin{center}
+        \includegraphics[width=0.85\textwidth]{02_baseline_comparison.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Análise dos Resultados Lookup}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \begin{table}
+                \centering
+                \small
+                \begin{tabular}{lcc}
+                    \toprule
+                    \textbf{Modelo} & \textbf{Acc} & \textbf{MCC} \\
+                    \midrule
+                    Lookup: Composto & 0.787 & 0.577 \\
+                    Lookup: Quinase & 0.750 & 0.510 \\
+                    Lookup: Comp+Quin & \textbf{0.862} & \textbf{0.717} \\
+                    \midrule
+                    KNN (Original) & 0.876 & 0.747 \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{alertblock}{Conclusão}
+                O modelo \textbf{Lookup simples} (apenas olha classe majoritária) tem performance \textbf{comparável} ao KNN!
+            \end{alertblock}
+
+            \vspace{0.3cm}
+            \begin{block}{Implicação}
+                \textcolor{alertred}{\textbf{O KNN não está aprendendo padrões complexos --- está memorizando!}}
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 4: DESBALANCEAMENTO POR QUINASE
+% =============================================================================
+\section{Desbalanceamento por Quinase}
+
+\begin{frame}{Distribuição de Classes por Quinase}
+    \begin{center}
+        \includegraphics[width=0.9\textwidth]{03_kinase_imbalance.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Quinases Trivialmente Previsíveis}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \begin{alertblock}{Estatísticas Alarmantes}
+                \begin{itemize}
+                    \item \textbf{70,6\%} das quinases são desbalanceadas ($>$80\% uma classe)
+                    \item \textbf{45,6\%} das linhas vêm de quinases extremamente desbalanceadas
+                \end{itemize}
+            \end{alertblock}
+
+            \vspace{0.3cm}
+            \begin{block}{Exemplos Extremos}
+                \small
+                \begin{itemize}
+                    \item Glycogen synthase kinase-3 beta: \textbf{100\% ativos}
+                    \item Muitas quinases: \textbf{100\% inativos}
+                \end{itemize}
+            \end{block}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{block}{Consequência}
+                Para muitas quinases, o modelo pode simplesmente predizer a classe majoritária e ter alta acurácia!
+            \end{block}
+
+            \vspace{0.5cm}
+            \textbf{Exemplo:}\\
+            Se uma quinase tem 100\% de compostos inativos, o modelo precisa apenas ``aprender'' que essa quinase $\rightarrow$ inativo.
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 5: CONSISTÊNCIA DOS COMPOSTOS
+% =============================================================================
+\section{Consistência de Classe dos Compostos}
+
+\begin{frame}{Comportamento dos Compostos através de Quinases}
+    \begin{center}
+        \includegraphics[width=0.9\textwidth]{04_compound_consistency.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Análise de Consistência}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \begin{table}
+                \centering
+                \begin{tabular}{lc}
+                    \toprule
+                    \textbf{Categoria} & \textbf{\%} \\
+                    \midrule
+                    Uma quinase apenas & 80,2\% \\
+                    Perfeitamente consistente & 15,2\% \\
+                    Inconsistente & 4,6\% \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+
+            \vspace{0.3cm}
+            \begin{block}{Multi-quinase}
+                \textbf{76,7\%} dos compostos multi-quinase são perfeitamente consistentes!
+            \end{block}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{alertblock}{Implicação Crítica}
+                O \textbf{fingerprint do composto sozinho} carrega a maior parte do sinal preditivo!
+            \end{alertblock}
+
+            \vspace{0.3cm}
+            \begin{center}
+                \textit{Ou seja, só de olhar para o composto, já é possível saber se ele é ativo ou inativo para a maioria das quinases.}
+            \end{center}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 6: SIMILARIDADE QUÍMICA
+% =============================================================================
+\section{Similaridade Química}
+
+\begin{frame}{Similaridade Tanimoto: Teste vs Treino}
+    \begin{center}
+        \includegraphics[width=0.9\textwidth]{05_similarity_analysis.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Por que o KNN Funciona?}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \begin{table}
+                \centering
+                \begin{tabular}{lc}
+                    \toprule
+                    \textbf{Similaridade} & \textbf{\%} \\
+                    \midrule
+                    Muito similar ($>$0.8) & 43,0\% \\
+                    Similar (0.6--0.8) & 46,8\% \\
+                    Moderada (0.4--0.6) & 5,8\% \\
+                    Baixa ($<$0.4) & 4,4\% \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{alertblock}{Descoberta}
+                \textbf{$\sim$90\%} dos compostos ``novos'' no teste têm vizinho muito próximo no treino!
+            \end{alertblock}
+
+            \vspace{0.3cm}
+            \begin{block}{Conclusão}
+                O KNN funciona bem porque a maioria dos compostos de teste é \textbf{quimicamente muito similar} aos compostos de treino.
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 7: COMPARAÇÃO DE SPLITS
+% =============================================================================
+\section{Comparação de Cenários de Avaliação}
+
+\begin{frame}{Três Cenários de Split}
+    \begin{block}{Cenário 1: Split Aleatório (Original)}
+        Split 80/10/10 estratificado --- \textcolor{alertred}{COM vazamento de dados}
+    \end{block}
+
+    \begin{block}{Cenário 2: Split por Composto}
+        Nenhum composto do teste aparece no treino --- \textcolor{warningorange}{Sem vazamento de compostos}
+    \end{block}
+
+    \begin{block}{Cenário 3: Novo Composto + Nova Quinase}
+        Compostos E quinases do teste nunca foram vistos no treino --- \textcolor{successgreen}{\textbf{Generalização Verdadeira}}
+    \end{block}
+
+    \vspace{0.3cm}
+    \begin{center}
+        \textit{O Cenário 3 representa o caso de uso real: predizer atividade para quinases e compostos completamente novos.}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Resultados por Cenário de Avaliação}
+    \begin{center}
+        \includegraphics[width=0.95\textwidth]{06_split_comparison.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Performance Inflada vs Performance Real}
+    \begin{center}
+        \includegraphics[width=0.95\textwidth]{07_inflated_vs_real_performance.png}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Queda Dramática de Performance}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \begin{table}
+                \centering
+                \begin{tabular}{lccc}
+                    \toprule
+                    & \textbf{Reportado} & \textbf{Real} & \textbf{Queda} \\
+                    \midrule
+                    \multicolumn{4}{c}{\textbf{MCC}} \\
+                    \midrule
+                    KNN & 0.747 & 0.407 & \textcolor{alertred}{-45\%} \\
+                    MLP & 0.768 & 0.275 & \textcolor{alertred}{-64\%} \\
+                    \midrule
+                    \multicolumn{4}{c}{\textbf{Accuracy}} \\
+                    \midrule
+                    KNN & 0.876 & 0.680 & \textcolor{alertred}{-22\%} \\
+                    MLP & 0.887 & 0.607 & \textcolor{alertred}{-32\%} \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \begin{alertblock}{Conclusão}
+                A queda \textbf{dramática} de performance confirma que os modelos estavam \textbf{MEMORIZANDO}, não aprendendo padrões generalizáveis!
+            \end{alertblock}
+
+            \vspace{0.3cm}
+            \begin{block}{Nota}
+                O MLP sofre mais no cenário de generalização verdadeira (MCC cai para 0.275 --- quase aleatório!)
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% =============================================================================
+% SEÇÃO 8: CONCLUSÕES
+% =============================================================================
+\section{Conclusões e Implicações}
+
+\begin{frame}{Resumo das Descobertas}
+    \begin{enumerate}
+        \item \textbf{Vazamento Massivo:} 60,5\% dos compostos de teste aparecem no treino
+        \vspace{0.3cm}
+        \item \textbf{Desbalanceamento Extremo:} 70,6\% das quinases são trivialmente previsíveis
+        \vspace{0.3cm}
+        \item \textbf{Consistência de Compostos:} O fingerprint sozinho carrega o sinal preditivo
+        \vspace{0.3cm}
+        \item \textbf{Alta Similaridade:} 90\% dos compostos de teste têm vizinho muito próximo
+        \vspace{0.3cm}
+        \item \textbf{Performance Inflada:} MCC cai de 0.77 para 0.27 em generalização real
+    \end{enumerate}
+\end{frame}
+
+\begin{frame}{Implicações para a Área}
+    \begin{alertblock}{Crítica Central}
+        \textbf{Modelos de triagem de quinases que não tiveram curadoria adequada dos dados podem estar superestimando drasticamente sua capacidade de generalização!}
+    \end{alertblock}
+
+    \vspace{0.5cm}
+    \begin{block}{Recomendações}
+        \begin{itemize}
+            \item Sempre verificar vazamento de compostos entre splits
+            \item Avaliar desbalanceamento por quinase
+            \item Usar splits que garantam generalização verdadeira
+            \item Reportar métricas em cenários de compostos E quinases novos
+            \item Comparar com baselines simples (Lookup)
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+\begin{frame}{Conclusão Final}
+    \begin{center}
+        \Large
+        \textcolor{lnccblue}{\textbf{Os modelos (KNN, MLP) NÃO estão aprendendo padrões complexos de interação quinase-composto.}}
+
+        \vspace{1cm}
+
+        \textcolor{alertred}{\textbf{Eles estão MEMORIZANDO devido a:}}
+
+        \vspace{0.5cm}
+        \begin{enumerate}
+            \item Vazamento massivo de compostos
+            \item Desbalanceamento extremo por quinase
+            \item Comportamento consistente dos compostos
+            \item Alta similaridade química ao treino
+        \end{enumerate}
+
+        \vspace{1cm}
+        \textit{Esta análise é fundamental para validar qualquer modelo de predição de atividade quinase-composto.}
+    \end{center}
+\end{frame}
+
+% =============================================================================
+% SLIDE FINAL
+% =============================================================================
+\begin{frame}
+    \begin{center}
+        \Huge\textcolor{lnccblue}{\textbf{Obrigado!}}
+
+        \vspace{1cm}
+        \Large
+        Perguntas?
+
+        \vspace{1.5cm}
+        \normalsize
+        \textit{LNCC - Laboratório Nacional de Computação Científica}\\
+        \textit{Análise Exploratória de Dados}
+    \end{center}
+\end{frame}
+
+\end{document}

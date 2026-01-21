@@ -13,12 +13,16 @@ embeddings per-token em três cenários de avaliação:
 Diferença dos outros scripts:
 - Usa embeddings PER-TOKEN (matrizes), não embeddings poolados
 - Usa CNN encoders + Cross-Attention bidirectional
-- Treina por 500 epochs com early stopping
+- Treina por 500 epochs e retorna o melhor modelo
 
 Uso:
+    # Com embeddings per-token (padrão):
     python crossattention_split_analysis.py --embedding 150M --dataset non_human
     python crossattention_split_analysis.py --run_all --dataset non_human
-    python crossattention_split_analysis.py --run_all --dataset non_human --force
+
+    # Com matrizes de atenção:
+    python crossattention_split_analysis.py --embedding 150M --dataset non_human --use-attention
+    python crossattention_split_analysis.py --run_all --dataset non_human --use-attention
 
 Author: DockTKinase Team
 Date: January 2025
@@ -60,25 +64,29 @@ from src.classifier.utils.matrix_dataloader import (
     collate_matrix_batch,
     create_matrix_dataloader
 )
+from torch.utils.data import Dataset, DataLoader
 
 # Configuration
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams['figure.figsize'] = (14, 6)
 plt.rcParams['font.size'] = 12
 
-# Embeddings suportados (apenas 8M, 150M e 3B)
+# Embeddings suportados (8M, 150M, 650M)
 SUPPORTED_EMBEDDINGS = {
     '8M': 'esm2_t6_8M_UR50D',
     '150M': 'esm2_t30_150M_UR50D',
-    '3B': 'esm2_t36_3B_UR50D'
+    '650M': 'esm2_t33_650M_UR50D'
 }
 
-# Dimensões dos embeddings
+# Dimensões dos embeddings per-token
 PROTEIN_DIMS = {
     'esm2_t6_8M_UR50D': 320,
     'esm2_t30_150M_UR50D': 640,
-    'esm2_t36_3B_UR50D': 2560
+    'esm2_t33_650M_UR50D': 1280
 }
+
+# Max sequence length for attention matrices (used as protein_dim when using attention)
+MAX_SEQ_LEN = 1024
 
 LIGAND_DIM = 768  # SMI-TED
 
@@ -91,6 +99,168 @@ DATASET_PATHS = {
 
 # Base path for embeddings
 EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
+
+
+# =============================================================================
+# ATTENTION MATRIX DATASET
+# =============================================================================
+
+class AttentionMatrixDataset(Dataset):
+    """
+    Dataset for attention matrices from ESM-2 + ligand embeddings.
+
+    Loads attention matrices [seq_len, seq_len] and pads them to [max_len, max_len].
+    The second dimension is used as the "embedding dimension" for the model.
+    """
+
+    def __init__(
+        self,
+        data_df: pd.DataFrame,
+        attention_matrix_dir: str,
+        ligand_matrix_dir: str,
+        max_seq_len: int = 1024,
+        label_column: str = 'label',
+        protein_id_column: str = 'seq_id',
+        ligand_id_column: str = 'chembl_id',
+        regression_column: str = 'pchembl_value'
+    ):
+        self.data_df = data_df.reset_index(drop=True)
+        self.attention_matrix_dir = Path(attention_matrix_dir)
+        self.ligand_matrix_dir = Path(ligand_matrix_dir)
+        self.max_seq_len = max_seq_len
+        self.label_column = label_column
+        self.protein_id_column = protein_id_column
+        self.ligand_id_column = ligand_id_column
+        self.regression_column = regression_column
+
+    def __len__(self) -> int:
+        return len(self.data_df)
+
+    def __getitem__(self, idx: int) -> Dict:
+        row = self.data_df.iloc[idx]
+
+        protein_id = str(row[self.protein_id_column])
+        ligand_id = row[self.ligand_id_column]
+        label = row[self.label_column]
+
+        # Load attention matrix [seq_len, seq_len]
+        attn_file = self.attention_matrix_dir / f"{protein_id}_attention.npy"
+        attention_matrix = np.load(attn_file)  # [seq_len, seq_len]
+
+        # Pad to [max_seq_len, max_seq_len]
+        seq_len = attention_matrix.shape[0]
+        if seq_len < self.max_seq_len:
+            padded = np.zeros((self.max_seq_len, self.max_seq_len), dtype=np.float32)
+            padded[:seq_len, :seq_len] = attention_matrix
+            attention_matrix = padded
+        else:
+            # Truncate if too long
+            attention_matrix = attention_matrix[:self.max_seq_len, :self.max_seq_len]
+            seq_len = self.max_seq_len
+
+        # Load ligand matrix
+        ligand_file = self.ligand_matrix_dir / f"{ligand_id}_matrix.npy"
+        ligand_matrix = np.load(ligand_file)  # [token_len, 768]
+
+        result = {
+            'protein_matrix': torch.from_numpy(attention_matrix).float(),
+            'ligand_matrix': torch.from_numpy(ligand_matrix).float(),
+            'label': torch.tensor(label, dtype=torch.float32),
+            'protein_len': seq_len,
+            'protein_id': protein_id,
+            'ligand_id': ligand_id
+        }
+
+        # Add regression target if available
+        if self.regression_column and self.regression_column in self.data_df.columns:
+            reg_value = row[self.regression_column]
+            if pd.notna(reg_value):
+                result['regression_target'] = torch.tensor(reg_value, dtype=torch.float32)
+                result['has_regression'] = torch.tensor(1, dtype=torch.float32)
+            else:
+                result['regression_target'] = torch.tensor(0.0, dtype=torch.float32)
+                result['has_regression'] = torch.tensor(0, dtype=torch.float32)
+
+        return result
+
+
+def collate_attention_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """Collate function for attention matrix batches."""
+    batch_size = len(batch)
+
+    # Get dimensions from first sample
+    max_protein_len = batch[0]['protein_matrix'].shape[0]  # Already padded to max_seq_len
+    protein_dim = batch[0]['protein_matrix'].shape[1]  # = max_seq_len
+    ligand_dim = batch[0]['ligand_matrix'].shape[-1]
+
+    # Find max ligand length in batch
+    max_ligand_len = max(sample['ligand_matrix'].shape[0] for sample in batch)
+
+    # Initialize tensors
+    protein_matrices = torch.zeros(batch_size, max_protein_len, protein_dim)
+    ligand_matrices = torch.zeros(batch_size, max_ligand_len, ligand_dim)
+    protein_masks = torch.zeros(batch_size, max_protein_len)
+    ligand_masks = torch.zeros(batch_size, max_ligand_len)
+    labels = torch.zeros(batch_size, 1)
+    regression_targets = torch.zeros(batch_size, 1)
+    regression_mask = torch.zeros(batch_size, 1)
+
+    for i, sample in enumerate(batch):
+        # Protein (already padded)
+        protein_matrices[i] = sample['protein_matrix']
+        prot_len = sample['protein_len']
+        protein_masks[i, :prot_len] = 1
+
+        # Ligand
+        lig_len = sample['ligand_matrix'].shape[0]
+        ligand_matrices[i, :lig_len] = sample['ligand_matrix']
+        ligand_masks[i, :lig_len] = 1
+
+        # Labels
+        labels[i] = sample['label']
+
+        # Regression
+        if 'regression_target' in sample:
+            regression_targets[i] = sample['regression_target']
+            regression_mask[i] = sample.get('has_regression', torch.tensor(1))
+
+    return {
+        'protein_matrix': protein_matrices,
+        'ligand_matrix': ligand_matrices,
+        'protein_mask': protein_masks,
+        'ligand_mask': ligand_masks,
+        'labels': labels,
+        'regression_targets': regression_targets,
+        'regression_mask': regression_mask
+    }
+
+
+def create_attention_dataloader(
+    data_df: pd.DataFrame,
+    attention_matrix_dir: str,
+    ligand_matrix_dir: str,
+    max_seq_len: int = 1024,
+    batch_size: int = 32,
+    shuffle: bool = True,
+    **kwargs
+) -> DataLoader:
+    """Create DataLoader for attention matrices."""
+    dataset = AttentionMatrixDataset(
+        data_df=data_df,
+        attention_matrix_dir=attention_matrix_dir,
+        ligand_matrix_dir=ligand_matrix_dir,
+        max_seq_len=max_seq_len,
+        **kwargs
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True,
+        collate_fn=collate_attention_batch
+    )
 
 
 @dataclass
@@ -143,6 +313,7 @@ def save_checkpoint(
     scheduler: optim.lr_scheduler._LRScheduler,
     epoch: int,
     best_val_mcc: float,
+    best_epoch: int,
     best_model_state: dict,
     patience_counter: int,
     history: Dict,
@@ -155,6 +326,7 @@ def save_checkpoint(
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
         'best_val_mcc': best_val_mcc,
+        'best_epoch': best_epoch,
         'best_model_state': best_model_state,
         'patience_counter': patience_counter,
         'history': history,
@@ -372,7 +544,7 @@ def train_model(
     checkpoint_path: Optional[str] = None,
     checkpoint_interval: int = 10
 ) -> Tuple[CrossAttentionAffinityModel, Dict]:
-    """Train the model with early stopping and checkpoint support.
+    """Train the model for all epochs and return the best model.
 
     Args:
         model: The model to train
@@ -406,6 +578,7 @@ def train_model(
 
     best_val_mcc = -1
     best_model_state = None
+    best_epoch = 0
     patience_counter = 0
     history = {'train_loss': [], 'val_mcc': [], 'val_acc': []}
     start_epoch = 0
@@ -419,6 +592,7 @@ def train_model(
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             best_val_mcc = checkpoint['best_val_mcc']
+            best_epoch = checkpoint.get('best_epoch', 0)
             best_model_state = checkpoint['best_model_state']
             patience_counter = checkpoint['patience_counter']
             history = checkpoint['history']
@@ -431,7 +605,7 @@ def train_model(
                 model.load_state_dict(checkpoint['best_model_state'])
             return model, checkpoint['history']
 
-    print(f"  Training for up to {config.num_epochs} epochs (patience={config.patience})...")
+    print(f"  Training for {config.num_epochs} epochs (returning best model)...")
     if start_epoch > 0:
         print(f"  Continuing from epoch {start_epoch + 1}...")
 
@@ -450,10 +624,11 @@ def train_model(
         history['val_mcc'].append(val_metrics['mcc'])
         history['val_acc'].append(val_metrics['accuracy'])
 
-        # Early stopping check
+        # Track best model
         improved = False
         if val_metrics['mcc'] > best_val_mcc:
             best_val_mcc = val_metrics['mcc']
+            best_epoch = epoch + 1
             best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             patience_counter = 0
             improved = True
@@ -469,8 +644,7 @@ def train_model(
         if checkpoint_path is not None:
             should_save = (
                 (epoch + 1) % checkpoint_interval == 0 or  # Periodic save
-                improved or  # Save when model improved
-                patience_counter >= config.patience  # Save before early stopping
+                improved  # Save when model improved
             )
             if should_save:
                 save_checkpoint(
@@ -480,19 +654,17 @@ def train_model(
                     scheduler=scheduler,
                     epoch=epoch,
                     best_val_mcc=best_val_mcc,
+                    best_epoch=best_epoch,
                     best_model_state=best_model_state,
                     patience_counter=patience_counter,
                     history=history,
                     scenario_completed=False
                 )
 
-        if patience_counter >= config.patience:
-            print(f"    Early stopping at epoch {epoch+1} (best val_mcc={best_val_mcc:.4f})")
-            break
-
     # Load best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
+        print(f"  Training complete. Best model from epoch {best_epoch} (val_mcc={best_val_mcc:.4f})")
 
     # Save final checkpoint marking scenario as completed
     if checkpoint_path is not None:
@@ -503,6 +675,7 @@ def train_model(
             scheduler=scheduler,
             epoch=epoch,
             best_val_mcc=best_val_mcc,
+            best_epoch=best_epoch,
             best_model_state=best_model_state,
             patience_counter=patience_counter,
             history=history,
@@ -526,7 +699,9 @@ def run_scenario(
     ligand_matrix_dir: str,
     config: TrainingConfig,
     device: torch.device,
-    checkpoint_path: Optional[str] = None
+    checkpoint_path: Optional[str] = None,
+    use_attention: bool = False,
+    max_seq_len: int = 1024
 ) -> Dict:
     """Run training and evaluation for one scenario.
 
@@ -535,36 +710,58 @@ def run_scenario(
         train_df: Training dataframe
         val_df: Validation dataframe
         test_df: Test dataframe
-        protein_matrix_dir: Path to protein matrix embeddings
+        protein_matrix_dir: Path to protein matrix embeddings OR attention matrices
         ligand_matrix_dir: Path to ligand matrix embeddings
         config: Training configuration
         device: Device to train on
         checkpoint_path: Path to save/load checkpoints (optional)
+        use_attention: If True, use attention matrices instead of embeddings
+        max_seq_len: Max sequence length for attention matrix padding
 
     Returns:
         Dictionary with test metrics
     """
 
     print(f"\n  Creating data loaders...")
+    print(f"  Input type: {'Attention Matrices' if use_attention else 'Per-token Embeddings'}")
 
-    # Create data loaders
-    train_loader = create_matrix_dataloader(
-        train_df, protein_matrix_dir, ligand_matrix_dir,
-        batch_size=config.batch_size, shuffle=True,
-        label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
-    )
+    # Create data loaders based on input type
+    if use_attention:
+        train_loader = create_attention_dataloader(
+            train_df, protein_matrix_dir, ligand_matrix_dir,
+            max_seq_len=max_seq_len, batch_size=config.batch_size, shuffle=True,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
 
-    val_loader = create_matrix_dataloader(
-        val_df, protein_matrix_dir, ligand_matrix_dir,
-        batch_size=config.batch_size, shuffle=False,
-        label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
-    )
+        val_loader = create_attention_dataloader(
+            val_df, protein_matrix_dir, ligand_matrix_dir,
+            max_seq_len=max_seq_len, batch_size=config.batch_size, shuffle=False,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
 
-    test_loader = create_matrix_dataloader(
-        test_df, protein_matrix_dir, ligand_matrix_dir,
-        batch_size=config.batch_size, shuffle=False,
-        label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
-    )
+        test_loader = create_attention_dataloader(
+            test_df, protein_matrix_dir, ligand_matrix_dir,
+            max_seq_len=max_seq_len, batch_size=config.batch_size, shuffle=False,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
+    else:
+        train_loader = create_matrix_dataloader(
+            train_df, protein_matrix_dir, ligand_matrix_dir,
+            batch_size=config.batch_size, shuffle=True,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
+
+        val_loader = create_matrix_dataloader(
+            val_df, protein_matrix_dir, ligand_matrix_dir,
+            batch_size=config.batch_size, shuffle=False,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
+
+        test_loader = create_matrix_dataloader(
+            test_df, protein_matrix_dir, ligand_matrix_dir,
+            batch_size=config.batch_size, shuffle=False,
+            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+        )
 
     print(f"  Creating model (protein_dim={config.protein_dim}, ligand_dim={config.ligand_dim})...")
 
@@ -604,7 +801,8 @@ def run_analysis(
     dataset_type: str,
     output_dir: str,
     config: TrainingConfig,
-    prefix: str = ""
+    prefix: str = "",
+    use_attention: bool = False
 ) -> Tuple[Dict, Dict]:
     """Run complete analysis for one embedding + dataset combination.
 
@@ -614,6 +812,7 @@ def run_analysis(
         output_dir: Directory to save results and checkpoints
         config: Training configuration
         prefix: Prefix for checkpoint files
+        use_attention: If True, use attention matrices instead of embeddings
 
     Returns:
         Tuple of (all_results, split_stats) dictionaries
@@ -627,8 +826,18 @@ def run_analysis(
         'build'
     )
 
-    protein_matrix_dir = os.path.join(embedding_dir, 'protein_matrices')
+    # Select protein input directory based on mode
+    if use_attention:
+        protein_matrix_dir = os.path.join(embedding_dir, 'attention_matrices')
+        input_type = "Attention Matrices"
+    else:
+        protein_matrix_dir = os.path.join(embedding_dir, 'protein_matrices')
+        input_type = "Per-token Embeddings"
+
     ligand_matrix_dir = os.path.join(embedding_dir, 'ligand_matrices')
+
+    print(f"\n  Protein input: {input_type}")
+    print(f"  Protein dir: {protein_matrix_dir}")
 
     # Check paths
     if not os.path.exists(protein_matrix_dir):
@@ -685,7 +894,8 @@ def run_analysis(
     results = run_scenario(
         scenario_name, train_df, val_df, test_df,
         protein_matrix_dir, ligand_matrix_dir, config, device,
-        checkpoint_path=checkpoint_path
+        checkpoint_path=checkpoint_path,
+        use_attention=use_attention, max_seq_len=MAX_SEQ_LEN
     )
     all_results['New Comp.\n+ New Kinase'] = {'CNN+CrossAttn': results}
 
@@ -716,7 +926,8 @@ def run_analysis(
     results = run_scenario(
         scenario_name, train_df, val_df, test_df,
         protein_matrix_dir, ligand_matrix_dir, config, device,
-        checkpoint_path=checkpoint_path
+        checkpoint_path=checkpoint_path,
+        use_attention=use_attention, max_seq_len=MAX_SEQ_LEN
     )
     all_results['Split by\nCompound'] = {'CNN+CrossAttn': results}
 
@@ -747,7 +958,8 @@ def run_analysis(
     results = run_scenario(
         scenario_name, train_df, val_df, test_df,
         protein_matrix_dir, ligand_matrix_dir, config, device,
-        checkpoint_path=checkpoint_path
+        checkpoint_path=checkpoint_path,
+        use_attention=use_attention, max_seq_len=MAX_SEQ_LEN
     )
     all_results['Random Split\n(Original)'] = {'CNN+CrossAttn': results}
 
@@ -848,7 +1060,7 @@ def save_results_json(all_results: Dict, split_stats: Dict, embedding_name: str,
             'embedding': embedding_name,
             'dataset_type': dataset_type,
             'epochs': 500,
-            'patience': 30
+            'best_model_selection': 'best_val_mcc'
         },
         'split_statistics': {k.replace('\n', ' '): v for k, v in split_stats.items()},
         'model_results': {
@@ -873,16 +1085,17 @@ def save_results_json(all_results: Dict, split_stats: Dict, embedding_name: str,
 # =============================================================================
 
 def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str,
-                        force: bool = False):
+                        force: bool = False, use_attention: bool = False):
     """Run analysis for a single embedding + dataset combination."""
 
     # Resolve embedding name
     if embedding_name in SUPPORTED_EMBEDDINGS:
         embedding_name = SUPPORTED_EMBEDDINGS[embedding_name]
 
-    # Generate prefix
+    # Generate prefix (include 'attn_' if using attention matrices)
     short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
-    prefix = f"{dataset_type}_{short_name}_"
+    attn_prefix = 'attn_' if use_attention else ''
+    prefix = f"{dataset_type}_{attn_prefix}{short_name}_"
 
     # Check cache
     json_file = os.path.join(output_dir, f'{prefix}crossattention_analysis_results.json')
@@ -892,12 +1105,19 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str,
         print(f"        Use --force to recalculate.")
         return None
 
+    input_type = "ATTENTION MATRICES" if use_attention else "PER-TOKEN EMBEDDINGS"
     print("\n" + "=" * 70)
     print(f"CNN+CROSSATTENTION ANALYSIS: {embedding_name} + {dataset_type}")
+    print(f"INPUT TYPE: {input_type}")
     print("=" * 70)
 
     # Create config
-    protein_dim = PROTEIN_DIMS.get(embedding_name, 640)
+    # For attention matrices, protein_dim = MAX_SEQ_LEN (the attention matrix is [seq_len, seq_len])
+    if use_attention:
+        protein_dim = MAX_SEQ_LEN
+    else:
+        protein_dim = PROTEIN_DIMS.get(embedding_name, 640)
+
     config = TrainingConfig(
         protein_dim=protein_dim,
         ligand_dim=LIGAND_DIM,
@@ -908,7 +1128,8 @@ def run_single_analysis(embedding_name: str, dataset_type: str, output_dir: str,
 
     # Run analysis with checkpoint support
     all_results, split_stats = run_analysis(
-        embedding_name, dataset_type, output_dir, config, prefix=prefix
+        embedding_name, dataset_type, output_dir, config, prefix=prefix,
+        use_attention=use_attention
     )
 
     if all_results is None:
@@ -948,8 +1169,8 @@ def main():
     )
 
     parser.add_argument('--embedding', type=str, default='150M',
-                        choices=['8M', '150M', '3B'],
-                        help='Embedding model (8M, 150M, or 3B)')
+                        choices=['8M', '150M', '650M'],
+                        help='Embedding model (8M, 150M, or 650M)')
     parser.add_argument('--dataset', type=str, default='non_human',
                         choices=['human', 'non_human'],
                         help='Dataset type')
@@ -957,6 +1178,8 @@ def main():
                         help='Run all embeddings (8M, 150M, 3B)')
     parser.add_argument('--force', action='store_true',
                         help='Force recalculation even if results exist')
+    parser.add_argument('--use-attention', action='store_true',
+                        help='Use attention matrices instead of per-token embeddings')
     parser.add_argument('--output_dir', type=str,
                         default='./results/leakage_analysis_results',
                         help='Output directory')
@@ -965,18 +1188,23 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    input_type = "Attention Matrices" if args.use_attention else "Per-token Embeddings"
+
     if args.run_all:
         print("\n" + "=" * 70)
         print("RUNNING ALL CROSSATTENTION ANALYSES")
         print(f"Embeddings: 8M, 150M, 3B")
         print(f"Dataset: {args.dataset}")
-        print(f"Epochs: 500, Patience: 30")
+        print(f"Input: {input_type}")
+        print(f"Epochs: 500 (returning best model)")
         print("=" * 70)
 
         for emb_short, emb_full in SUPPORTED_EMBEDDINGS.items():
-            run_single_analysis(emb_full, args.dataset, args.output_dir, args.force)
+            run_single_analysis(emb_full, args.dataset, args.output_dir, args.force,
+                               use_attention=args.use_attention)
     else:
-        run_single_analysis(args.embedding, args.dataset, args.output_dir, args.force)
+        run_single_analysis(args.embedding, args.dataset, args.output_dir, args.force,
+                           use_attention=args.use_attention)
 
     print(f"\nResults saved in: {args.output_dir}")
 
