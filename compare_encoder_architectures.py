@@ -62,13 +62,13 @@ plt.style.use('seaborn-v0_8-whitegrid')
 SUPPORTED_EMBEDDINGS = {
     '8M': 'esm2_t6_8M_UR50D',
     '150M': 'esm2_t30_150M_UR50D',
-    '3B': 'esm2_t36_3B_UR50D'
+    '650M': 'esm2_t33_650M_UR50D'
 }
 
 PROTEIN_DIMS = {
     'esm2_t6_8M_UR50D': 320,
     'esm2_t30_150M_UR50D': 640,
-    'esm2_t36_3B_UR50D': 2560
+    'esm2_t33_650M_UR50D': 1280
 }
 
 LIGAND_DIM = 768
@@ -645,7 +645,7 @@ def main():
     parser = argparse.ArgumentParser(description='Compare encoder architectures')
 
     parser.add_argument('--embedding', type=str, default='150M',
-                       choices=['8M', '150M', '3B'])
+                       choices=['8M', '150M', '650M'])
     parser.add_argument('--dataset', type=str, default='non_human',
                        choices=['human', 'non_human'])
     parser.add_argument('--run_all', action='store_true',
