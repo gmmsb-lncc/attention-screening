@@ -15,10 +15,11 @@ def train_epoch(
     loader: DataLoader,
     optimizer: optim.Optimizer,
     criterion: nn.Module,
-    device: torch.device
+    device: torch.device,
+    max_grad_norm: float = 1.0
 ) -> float:
     """
-    Train for one epoch.
+    Train for one epoch with gradient clipping.
 
     Args:
         model: Neural network model
@@ -26,6 +27,7 @@ def train_epoch(
         optimizer: Optimizer
         criterion: Loss function
         device: Device to train on
+        max_grad_norm: Maximum gradient norm for clipping
 
     Returns:
         Average loss for the epoch
@@ -43,8 +45,32 @@ def train_epoch(
         optimizer.zero_grad()
         output = model(protein, ligand, protein_mask, ligand_mask)
         loss = criterion(output, labels)
+
+        # Check for NaN loss
+        if torch.isnan(loss) or torch.isinf(loss):
+            raise ValueError(
+                f"Loss became NaN or Inf during training!\n"
+                f"This indicates severe training instability.\n"
+                f"Try: 1) Lower learning rate, 2) Check data for invalid values"
+            )
+
         loss.backward()
+
+        # Gradient clipping to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+
         optimizer.step()
+
+        # Check for NaN in model parameters (early detection)
+        for name, param in model.named_parameters():
+            if torch.isnan(param).any() or torch.isinf(param).any():
+                raise ValueError(
+                    f"NaN or Inf detected in parameter '{name}' after optimizer step!\n"
+                    f"Training has become unstable. This often happens with:\n"
+                    f"  - Very high learning rate (current: {optimizer.param_groups[0]['lr']:.2e})\n"
+                    f"  - Exploding gradients (gradient clipping: {max_grad_norm})\n"
+                    f"  - Numerical instability in model architecture"
+                )
 
         total_loss += loss.item()
 
@@ -89,7 +115,10 @@ def train_model(
     history = {'train_loss': [], 'val_mcc': []}
 
     for epoch in range(config.num_epochs):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_epoch(
+            model, train_loader, optimizer, criterion, device,
+            max_grad_norm=config.max_grad_norm
+        )
         val_metrics = evaluate(model, val_loader, device)
         scheduler.step()
 

@@ -39,15 +39,19 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict
             all_preds.extend((probs > 0.5).cpu().numpy().flatten().astype(int))
             all_labels.extend(labels.cpu().numpy().flatten().astype(int))
 
-    # Calculate metrics (handle NaN values)
+    # Check for NaN or Inf values (indicates training failure)
     import numpy as np
     all_probs = np.array(all_probs)
 
-    # Check for NaN or Inf in probabilities
     if np.any(np.isnan(all_probs)) or np.any(np.isinf(all_probs)):
-        print("WARNING: Model produced NaN or Inf values. Replacing with 0.5")
-        all_probs = np.nan_to_num(all_probs, nan=0.5, posinf=0.5, neginf=0.5)
-        all_preds = [1 if p > 0.5 else 0 for p in all_probs]
+        raise ValueError(
+            "Model produced NaN or Inf values during evaluation!\n"
+            "This indicates training instability. Possible causes:\n"
+            "  1. Exploding gradients - try gradient clipping\n"
+            "  2. Learning rate too high - reduce learning rate\n"
+            "  3. Numerical instability - check model architecture\n"
+            "Training cannot continue with invalid outputs."
+        )
 
     return {
         'accuracy': accuracy_score(all_labels, all_preds),
