@@ -1,4 +1,8 @@
-"""Data splitting strategies for evaluation scenarios."""
+"""Data splitting strategies for evaluation scenarios.
+
+All split functions use local numpy random generators (np.random.default_rng)
+to ensure reproducibility without affecting global random state.
+"""
 
 from typing import Tuple, Callable
 import numpy as np
@@ -12,6 +16,9 @@ def split_random(df: pd.DataFrame, seed: int = 42) -> Tuple[np.ndarray, np.ndarr
     Both compounds and kinases may appear in multiple sets.
     This is the easiest scenario and serves as an upper bound.
 
+    WARNING: This split allows data leakage - the same compound-kinase
+    pairs may appear in train and test. Use only as baseline.
+
     Args:
         df: DataFrame with samples
         seed: Random seed for reproducibility
@@ -19,8 +26,9 @@ def split_random(df: pd.DataFrame, seed: int = 42) -> Tuple[np.ndarray, np.ndarr
     Returns:
         Tuple of (train_indices, val_indices, test_indices)
     """
-    np.random.seed(seed)
-    indices = np.random.permutation(len(df))
+    # Use local generator to avoid polluting global state
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(df))
     n = len(df)
     train_end = int(0.8 * n)
     val_end = int(0.9 * n)
@@ -41,9 +49,10 @@ def split_by_compound(df: pd.DataFrame, seed: int = 42) -> Tuple[np.ndarray, np.
     Returns:
         Tuple of (train_indices, val_indices, test_indices)
     """
-    np.random.seed(seed)
+    # Use local generator to avoid polluting global state
+    rng = np.random.default_rng(seed)
     compounds = np.array(df['chembl_id'].unique())
-    np.random.shuffle(compounds)
+    rng.shuffle(compounds)
     n = len(compounds)
 
     train_compounds = set(compounds[:int(0.8 * n)])
@@ -77,12 +86,13 @@ def split_new_compound_new_kinase(
     Returns:
         Tuple of (train_indices, val_indices, test_indices)
     """
-    np.random.seed(seed)
+    # Use local generator to avoid polluting global state
+    rng = np.random.default_rng(seed)
 
     compounds = np.array(df['chembl_id'].unique())
     kinases = np.array(df['target_kinase'].unique())
-    np.random.shuffle(compounds)
-    np.random.shuffle(kinases)
+    rng.shuffle(compounds)
+    rng.shuffle(kinases)
 
     # 80/10/10 split for both compounds and kinases
     test_kinases = set(kinases[:int(0.10 * len(kinases))])

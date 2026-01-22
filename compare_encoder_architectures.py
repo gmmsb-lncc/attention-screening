@@ -22,27 +22,39 @@ from encoder_compare.experiment import run_encoder_comparison
 from encoder_compare.visualization import plot_comparison, print_summary, save_results
 
 
+MIN_SEEDS_FOR_STATISTICS = 3
+RECOMMENDED_SEEDS_FOR_PUBLICATION = 5
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description='Compare encoder architectures for protein-ligand affinity prediction',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
-  # Single embedding with single seed (fastest)
-  python compare_encoder_architectures.py --embedding 150M --dataset non_human
-
-  # Multiple seeds for robust statistics
+  # Minimum seeds for valid statistics (recommended)
   python compare_encoder_architectures.py --embedding 150M --dataset non_human --seeds 42 123 456
 
+  # Publication-quality with 5 seeds
+  python compare_encoder_architectures.py --embedding 150M --dataset non_human --seeds 42 123 456 789 1011
+
+  # Quick test (single seed - WARNING: no valid CI)
+  python compare_encoder_architectures.py --embedding 150M --dataset non_human --seeds 42 --allow-single-seed
+
   # All embeddings
-  python compare_encoder_architectures.py --run_all --dataset non_human
+  python compare_encoder_architectures.py --run_all --dataset non_human --seeds 42 123 456
 
   # Resume from checkpoint (default)
   python compare_encoder_architectures.py --embedding 150M --dataset non_human
 
   # Start fresh (ignore checkpoint)
   python compare_encoder_architectures.py --embedding 150M --dataset non_human --no-resume
+
+Note:
+  - Minimum {MIN_SEEDS_FOR_STATISTICS} seeds required for valid confidence intervals
+  - {RECOMMENDED_SEEDS_FOR_PUBLICATION}+ seeds recommended for publication-quality results
+  - Use --allow-single-seed only for debugging/quick tests
         """
     )
 
@@ -75,8 +87,15 @@ Examples:
         '--seeds',
         type=int,
         nargs='+',
-        default=[42],
-        help='Random seeds for multiple runs (default: 42)'
+        default=[42, 123, 456],
+        help=f'Random seeds for multiple runs (default: 42 123 456). '
+             f'Minimum {MIN_SEEDS_FOR_STATISTICS} seeds required for valid statistics.'
+    )
+    parser.add_argument(
+        '--allow-single-seed',
+        action='store_true',
+        help='Allow running with fewer than 3 seeds (for debugging only). '
+             'Results will have invalid confidence intervals.'
     )
     parser.add_argument(
         '--no-resume',
@@ -93,6 +112,54 @@ Examples:
     return parser.parse_args()
 
 
+def validate_seeds(args: argparse.Namespace) -> None:
+    """
+    Validate seed configuration for statistical validity.
+
+    Raises:
+        SystemExit: If seed count is insufficient and --allow-single-seed not set
+    """
+    n_seeds = len(args.seeds)
+
+    if n_seeds < MIN_SEEDS_FOR_STATISTICS:
+        if args.allow_single_seed:
+            print("\n" + "!" * 70)
+            print("WARNING: Running with fewer than 3 seeds!")
+            print("!" * 70)
+            print(f"  Seeds provided: {n_seeds}")
+            print(f"  Minimum for valid statistics: {MIN_SEEDS_FOR_STATISTICS}")
+            print(f"  Recommended for publication: {RECOMMENDED_SEEDS_FOR_PUBLICATION}")
+            print("")
+            print("  Confidence intervals will be INVALID.")
+            print("  Use this mode only for debugging/quick tests.")
+            print("!" * 70 + "\n")
+        else:
+            print("\n" + "=" * 70)
+            print("ERROR: Insufficient seeds for valid statistics")
+            print("=" * 70)
+            print(f"  Seeds provided: {n_seeds} ({args.seeds})")
+            print(f"  Minimum required: {MIN_SEEDS_FOR_STATISTICS}")
+            print("")
+            print("  To run with valid statistics:")
+            print(f"    --seeds 42 123 456  (or any {MIN_SEEDS_FOR_STATISTICS}+ distinct seeds)")
+            print("")
+            print("  To run anyway (debugging only):")
+            print("    --allow-single-seed")
+            print("=" * 70)
+            sys.exit(1)
+
+    # Check for duplicate seeds
+    if len(set(args.seeds)) != len(args.seeds):
+        print("\nERROR: Duplicate seeds detected!")
+        print(f"  Seeds: {args.seeds}")
+        print("  Each seed must be unique for independent trials.")
+        sys.exit(1)
+
+    if n_seeds < RECOMMENDED_SEEDS_FOR_PUBLICATION:
+        print(f"\nNote: Using {n_seeds} seeds. For publication-quality results, "
+              f"consider using {RECOMMENDED_SEEDS_FOR_PUBLICATION}+ seeds.")
+
+
 def print_experiment_info(args: argparse.Namespace) -> None:
     """Print experiment configuration."""
     print("\n" + "=" * 70)
@@ -101,7 +168,7 @@ def print_experiment_info(args: argparse.Namespace) -> None:
     print(f"Encoders: {', '.join(e.upper() for e in ENCODER_TYPES)}")
     print(f"Dataset: {args.dataset}")
     print(f"Epochs: {args.epochs}")
-    print(f"Seeds: {args.seeds}")
+    print(f"Seeds: {args.seeds} (n={len(args.seeds)})")
     print(f"Resume: {not args.no_resume}")
 
 
@@ -142,7 +209,10 @@ def run_single_embedding(
 
     # Save and visualize results
     if results:
-        save_results(results, embedding_name, args.dataset, args.output_dir)
+        save_results(
+            results, embedding_name, args.dataset, args.output_dir,
+            config=config.to_dict()
+        )
         plot_comparison(results, embedding_name, args.dataset, args.output_dir)
         print_summary(results)
 
@@ -150,6 +220,7 @@ def run_single_embedding(
 def main() -> None:
     """Main entry point."""
     args = parse_arguments()
+    validate_seeds(args)
     print_experiment_info(args)
 
     embeddings_to_run = get_embeddings_to_run(args)

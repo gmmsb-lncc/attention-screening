@@ -7,11 +7,13 @@ import pandas as pd
 import torch
 from src.classifier.utils.matrix_dataloader import create_matrix_dataloader
 
-from .config import TrainingConfig, ENCODER_TYPES, EMBEDDING_BASE_PATH, DATASET_PATHS
-from .models import FlexibleCrossAttentionModel
+from .config import TrainingConfig, ENCODER_TYPES, EMBEDDING_BASE_PATH, DATASET_PATHS, DEFAULT_AFFINITY_THRESHOLD
+from .models.flexible_model import FlexibleCrossAttentionModel
 from .data import get_scenarios
-from .training import train_model, evaluate
-from .utils import get_device, save_checkpoint, load_checkpoint, get_checkpoint_path
+from .training import evaluate, EvaluationError
+from .training.stable_trainer import train_model
+from .utils import get_device, set_seed
+from .utils.checkpoints import save_checkpoint, load_checkpoint, get_checkpoint_path
 
 
 def run_encoder_comparison(
@@ -43,7 +45,7 @@ def run_encoder_comparison(
 
     # Load and validate data
     df, protein_matrix_dir, ligand_matrix_dir = _load_data(
-        embedding_name, dataset_type
+        embedding_name, dataset_type, config
     )
     if df is None:
         return None
@@ -61,7 +63,8 @@ def run_encoder_comparison(
             encoder_type, scenarios, df,
             protein_matrix_dir, ligand_matrix_dir,
             config, seeds, device,
-            all_results, checkpoint_path
+            all_results, checkpoint_path,
+            embedding_name  # Pass the embedding_name parameter
         )
 
     # Mark as completed
@@ -97,8 +100,18 @@ def _initialize_experiment(
     return checkpoint_path, all_results
 
 
-def _load_data(embedding_name: str, dataset_type: str) -> tuple:
-    """Load dataset and validate paths."""
+def _load_data(embedding_name: str, dataset_type: str, config: TrainingConfig = None) -> tuple:
+    """
+    Load dataset and validate paths.
+
+    Args:
+        embedding_name: Name of embedding model
+        dataset_type: Type of dataset
+        config: Training configuration (contains affinity threshold)
+
+    Returns:
+        Tuple of (dataframe, protein_matrix_dir, ligand_matrix_dir)
+    """
     # Build paths
     embedding_dir = os.path.join(
         EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
@@ -129,9 +142,26 @@ def _load_data(embedding_name: str, dataset_type: str) -> tuple:
         print(f"ERROR loading dataset: {e}")
         return None, None, None
 
-    df['label'] = (df['standard_value'] <= 1000).astype(int)
+    # Get threshold configuration
+    threshold_config = (
+        config.affinity_threshold if config else DEFAULT_AFFINITY_THRESHOLD
+    )
+
+    # Apply threshold to generate binary labels
+    threshold = threshold_config.threshold_nm
+    column = threshold_config.column_name
+    label_col = threshold_config.label_column
+
+    df[label_col] = (df[column] <= threshold).astype(int)
     df['seq_id'] = df['seq_id'].astype(str)
+
+    # Report class distribution
+    n_active = df[label_col].sum()
+    n_inactive = len(df) - n_active
     print(f"  Total: {len(df)} samples")
+    print(f"  Affinity threshold: {threshold} nM ({threshold/1000} μM)")
+    print(f"  Class distribution: {n_active} active ({100*n_active/len(df):.1f}%), "
+          f"{n_inactive} inactive ({100*n_inactive/len(df):.1f}%)")
 
     return df, protein_matrix_dir, ligand_matrix_dir
 
@@ -156,7 +186,8 @@ def _run_encoder_experiments(
     seeds: List[int],
     device: torch.device,
     all_results: Dict,
-    checkpoint_path: str
+    checkpoint_path: str,
+    embedding_name: str = "unknown"  # Added embedding_name parameter
 ) -> None:
     """Run all experiments for a single encoder."""
     print(f"\n{'='*60}")
@@ -172,7 +203,8 @@ def _run_encoder_experiments(
             encoder_type, scenario_name, split_fn, df,
             protein_matrix_dir, ligand_matrix_dir,
             config, seeds, device,
-            all_results, checkpoint_path
+            all_results, checkpoint_path,
+            embedding_name  # Pass the embedding_name parameter
         )
 
         # Calculate statistics and save
@@ -198,7 +230,8 @@ def _run_scenario_experiments(
     seeds: List[int],
     device: torch.device,
     all_results: Dict,
-    checkpoint_path: str
+    checkpoint_path: str,
+    embedding_name: str = "unknown"  # Added embedding_name parameter
 ) -> Dict:
     """Run experiments for a scenario across multiple seeds."""
     scenario_seed_results = {}
@@ -219,7 +252,8 @@ def _run_scenario_experiments(
         test_metrics, n_params = _run_single_seed(
             encoder_type, split_fn, df, seed,
             protein_matrix_dir, ligand_matrix_dir,
-            config, device, n_params
+            config, device, n_params,
+            embedding_name, scenario_name  # Pass the required parameters
         )
 
         scenario_seed_results[seed] = {
@@ -248,7 +282,9 @@ def _run_single_seed(
     ligand_matrix_dir: str,
     config: TrainingConfig,
     device: torch.device,
-    n_params: Optional[int]
+    n_params: Optional[int],
+    embedding_name: str = "unknown",  # Added embedding_name parameter
+    scenario_name: str = "unknown"    # Added scenario_name parameter
 ) -> tuple:
     """Run experiment for a single seed."""
     # Split data
@@ -259,11 +295,8 @@ def _run_single_seed(
 
     print(f"      Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
-    # Set seeds
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+    # Set all random seeds for full reproducibility
+    set_seed(seed, deterministic=True)
 
     # Create dataloaders
     train_loader = create_matrix_dataloader(
@@ -299,10 +332,27 @@ def _run_single_seed(
         print(f"      Parameters: {n_params:,}")
 
     print(f"      Training for {config.num_epochs} epochs...")
-    model, history = train_model(model, train_loader, val_loader, config, device)
+    # Generate a unique checkpoint path for this specific training run
+    exp_id = f"{embedding_name}_{encoder_type}_{scenario_name}_{seed}"
+    # Create a checkpoint path specific to this training run
+    checkpoint_dir = './checkpoints'  # Use a default checkpoint directory
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, f"train_{exp_id}_checkpoint.pt")
 
-    # Evaluate
-    test_metrics = evaluate(model, test_loader, device)
+    model, history = train_model(model, train_loader, val_loader, config, device,
+                                checkpoint_path=checkpoint_path, experiment_id=exp_id)
+
+    # Evaluate with explicit error handling
+    test_result = evaluate(model, test_loader, device, raise_on_invalid=False)
+
+    if not test_result.is_valid:
+        raise EvaluationError(
+            f"Test evaluation failed for seed {seed}: {test_result.failure_reason}\n"
+            f"This run cannot be included in results. "
+            f"Consider lowering learning rate or checking data quality."
+        )
+
+    test_metrics = test_result.metrics
     print(f"      Test: MCC={test_metrics['mcc']:.4f}, AUC={test_metrics['auc']:.4f}, "
           f"F1={test_metrics['f1']:.4f}, Acc={test_metrics['accuracy']:.4f}")
 
@@ -323,23 +373,68 @@ def _is_seed_completed(
 
 
 def _calculate_statistics(scenario_seed_results: Dict) -> Dict:
-    """Calculate mean and std across seeds."""
-    return {
+    """
+    Calculate mean and sample standard deviation across seeds.
+
+    Uses ddof=1 for sample standard deviation (Bessel's correction),
+    which is appropriate when seeds represent a sample from the
+    population of possible random initializations.
+
+    Also computes 95% confidence interval when n >= 2.
+    """
+    n_seeds = len(scenario_seed_results)
+
+    # Extract metrics arrays
+    accuracies = np.array([r['accuracy'] for r in scenario_seed_results.values()])
+    mccs = np.array([r['mcc'] for r in scenario_seed_results.values()])
+    aucs = np.array([r['auc'] for r in scenario_seed_results.values()])
+    f1s = np.array([r['f1'] for r in scenario_seed_results.values()])
+
+    # Use ddof=1 for sample standard deviation (Bessel's correction)
+    # This provides unbiased estimate of population variance
+    ddof = 1 if n_seeds > 1 else 0
+
+    stats = {
         'seed_results': scenario_seed_results,
+        'n_seeds': n_seeds,
         'mean': {
-            'accuracy': np.mean([r['accuracy'] for r in scenario_seed_results.values()]),
-            'mcc': np.mean([r['mcc'] for r in scenario_seed_results.values()]),
-            'auc': np.mean([r['auc'] for r in scenario_seed_results.values()]),
-            'f1': np.mean([r['f1'] for r in scenario_seed_results.values()]),
+            'accuracy': float(np.mean(accuracies)),
+            'mcc': float(np.mean(mccs)),
+            'auc': float(np.mean(aucs)),
+            'f1': float(np.mean(f1s)),
         },
         'std': {
-            'accuracy': np.std([r['accuracy'] for r in scenario_seed_results.values()]),
-            'mcc': np.std([r['mcc'] for r in scenario_seed_results.values()]),
-            'auc': np.std([r['auc'] for r in scenario_seed_results.values()]),
-            'f1': np.std([r['f1'] for r in scenario_seed_results.values()]),
+            'accuracy': float(np.std(accuracies, ddof=ddof)),
+            'mcc': float(np.std(mccs, ddof=ddof)),
+            'auc': float(np.std(aucs, ddof=ddof)),
+            'f1': float(np.std(f1s, ddof=ddof)),
         },
         'n_params': list(scenario_seed_results.values())[0]['n_params']
     }
+
+    # Add 95% CI if n >= 2 (requires scipy for t-distribution)
+    if n_seeds >= 2:
+        from scipy import stats as scipy_stats
+        t_critical = scipy_stats.t.ppf(0.975, df=n_seeds - 1)
+        sem = lambda arr: np.std(arr, ddof=1) / np.sqrt(n_seeds)
+
+        stats['ci_95'] = {
+            'accuracy': float(t_critical * sem(accuracies)),
+            'mcc': float(t_critical * sem(mccs)),
+            'auc': float(t_critical * sem(aucs)),
+            'f1': float(t_critical * sem(f1s)),
+        }
+    else:
+        # CI undefined for n=1
+        stats['ci_95'] = {
+            'accuracy': np.nan,
+            'mcc': np.nan,
+            'auc': np.nan,
+            'f1': np.nan,
+        }
+        stats['_warning'] = "CI undefined: only 1 seed. Use >= 3 seeds for valid statistics."
+
+    return stats
 
 
 def _save_intermediate_checkpoint(
