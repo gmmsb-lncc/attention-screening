@@ -29,8 +29,9 @@ def split_random(
     Returns:
         Tuple of (train_indices, val_indices, test_indices)
     """
-    indices = np.arange(len(df))
-    labels = df['label'].values
+    indices = np.arange(len(df), dtype=np.int64)
+    # Ensure labels are numpy array (avoids PyArrow issues)
+    labels = np.asarray(df['label'].values)
 
     # Use sklearn's train_test_split with explicit random_state
     train_idx, temp_idx = train_test_split(
@@ -63,7 +64,8 @@ def split_by_compound(
     # Use local generator
     rng = np.random.default_rng(seed)
 
-    compounds = df['chembl_id'].unique()
+    # Get unique compounds as numpy array
+    compounds = np.array(df['chembl_id'].unique())
     rng.shuffle(compounds)
 
     n = len(compounds)
@@ -74,9 +76,14 @@ def split_by_compound(
     val_compounds = set(compounds[train_end:val_end])
     test_compounds = set(compounds[val_end:])
 
-    train_idx = df[df['chembl_id'].isin(train_compounds)].index.values
-    val_idx = df[df['chembl_id'].isin(val_compounds)].index.values
-    test_idx = df[df['chembl_id'].isin(test_compounds)].index.values
+    # Use np.where for robust index extraction (avoids PyArrow issues)
+    train_mask = df['chembl_id'].isin(train_compounds).values
+    val_mask = df['chembl_id'].isin(val_compounds).values
+    test_mask = df['chembl_id'].isin(test_compounds).values
+
+    train_idx = np.where(train_mask)[0]
+    val_idx = np.where(val_mask)[0]
+    test_idx = np.where(test_mask)[0]
 
     return train_idx, val_idx, test_idx
 
@@ -105,8 +112,9 @@ def split_new_compound_new_kinase(
     # Use local generator
     rng = np.random.default_rng(seed)
 
-    compounds = df['chembl_id'].unique()
-    kinases = df['target_kinase'].unique()
+    # Get unique values as numpy arrays (avoids PyArrow issues)
+    compounds = np.array(df['chembl_id'].unique())
+    kinases = np.array(df['target_kinase'].unique())
 
     # Shuffle using local generator
     rng.shuffle(compounds)
@@ -121,20 +129,21 @@ def split_new_compound_new_kinase(
     test_compounds = set(compounds[:n_test_compounds])
     train_compounds = set(compounds[n_test_compounds:])
 
-    # Create masks
+    # Create masks as numpy arrays (avoids PyArrow issues)
     train_mask = (
-        df['chembl_id'].isin(train_compounds) &
-        df['target_kinase'].isin(train_kinases)
+        df['chembl_id'].isin(train_compounds).values &
+        df['target_kinase'].isin(train_kinases).values
     )
     test_mask = (
-        df['chembl_id'].isin(test_compounds) &
-        df['target_kinase'].isin(test_kinases)
+        df['chembl_id'].isin(test_compounds).values &
+        df['target_kinase'].isin(test_kinases).values
     )
     val_mask = ~train_mask & ~test_mask
 
-    train_idx = df[train_mask].index.values
-    val_idx = df[val_mask].index.values
-    test_idx = df[test_mask].index.values
+    # Use np.where for robust index extraction
+    train_idx = np.where(train_mask)[0]
+    val_idx = np.where(val_mask)[0]
+    test_idx = np.where(test_mask)[0]
 
     # Recursively increase fractions if test set is too small
     if len(test_idx) < 50:
