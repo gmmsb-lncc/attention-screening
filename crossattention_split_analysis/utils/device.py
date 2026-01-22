@@ -2,23 +2,26 @@
 
 import os
 import random
+from typing import Dict
 import numpy as np
 import torch
 
 
 def get_device() -> torch.device:
     """
-    Get the best available device (CUDA if available, else CPU).
+    Get the best available device.
 
     Returns:
-        torch.device object
+        torch.device (cuda > mps > cpu)
     """
     if torch.cuda.is_available():
         return torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device('mps')
     return torch.device('cpu')
 
 
-def set_seed(seed: int, deterministic: bool = True) -> dict:
+def set_seed(seed: int, deterministic: bool = True) -> Dict:
     """
     Set all random seeds for reproducibility.
 
@@ -27,22 +30,19 @@ def set_seed(seed: int, deterministic: bool = True) -> dict:
 
     Args:
         seed: Random seed value
-        deterministic: If True, enforce deterministic CUDA operations.
-                      May reduce performance but ensures reproducibility.
+        deterministic: If True, enforce deterministic CUDA operations
 
     Returns:
-        Dictionary with configuration details for logging
+        Dictionary with configuration details
     """
     # Python built-in random
     random.seed(seed)
 
-    # NumPy - use both legacy and new API for compatibility
+    # NumPy
     np.random.seed(seed)
 
-    # PyTorch CPU
+    # PyTorch
     torch.manual_seed(seed)
-
-    # PyTorch CUDA (all GPUs)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
@@ -54,39 +54,28 @@ def set_seed(seed: int, deterministic: bool = True) -> dict:
     }
 
     if deterministic:
-        # Ensure deterministic algorithms in PyTorch
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-        # PyTorch 1.8+ deterministic algorithms
         if hasattr(torch, 'use_deterministic_algorithms'):
             try:
                 torch.use_deterministic_algorithms(True)
                 config['use_deterministic_algorithms'] = True
-            except RuntimeError as e:
-                # Some operations don't have deterministic implementations
-                # Fall back to allowing non-deterministic with warning
+            except RuntimeError:
                 config['use_deterministic_algorithms'] = False
-                config['deterministic_warning'] = str(e)
 
-        # Environment variable for CUDA determinism
         os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
         config['cublas_workspace_config'] = ':4096:8'
-    else:
-        # Allow non-deterministic for better performance
-        torch.backends.cudnn.deterministic = False
-        torch.backends.cudnn.benchmark = True
-        config['cudnn_benchmark'] = True
 
     return config
 
 
-def get_reproducibility_info() -> dict:
+def get_reproducibility_info() -> Dict:
     """
     Get current reproducibility configuration for logging.
 
     Returns:
-        Dictionary with environment and configuration details
+        Dictionary with environment details
     """
     info = {
         'torch_version': torch.__version__,

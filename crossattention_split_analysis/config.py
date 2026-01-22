@@ -1,7 +1,7 @@
-"""Configuration and constants for encoder comparison experiments."""
+"""Configuration and constants for CrossAttention split analysis."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict
 
 # =============================================================================
 # EMBEDDINGS
@@ -19,7 +19,11 @@ PROTEIN_DIMS = {
     'esm2_t33_650M_UR50D': 1280
 }
 
+# Ligand embedding dimension (SMI-TED)
 LIGAND_DIM = 768
+
+# Max sequence length for attention matrices
+MAX_SEQ_LEN = 1024
 
 
 # =============================================================================
@@ -27,72 +31,39 @@ LIGAND_DIM = 768
 # =============================================================================
 
 DATASET_PATHS = {
-    'human': '/media/storage/leon/semantic-screening/tests/datasets/kinase_human_compounds.tsv',
-    'non_human': '/media/storage/leon/semantic-screening/tests/datasets/kinase_non_human_compounds.tsv',
+    'human': './tests/datasets/kinase_human_compounds.tsv',
+    'non_human': './tests/datasets/kinase_non_human_compounds.tsv',
+    'all': './tests/datasets/kinase_all_compounds.tsv'
 }
 
-EMBEDDING_BASE_PATH = '/media/storage/leon/semantic-screening/results/protein_model_benchmark_{dataset_type}_v2'
+EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
 
 
 # =============================================================================
-# ENCODER TYPES
-# =============================================================================
-
-ENCODER_TYPES = ['linear', 'cnn', 'cnn_attention']
-
-
-# =============================================================================
-# AFFINITY THRESHOLD CONFIGURATION
+# AFFINITY THRESHOLD
 # =============================================================================
 
 @dataclass
 class AffinityThresholdConfig:
     """
-    Configuration for converting continuous affinity values to binary labels.
+    Configuration for converting continuous affinity to binary labels.
 
-    The threshold defines what constitutes an "active" compound:
-    - standard_value <= threshold → active (label=1)
-    - standard_value > threshold → inactive (label=0)
-
-    Attributes:
-        threshold_nm: Threshold in nanomolar (nM). Default: 1000 nM (1 μM).
-        column_name: Name of the column containing affinity values.
-        label_column: Name of the output label column.
-
-    Scientific Justification:
-        The 1000 nM (1 μM) threshold is commonly used in drug discovery as it
-        represents a reasonable cutoff for "active" compounds in biochemical
-        assays. This threshold is consistent with:
-        - ChEMBL activity classification
-        - FDA guidance for lead compound potency
-        - Standard kinase inhibitor screening practices
-
-        However, this threshold should be validated for your specific:
-        - Assay type (Ki, Kd, IC50, EC50)
-        - Target class (kinases vs other protein families)
-        - Downstream application (screening vs optimization)
-
-    References:
-        - Merck Molecular Activity Challenge (Kaggle)
-        - ChEMBL database documentation
-        - Hughes et al. (2011) "Principles of early drug discovery"
+    The 1000 nM (1 μM) threshold is standard in kinase drug discovery.
+    See encoder_compare/config.py for detailed scientific justification.
     """
-    threshold_nm: float = 1000.0  # 1 μM
+    threshold_nm: float = 1000.0
     column_name: str = 'standard_value'
     label_column: str = 'label'
 
     def to_dict(self) -> Dict:
-        """Convert to dictionary for logging."""
         return {
             'threshold_nm': self.threshold_nm,
             'threshold_uM': self.threshold_nm / 1000,
             'column_name': self.column_name,
-            'label_column': self.label_column,
             'interpretation': f'active if {self.column_name} <= {self.threshold_nm} nM'
         }
 
 
-# Default threshold configuration
 DEFAULT_AFFINITY_THRESHOLD = AffinityThresholdConfig()
 
 
@@ -103,35 +74,43 @@ DEFAULT_AFFINITY_THRESHOLD = AffinityThresholdConfig()
 @dataclass
 class TrainingConfig:
     """
-    Training hyperparameters.
+    Training configuration for CrossAttention model.
 
     Attributes:
-        protein_dim: Protein embedding dimension (depends on ESM model)
-        ligand_dim: Ligand embedding dimension (768 for ChemBERTa)
+        protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
+        ligand_dim: Ligand embedding dimension (768 for SMI-TED)
         hidden_dim: Hidden dimension for all layers
-        num_heads: Number of attention heads
+        num_cnn_layers: Number of CNN encoder layers
         num_cross_attn_layers: Number of cross-attention layers
+        num_heads: Number of attention heads
         ff_dim: Feed-forward layer dimension
         dropout: Dropout rate
-        num_epochs: Maximum number of training epochs
         batch_size: Training batch size
         learning_rate: Initial learning rate
         weight_decay: AdamW weight decay
-        max_grad_norm: Gradient clipping threshold
+        num_epochs: Maximum training epochs
+        patience: Early stopping patience (epochs without improvement)
         affinity_threshold: Configuration for label generation
     """
+    # Model architecture
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
-    num_heads: int = 8
+    num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
-    ff_dim: int = 512
+    num_heads: int = 8
+    ff_dim: int = 1024
     dropout: float = 0.1
-    num_epochs: int = 200
+
+    # Training
     batch_size: int = 32
-    learning_rate: float = 5e-5  # Reduced from 1e-4 for better stability
+    learning_rate: float = 1e-4
     weight_decay: float = 0.01
-    max_grad_norm: float = 1.0  # Gradient clipping to prevent exploding gradients
+    num_epochs: int = 500
+    patience: int = 30
+    max_grad_norm: float = 1.0
+
+    # Reproducibility
     affinity_threshold: AffinityThresholdConfig = field(
         default_factory=lambda: DEFAULT_AFFINITY_THRESHOLD
     )
@@ -142,14 +121,25 @@ class TrainingConfig:
             'protein_dim': self.protein_dim,
             'ligand_dim': self.ligand_dim,
             'hidden_dim': self.hidden_dim,
-            'num_heads': self.num_heads,
+            'num_cnn_layers': self.num_cnn_layers,
             'num_cross_attn_layers': self.num_cross_attn_layers,
+            'num_heads': self.num_heads,
             'ff_dim': self.ff_dim,
             'dropout': self.dropout,
-            'num_epochs': self.num_epochs,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,
+            'num_epochs': self.num_epochs,
+            'patience': self.patience,
             'max_grad_norm': self.max_grad_norm,
             'affinity_threshold': self.affinity_threshold.to_dict()
         }
+
+
+# =============================================================================
+# STATISTICAL CONFIGURATION
+# =============================================================================
+
+MIN_SEEDS_FOR_STATISTICS = 3
+RECOMMENDED_SEEDS_FOR_PUBLICATION = 5
+DEFAULT_SEEDS = [42, 123, 456]
