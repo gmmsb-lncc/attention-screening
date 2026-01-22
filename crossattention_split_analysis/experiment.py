@@ -155,7 +155,8 @@ def run_crossattention_analysis(
     config: TrainingConfig,
     seeds: List[int] = None,
     prefix: str = "",
-    use_attention: bool = False
+    use_attention: bool = False,
+    scenarios: List[str] = None
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -168,6 +169,7 @@ def run_crossattention_analysis(
         seeds: List of random seeds
         prefix: Prefix for output files
         use_attention: Use attention matrices instead of embeddings
+        scenarios: List of scenario keys to run (None = all)
 
     Returns:
         Tuple of (all_results, split_stats) or (None, None) on failure
@@ -229,10 +231,19 @@ def run_crossattention_analysis(
     split_stats = {}
 
     # Define scenarios in order (hardest to easiest)
+    # Map scenario keys to (display_name, plot_key, split_function)
+    all_scenarios_config = {
+        'new_compound_new_kinase': ('New Compound + New Kinase', 'New Comp.\n+ New Kinase', split_new_compound_new_kinase),
+        'compound': ('Split by Compound', 'Split by\nCompound', split_by_compound),
+        'random': ('Random Split', 'Random Split\n(Original)', split_random),
+    }
+
+    # Filter scenarios if specified
+    if scenarios is None:
+        scenarios = ['new_compound_new_kinase', 'compound', 'random']
+
     scenarios_config = [
-        ('New Compound + New Kinase', 'New Comp.\n+ New Kinase', split_new_compound_new_kinase),
-        ('Split by Compound', 'Split by\nCompound', split_by_compound),
-        ('Random Split', 'Random Split\n(Original)', split_random),
+        all_scenarios_config[s] for s in scenarios if s in all_scenarios_config
     ]
 
     for scenario_name, scenario_key, split_fn in scenarios_config:
@@ -315,7 +326,12 @@ def run_single_analysis(
     output_dir: str,
     seeds: List[int] = None,
     force: bool = False,
-    use_attention: bool = False
+    use_attention: bool = False,
+    scenarios: List[str] = None,
+    num_epochs: int = 500,
+    patience: int = 30,
+    batch_size: int = 32,
+    learning_rate: float = 1e-4
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -327,14 +343,22 @@ def run_single_analysis(
         seeds: List of random seeds
         force: Force recalculation even if results exist
         use_attention: Use attention matrices
+        scenarios: List of scenario keys to run (None = all)
+        num_epochs: Maximum training epochs
+        patience: Early stopping patience
+        batch_size: Training batch size
+        learning_rate: Learning rate
 
     Returns:
         Results dictionary or None
     """
-    from .config import SUPPORTED_EMBEDDINGS
+    from .config import SUPPORTED_EMBEDDINGS, DEFAULT_SCENARIOS
 
     if seeds is None:
         seeds = DEFAULT_SEEDS
+
+    if scenarios is None:
+        scenarios = DEFAULT_SCENARIOS
 
     # Resolve embedding name
     if embedding_name in SUPPORTED_EMBEDDINGS:
@@ -358,6 +382,7 @@ def run_single_analysis(
     print(f"CNN+CROSSATTENTION ANALYSIS: {embedding_name} + {dataset_type}")
     print(f"INPUT TYPE: {input_type}")
     print(f"SEEDS: {seeds}")
+    print(f"SCENARIOS: {scenarios}")
     print("=" * 70)
 
     # Create config
@@ -368,9 +393,10 @@ def run_single_analysis(
 
     config = TrainingConfig(
         protein_dim=protein_dim,
-        num_epochs=500,
-        patience=30,
-        batch_size=32
+        num_epochs=num_epochs,
+        patience=patience,
+        batch_size=batch_size,
+        learning_rate=learning_rate
     )
 
     # Create output directory
@@ -379,7 +405,8 @@ def run_single_analysis(
     # Run analysis
     all_results, split_stats = run_crossattention_analysis(
         embedding_name, dataset_type, output_dir, config,
-        seeds=seeds, prefix=prefix, use_attention=use_attention
+        seeds=seeds, prefix=prefix, use_attention=use_attention,
+        scenarios=scenarios
     )
 
     if all_results is None:

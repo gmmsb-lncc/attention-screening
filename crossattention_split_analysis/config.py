@@ -142,4 +142,17 @@ class TrainingConfig:
 
 MIN_SEEDS_FOR_STATISTICS = 3
 RECOMMENDED_SEEDS_FOR_PUBLICATION = 5
-DEFAULT_SEEDS = [42, 123, 456]
+DEFAULT_SEEDS = [42, 123, 456, 789, 1024]  # 5 seeds for statistical rigor
+
+
+# =============================================================================
+# SCENARIO CONFIGURATION
+# =============================================================================
+
+AVAILABLE_SCENARIOS = {
+    'new_compound_new_kinase': 'New Compound + New Kinase',
+    'compound': 'Split by Compound',
+    'random': 'Random Split'
+}
+
+DEFAULT_SCENARIOS = ['new_compound_new_kinase', 'compound', 'random']
