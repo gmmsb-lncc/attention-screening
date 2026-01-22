@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from ..config import TrainingConfig
 from .evaluator import evaluate
@@ -35,7 +36,7 @@ def train_epoch(
     model.train()
     total_loss = 0
 
-    for batch in loader:
+    for batch in tqdm(loader, desc="Training", leave=False):
         protein = batch['protein_matrix'].to(device)
         ligand = batch['ligand_matrix'].to(device)
         protein_mask = batch['protein_mask'].to(device)
@@ -114,12 +115,19 @@ def train_model(
     best_epoch = 0
     history = {'train_loss': [], 'val_mcc': []}
 
-    for epoch in range(config.num_epochs):
+    # Add progress bar for epochs
+    epoch_range = tqdm(range(config.num_epochs), desc="Epochs", total=config.num_epochs)
+
+    for epoch in epoch_range:
         train_loss = train_epoch(
             model, train_loader, optimizer, criterion, device,
             max_grad_norm=config.max_grad_norm
         )
-        val_metrics = evaluate(model, val_loader, device)
+        try:
+            val_metrics = evaluate(model, val_loader, device)
+        except Exception as e:
+            print(f"Evaluation failed at epoch {epoch+1}: {str(e)}. Using default metrics.")
+            val_metrics = {'mcc': -1.0, 'accuracy': 0.5, 'auc': 0.5, 'f1': 0.0}  # Default metrics
         scheduler.step()
 
         history['train_loss'].append(train_loss)
