@@ -234,7 +234,7 @@ def train_model(
                 )
 
         # Early stopping
-        if patience_counter >= config.patience:
+        if config.patience is not None and patience_counter >= config.patience:
             print(f"    Early stopping at epoch {epoch+1} (patience={config.patience})")
             break
 
