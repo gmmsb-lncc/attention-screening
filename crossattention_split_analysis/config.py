@@ -19,8 +19,15 @@ PROTEIN_DIMS = {
     'esm2_t33_650M_UR50D': 1280
 }
 
-# Ligand embedding dimension (SMI-TED)
-LIGAND_DIM = 768
+# Ligand embedding dimensions
+LIGAND_DIM = 768  # SMI-TED per-token embeddings
+MOLFORMER_DIM = 768  # MoLFormer per-token embeddings
+
+# Ligand matrix directory names
+LIGAND_MATRIX_DIRS = {
+    'smited': 'ligand_matrices',      # Original SMI-TED matrices
+    'molformer': 'molformer_matrix',  # MoLFormer matrices
+}
 
 # Max sequence length for attention matrices
 MAX_SEQ_LEN = 1024
