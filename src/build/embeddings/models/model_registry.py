@@ -126,6 +126,12 @@ class ModelRegistry:
             type='fm4m',
             embedding_dim=768,
             description='SMI-TED Light model (40 layers) for molecular embeddings'
+        ),
+        'molformer': ModelInfo(
+            name='molformer',
+            type='fm4m',
+            embedding_dim=768,
+            description='MoLFormer-XL model (12 layers) for molecular embeddings - supports per-token representations'
         )
     }
     
