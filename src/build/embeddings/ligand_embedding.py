@@ -43,11 +43,16 @@ class LigandEmbedding(BaseEmbedding):
         self.checkpoint_enabled = checkpoint_enabled
         self.processed_files = set()
         self.checkpoint_file = None
-        
+
         # Cache do modelo SMI-TED
         self._smited_model = None
         self._smited_model_loaded = False
-            
+
+        # Cache do modelo MoLFormer
+        self._molformer_model = None
+        self._molformer_tokenizer = None
+        self._molformer_model_loaded = False
+
         super().__init__(model_name=model_name, config=config, **kwargs)
         
         # Verificar dependências
@@ -71,8 +76,8 @@ class LigandEmbedding(BaseEmbedding):
         super()._validate_config()
         
         # Validate FM4M model
-        if self.model_name not in FM4M_MODELS:
-            raise EmbeddingError(f"Invalid FM4M model: {self.model_name}. Available models: {list(FM4M_MODELS.keys())}")
+        if self.model_name.upper() not in [model.upper() for model in FM4M_MODELS.keys()] and self.model_name.upper() != "MOLFORMER":
+            raise EmbeddingError(f"Invalid FM4M model: {self.model_name}. Available models: {list(FM4M_MODELS.keys()) + ['MOLFORMER']}")
         
         # Check parallel processing configuration
         if self.use_parallel:
@@ -121,29 +126,59 @@ class LigandEmbedding(BaseEmbedding):
                 import os
                 import torch
                 from smi_ted.smi_ted_light.load import load_smi_ted
-                
+
                 # Locate model files
                 materials_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                 model_files_path = os.path.join(materials_path, "llm", "FM4M", "model_files")
-                
+
                 self.logger.info(f"Pre-loading SMI-TED model from: {model_files_path}")
-                
+
                 # Check if files exist
                 vocab_file = os.path.join(model_files_path, "bert_vocab_curated.txt")
                 ckpt_file = os.path.join(model_files_path, "smi-ted-Light_40.pt")
-                
+
                 if not os.path.exists(vocab_file) or not os.path.exists(ckpt_file):
                     raise DependencyError(
                         f"SMI-TED model files not found at {model_files_path}. "
                         f"Please run: cd llm/FM4M && python download_model_files.py"
                     )
-                
+
                 # Load model ONCE and cache
                 self._smited_model = load_smi_ted(folder=model_files_path, ckpt_filename='smi-ted-Light_40.pt')
                 self._smited_model_loaded = True
                 self.logger.info("✅ SMI-TED model pre-loaded and cached!")
-                
+
                 return self._smited_model
+
+            # Load MoLFormer model
+            elif self.model_name.upper() == "MOLFORMER":
+                import os
+                import torch
+                from transformers import AutoTokenizer, AutoModelForMaskedLM
+
+                # Locate cached model
+                materials_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                model_cache_path = os.path.join(materials_path, "llm", "models_cache", "molformer")
+
+                self.logger.info(f"Pre-loading MoLFormer model from: {model_cache_path}")
+
+                # Check if cached model exists
+                model_path = os.path.join(model_cache_path, "model")
+                tokenizer_path = os.path.join(model_cache_path, "tokenizer")
+
+                if not os.path.exists(model_path) or not os.path.exists(tokenizer_path):
+                    raise DependencyError(
+                        f"MoLFormer model files not found at {model_cache_path}. "
+                        f"Please run: python llm/MoLFormer/download_model.py"
+                    )
+
+                # Load model and tokenizer ONCE and cache
+                self._molformer_tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+                self._molformer_model = AutoModelForMaskedLM.from_pretrained(model_path, trust_remote_code=True)
+                self._molformer_model_loaded = True
+                self.logger.info("✅ MoLFormer model pre-loaded and cached!")
+
+                return self._molformer_model
             else:
                 # For other models, try importing fm4m (may fail)
                 try:
@@ -151,7 +186,7 @@ class LigandEmbedding(BaseEmbedding):
                     self.fm4m = fm4m
                 except ImportError:
                     raise DependencyError(f"Model {self.model_name} requires fm4m which is not available")
-                
+
                 self._smited_model = None
                 self._smited_model_loaded = False
                 return self.fm4m
@@ -164,8 +199,15 @@ class LigandEmbedding(BaseEmbedding):
     
     def _do_initialize(self) -> None:
         """Ligand-specific initialization."""
+        # Call parent initialization first to load the model
         super()._do_initialize()
-        
+
+        # Update fm4m_available flag based on model type
+        if self.model_name.upper() == "MOLFORMER":
+            # For MoLFormer, we don't use the generic fm4m, but the model is available
+            self.fm4m_available = True
+        # For SMI-TED and other FM4M models, fm4m_available is already set in _load_model
+
         # Configure checkpoint if enabled
         if self.checkpoint_enabled:
             self.checkpoint_file = Path(self.get_config('base_dir', '.')) / 'processed_ligands.log'
@@ -231,7 +273,7 @@ class LigandEmbedding(BaseEmbedding):
         # Ensure model is loaded
         if not self._model_loaded:
             self._do_initialize()
-        
+
         # SMI-TED does not support per-token representations
         # Returns None to indicate matrix is not available
         if self.model_name == "SMI-TED":
@@ -240,14 +282,48 @@ class LigandEmbedding(BaseEmbedding):
                 "Returning None. Use generate_embedding() for global vector."
             )
             return None
-        
+
+        # MoLFormer supports per-token representations
+        elif self.model_name.upper() == "MOLFORMER":
+            import torch
+            import numpy as np
+
+            # Tokenize the SMILES string
+            inputs = self._molformer_tokenizer(
+                smiles,
+                return_tensors="pt",
+                padding=False,
+                truncation=True,
+                max_length=512
+            )
+
+            # Get model outputs
+            with torch.no_grad():
+                outputs = self._molformer_model(**inputs, output_hidden_states=True)
+
+            # Get the last hidden state (this gives us per-token representations)
+            last_hidden_state = outputs.hidden_states[-1][0]  # Shape: [seq_len, hidden_size]
+
+            # Remove [CLS] and [SEP] tokens if not needed (optional)
+            # last_hidden_state = last_hidden_state[1:-1]  # Skip first and last token
+
+            # Convert to numpy array
+            embedding_matrix = last_hidden_state.cpu().numpy()
+
+            self.logger.debug(
+                f"Generated per-token embedding matrix for {self.model_name}: "
+                f"shape {embedding_matrix.shape}"
+            )
+            return embedding_matrix
+
         # For other models, check if they support per-token representations
-        # For now, return None for all FM4M models
-        self.logger.warning(
-            f"Model {self.model_name} does not support per-token/atom representations. "
-            "Use generate_embedding() to get global ligand representation."
-        )
-        return None
+        # For now, return None for all other FM4M models
+        else:
+            self.logger.warning(
+                f"Model {self.model_name} does not support per-token/atom representations. "
+                "Use generate_embedding() to get global ligand representation."
+            )
+            return None
     
     def _generate_batch_embeddings(self, smiles_list: List[str]) -> List[np.ndarray]:
         """
@@ -271,7 +347,7 @@ class LigandEmbedding(BaseEmbedding):
             # If model is cached (SMI-TED), use directly
             if self._smited_model_loaded and self.model_name == "SMI-TED":
                 import torch
-                
+
                 # For SMI-TED, process individually to avoid C++ crashes
                 embeddings = []
                 for smiles in valid_smiles:
@@ -279,33 +355,72 @@ class LigandEmbedding(BaseEmbedding):
                         with torch.no_grad():
                             # Process SMILES individually
                             representation = self._smited_model.encode([smiles], return_torch=False)
-                            
+
                             # Convert to numpy array
                             if hasattr(representation, 'values'):
                                 embedding = representation.values[0]
                             else:
                                 embedding = np.array(representation[0])
-                            
+
                             embeddings.append(embedding)
-                    
+
                     except Exception as e:
                         # Log error but don't fail entire batch
                         if self.logger:
                             self.logger.warning(f"Failed to process SMILES '{smiles[:50]}...': {e}")
                         # Re-raise for individual SMILES (will be caught at upper level)
                         raise EmbeddingError(f"Error processing SMILES: {e}")
-                
+
+                return embeddings
+            # If model is cached (MoLFormer), use directly
+            elif self._molformer_model_loaded and self.model_name.upper() == "MOLFORMER":
+                import torch
+
+                # For MoLFormer, process individually to get pooled embeddings
+                embeddings = []
+                for smiles in valid_smiles:
+                    try:
+                        # Tokenize the SMILES string
+                        inputs = self._molformer_tokenizer(
+                            smiles,
+                            return_tensors="pt",
+                            padding=False,
+                            truncation=True,
+                            max_length=512
+                        )
+
+                        # Get model outputs
+                        with torch.no_grad():
+                            outputs = self._molformer_model(**inputs, output_hidden_states=True)
+
+                        # Get the last hidden state and pool it (mean pooling)
+                        last_hidden_state = outputs.hidden_states[-1][0]  # Shape: [seq_len, hidden_size]
+
+                        # Apply mean pooling to get a single vector representation
+                        pooled_embedding = torch.mean(last_hidden_state, dim=0)  # Shape: [hidden_size]
+
+                        # Convert to numpy array
+                        embedding = pooled_embedding.cpu().numpy()
+                        embeddings.append(embedding)
+
+                    except Exception as e:
+                        # Log error but don't fail entire batch
+                        if self.logger:
+                            self.logger.warning(f"Failed to process SMILES '{smiles[:50]}...': {e}")
+                        # Re-raise for individual SMILES (will be caught at upper level)
+                        raise EmbeddingError(f"Error processing SMILES: {e}")
+
                 return embeddings
             else:
                 # Fallback: use original method (for other models)
                 representations = self._get_representation_with_retry(valid_smiles)
-                
+
                 # Convert to list of numpy arrays
                 if hasattr(representations, 'values'):
                     embeddings = [representations.values[i] for i in range(len(representations.values))]
                 else:
                     embeddings = [np.array(row) for row in representations]
-                
+
                 return embeddings
             
         except Exception as e:
@@ -338,35 +453,40 @@ class LigandEmbedding(BaseEmbedding):
                     raise e
     
     @memory_monitor(threshold_percent=85.0)
-    def generate_batch_embeddings(self, 
+    def generate_batch_embeddings(self,
                                  input_list: List[str],
                                  batch_size: Optional[int] = None,
                                  show_progress: bool = True) -> List[np.ndarray]:
         """
         Override base class method to use FM4M implementation.
-        
+
         Args:
             input_list: List of SMILES
             batch_size: Batch size
             show_progress: Whether to show progress
-            
+
         Returns:
             List of embeddings
         """
-        if not self.fm4m_available:
-            raise EmbeddingError("FM4M is not loaded")
-        
+        # Ensure model is loaded
+        if not self._model_loaded:
+            self._do_initialize()
+
+        # Now check if the model is available
+        if not self.fm4m_available and not self._molformer_model_loaded:
+            raise EmbeddingError("FM4M or MoLFormer is not loaded")
+
         if not input_list:
             return []
-        
+
         # Optimize batch size
         if batch_size is None:
             batch_size = self.get_config('batch_size', 32)
         batch_size = optimize_batch_size(batch_size)
-        
+
         embeddings = []
         total_items = len(input_list)
-        
+
         # Progress logger
         if show_progress:
             progress_logger = ProgressLogger(
@@ -374,30 +494,30 @@ class LigandEmbedding(BaseEmbedding):
                 total_items,
                 f"Generating FM4M embeddings ({self.model_name})"
             )
-        
+
         # Process in batches
         for i in range(0, total_items, batch_size):
             batch = input_list[i:i + batch_size]
-            
+
             try:
                 batch_embeddings = self._generate_batch_embeddings(batch)
                 embeddings.extend(batch_embeddings)
-                
+
                 if show_progress:
                     progress_logger.update(len(batch))
-                    
+
             except Exception as e:
                 self.logger.error(f"Error in batch {i//batch_size + 1}: {e}")
                 # Add zero embeddings to maintain consistency
                 zero_embeddings = [np.zeros(self.embedding_dim) for _ in batch]
                 embeddings.extend(zero_embeddings)
-                
+
                 if show_progress:
                     progress_logger.update(len(batch))
-        
+
         if show_progress:
             progress_logger.finish()
-        
+
         return embeddings
     
     def process_smi_file(self, 
@@ -568,11 +688,18 @@ class LigandEmbedding(BaseEmbedding):
                     )
                 matrix_output_dir = Path(matrix_output_dir)
                 matrix_output_dir = ensure_directory(matrix_output_dir)
-                self.logger.info(f"📊 Matrix directory configured: {matrix_output_dir}")
-                self.logger.warning(
-                    "⚠️ Note: SMI-TED model does not support per-token/atom representations. "
-                    "Matrices will not be generated."
-                )
+                self.logger.info(f"📊 Ligand matrix directory configured: {matrix_output_dir}")
+                # Only warn if the model doesn't support matrices
+                if self.model_name.upper() != "MOLFORMER":
+                    self.logger.warning(
+                        f"⚠️ Note: {self.model_name} model does not support per-token/atom representations. "
+                        "Ligand matrices will not be generated."
+                    )
+                else:
+                    self.logger.info(
+                        f"✅ {self.model_name} model supports per-token representations. "
+                        f"Ligand matrices will be generated in: {matrix_output_dir}"
+                    )
             
             # Load TSV
             self.logger.info(f"Loading data from {tsv_path}")
@@ -653,21 +780,45 @@ class LigandEmbedding(BaseEmbedding):
                     output_file = output_dir / f"{chembl_id}_embedding.npy"
                     if output_file.exists():
                         self.logger.debug(f"Embedding already exists: {chembl_id}")
+
+                        # Even if embedding exists, check if matrix needs to be generated
+                        if save_matrix and matrix_output_dir:
+                            matrix_output_file = matrix_output_dir / f"{chembl_id}_matrix.npy"
+                            if not matrix_output_file.exists():
+                                matrix = self.generate_embedding_matrix(smiles)
+                                if matrix is not None:
+                                    matrix_output_file = matrix_output_dir / f"{chembl_id}_matrix.npy"
+                                    np.save(matrix_output_file, matrix)
+                                    self.logger.debug(f"Saved matrix for {chembl_id}: {matrix.shape}")
+                                else:
+                                    self.logger.debug(f"No matrix available for {chembl_id}")
+
                         successes += 1
                         progress_logger.update()
                         continue
-                    
+
                     # Generate embedding
                     embedding = self.generate_embedding(smiles)
-                    
+
                     # Save
                     np.save(output_file, embedding)
+
+                    # Also generate and save matrix if requested and model supports it
+                    if save_matrix and matrix_output_dir:
+                        matrix = self.generate_embedding_matrix(smiles)
+                        if matrix is not None:
+                            matrix_output_file = matrix_output_dir / f"{chembl_id}_matrix.npy"
+                            np.save(matrix_output_file, matrix)
+                            self.logger.debug(f"Saved matrix for {chembl_id}: {matrix.shape}")
+                        else:
+                            self.logger.debug(f"No matrix available for {chembl_id}")
+
                     successes += 1
-                    
+
                 except Exception as e:
                     self.logger.error(f"Error processing {chembl_id}: {e}")
                     failures += 1
-                
+
                 progress_logger.update()
             
             progress_logger.finish()
@@ -709,7 +860,7 @@ class LigandEmbedding(BaseEmbedding):
             'dimension': self.embedding_dim,
             'matrix_output_path': None,
             'matrix_count': 0,
-            'matrix_supported': False  # SMI-TED não suporta matrizes
+            'matrix_supported': self.model_name.upper() == "MOLFORMER"  # MoLFormer supports matrices
         }
         
         if output_path and output_path.exists():

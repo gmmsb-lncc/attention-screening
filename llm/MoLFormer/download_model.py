@@ -55,12 +55,12 @@ def download_molformer(cache_dir: str = None, force: bool = False):
         return str(model_path), str(tokenizer_path)
 
     print("\nDownloading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.save_pretrained(str(tokenizer_path))
     print(f"  Saved to: {tokenizer_path}")
 
     print("\nDownloading model...")
-    model = AutoModelForMaskedLM.from_pretrained(model_name)
+    model = AutoModelForMaskedLM.from_pretrained(model_name, trust_remote_code=True)
     model.save_pretrained(str(model_path))
     print(f"  Saved to: {model_path}")
 
