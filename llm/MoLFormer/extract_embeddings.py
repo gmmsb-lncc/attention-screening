@@ -73,16 +73,16 @@ class MoLFormerEmbedder:
 
         if use_cache and tokenizer_path.exists() and local_model_path.exists():
             print(f"  Using cached model from: {cache_dir}")
-            self.tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path))
-            self.model = AutoModelForMaskedLM.from_pretrained(str(local_model_path))
+            self.tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path), trust_remote_code=True)
+            self.model = AutoModelForMaskedLM.from_pretrained(str(local_model_path), trust_remote_code=True)
         elif model_path is not None:
             print(f"  Loading from: {model_path}")
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-            self.model = AutoModelForMaskedLM.from_pretrained(model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+            self.model = AutoModelForMaskedLM.from_pretrained(model_path, trust_remote_code=True)
         else:
             print(f"  Downloading from HuggingFace: {self.MODEL_NAME}")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME)
-            self.model = AutoModelForMaskedLM.from_pretrained(self.MODEL_NAME)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME, trust_remote_code=True)
+            self.model = AutoModelForMaskedLM.from_pretrained(self.MODEL_NAME, trust_remote_code=True)
 
         self.model.to(self.device)
         self.model.eval()
