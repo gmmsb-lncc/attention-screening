@@ -163,6 +163,12 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--no-early-stopping',
+        action='store_true',
+        help='Disable early stopping (train for full --epochs)'
+    )
+
+    parser.add_argument(
         '--batch_size',
         type=int,
         default=32,
@@ -255,7 +261,10 @@ Available scenarios:
     print("-" * 70)
     print("Training Parameters:")
     print(f"  Epochs:         {args.epochs}")
-    print(f"  Patience:       {args.patience}")
+    if args.no_early_stopping:
+        print(f"  Early stopping: DISABLED")
+    else:
+        print(f"  Patience:       {args.patience}")
     print(f"  Batch size:     {args.batch_size}")
     print(f"  Learning rate:  {args.learning_rate}")
     print("-" * 70)
@@ -278,6 +287,9 @@ Available scenarios:
         embedding_start_time = time.time()
 
         try:
+            # Set patience to None if early stopping is disabled
+            patience = None if args.no_early_stopping else args.patience
+
             result = run_single_analysis(
                 embedding_name=embedding,
                 dataset_type=args.dataset,
@@ -287,7 +299,7 @@ Available scenarios:
                 use_attention=args.use_attention,
                 scenarios=scenarios,
                 num_epochs=args.epochs,
-                patience=args.patience,
+                patience=patience,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
                 use_molformer_ligand=args.molformer_ligand
