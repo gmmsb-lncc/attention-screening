@@ -18,7 +18,9 @@ from .config import (
     MAX_SEQ_LEN,
     DEFAULT_AFFINITY_THRESHOLD,
     MIN_SEEDS_FOR_STATISTICS,
-    DEFAULT_SEEDS
+    DEFAULT_SEEDS,
+    LIGAND_MATRIX_DIRS,
+    MOLFORMER_DIM
 )
 from .data import (
     create_attention_dataloader,
@@ -156,7 +158,8 @@ def run_crossattention_analysis(
     seeds: List[int] = None,
     prefix: str = "",
     use_attention: bool = False,
-    scenarios: List[str] = None
+    scenarios: List[str] = None,
+    use_molformer_ligand: bool = False
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -170,6 +173,7 @@ def run_crossattention_analysis(
         prefix: Prefix for output files
         use_attention: Use attention matrices instead of embeddings
         scenarios: List of scenario keys to run (None = all)
+        use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
 
     Returns:
         Tuple of (all_results, split_stats) or (None, None) on failure
@@ -192,10 +196,20 @@ def run_crossattention_analysis(
         protein_matrix_dir = os.path.join(embedding_dir, 'protein_matrices')
         input_type = "Per-token Embeddings"
 
-    ligand_matrix_dir = os.path.join(embedding_dir, 'ligand_matrices')
+    # Select ligand matrix directory
+    if use_molformer_ligand:
+        ligand_dir_name = LIGAND_MATRIX_DIRS['molformer']
+        ligand_type = "Per-token Embeddings (MoLFormer)"
+    else:
+        ligand_dir_name = LIGAND_MATRIX_DIRS['smited']
+        ligand_type = "Per-token Embeddings (SMI-TED)"
+
+    ligand_matrix_dir = os.path.join(embedding_dir, ligand_dir_name)
 
     print(f"\n  Protein input: {input_type}")
     print(f"  Protein dir: {protein_matrix_dir}")
+    print(f"  Ligand input: {ligand_type}")
+    print(f"  Ligand dir: {ligand_matrix_dir}")
 
     if not os.path.exists(protein_matrix_dir):
         print(f"ERROR: Protein matrices not found: {protein_matrix_dir}")
@@ -331,7 +345,8 @@ def run_single_analysis(
     num_epochs: int = 500,
     patience: int = 30,
     batch_size: int = 32,
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-4,
+    use_molformer_ligand: bool = False
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -348,6 +363,7 @@ def run_single_analysis(
         patience: Early stopping patience
         batch_size: Training batch size
         learning_rate: Learning rate
+        use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
 
     Returns:
         Results dictionary or None
@@ -364,10 +380,11 @@ def run_single_analysis(
     if embedding_name in SUPPORTED_EMBEDDINGS:
         embedding_name = SUPPORTED_EMBEDDINGS[embedding_name]
 
-    # Generate prefix
+    # Generate prefix (include molformer tag to avoid overwriting existing results)
     short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
     attn_prefix = 'attn_' if use_attention else ''
-    prefix = f"{dataset_type}_{attn_prefix}{short_name}_"
+    molformer_prefix = 'molformer_' if use_molformer_ligand else ''
+    prefix = f"{dataset_type}_{attn_prefix}{molformer_prefix}{short_name}_"
 
     # Check cache
     json_file = os.path.join(output_dir, f'{prefix}crossattention_analysis_results.json')
@@ -377,10 +394,12 @@ def run_single_analysis(
         print(f"        Use --force to recalculate.")
         return None
 
-    input_type = "ATTENTION MATRICES" if use_attention else "PER-TOKEN EMBEDDINGS"
+    protein_input_type = "ATTENTION MATRICES" if use_attention else "PER-TOKEN EMBEDDINGS"
+    ligand_input_type = "PER-TOKEN EMBEDDINGS (MoLFormer)" if use_molformer_ligand else "PER-TOKEN EMBEDDINGS (SMI-TED)"
     print("\n" + "=" * 70)
     print(f"CNN+CROSSATTENTION ANALYSIS: {embedding_name} + {dataset_type}")
-    print(f"INPUT TYPE: {input_type}")
+    print(f"PROTEIN INPUT: {protein_input_type}")
+    print(f"LIGAND INPUT: {ligand_input_type}")
     print(f"SEEDS: {seeds}")
     print(f"SCENARIOS: {scenarios}")
     print("=" * 70)
@@ -391,8 +410,12 @@ def run_single_analysis(
     else:
         protein_dim = PROTEIN_DIMS.get(embedding_name, 640)
 
+    # Ligand dimension (same for both SMI-TED and MoLFormer)
+    ligand_dim = MOLFORMER_DIM if use_molformer_ligand else 768
+
     config = TrainingConfig(
         protein_dim=protein_dim,
+        ligand_dim=ligand_dim,
         num_epochs=num_epochs,
         patience=patience,
         batch_size=batch_size,
@@ -406,7 +429,7 @@ def run_single_analysis(
     all_results, split_stats = run_crossattention_analysis(
         embedding_name, dataset_type, output_dir, config,
         seeds=seeds, prefix=prefix, use_attention=use_attention,
-        scenarios=scenarios
+        scenarios=scenarios, use_molformer_ligand=use_molformer_ligand
     )
 
     if all_results is None:

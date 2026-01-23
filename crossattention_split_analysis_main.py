@@ -195,7 +195,13 @@ Available scenarios:
     parser.add_argument(
         '--use_attention',
         action='store_true',
-        help='Use attention matrices instead of embeddings'
+        help='Use attention matrices instead of embeddings for protein'
+    )
+
+    parser.add_argument(
+        '--molformer_ligand',
+        action='store_true',
+        help='Use MoLFormer matrices instead of SMI-TED for ligand representation'
     )
 
     parser.add_argument(
@@ -243,7 +249,8 @@ Available scenarios:
     print(f"Embeddings:       {embeddings_to_run}")
     print(f"Scenarios:        {scenarios}")
     print(f"Output directory: {args.output_dir}")
-    print(f"Use attention:    {args.use_attention}")
+    print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
+    print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
     print("-" * 70)
     print("Training Parameters:")
@@ -282,7 +289,8 @@ Available scenarios:
                 num_epochs=args.epochs,
                 patience=args.patience,
                 batch_size=args.batch_size,
-                learning_rate=args.learning_rate
+                learning_rate=args.learning_rate,
+                use_molformer_ligand=args.molformer_ligand
             )
 
             embedding_time = time.time() - embedding_start_time

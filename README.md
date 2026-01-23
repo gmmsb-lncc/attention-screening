@@ -49,7 +49,7 @@ For detailed information:
 | Feature | Description |
 |---------|-------------|
 | 🧬 **Multi-Model Protein Embeddings** | ESM-2 (8M-15B params), ESM-C, Boltz-2 (384-dim) |
-| 🔬 **Ligand Embeddings** | FM4M SMI-TED (768-dim) |
+| 🔬 **Ligand Embeddings** | FM4M SMI-TED, MoLFormer (768-dim) |
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
@@ -73,18 +73,19 @@ For detailed information:
 | `esmc_6b` | 6B | 4096 | ~24 GB | Slow |
 | `boltz2` | ~400M | 384 | ~4 GB | Medium |
 
-### Ligand Embedding Model
+### Ligand Embedding Models
 
 | Model | Embedding Dim | Description |
 |-------|---------------|-------------|
 | `fm4m` (SMI-TED) | 768 | Molecular foundation model from IBM Research |
+| `MoLFormer` | 768 | Transformer-based molecular representation model |
 
 ## The DT-Kinase Architecture
 
 **DT-Kinase** is the neural network architecture implemented within semantic-screening that solves protein-ligand interaction prediction through semantic embeddings. It combines:
 
 1. **Protein Encoding**: Per-residue embeddings from Protein Language Models (ESM-2, ESM-C, Boltz-2) capture evolutionary constraints and implicit structural information
-2. **Ligand Encoding**: Per-atom embeddings from chemical foundation models (FM4M SMI-TED) encode molecular properties and SMILES syntax
+2. **Ligand Encoding**: Per-token embeddings from chemical foundation models (FM4M SMI-TED, MoLFormer) encode molecular properties and SMILES syntax
 3. **Local Feature Extraction**: Multi-scale CNN encoders capture local patterns in protein sequences and molecular structures
 4. **Semantic Interaction Modeling**: Bidirectional cross-attention mechanisms model protein-ligand compatibility by learning which residues interact with which atoms
 5. **Multi-Task Prediction**: Simultaneous classification (active/inactive) and regression (affinity quantification) with uncertainty-weighted loss
@@ -95,7 +96,7 @@ For detailed information:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  INPUT: Contextual Embeddings                                               │
 │  ├── Protein: ESM-2/ESM-C per-residue embeddings [seq_len, d_protein]      │
-│  └── Ligand:  SMI-TED per-atom embeddings [mol_len, d_ligand]              │
+│  └── Ligand:  SMI-TED/MoLFormer per-token embeddings [mol_len, d_ligand]   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼

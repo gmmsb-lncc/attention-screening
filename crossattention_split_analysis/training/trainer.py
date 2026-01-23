@@ -210,8 +210,8 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Print progress every 50 epochs
-        if (epoch + 1) % 50 == 0 or epoch == 0:
+        # Print progress every 5 epochs
+        if (epoch + 1) % 5 == 0 or epoch == 0:
             print(f"    Epoch {epoch+1}: loss={train_metrics['total']:.4f}, "
                   f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}")
 
