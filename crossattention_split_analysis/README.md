@@ -126,7 +126,7 @@ The `TrainingConfig` dataclass allows fine-grained control over model architectu
 
 ### Affinity Threshold
 
-The default threshold of 1000 nM (1 μM) follows standard practice in kinase drug discovery for distinguishing active from inactive compounds.
+The default threshold uses pChEMBL >= 6.0 (logarithmic scale), which corresponds to 1000 nM (1 μM) in the original scale. This follows standard practice in kinase drug discovery for distinguishing active from inactive compounds. Using logarithmic scale (pChEMBL values) provides better numerical stability and is the standard representation in medicinal chemistry.
 
 ## Output Format
 

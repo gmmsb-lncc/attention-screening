@@ -55,19 +55,28 @@ class AffinityThresholdConfig:
     """
     Configuration for converting continuous affinity to binary labels.
 
-    The 1000 nM (1 μM) threshold is standard in kinase drug discovery.
+    Uses pChEMBL values (logarithmic scale) instead of direct nM values.
+    The threshold of 6.0 corresponds to 1000 nM (1 μM), which is standard in kinase drug discovery.
+
+    Conversion: pChEMBL = -log10(IC50/Kd in M)
+    - 1000 nM = 1e-6 M → pChEMBL = 6.0
+    - Active: pChEMBL >= 6.0 (higher pChEMBL = lower concentration = higher affinity)
+
     See encoder_compare/config.py for detailed scientific justification.
     """
-    threshold_nm: float = 1000.0
-    column_name: str = 'standard_value'
+    threshold_pchembl: float = 6.0  # Equivalent to 1000 nM
+    column_name: str = 'pchembl_value'
     label_column: str = 'label'
 
     def to_dict(self) -> Dict:
+        # Calculate equivalent nM value: nM = 10^(9 - pChEMBL)
+        equivalent_nm = 10 ** (9 - self.threshold_pchembl)
         return {
-            'threshold_nm': self.threshold_nm,
-            'threshold_uM': self.threshold_nm / 1000,
+            'threshold_pchembl': self.threshold_pchembl,
+            'threshold_nm_equivalent': equivalent_nm,
+            'threshold_uM_equivalent': equivalent_nm / 1000,
             'column_name': self.column_name,
-            'interpretation': f'active if {self.column_name} <= {self.threshold_nm} nM'
+            'interpretation': f'active if {self.column_name} >= {self.threshold_pchembl} (equivalent to <= {equivalent_nm:.0f} nM)'
         }
 
 
