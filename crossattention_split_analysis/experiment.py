@@ -223,9 +223,21 @@ def run_crossattention_analysis(
     print(f"\nLoading dataset: {dataset_path}")
     df = pd.read_csv(dataset_path, sep='\t')
 
-    # Apply threshold
-    threshold = config.affinity_threshold.threshold_nm
-    df['label'] = (df['standard_value'] <= threshold).astype(int)
+    # Apply threshold using pChEMBL values (logarithmic scale)
+    # pChEMBL >= threshold means active (higher pChEMBL = higher affinity = lower IC50/Kd)
+    threshold = config.affinity_threshold.threshold_pchembl
+    threshold_nm_equiv = 10 ** (9 - threshold)
+
+    # Calculate pChEMBL from standard_value when missing
+    # pChEMBL = -log10(Molar) = -log10(nM / 1e9) = 9 - log10(nM)
+    import numpy as np
+    n_missing = df['pchembl_value'].isna().sum()
+    if n_missing > 0:
+        print(f"  Calculating pChEMBL for {n_missing} samples with missing values...")
+        mask_missing = df['pchembl_value'].isna()
+        df.loc[mask_missing, 'pchembl_value'] = 9 - np.log10(df.loc[mask_missing, 'standard_value'])
+
+    df['label'] = (df['pchembl_value'] >= threshold).astype(int)
     df['seq_id'] = df['seq_id'].astype(str)
 
     # Report class distribution
@@ -233,7 +245,7 @@ def run_crossattention_analysis(
     n_inactive = len(df) - n_active
     print(f"  Total: {len(df)} samples, {df['chembl_id'].nunique()} compounds, "
           f"{df['target_kinase'].nunique()} kinases")
-    print(f"  Affinity threshold: {threshold} nM ({threshold/1000} μM)")
+    print(f"  Affinity threshold: pChEMBL >= {threshold:.1f} (equivalent to <= {threshold_nm_equiv:.0f} nM / {threshold_nm_equiv/1000:.1f} μM)")
     print(f"  Class distribution: {n_active} active ({100*n_active/len(df):.1f}%), "
           f"{n_inactive} inactive ({100*n_inactive/len(df):.1f}%)")
 
@@ -343,7 +355,7 @@ def run_single_analysis(
     use_attention: bool = False,
     scenarios: List[str] = None,
     num_epochs: int = 500,
-    patience: int = 30,
+    patience: Optional[int] = 30,
     batch_size: int = 32,
     learning_rate: float = 1e-4,
     use_molformer_ligand: bool = False
@@ -402,6 +414,10 @@ def run_single_analysis(
     print(f"LIGAND INPUT: {ligand_input_type}")
     print(f"SEEDS: {seeds}")
     print(f"SCENARIOS: {scenarios}")
+    if patience is None:
+        print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
+    else:
+        print(f"EARLY STOPPING: patience={patience}")
     print("=" * 70)
 
     # Create config
