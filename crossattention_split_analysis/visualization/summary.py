@@ -99,7 +99,8 @@ def calculate_statistics(seed_results: Dict) -> Dict:
         'accuracy': [],
         'mcc': [],
         'auc': [],
-        'f1': []
+        'f1': [],
+        'loss': []
     }
 
     for seed_data in seed_results.values():

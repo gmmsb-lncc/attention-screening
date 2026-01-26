@@ -61,7 +61,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, matthews_corrcoef, balanced_accuracy_score
+    roc_auc_score, matthews_corrcoef, balanced_accuracy_score,
+    log_loss
 )
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import AgglomerativeClustering
@@ -375,22 +376,30 @@ def train_and_evaluate(
     start = time.time()
     model.fit(X_train, y_train)
     train_time = time.time() - start
-    
+
     # Predições
     y_train_pred = model.predict(X_train)
     y_val_pred = model.predict(X_val)
     y_test_pred = model.predict(X_test)
-    
+
     y_train_prob = model.predict_proba(X_train)[:, 1]
     y_val_prob = model.predict_proba(X_val)[:, 1]
     y_test_prob = model.predict_proba(X_test)[:, 1]
-    
+
+    # Calcular loss (log_loss/cross-entropy) para todos os modelos
+    train_loss = log_loss(y_train, y_train_prob)
+    val_loss = log_loss(y_val, y_val_prob)
+    test_loss = log_loss(y_test, y_test_prob)
+
     return {
         'model_name': model_name,
         'train_time': train_time,
         'train_metrics': calculate_metrics(y_train, y_train_pred, y_train_prob),
         'val_metrics': calculate_metrics(y_val, y_val_pred, y_val_prob),
         'test_metrics': calculate_metrics(y_test, y_test_pred, y_test_prob),
+        'train_loss': train_loss,
+        'val_loss': val_loss,
+        'test_loss': test_loss,
     }
 
 
@@ -438,19 +447,19 @@ def run_single_seed(
         'KNN', knn, X_train, y_train, X_val, y_val, X_test, y_test
     )
     results['classifiers']['KNN'] = knn_results
-    
+
     if verbose:
-        print(f"      KNN: ROC-AUC={knn_results['test_metrics']['roc_auc']:.4f} ({knn_results['train_time']:.1f}s)")
-    
+        print(f"      KNN: ROC-AUC={knn_results['test_metrics']['roc_auc']:.4f}, Loss={knn_results['test_loss']:.4f} ({knn_results['train_time']:.1f}s)")
+
     # Treinar MLP
     mlp = create_mlp_model(seed)
     mlp_results = train_and_evaluate(
         'MLP', mlp, X_train, y_train, X_val, y_val, X_test, y_test
     )
     results['classifiers']['MLP'] = mlp_results
-    
+
     if verbose:
-        print(f"      MLP: ROC-AUC={mlp_results['test_metrics']['roc_auc']:.4f} ({mlp_results['train_time']:.1f}s)")
+        print(f"      MLP: ROC-AUC={mlp_results['test_metrics']['roc_auc']:.4f}, Loss={mlp_results['test_loss']:.4f} ({mlp_results['train_time']:.1f}s)")
     
     return results
 
@@ -458,10 +467,10 @@ def run_single_seed(
 def aggregate_results(all_results: List[Dict], metric_name: str = 'test_metrics') -> Dict:
     """Agrega resultados de múltiplas seeds."""
     aggregated = {}
-    
+
     for clf in ['KNN', 'MLP']:
         clf_metrics = {}
-        
+
         for metric in ['accuracy', 'precision', 'recall', 'f1', 'mcc', 'roc_auc', 'balanced_accuracy']:
             values = [r['classifiers'][clf][metric_name][metric] for r in all_results]
             clf_metrics[metric] = {
@@ -471,9 +480,20 @@ def aggregate_results(all_results: List[Dict], metric_name: str = 'test_metrics'
                 'min': np.min(values),
                 'max': np.max(values),
             }
-        
+
+        # Agregar loss (usando o loss correspondente ao metric_name)
+        loss_key = metric_name.replace('_metrics', '_loss')  # test_metrics -> test_loss
+        loss_values = [r['classifiers'][clf][loss_key] for r in all_results]
+        clf_metrics['loss'] = {
+            'values': loss_values,
+            'mean': np.mean(loss_values),
+            'std': np.std(loss_values),
+            'min': np.min(loss_values),
+            'max': np.max(loss_values),
+        }
+
         aggregated[clf] = clf_metrics
-    
+
     return aggregated
 
 
@@ -759,6 +779,85 @@ def create_comparison_visualization(random_results: Dict, stratified_results: Di
     print(f"📊 Delta salvo em: {output_dir / 'comparison_delta.png'}")
 
 
+def create_metrics_summary_visualization(results: Dict, output_dir: Path, split_method: str):
+    """
+    Cria visualização com Acurácia, MCC e Loss lado a lado para os três modelos ESM-2.
+
+    Para cada métrica, mostra barras agrupadas por modelo ESM-2, com KNN e MLP lado a lado.
+    """
+    esm_models = list(results['models'].keys())
+    model_labels = ['ESM-2 8M', 'ESM-2 150M', 'ESM-2 3B'][:len(esm_models)]
+
+    split_title = "Aleatório" if split_method == 'random' else "Estratificado"
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(f'Métricas de Desempenho - Split {split_title}\n(Média ± Desvio Padrão de {results["n_seeds"]} seeds)',
+                 fontsize=14, fontweight='bold', y=1.02)
+
+    colors = {'KNN': '#3498db', 'MLP': '#e74c3c'}
+    metrics_to_plot = [('accuracy', 'Acurácia'), ('mcc', 'MCC'), ('loss', 'Loss')]
+
+    for ax_idx, (metric, label) in enumerate(metrics_to_plot):
+        ax = axes[ax_idx]
+
+        x = np.arange(len(esm_models))
+        width = 0.35
+
+        for i, clf in enumerate(['KNN', 'MLP']):
+            means = []
+            stds = []
+
+            for esm in esm_models:
+                agg = results['models'][esm]['aggregated']
+                means.append(agg[clf][metric]['mean'])
+                stds.append(agg[clf][metric]['std'])
+
+            offset = -width/2 if i == 0 else width/2
+            bars = ax.bar(x + offset, means, width, label=clf, color=colors[clf], alpha=0.8)
+            ax.errorbar(x + offset, means, yerr=stds, fmt='none', color='black', capsize=3, linewidth=1.5)
+
+            # Anotações com valores
+            for bar, mean, std in zip(bars, means, stds):
+                y_pos = bar.get_height()
+                if metric == 'loss':
+                    text = f'{mean:.4f}\n±{std:.4f}'
+                else:
+                    text = f'{mean:.3f}\n±{std:.3f}'
+                ax.annotate(text,
+                           xy=(bar.get_x() + bar.get_width()/2, y_pos),
+                           xytext=(0, 3), textcoords='offset points',
+                           ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+        ax.set_xlabel('Modelo ESM-2', fontsize=11, fontweight='bold')
+        ax.set_ylabel(label, fontsize=11, fontweight='bold')
+        ax.set_title(label, fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(model_labels, fontsize=10)
+        ax.legend(loc='best', fontsize=10)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        # Ajustar limites Y conforme métrica
+        if metric == 'accuracy':
+            ax.set_ylim(0.85, 1.02)
+        elif metric == 'mcc':
+            ax.set_ylim(0.5, 1.0)
+        # Loss: deixar automático
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if split_method == 'random':
+        output_path = output_dir / "metrics_summary_random.png"
+    else:
+        output_path = output_dir / "metrics_summary_stratified.png"
+
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+    print(f"📊 Resumo de métricas salvo em: {output_path}")
+
+
 def print_summary_table(results: Dict, seeds: List[int], split_method: str):
     """Imprime tabela resumo."""
     
@@ -854,13 +953,14 @@ def main():
     # Executar split(s) selecionado(s)
     if args.split in ['random', 'both']:
         random_results = run_pipeline(
-            embeddings_dir, output_dir, 'random', 
+            embeddings_dir, output_dir, 'random',
             args.n_seeds, args.skip_existing
         )
         if random_results.get('models'):  # Se tem dados novos
             create_single_visualization(random_results, output_dir, 'random')
+            create_metrics_summary_visualization(random_results, output_dir, 'random')
             print_summary_table(random_results, seeds, 'random')
-    
+
     if args.split in ['stratified', 'both']:
         stratified_results = run_pipeline(
             embeddings_dir, output_dir, 'stratified',
@@ -868,6 +968,7 @@ def main():
         )
         if stratified_results.get('models'):  # Se tem dados novos
             create_single_visualization(stratified_results, output_dir, 'stratified')
+            create_metrics_summary_visualization(stratified_results, output_dir, 'stratified')
             print_summary_table(stratified_results, seeds, 'stratified')
     
     # Comparação se ambos foram executados
