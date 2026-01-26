@@ -1,7 +1,7 @@
 """Dataset classes for attention matrices and embeddings."""
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -16,18 +16,20 @@ class AttentionMatrixDataset(Dataset):
     Loads attention matrices [seq_len, seq_len] and pads them to [max_len, max_len].
     The second dimension serves as the "embedding dimension" for the model.
 
+    Supports multiple directories for combined datasets (e.g., human + non_human).
+
     Attributes:
         data_df: DataFrame containing sample information
-        attention_matrix_dir: Path to attention matrix files
-        ligand_matrix_dir: Path to ligand embedding files
+        attention_matrix_dirs: List of paths to attention matrix files
+        ligand_matrix_dirs: List of paths to ligand embedding files
         max_seq_len: Maximum sequence length for padding
     """
 
     def __init__(
         self,
         data_df: pd.DataFrame,
-        attention_matrix_dir: str,
-        ligand_matrix_dir: str,
+        attention_matrix_dir: Union[str, List[str]],
+        ligand_matrix_dir: Union[str, List[str]],
         max_seq_len: int = 1024,
         label_column: str = 'label',
         protein_id_column: str = 'seq_id',
@@ -35,8 +37,22 @@ class AttentionMatrixDataset(Dataset):
         regression_column: Optional[str] = 'pchembl_value'
     ):
         self.data_df = data_df.reset_index(drop=True)
-        self.attention_matrix_dir = Path(attention_matrix_dir)
-        self.ligand_matrix_dir = Path(ligand_matrix_dir)
+
+        # Support single dir or list of dirs
+        if isinstance(attention_matrix_dir, str):
+            self.attention_matrix_dirs = [Path(attention_matrix_dir)]
+        else:
+            self.attention_matrix_dirs = [Path(d) for d in attention_matrix_dir]
+
+        if isinstance(ligand_matrix_dir, str):
+            self.ligand_matrix_dirs = [Path(ligand_matrix_dir)]
+        else:
+            self.ligand_matrix_dirs = [Path(d) for d in ligand_matrix_dir]
+
+        # Backward compatibility
+        self.attention_matrix_dir = self.attention_matrix_dirs[0]
+        self.ligand_matrix_dir = self.ligand_matrix_dirs[0]
+
         self.max_seq_len = max_seq_len
         self.label_column = label_column
         self.protein_id_column = protein_id_column
@@ -46,6 +62,34 @@ class AttentionMatrixDataset(Dataset):
     def __len__(self) -> int:
         return len(self.data_df)
 
+    def _find_file(self, dirs: List[Path], filename: str, alt_patterns: List[str] = None) -> Path:
+        """
+        Find a file in multiple directories, trying alternative patterns if needed.
+
+        Args:
+            dirs: List of directories to search
+            filename: Primary filename to look for
+            alt_patterns: Alternative filename patterns to try (e.g., for different naming conventions)
+
+        Returns:
+            Path to the found file
+        """
+        patterns = [filename]
+        if alt_patterns:
+            patterns.extend(alt_patterns)
+
+        checked_paths = []
+        for d in dirs:
+            for pattern in patterns:
+                file_path = d / pattern
+                checked_paths.append(str(file_path))
+                if file_path.exists():
+                    return file_path
+
+        raise FileNotFoundError(
+            f"File not found. Checked: {checked_paths}"
+        )
+
     def __getitem__(self, idx: int) -> Dict:
         row = self.data_df.iloc[idx]
 
@@ -53,8 +97,8 @@ class AttentionMatrixDataset(Dataset):
         ligand_id = row[self.ligand_id_column]
         label = row[self.label_column]
 
-        # Load attention matrix [seq_len, seq_len]
-        attn_file = self.attention_matrix_dir / f"{protein_id}_attention.npy"
+        # Load attention matrix [seq_len, seq_len] - search in all directories
+        attn_file = self._find_file(self.attention_matrix_dirs, f"{protein_id}_attention.npy")
         attention_matrix = np.load(attn_file)
 
         # Pad or truncate to [max_seq_len, max_seq_len]
@@ -67,8 +111,13 @@ class AttentionMatrixDataset(Dataset):
             attention_matrix = attention_matrix[:self.max_seq_len, :self.max_seq_len]
             seq_len = self.max_seq_len
 
-        # Load ligand matrix
-        ligand_file = self.ligand_matrix_dir / f"{ligand_id}_matrix.npy"
+        # Load ligand matrix - search in all directories with alternative naming patterns
+        # SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+        ligand_file = self._find_file(
+            self.ligand_matrix_dirs,
+            f"{ligand_id}_matrix.npy",
+            alt_patterns=[f"{ligand_id}_molformer_matrix.npy"]
+        )
         ligand_matrix = np.load(ligand_file)
 
         result = {
