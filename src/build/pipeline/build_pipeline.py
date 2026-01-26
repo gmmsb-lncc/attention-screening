@@ -166,12 +166,27 @@ class BuildPipeline(BaseBuilder):
                 self.logger.error("Failed to generate protein embeddings")
                 return False
             
-            # Generate ligand embeddings  
+            # Generate ligand embeddings
             self.logger.info("Generating ligand embeddings...")
             ligand_embedding = self.components['ligand_embedding']
+
+            # Check if we should save matrices (for per-token representations)
+            save_matrices = self.config.get('save_matrices', False)
+
+            # Determine matrix output directory - should be inside the build directory
+            ligand_matrix_output_dir = None
+            if save_matrices:
+                # Create matrix directory inside the build directory structure
+                ligand_matrix_output_dir = output_dir / "ligand_molformer_matrices" if output_dir else None
+                if ligand_matrix_output_dir:
+                    ligand_matrix_output_dir.mkdir(parents=True, exist_ok=True)
+                    self.logger.info(f"📁 Ligand matrix directory created: {ligand_matrix_output_dir}")
+
             ligand_success = ligand_embedding.generate_embeddings(
                 tsv_path=input_tsv_path,
-                output_dir=ligand_output_dir
+                output_dir=ligand_output_dir,
+                save_matrix=save_matrices,  # Pass the save_matrices flag
+                matrix_output_dir=ligand_matrix_output_dir  # Pass the specific matrix directory
             )
             
             if not ligand_success:

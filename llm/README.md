@@ -15,10 +15,15 @@ llm/
 │   └── esm-3/                   # ESM-3/ESM-C models (EvolutionaryScale)
 ├── FM4M/                        # Foundation Models for Molecules
 │   └── model_files/             # SMI-TED model weights
+├── MoLFormer/                   # MoLFormer ligand embeddings (DeepChem)
+│   ├── README.md                # MoLFormer documentation
+│   ├── download_model.py        # Download and cache model
+│   └── extract_embeddings.py    # Extract embeddings from SMILES
 ├── OPENFOLD-3/                  # OpenFold3 structure prediction
 └── models_cache/                # Downloaded model cache
     ├── ESM/                     # ESM-2 checkpoints
     ├── ESM3/                    # ESM-C checkpoints
+    ├── molformer/               # MoLFormer model cache
     └── embeddings/              # Cached embeddings
 ```
 
@@ -56,12 +61,32 @@ Local path: `llm/BOLTZ-2/boltz-main/src/`
 
 ### Ligand Embeddings
 
+#### MoLFormer (DeepChem) - RECOMMENDED
+Local path: `llm/MoLFormer/`
+
+| Model | Parameters | Embedding Dim | Output Type |
+|-------|------------|---------------|-------------|
+| `MoLFormer-c3-1.1B` | 46.8M | 768 | **Matrix** `[seq_len, 768]` |
+
+**Advantages over SMI-TED:**
+- Produces **per-token embeddings** (matrix) for cross-attention compatibility
+- Larger training corpus (ZINC20 + PubChem)
+- Full token-level representations for interaction analysis
+
 #### SMI-TED (IBM Foundation Models for Molecules)
 Local path: `llm/FM4M/model_files/`
 
-| Model | Parameters | Embedding Dim |
-|-------|------------|---------------|
-| `smi-ted-Light` | 40M | 768 |
+| Model | Parameters | Embedding Dim | Output Type |
+|-------|------------|---------------|-------------|
+| `smi-ted-Light` | 40M | 768 | **Vector** `[1, 768]` |
+
+**Comparison:**
+| Feature | MoLFormer | SMI-TED |
+|---------|-----------|---------|
+| Output shape | `[seq_len, 768]` | `[1, 768]` |
+| Per-token embeddings | Yes | No |
+| Cross-attention support | Full | Limited |
+| Training data | ZINC20 + PubChem | ChEMBL |
 
 ## Installation
 
@@ -121,6 +146,29 @@ strategy.load('boltz2', device=torch.device('cpu'))
 # SMI-TED is loaded via FM4M
 sys.path.insert(0, 'llm/FM4M')
 from models.smi_ted.smi_ted_light.load import load_smi_ted
+```
+
+### MoLFormer Embeddings (RECOMMENDED for cross-attention)
+```python
+from llm.MoLFormer import MoLFormerEmbedder
+
+embedder = MoLFormerEmbedder()
+
+# Matrix embedding (per-token) - for cross-attention models
+matrix = embedder.extract_matrix_embedding("CCO")  # [seq_len, 768]
+
+# Vector embedding (pooled) - for similarity/classification
+vector = embedder.extract_vector_embedding("CCO")  # [768]
+
+# Batch processing
+smiles_list = ["CCO", "C1=CC=CC=C1", "CC(=O)O"]
+matrices = embedder.extract_batch(smiles_list, return_matrix=True)
+vectors = embedder.extract_batch(smiles_list, return_matrix=False)
+```
+
+**First-time download:**
+```bash
+python llm/MoLFormer/download_model.py
 ```
 
 ## Environment Variables
