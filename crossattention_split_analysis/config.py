@@ -45,6 +45,13 @@ DATASET_PATHS = {
 
 EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
 
+# For dataset 'all', we need to search in both human and non_human directories
+# since the matrices are stored separately
+EMBEDDING_BASE_PATHS_ALL = [
+    './results/protein_model_benchmark_human_v2',
+    './results/protein_model_benchmark_non_human_v2'
+]
+
 
 # =============================================================================
 # AFFINITY THRESHOLD
