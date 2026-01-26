@@ -144,8 +144,11 @@ def run_scenario(
     test_metrics = test_result.metrics
     test_metrics['n_params'] = n_params
 
+    # Loss is now calculated as log_loss on test set (from evaluate())
+    # This is consistent with baseline models (KNN, MLP) and is the standard practice
+
     print(f"  Results: Acc={test_metrics['accuracy']:.4f}, MCC={test_metrics['mcc']:.4f}, "
-          f"AUC={test_metrics['auc']:.4f}")
+          f"AUC={test_metrics['auc']:.4f}, Loss={test_metrics['loss']:.4f}")
 
     return test_metrics
 
@@ -333,7 +336,7 @@ def run_crossattention_analysis(
                 import numpy as np
 
                 aggregated = {}
-                for metric in ['accuracy', 'mcc', 'auc', 'f1']:
+                for metric in ['accuracy', 'mcc', 'auc', 'f1', 'loss']:
                     values = [r[metric] for r in scenario_seed_results.values() if metric in r]
                     if values:
                         aggregated[metric] = float(np.mean(values))
