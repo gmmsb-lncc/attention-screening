@@ -14,6 +14,7 @@ from .config import (
     TrainingConfig,
     DATASET_PATHS,
     EMBEDDING_BASE_PATH,
+    EMBEDDING_BASE_PATHS_ALL,
     PROTEIN_DIMS,
     MAX_SEQ_LEN,
     DEFAULT_AFFINITY_THRESHOLD,
@@ -39,8 +40,8 @@ def run_scenario(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
-    protein_matrix_dir: str,
-    ligand_matrix_dir: str,
+    protein_matrix_dirs: List[str],
+    ligand_matrix_dirs: List[str],
     config: TrainingConfig,
     device,
     seed: int,
@@ -53,8 +54,8 @@ def run_scenario(
     Args:
         scenario_name: Name of the scenario
         train_df, val_df, test_df: DataFrames for each split
-        protein_matrix_dir: Path to protein embeddings/attention matrices
-        ligand_matrix_dir: Path to ligand embeddings
+        protein_matrix_dirs: List of paths to protein embeddings/attention matrices
+        ligand_matrix_dirs: List of paths to ligand embeddings
         config: Training configuration
         device: Training device
         seed: Random seed
@@ -70,36 +71,36 @@ def run_scenario(
     print(f"\n  Creating data loaders...")
     print(f"  Input type: {'Attention Matrices' if use_attention else 'Per-token Embeddings'}")
 
-    # Create data loaders
+    # Create data loaders (pass list of directories for multi-source datasets)
     if use_attention:
         train_loader = create_attention_dataloader(
-            train_df, protein_matrix_dir, ligand_matrix_dir,
+            train_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=True,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_attention_dataloader(
-            val_df, protein_matrix_dir, ligand_matrix_dir,
+            val_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = create_attention_dataloader(
-            test_df, protein_matrix_dir, ligand_matrix_dir,
+            test_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
     else:
         train_loader = create_matrix_dataloader(
-            train_df, protein_matrix_dir, ligand_matrix_dir,
+            train_df, protein_matrix_dirs, ligand_matrix_dirs,
             batch_size=config.batch_size, shuffle=True,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_matrix_dataloader(
-            val_df, protein_matrix_dir, ligand_matrix_dir,
+            val_df, protein_matrix_dirs, ligand_matrix_dirs,
             batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = create_matrix_dataloader(
-            test_df, protein_matrix_dir, ligand_matrix_dir,
+            test_df, protein_matrix_dirs, ligand_matrix_dirs,
             batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
@@ -186,17 +187,25 @@ def run_crossattention_analysis(
 
     # Validate paths
     dataset_path = DATASET_PATHS.get(dataset_type)
-    embedding_dir = os.path.join(
-        EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
-        embedding_name,
-        'build'
-    )
+
+    # For dataset 'all', use multiple directories (human + non_human)
+    if dataset_type == 'all':
+        embedding_dirs = [
+            os.path.join(base_path, embedding_name, 'build')
+            for base_path in EMBEDDING_BASE_PATHS_ALL
+        ]
+    else:
+        embedding_dirs = [os.path.join(
+            EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
+            embedding_name,
+            'build'
+        )]
 
     if use_attention:
-        protein_matrix_dir = os.path.join(embedding_dir, 'attention_matrices')
+        protein_matrix_dirs = [os.path.join(d, 'attention_matrices') for d in embedding_dirs]
         input_type = "Attention Matrices"
     else:
-        protein_matrix_dir = os.path.join(embedding_dir, 'protein_matrices')
+        protein_matrix_dirs = [os.path.join(d, 'protein_matrices') for d in embedding_dirs]
         input_type = "Per-token Embeddings"
 
     # Select ligand matrix directory
@@ -207,19 +216,33 @@ def run_crossattention_analysis(
         ligand_dir_name = LIGAND_MATRIX_DIRS['smited']
         ligand_type = "Per-token Embeddings (SMI-TED)"
 
-    ligand_matrix_dir = os.path.join(embedding_dir, ligand_dir_name)
+    ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
+
+    # For backward compatibility, keep single dir references
+    protein_matrix_dir = protein_matrix_dirs[0]
+    ligand_matrix_dir = ligand_matrix_dirs[0]
 
     print(f"\n  Protein input: {input_type}")
-    print(f"  Protein dir: {protein_matrix_dir}")
+    if len(protein_matrix_dirs) > 1:
+        print(f"  Protein dirs: {protein_matrix_dirs}")
+    else:
+        print(f"  Protein dir: {protein_matrix_dir}")
     print(f"  Ligand input: {ligand_type}")
-    print(f"  Ligand dir: {ligand_matrix_dir}")
+    if len(ligand_matrix_dirs) > 1:
+        print(f"  Ligand dirs: {ligand_matrix_dirs}")
+    else:
+        print(f"  Ligand dir: {ligand_matrix_dir}")
 
-    if not os.path.exists(protein_matrix_dir):
-        print(f"ERROR: Protein matrices not found: {protein_matrix_dir}")
+    # Check that at least one directory exists
+    protein_dirs_exist = [os.path.exists(d) for d in protein_matrix_dirs]
+    ligand_dirs_exist = [os.path.exists(d) for d in ligand_matrix_dirs]
+
+    if not any(protein_dirs_exist):
+        print(f"ERROR: No protein matrices found in: {protein_matrix_dirs}")
         return None, None
 
-    if not os.path.exists(ligand_matrix_dir):
-        print(f"ERROR: Ligand matrices not found: {ligand_matrix_dir}")
+    if not any(ligand_dirs_exist):
+        print(f"ERROR: No ligand matrices found in: {ligand_matrix_dirs}")
         return None, None
 
     # Load dataset
@@ -315,7 +338,7 @@ def run_crossattention_analysis(
             try:
                 metrics = run_scenario(
                     scenario_name, train_df, val_df, test_df,
-                    protein_matrix_dir, ligand_matrix_dir,
+                    protein_matrix_dirs, ligand_matrix_dirs,
                     config, device, seed,
                     checkpoint_path=checkpoint_path,
                     use_attention=use_attention
