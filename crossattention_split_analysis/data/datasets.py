@@ -62,14 +62,32 @@ class AttentionMatrixDataset(Dataset):
     def __len__(self) -> int:
         return len(self.data_df)
 
-    def _find_file(self, dirs: List[Path], filename: str) -> Path:
-        """Find a file in multiple directories."""
+    def _find_file(self, dirs: List[Path], filename: str, alt_patterns: List[str] = None) -> Path:
+        """
+        Find a file in multiple directories, trying alternative patterns if needed.
+
+        Args:
+            dirs: List of directories to search
+            filename: Primary filename to look for
+            alt_patterns: Alternative filename patterns to try (e.g., for different naming conventions)
+
+        Returns:
+            Path to the found file
+        """
+        patterns = [filename]
+        if alt_patterns:
+            patterns.extend(alt_patterns)
+
+        checked_paths = []
         for d in dirs:
-            file_path = d / filename
-            if file_path.exists():
-                return file_path
+            for pattern in patterns:
+                file_path = d / pattern
+                checked_paths.append(str(file_path))
+                if file_path.exists():
+                    return file_path
+
         raise FileNotFoundError(
-            f"File '{filename}' not found in any of: {[str(d) for d in dirs]}"
+            f"File not found. Checked: {checked_paths}"
         )
 
     def __getitem__(self, idx: int) -> Dict:
@@ -93,8 +111,13 @@ class AttentionMatrixDataset(Dataset):
             attention_matrix = attention_matrix[:self.max_seq_len, :self.max_seq_len]
             seq_len = self.max_seq_len
 
-        # Load ligand matrix - search in all directories
-        ligand_file = self._find_file(self.ligand_matrix_dirs, f"{ligand_id}_matrix.npy")
+        # Load ligand matrix - search in all directories with alternative naming patterns
+        # SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+        ligand_file = self._find_file(
+            self.ligand_matrix_dirs,
+            f"{ligand_id}_matrix.npy",
+            alt_patterns=[f"{ligand_id}_molformer_matrix.npy"]
+        )
         ligand_matrix = np.load(ligand_file)
 
         result = {

@@ -137,6 +137,7 @@ class MatrixEmbeddingDataset(Dataset):
         Load embedding from disk, with fallback to vector if matrix not found.
 
         Searches through multiple directories to find the embedding.
+        Tries multiple file naming patterns for ligands (e.g., _matrix.npy, _molformer_matrix.npy).
 
         Args:
             embed_id: Embedding identifier
@@ -152,15 +153,28 @@ class MatrixEmbeddingDataset(Dataset):
         if embed_id in cache:
             return cache[embed_id]
 
-        # Try loading matrix from each directory
+        # File patterns to try (different naming conventions)
+        if is_protein:
+            file_patterns = [f"{embed_id}_matrix.npy"]
+        else:
+            # Ligands may use different naming: SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+            file_patterns = [
+                f"{embed_id}_matrix.npy",
+                f"{embed_id}_molformer_matrix.npy",
+            ]
+
+        # Try loading matrix from each directory with each pattern
+        checked_paths = []
         if self.use_matrices:
             for matrix_dir in matrix_dirs:
-                matrix_file = matrix_dir / f"{embed_id}_matrix.npy"
-                if matrix_file.exists():
-                    embedding = np.load(matrix_file)
-                    if self.cache_in_memory:
-                        cache[embed_id] = embedding
-                    return embedding
+                for pattern in file_patterns:
+                    matrix_file = matrix_dir / pattern
+                    checked_paths.append(str(matrix_file))
+                    if matrix_file.exists():
+                        embedding = np.load(matrix_file)
+                        if self.cache_in_memory:
+                            cache[embed_id] = embedding
+                        return embedding
 
         # Fallback to vector
         if vector_dir is not None:
@@ -176,7 +190,6 @@ class MatrixEmbeddingDataset(Dataset):
 
         # Error if not found
         embed_type = "protein" if is_protein else "ligand"
-        checked_paths = [str(d / f'{embed_id}_matrix.npy') for d in matrix_dirs]
         raise FileNotFoundError(
             f"{embed_type} embedding not found for '{embed_id}'. "
             f"Checked: {checked_paths}"
