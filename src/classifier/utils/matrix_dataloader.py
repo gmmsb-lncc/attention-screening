@@ -22,28 +22,30 @@ logger = logging.getLogger(__name__)
 class MatrixEmbeddingDataset(Dataset):
     """
     Dataset for protein-ligand matrix embeddings.
-    
+
     Loads pre-computed embedding matrices from disk and pairs them
     with labels for training/evaluation.
-    
+
     Directory structure expected:
         protein_matrix_embeddings/
             {seq_id}_matrix.npy  -> [seq_len, protein_dim]
         ligand_matrix_embeddings/
             {chembl_id}_matrix.npy  -> [token_len, ligand_dim]
-        
+
     Or vector embeddings (fallback):
         protein_embeddings/
             {seq_id}_embedding.npy  -> [protein_dim]
         ligand_embeddings/
             {chembl_id}_embedding.npy  -> [ligand_dim]
+
+    Supports multiple directories for combined datasets (e.g., human + non_human).
     """
-    
+
     def __init__(
         self,
         data_df: pd.DataFrame,
-        protein_matrix_dir: Union[str, Path],
-        ligand_matrix_dir: Union[str, Path],
+        protein_matrix_dir: Union[str, Path, List[Union[str, Path]]],
+        ligand_matrix_dir: Union[str, Path, List[Union[str, Path]]],
         protein_vector_dir: Optional[Union[str, Path]] = None,
         ligand_vector_dir: Optional[Union[str, Path]] = None,
         label_column: str = 'label',
@@ -56,8 +58,8 @@ class MatrixEmbeddingDataset(Dataset):
         """
         Args:
             data_df: DataFrame with protein-ligand pairs and labels
-            protein_matrix_dir: Directory with protein matrix embeddings
-            ligand_matrix_dir: Directory with ligand matrix embeddings
+            protein_matrix_dir: Directory (or list of directories) with protein matrix embeddings
+            ligand_matrix_dir: Directory (or list of directories) with ligand matrix embeddings
             protein_vector_dir: Fallback directory for protein vectors
             ligand_vector_dir: Fallback directory for ligand vectors
             label_column: Column name for classification labels
@@ -68,8 +70,22 @@ class MatrixEmbeddingDataset(Dataset):
             cache_in_memory: If True, cache all embeddings in memory
         """
         self.data_df = data_df.reset_index(drop=True)
-        self.protein_matrix_dir = Path(protein_matrix_dir)
-        self.ligand_matrix_dir = Path(ligand_matrix_dir)
+
+        # Support single dir or list of dirs
+        if isinstance(protein_matrix_dir, (str, Path)):
+            self.protein_matrix_dirs = [Path(protein_matrix_dir)]
+        else:
+            self.protein_matrix_dirs = [Path(d) for d in protein_matrix_dir]
+
+        if isinstance(ligand_matrix_dir, (str, Path)):
+            self.ligand_matrix_dirs = [Path(ligand_matrix_dir)]
+        else:
+            self.ligand_matrix_dirs = [Path(d) for d in ligand_matrix_dir]
+
+        # Keep backward compatibility
+        self.protein_matrix_dir = self.protein_matrix_dirs[0]
+        self.ligand_matrix_dir = self.ligand_matrix_dirs[0]
+
         self.protein_vector_dir = Path(protein_vector_dir) if protein_vector_dir else None
         self.ligand_vector_dir = Path(ligand_vector_dir) if ligand_vector_dir else None
         
@@ -98,48 +114,68 @@ class MatrixEmbeddingDataset(Dataset):
         for col in required_cols:
             if col not in self.data_df.columns:
                 raise ValueError(f"Required column '{col}' not found in DataFrame")
-        
-        # Check directories exist
+
+        # Check directories exist (at least one must exist for each type)
         if self.use_matrices:
-            if not self.protein_matrix_dir.exists():
-                logger.warning(f"Protein matrix dir not found: {self.protein_matrix_dir}")
-            if not self.ligand_matrix_dir.exists():
-                logger.warning(f"Ligand matrix dir not found: {self.ligand_matrix_dir}")
+            protein_dirs_exist = [d.exists() for d in self.protein_matrix_dirs]
+            ligand_dirs_exist = [d.exists() for d in self.ligand_matrix_dirs]
+
+            if not any(protein_dirs_exist):
+                logger.warning(f"No protein matrix dirs found: {self.protein_matrix_dirs}")
+            if not any(ligand_dirs_exist):
+                logger.warning(f"No ligand matrix dirs found: {self.ligand_matrix_dirs}")
     
     def _load_embedding(
         self,
         embed_id: str,
-        matrix_dir: Path,
+        matrix_dirs: List[Path],
         vector_dir: Optional[Path],
         cache: Dict[str, np.ndarray],
         is_protein: bool = True
     ) -> np.ndarray:
         """
         Load embedding from disk, with fallback to vector if matrix not found.
-        
+
+        Searches through multiple directories to find the embedding.
+        Tries multiple file naming patterns for ligands (e.g., _matrix.npy, _molformer_matrix.npy).
+
         Args:
             embed_id: Embedding identifier
-            matrix_dir: Directory for matrix embeddings
+            matrix_dirs: List of directories for matrix embeddings
             vector_dir: Fallback directory for vector embeddings
             cache: Cache dictionary
             is_protein: Whether this is a protein embedding
-        
+
         Returns:
             Embedding array (matrix or vector)
         """
         # Check cache
         if embed_id in cache:
             return cache[embed_id]
-        
-        # Try loading matrix
+
+        # File patterns to try (different naming conventions)
+        if is_protein:
+            file_patterns = [f"{embed_id}_matrix.npy"]
+        else:
+            # Ligands may use different naming: SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+            file_patterns = [
+                f"{embed_id}_matrix.npy",
+                f"{embed_id}_molformer_matrix.npy",
+            ]
+
+        # Try loading matrix from each directory with each pattern
+        checked_paths = []
         if self.use_matrices:
-            matrix_file = matrix_dir / f"{embed_id}_matrix.npy"
-            if matrix_file.exists():
-                embedding = np.load(matrix_file)
-                if self.cache_in_memory:
-                    cache[embed_id] = embedding
-                return embedding
-        
+            for matrix_dir in matrix_dirs:
+                for pattern in file_patterns:
+                    matrix_file = matrix_dir / pattern
+                    checked_paths.append(str(matrix_file))
+                    if matrix_file.exists():
+                        embedding = np.load(matrix_file)
+                        if self.cache_in_memory:
+                            cache[embed_id] = embedding
+                        return embedding
+
         # Fallback to vector
         if vector_dir is not None:
             vector_file = vector_dir / f"{embed_id}_embedding.npy"
@@ -151,12 +187,12 @@ class MatrixEmbeddingDataset(Dataset):
                 if self.cache_in_memory:
                     cache[embed_id] = embedding
                 return embedding
-        
+
         # Error if not found
         embed_type = "protein" if is_protein else "ligand"
         raise FileNotFoundError(
             f"{embed_type} embedding not found for '{embed_id}'. "
-            f"Checked: {matrix_dir / f'{embed_id}_matrix.npy'}"
+            f"Checked: {checked_paths}"
         )
     
     def __len__(self) -> int:
@@ -181,18 +217,18 @@ class MatrixEmbeddingDataset(Dataset):
         ligand_id = row[self.ligand_id_column]
         label = row[self.label_column]
         
-        # Load embeddings
+        # Load embeddings (search through all directories)
         protein_matrix = self._load_embedding(
             protein_id,
-            self.protein_matrix_dir,
+            self.protein_matrix_dirs,
             self.protein_vector_dir,
             self._protein_cache,
             is_protein=True
         )
-        
+
         ligand_matrix = self._load_embedding(
             ligand_id,
-            self.ligand_matrix_dir,
+            self.ligand_matrix_dirs,
             self.ligand_vector_dir,
             self._ligand_cache,
             is_protein=False
