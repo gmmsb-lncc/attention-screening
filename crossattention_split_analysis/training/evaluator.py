@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, matthews_corrcoef
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, matthews_corrcoef, log_loss
 
 
 class EvaluationError(Exception):
@@ -120,7 +120,8 @@ def evaluate(
                 'accuracy': np.nan,
                 'f1': np.nan,
                 'mcc': np.nan,
-                'auc': np.nan
+                'auc': np.nan,
+                'loss': np.nan
             },
             is_valid=False,
             failure_reason=failure_msg,
@@ -136,7 +137,8 @@ def evaluate(
         'auc': float(
             roc_auc_score(all_labels, all_probs)
             if len(np.unique(all_labels)) > 1 else np.nan
-        )
+        ),
+        'loss': float(log_loss(all_labels, all_probs))
     }
 
     return EvaluationResult(metrics=metrics, is_valid=True)
