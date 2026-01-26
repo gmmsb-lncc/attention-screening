@@ -200,7 +200,7 @@ Devices:
         '--ligand-model',
         type=str,
         default='SMI-TED',
-        choices=['SMI-TED'],
+        choices=['SMI-TED', 'MOLFORMER'],
         help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim)'
     )
     

@@ -32,7 +32,7 @@ class BuildConstants:
     DEFAULT_LIGAND_OUTPUT_DIR = 'ligand_embeddings'
     DEFAULT_PROTEIN_OUTPUT_DIR = 'protein_embeddings'
     DEFAULT_PROTEIN_MATRIX_OUTPUT_DIR = 'protein_matrix_embeddings'  # NEW: per-token matrices
-    DEFAULT_LIGAND_MATRIX_OUTPUT_DIR = 'ligand_matrix_embeddings'    # NEW: per-token matrices
+    DEFAULT_LIGAND_MATRIX_OUTPUT_DIR = 'ligand_molformer_matrices'    # NEW: per-token matrices for MoLFormer
     DEFAULT_MATRIX_OUTPUT_DIR = 'matrix_embedding'
     DEFAULT_CONCATENATED_OUTPUT_DIR = 'concatenated_embeddings'
     
@@ -154,7 +154,8 @@ FM4M_MODELS = {
     'SELFIES-TED': {'dim': 768, 'type': 'transformer'},
     'SMI-SSED': {'dim': 768, 'type': 'encoder'},
     'MHG': {'dim': 768, 'type': 'graph'},
-    'MOL-MOE': {'dim': 768, 'type': 'mixture'}
+    'MOL-MOE': {'dim': 768, 'type': 'mixture'},
+    'MOLFORMER': {'dim': 768, 'type': 'transformer'}
 }
 
 # Configurações de Spark
