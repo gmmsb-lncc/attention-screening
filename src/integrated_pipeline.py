@@ -143,6 +143,7 @@ class BuildPhase:
             random_state=self.config.random_state,
             protein_embeddings_dir=self.config.protein_embeddings_dir,
             ligand_embeddings_dir=self.config.ligand_embeddings_dir,
+            save_matrices=self.config.save_matrices,  # Pass the save_matrices flag
             stratification_enabled=True,
             stratification_params={
                 'clustering_algorithm': 'adaptive',

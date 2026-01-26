@@ -101,7 +101,10 @@ class BuildConfig:
                 'protein_weight': 0.6,
                 'ligand_weight': 0.4,
                 'adaptive_method': 'target'  # silhouette, elbow, target, percentile, leakage_aware
-            }
+            },
+
+            # Matrices
+            'save_matrices': False  # Whether to save per-token/residue embedding matrices
         }
     
     def _load_from_file(self, config_file: str) -> None:
