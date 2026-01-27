@@ -417,18 +417,15 @@ np.save('embeddings.npy', embeddings)
 | `esm2_t6_8M_UR50D` | 8M | 320 | 6 | ❌ No |
 | `esm1b_t33_650M_UR50S` | 650M | 1280 | 33 | ❌ No (legacy) |
 
-### 🆕 Boltz-2 Models (Multi-Pooling Strategy) **← RECOMMENDED**
+### ESM-3 / ESM-C Models (EvolutionaryScale)
 
-| Model | Strategy | Embedding Dim | Speed | Performance |
-|-------|----------|---------------|-------|-------------|
-| `boltz2_multi` | CLS + mean + max | 384 | ⚡ Fast (18 min/299) | 🏆 Best |
-| `boltz2_cls` | CLS token only | 128 | ⚡⚡ Very fast | ✅ Good |
-| `boltz2_mean` | Mean pooling | 128 | ⚡⚡ Very fast | ✅ Good |
-| `boltz2_max` | Max pooling | 128 | ⚡⚡ Very fast | ✅ Good |
+| Model | Parameters | Embedding Dim | Speed | Notes |
+|-------|------------|---------------|-------|-------|
+| `esmc-300m-2024-12` | 300M | 960 | ⚡⚡ Fast | Local |
+| `esmc-600m-2024-12` | 600M | 1152 | ⚡ Medium | Local |
+| `esmc-6b-2024-12` | 6B | 4096 | Slow | API only |
 
-**Benchmarks**: Boltz-2 multi-pooling achieves comparable performance to ESM-2 3B (2560-dim) with 85% smaller embeddings and 10x faster inference.
-
-See **[BOLTZ_STRATEGY_GUIDE.md](../../docs/04-modules/BOLTZ_STRATEGY_GUIDE.md)** for complete integration guide.
+**Key differences from ESM-2**: ESM-C uses causal (next-token) prediction instead of masked language modeling, which can better capture generative protein grammar and long-range dependencies.
 
 ### FM4M Models (Small Molecule Embeddings)
 

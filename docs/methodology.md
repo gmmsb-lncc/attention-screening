@@ -8,7 +8,7 @@
 
 ## Abstract
 
-The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-C) and Chemical Foundation Models (SMI-TED) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
+The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-3/ESM-C) and Chemical Foundation Models (SMI-TED, MoLFormer) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
 
 ---
 
@@ -134,7 +134,7 @@ The architecture is composed of the following core subsystems:
 
 ### 3.2 The Strategy Pattern for Model Integration
 
-A critical architectural challenge in modern bioinformatics is the rapid pace of model evolution. To accommodate this, semantic-screening employs the **Strategy Design Pattern** for embedding generation. This allows the system to switch between different protein language models (e.g., ESM-2, ESM-C, Boltz-2) and ligand encoders (e.g., SMI-TED) at runtime, while maintaining a consistent API for the downstream pipelines.
+A critical architectural challenge in modern bioinformatics is the rapid pace of model evolution. To accommodate this, semantic-screening employs the **Strategy Design Pattern** for embedding generation. This allows the system to switch between different protein language models (e.g., ESM-2, ESM-3/ESM-C) and ligand encoders (e.g., SMI-TED, MoLFormer) at runtime, while maintaining a consistent API for the downstream pipelines.
 
 #### 3.2.1 Protein Embedding Strategy
 
@@ -145,9 +145,8 @@ The `ProteinEmbedding` class acts as the context, delegating the actual computat
 *   **Concrete Strategies**:
     *   `ESM2Strategy`: Wraps Meta AI's `fair-esm` library for models ranging from 8M to 15B parameters.
     *   `ESMCStrategy`: Integrates EvolutionaryScale's generative models (300M, 600M, 6B).
-    *   `BoltzStrategy`: Adapts the Boltz-2 foundation model for structure-aware embeddings.
 
-This design allows researchers to experiment with cutting-edge models simply by changing a configuration string (e.g., `--protein-model boltz2`), without modifying the core pipeline code.
+This design allows researchers to experiment with cutting-edge models simply by changing a configuration string (e.g., `--protein-model esmc-600m-2024-12`), without modifying the core pipeline code.
 
 ### 3.3 Pipeline Orchestration
 
@@ -187,13 +186,6 @@ ESM-C (Hayes et al., 2024) represents a shift towards generative modeling. Unlik
 $$ P(x) = \prod_{t=1}^L P(x_t | x_{<t}) $$
 
 *   **Advantage**: While MLM excels at understanding static structure, NTP captures the generative grammar of evolution, potentially offering better representations for mutational effects.
-
-#### 4.1.3 Boltz-2 (Structure-Aware)
-While ESM models are sequence-based, Boltz-2 (Wohlwend et al., 2024) is a foundation model explicitly trained to predict 3D structures. By extracting embeddings from the **Pairformer** blocks, we obtain representations that are implicitly aware of spatial proximity ($d_{ij}$), even without explicit coordinate input. This provides a critical inductive bias for binding affinity prediction.
-
-*   **Architecture**: Pairformer (Triangle Multiplicative Update + Axial Attention).
-*   **Invariant Point Attention (IPA)**: A specialized attention mechanism that operates on 3D coordinates, ensuring invariance to rotation and translation (SE(3) invariance).
-*   **Output**: Unlike standard Transformers that output a sequence $L \times D$, Boltz produces both single representations ($L \times D$) and pair representations ($L \times L \times C$), encoding the distance map directly.
 
 ### 4.2 Ligand Representation: Chemical Foundation Models
 
@@ -475,9 +467,9 @@ semantic-screening implements a **Dynamic Dimension Synchronization** system wit
 # Conceptual Logic
 if model == 'esm2_t36_3B_UR50D':
     protein_dim = 2560
-elif model == 'boltz2':
-    protein_dim = 384
-    
+elif model == 'esmc-600m-2024-12':
+    protein_dim = 1152
+
 # Downstream Projection
 self.protein_proj = nn.Linear(protein_dim, hidden_dim)
 ```
@@ -506,7 +498,6 @@ These models serve as the feature extraction engine, transforming raw biological
 | **ESM-2** | t36_3B | 3B | 36 | 2560 | Transformer Encoder | Masked Language Modeling |
 | **ESM-C** | 6B | 6B | 56 | 3072 | Causal Decoder | Next Token Prediction |
 | **ESM-2** | t48_15B | 15B | 48 | 5120 | Transformer Encoder | Masked Language Modeling |
-| **Boltz-2** | Standard | ~200M | 64 | 384 | Pairformer | Structure Prediction |
 
 ### 9.2 Predictive Models (Classical & Deep)
 
@@ -578,16 +569,16 @@ This closes the loop, creating a self-improving cycle where the model diagnoses 
 
 ## Conclusion
 
-semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-C, Boltz-2, SMI-TED) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology, it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
+semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-3/ESM-C, SMI-TED, MoLFormer) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology, it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
 
 ---
 
 ## References
 
 1.  **Lin, Z., et al. (2023)**. *Evolutionary-scale prediction of atomic-level protein structure with a language model*. Science, 379(6637), 1123-1130. (ESM-2)
-2.  **Hayes, T., et al. (2024)**. *Simulating 500 million years of evolution with a language model*. bioRxiv. (ESM-C)
-3.  **Wohlwend, J., et al. (2024)**. *Boltz-1: Democratizing Biomolecular Interaction Modeling*. arXiv:2411.00001. (Boltz)
-4.  **Vaswani, A., et al. (2017)**. *Attention is all you need*. Advances in neural information processing systems, 30.
-5.  **Ross, J., et al. (2022)**. *Large-scale chemical language representations capture molecular structure and properties*. Nature Machine Intelligence, 4(12), 1256-1264. (SMI-TED/FM4M)
-6.  **Eldridge, M. D., et al. (1997)**. *Empirical scoring functions: I. The development of a fast empirical scoring function to estimate the binding affinity of ligands in receptor complexes*. Journal of Computer-Aided Molecular Design, 11, 425-445.
-7.  **Dosovitskiy, A., et al. (2020)**. *An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*. ICLR. (ViT)
+2.  **Hayes, T., et al. (2024)**. *Simulating 500 million years of evolution with a language model*. bioRxiv. (ESM-3/ESM-C)
+3.  **Vaswani, A., et al. (2017)**. *Attention is all you need*. Advances in neural information processing systems, 30.
+4.  **Ross, J., et al. (2022)**. *Large-scale chemical language representations capture molecular structure and properties*. Nature Machine Intelligence, 4(12), 1256-1264. (SMI-TED/FM4M)
+5.  **Eldridge, M. D., et al. (1997)**. *Empirical scoring functions: I. The development of a fast empirical scoring function to estimate the binding affinity of ligands in receptor complexes*. Journal of Computer-Aided Molecular Design, 11, 425-445.
+6.  **Dosovitskiy, A., et al. (2020)**. *An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*. ICLR. (ViT)
+7.  **Wu, Z., et al. (2021)**. *MolFormer: Large-scale chemical language representations capture molecular structure and properties*. arXiv:2106.09553. (MoLFormer)
