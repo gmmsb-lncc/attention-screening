@@ -7,7 +7,7 @@
 
 **Open-source platform for semantic screening of protein-ligand interactions using deep learning**
 
-semantic-screening is an extensible platform combining state-of-the-art protein language models (ESM-2, ESM-C, Boltz-2) with molecular embeddings (SMI-TED) to predict compound activity against protein targets. It implements the **DT-Kinase** architecture—a hybrid CNN + Cross-Attention neural network for interaction modeling—alongside classical ML pipelines and rigorous stratification to prevent data leakage.
+semantic-screening is an extensible platform combining state-of-the-art protein language models (ESM-2, ESM-C/ESM-3) with molecular embeddings (SMI-TED, MoLFormer) to predict compound activity against protein targets. It implements the **DT-Kinase** architecture—a hybrid CNN + Cross-Attention neural network for interaction modeling—alongside classical ML pipelines and rigorous stratification to prevent data leakage.
 
 ### 🔬 Scientific Context & Motivation
 
@@ -21,7 +21,7 @@ semantic-screening is an extensible platform combining state-of-the-art protein 
 **The semantic-screening hypothesis** proposes a paradigm shift: abandon geometric representations and operate directly on **primary sequence information interpreted through contextual embeddings from Protein Language Models (PLMs)**. This reformulation answers the selectivity question through semantic compatibility in latent space rather than geometric fit in 3D space.
 
 **The DT-Kinase solution** (implemented within semantic-screening) validates this hypothesis empirically by:
-1. Using ESM-2/ESM-C to encode evolutionary and structural information implicitly in sequence
+1. Using ESM-2/ESM-3 (ESM-C) to encode evolutionary and structural information implicitly in sequence
 2. Modeling interaction patterns through CNN + Cross-Attention mechanisms
 3. Achieving universal applicability (any protein with known sequence, no structure required)
 4. Demonstrating superior selectivity prediction compared to structure-based and first-generation ML approaches
@@ -48,8 +48,8 @@ For detailed information:
 
 | Feature | Description |
 |---------|-------------|
-| 🧬 **Multi-Model Protein Embeddings** | ESM-2 (8M-15B params), ESM-C, Boltz-2 (384-dim) |
-| 🔬 **Ligand Embeddings** | FM4M SMI-TED, MoLFormer (768-dim) |
+| 🧬 **Multi-Model Protein Embeddings** | ESM-2 (8M-15B params), ESM-3/ESM-C (300M-6B params) |
+| 🔬 **Ligand Embeddings** | SMI-TED (768-dim vector), MoLFormer (768-dim per-token matrix) |
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
@@ -60,6 +60,9 @@ For detailed information:
 
 ### Protein Embedding Models
 
+#### ESM-2 (Meta AI / Facebook Research)
+Bidirectional transformer trained with Masked Language Modeling (MLM) on UniRef50.
+
 | Model | Parameters | Embedding Dim | Memory | Speed |
 |-------|------------|---------------|--------|-------|
 | `esm2_t6_8M_UR50D` | 8M | 320 | ~1 GB | Fast |
@@ -68,24 +71,29 @@ For detailed information:
 | `esm2_t33_650M_UR50D` | 650M | 1280 | ~6 GB | Medium |
 | `esm2_t36_3B_UR50D` | 3B | 2560 | ~12 GB | Slow |
 | `esm2_t48_15B_UR50D` | 15B | 5120 | ~48 GB | Very Slow |
-| `esmc_300m` | 300M | 960 | ~3 GB | Fast |
-| `esmc_600m` | 600M | 1152 | ~5 GB | Medium |
-| `esmc_6b` | 6B | 4096 | ~24 GB | Slow |
-| `boltz2` | ~400M | 384 | ~4 GB | Medium |
+
+#### ESM-3 / ESM-C (EvolutionaryScale)
+Causal transformer trained with Next Token Prediction (NTP). Better for capturing generative protein grammar.
+
+| Model | Parameters | Embedding Dim | Memory | Speed |
+|-------|------------|---------------|--------|-------|
+| `esmc-300m-2024-12` | 300M | 960 | ~3 GB | Fast |
+| `esmc-600m-2024-12` | 600M | 1152 | ~5 GB | Medium |
+| `esmc-6b-2024-12` | 6B | 4096 | ~24 GB | Slow (API) |
 
 ### Ligand Embedding Models
 
-| Model | Embedding Dim | Description |
-|-------|---------------|-------------|
-| `fm4m` (SMI-TED) | 768 | Molecular foundation model from IBM Research |
-| `MoLFormer` | 768 | Transformer-based molecular representation model |
+| Model | Embedding Dim | Output Type | Description |
+|-------|---------------|-------------|-------------|
+| **SMI-TED** | 768 | Vector `[1, 768]` | IBM Foundation Models for Molecules. Pooled representation for classical ML. |
+| **MoLFormer** | 768 | Matrix `[seq_len, 768]` | Per-token embeddings for cross-attention models. Recommended for DT-Kinase. |
 
 ## The DT-Kinase Architecture
 
 **DT-Kinase** is the neural network architecture implemented within semantic-screening that solves protein-ligand interaction prediction through semantic embeddings. It combines:
 
-1. **Protein Encoding**: Per-residue embeddings from Protein Language Models (ESM-2, ESM-C, Boltz-2) capture evolutionary constraints and implicit structural information
-2. **Ligand Encoding**: Per-token embeddings from chemical foundation models (FM4M SMI-TED, MoLFormer) encode molecular properties and SMILES syntax
+1. **Protein Encoding**: Per-residue embeddings from Protein Language Models (ESM-2, ESM-3/ESM-C) capture evolutionary constraints and implicit structural information
+2. **Ligand Encoding**: Per-token embeddings from chemical foundation models (SMI-TED, MoLFormer) encode molecular properties and SMILES syntax
 3. **Local Feature Extraction**: Multi-scale CNN encoders capture local patterns in protein sequences and molecular structures
 4. **Semantic Interaction Modeling**: Bidirectional cross-attention mechanisms model protein-ligand compatibility by learning which residues interact with which atoms
 5. **Multi-Task Prediction**: Simultaneous classification (active/inactive) and regression (affinity quantification) with uncertainty-weighted loss
@@ -155,7 +163,7 @@ docktkinase/
 │   │   └── ...
 │   │
 │   ├── build/                  # Data Ingestion & Embedding Generation
-│   │   ├── embeddings/         # ESM-2, Boltz-2, SMI-TED wrappers
+│   │   ├── embeddings/         # ESM-2, ESM-3, SMI-TED, MoLFormer wrappers
 │   │   ├── matrix/             # Matrix construction
 │   │   └── stratification/     # K-means++ Stratification logic
 │   │
