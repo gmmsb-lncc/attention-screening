@@ -1,59 +1,59 @@
-# Conceitos Fundamentais: semantic-screening e DT-Kinase
+# Fundamental Concepts: semantic-screening and DT-Kinase
 
-## 📌 Definições
+## 📌 Definitions
 
 ### semantic-screening
-**Plataforma aberta e extensível** para predição de propriedades de interações proteína-ligante usando aprendizado profundo baseado em linguagem de proteína.
+**Open and extensible platform** for predicting protein-ligand interaction properties using deep learning based on protein language models.
 
-**Escopo**:
-- Implementação completa de pipeline: embeddings → processamento → predição
-- Suporte para múltiplas estratégias:
-  - **Modelos clássicos**: 12 algoritmos de ML (classificação + regressão)
-  - **Arquitetura neural**: DT-Kinase (CNN + Cross-Attention)
-  - **Modelos de embeddings**: ESM-2, ESM-C, Boltz-2 (proteína), SMI-TED (ligante)
-- Estratificação robusta com validação de leakage
-- Modular e reutilizável para novos arquivos, modelos e abordagens
+**Scope**:
+- Complete pipeline implementation: embeddings → processing → prediction
+- Support for multiple strategies:
+  - **Classical models**: 12 ML algorithms (classification + regression)
+  - **Neural architecture**: DT-Kinase (CNN + Cross-Attention)
+  - **Embedding models**: ESM-2, ESM-3/ESM-C (protein), SMI-TED, MoLFormer (ligand)
+- Robust stratification with leakage validation
+- Modular and reusable for new datasets, models, and approaches
 
-**Analogia**: semantic-screening é como um "toolkit" – fornece componentes reutilizáveis e padrões para construir soluções de screening.
+**Analogy**: semantic-screening is like a "toolkit" – it provides reusable components and patterns for building screening solutions.
 
 ---
 
 ### DT-Kinase
-**Arquitetura neural específica** implementada na plataforma semantic-screening que soluciona o problema de predição de seletividade de quinases através de reformulação semântica.
+**Specific neural architecture** implemented in the semantic-screening platform that solves the kinase selectivity prediction problem through semantic reformulation.
 
-**Componentes**:
-1. **Codificação de Proteína**: Embeddings contextuais per-resíduo de modelos de linguagem de proteína (ESM-2, ESM-C, Boltz-2)
-   - Capturam informação evolutiva implícita em sequência
-   - Não requerem estrutura 3D experimental
-   
-2. **Codificação de Ligante**: Embeddings per-átomo de modelos de fundação química (SMI-TED)
-   - Capturam propriedades moleculares e sintaxe SMILES
-   - Codificam padrões de estrutura 2D/semântica
-   
-3. **Extração de Features Locais**: Codificadores CNN multi-escala
-   - Kernels {3, 5, 7} para capturar padrões em múltiplas escalas
-   - Conexões residuais preservam hierarquia de features
-   
-4. **Modelagem de Interação Semântica**: Mecanismos de Cross-Attention bidirecional
-   - Proteína → Ligante: "Quais resíduos se ligam a quais átomos?"
-   - Ligante → Proteína: "Quais átomos interagem com quais resíduos?"
-   - Multi-Head (8 cabeças) para capturar diferentes tipos de interação
-   
-5. **Predição Multi-Tarefa**:
-   - **Classificação**: Ativo/Inativo (logits binários)
-   - **Regressão**: Valor de afinidade em escala pChEMBL (contínuo)
-   - Otimização conjunta com ponderação por tarefa
+**Components**:
+1. **Protein Encoding**: Per-residue contextual embeddings from protein language models (ESM-2, ESM-3/ESM-C)
+   - Capture implicit evolutionary information in sequence
+   - Do not require experimental 3D structure
 
-**Analogia**: DT-Kinase é uma arquitetura específica – assim como "AlexNet" é uma arquitetura CNN específica dentro do ecossistema mais amplo de deep learning.
+2. **Ligand Encoding**: Per-atom embeddings from chemical foundation models (SMI-TED, MoLFormer)
+   - Capture molecular properties and SMILES syntax
+   - Encode 2D/semantic structure patterns
+
+3. **Local Feature Extraction**: Multi-scale CNN encoders
+   - Kernels {3, 5, 7} to capture patterns at multiple scales
+   - Residual connections preserve feature hierarchy
+
+4. **Semantic Interaction Modeling**: Bidirectional Cross-Attention mechanisms
+   - Protein → Ligand: "Which residues bind to which atoms?"
+   - Ligand → Protein: "Which atoms interact with which residues?"
+   - Multi-Head (8 heads) to capture different interaction types
+
+5. **Multi-Task Prediction**:
+   - **Classification**: Active/Inactive (binary logits)
+   - **Regression**: Affinity value in pChEMBL scale (continuous)
+   - Joint optimization with task weighting
+
+**Analogy**: DT-Kinase is a specific architecture – just as "AlexNet" is a specific CNN architecture within the broader deep learning ecosystem.
 
 ---
 
-## 🔗 Relação Conceitual
+## 🔗 Conceptual Relationship
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                 SEMANTIC-SCREENING                             │
-│        (Plataforma aberta de screening semântico)              │
+│        (Open semantic screening platform)                      │
 │                                                                │
 │  ┌──────────────────┐         ┌──────────────────┐             │
 │  │  ML CLASSICALS   │         │   DT-KINASE      │             │
@@ -63,8 +63,8 @@
 │                                                                │
 │  ┌──────────────────────────────────────────────────┐          │
 │  │  EMBEDDING INFRASTRUCTURE                        │          │
-│  │  • ESM-2 / ESM-C / Boltz-2 (Protein)            │          │
-│  │  • SMI-TED (Ligand)                              │          │
+│  │  • ESM-2 / ESM-3 (ESM-C) (Protein)              │          │
+│  │  • SMI-TED / MoLFormer (Ligand)                 │          │
 │  │  • Cached embeddings & validation                │          │
 │  └──────────────────────────────────────────────────┘          │
 │                                                                │
@@ -79,118 +79,118 @@
 
 ---
 
-## 🎯 Quando Usar Cada Um
+## 🎯 When to Use Each
 
 ### semantic-screening
-Use quando você quer:
-- Uma **plataforma modular completa** para screening de interações proteína-ligante
-- **Explorar múltiplas abordagens**: comparar ML clássico vs deep learning
-- **Customização**: adicionar novos modelos, embeddings ou estratégias
-- **Produção**: escalabilidade e robustez validadas
-- **Investigação**: entender quais componentes afetam desempenho
+Use when you want:
+- A **complete modular platform** for protein-ligand interaction screening
+- **Explore multiple approaches**: compare classical ML vs deep learning
+- **Customization**: add new models, embeddings, or strategies
+- **Production**: validated scalability and robustness
+- **Investigation**: understand which components affect performance
 
-### DT-Kinase (dentro de semantic-screening)
-Use quando você quer:
-- **Aproveitar a informação semântica** de proteínas e moléculas via PLMs
-- **Modelar interações explicáveis** com mecanismos de atenção
-- **Performance otimizada**: CNN captura local, Cross-Attention captura interações
-- **Sem estrutura 3D**: aplicável a qualquer proteína com sequência conhecida
-- **Multi-tarefa**: classificação e regressão simultâneas com incerteza
-
----
-
-## 📊 Casos de Uso
-
-### Exemplo 1: Descoberta de Inibidores de Quinase Bacteriana
-**Cenário**: Você tem dataset de 15K moléculas contra 42 quinases bacterianas com dados de afinidade.
-
-**Abordagem semantic-screening + DT-Kinase**:
-1. Gerar embeddings ESM-C para 42 quinases (uma vez)
-2. Gerar embeddings SMI-TED para 15K moléculas
-3. Treinar DT-Kinase para predição multi-tarefa
-4. Usar modelos ML clássicos como baselines
-5. Comparar: DT-Kinase vs 12 algoritmos ML
-6. Estratificar robustamente com validação de leakage
-
-**Resultado**: Arquitetura neural especializada para seu problema + validação contra múltiplas baselines.
+### DT-Kinase (within semantic-screening)
+Use when you want:
+- **Leverage semantic information** from proteins and molecules via PLMs
+- **Model explainable interactions** with attention mechanisms
+- **Optimized performance**: CNN captures local, Cross-Attention captures interactions
+- **No 3D structure**: applicable to any protein with known sequence
+- **Multi-task**: simultaneous classification and regression with uncertainty
 
 ---
 
-### Exemplo 2: Screening de Biblioteca Química Ultra-Grande
-**Cenário**: Você tem 1B de moléculas e quer predizer atividade contra 100 proteínas.
+## 📊 Use Cases
 
-**Abordagem semantic-screening + DT-Kinase**:
-1. Treinar DT-Kinase uma vez em dataset benchmark
-2. Gerar embeddings para 100 proteínas (cache reutilizável)
-3. Processar 1B moléculas em batches (forward pass puro = fast)
-4. Ranking de candidatos por score de afinidade predita
+### Example 1: Bacterial Kinase Inhibitor Discovery
+**Scenario**: You have a dataset of 15K molecules against 42 bacterial kinases with affinity data.
 
-**Resultado**: Triagem de bilhões de compostos em horas, sem estrutura 3D, com uncertainties.
+**semantic-screening + DT-Kinase approach**:
+1. Generate ESM-C embeddings for 42 kinases (once)
+2. Generate MoLFormer embeddings for 15K molecules
+3. Train DT-Kinase for multi-task prediction
+4. Use classical ML models as baselines
+5. Compare: DT-Kinase vs 12 ML algorithms
+6. Robustly stratify with leakage validation
 
----
-
-### Exemplo 3: Novo Alvo Sem Estrutura Cristalográfica
-**Cenário**: Novo target com sequência anotada mas sem estrutura PDB.
-
-**Abordagem semantic-screening + DT-Kinase**:
-1. PLM (ESM-2) reconstruiu estrutura local implicitamente em embeddings
-2. DT-Kinase não precisa de 3D explícito
-3. Aplicável imediatamente a targets "orphaned"
-
-**Resultado**: Screening funcional sem cristalografia.
+**Result**: Neural architecture specialized for your problem + validation against multiple baselines.
 
 ---
 
-## 🔬 Fundamentação Teórica
+### Example 2: Ultra-Large Chemical Library Screening
+**Scenario**: You have 1B molecules and want to predict activity against 100 proteins.
 
-### Por que semantic-screening?
-- **Sequência contém informação estrutural**: Demonstrado por AlphaFold2, ESMFold, ProtBERT
-- **PLMs aprendem semântica**: Via auto-atenção em centenas de milhões de sequências
-- **Reformulação do problema**: Não "Qual é a geometria?" mas "Quão compatível é a semântica?"
-- **Universalidade**: Aplicável a qualquer proteína com sequência, estrutura ou não
+**semantic-screening + DT-Kinase approach**:
+1. Train DT-Kinase once on benchmark dataset
+2. Generate embeddings for 100 proteins (reusable cache)
+3. Process 1B molecules in batches (pure forward pass = fast)
+4. Rank candidates by predicted affinity score
 
-### Por que DT-Kinase como arquitetura específica?
-- **CNN**: Captura padrões locais em sequências e moléculas
-- **Cross-Attention**: Modela compatibilidade semântica entre proteína e ligante
-- **Multi-Tarefa**: Classificação + Regressão com ponderação de tarefa
-- **Escalonável**: Forward pass puro, sem bottleneck geométrico
+**Result**: Screening of billions of compounds in hours, no 3D structure, with uncertainties.
 
 ---
 
-## 📚 Referências na Tese
+### Example 3: New Target Without Crystal Structure
+**Scenario**: New target with annotated sequence but no PDB structure.
 
-- **Capítulo 1, Seção 1.3**: "From Docking to Language Modeling: The DockTKinase Philosophy"
-  - Explica por que abandonar representações 3D
-  - Fundamenta uso de PLMs
+**semantic-screening + DT-Kinase approach**:
+1. PLM (ESM-2) reconstructs local structure implicitly in embeddings
+2. DT-Kinase doesn't need explicit 3D
+3. Immediately applicable to "orphaned" targets
 
-- **Capítulo 1, Seção 1.5**: "DT-Kinase: Objetivos e Contribuições"
-  - Define DT-Kinase como arquitetura proposta
-  - Especifica componentes: embeddings + CNN + Cross-Attention
-
-- **Capítulo 2**: Estado da arte
-  - Limitações de docking
-  - Limitações de painéis experimentais
-  - Necessidade de abordagem semântica
-
-- **Capítulo 3**: Fundamentos teóricos
-  - Formação matemática de PLMs
-  - Atenção cruzada
-  - Arquitetura proposta
+**Result**: Functional screening without crystallography.
 
 ---
 
-## ✅ Checklist Conceitual
+## 🔬 Theoretical Foundation
 
-- [ ] semantic-screening = Plataforma aberta e modular
-- [ ] DT-Kinase = Arquitetura neural específica dentro de semantic-screening
-- [ ] semantic-screening implementa múltiplas abordagens (ML clássico + DL)
-- [ ] DT-Kinase é otimizado para quinases e interações proteína-ligante
-- [ ] Ambos operam sem requerer estrutura 3D
-- [ ] semantic-screening fornece infra de embeddings, validação, estratificação
-- [ ] DT-Kinase fornece arquitetura CNN + Cross-Attention para interações
+### Why semantic-screening?
+- **Sequence contains structural information**: Demonstrated by AlphaFold2, ESMFold, ProtBERT
+- **PLMs learn semantics**: Via self-attention on hundreds of millions of sequences
+- **Problem reformulation**: Not "What is the geometry?" but "How compatible is the semantics?"
+- **Universality**: Applicable to any protein with sequence, structure or not
+
+### Why DT-Kinase as a specific architecture?
+- **CNN**: Captures local patterns in sequences and molecules
+- **Cross-Attention**: Models semantic compatibility between protein and ligand
+- **Multi-Task**: Classification + Regression with task weighting
+- **Scalable**: Pure forward pass, no geometric bottleneck
 
 ---
 
-**Última atualização**: Janeiro 2026  
-**Documento**: Esclarecimento conceitual  
-**Status**: Referência para toda documentação
+## 📚 References in Thesis
+
+- **Chapter 1, Section 1.3**: "From Docking to Language Modeling: The DockTKinase Philosophy"
+  - Explains why to abandon 3D representations
+  - Establishes PLM usage
+
+- **Chapter 1, Section 1.5**: "DT-Kinase: Objectives and Contributions"
+  - Defines DT-Kinase as proposed architecture
+  - Specifies components: embeddings + CNN + Cross-Attention
+
+- **Chapter 2**: State of the art
+  - Docking limitations
+  - Experimental panel limitations
+  - Need for semantic approach
+
+- **Chapter 3**: Theoretical foundations
+  - Mathematical formulation of PLMs
+  - Cross-attention
+  - Proposed architecture
+
+---
+
+## ✅ Conceptual Checklist
+
+- [ ] semantic-screening = Open and modular platform
+- [ ] DT-Kinase = Specific neural architecture within semantic-screening
+- [ ] semantic-screening implements multiple approaches (classical ML + DL)
+- [ ] DT-Kinase is optimized for kinases and protein-ligand interactions
+- [ ] Both operate without requiring 3D structure
+- [ ] semantic-screening provides embedding infrastructure, validation, stratification
+- [ ] DT-Kinase provides CNN + Cross-Attention architecture for interactions
+
+---
+
+**Last updated**: January 2026
+**Document**: Conceptual clarification
+**Status**: Reference for all documentation

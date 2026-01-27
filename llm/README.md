@@ -7,9 +7,6 @@ This directory contains all language models and related caches for protein and l
 ```
 llm/
 ├── README.md                    # This file
-├── BOLTZ-2/                     # Boltz-2 biomolecular foundation model
-│   └── boltz-main/              # Boltz repository clone
-│       └── src/boltz/           # Boltz Python module
 ├── ESM/                         # ESM-2 protein language models
 │   ├── esm/                     # ESM repository (Facebook Research)
 │   └── esm-3/                   # ESM-3/ESM-C models (EvolutionaryScale)
@@ -19,7 +16,6 @@ llm/
 │   ├── README.md                # MoLFormer documentation
 │   ├── download_model.py        # Download and cache model
 │   └── extract_embeddings.py    # Extract embeddings from SMILES
-├── OPENFOLD-3/                  # OpenFold3 structure prediction
 └── models_cache/                # Downloaded model cache
     ├── ESM/                     # ESM-2 checkpoints
     ├── ESM3/                    # ESM-C checkpoints
@@ -31,62 +27,68 @@ llm/
 
 ### Protein Embeddings
 
-#### ESM-2 (Facebook Research)
+#### ESM-2 (Meta AI / Facebook Research)
+Bidirectional transformer trained with Masked Language Modeling (MLM) objective on UniRef50.
+
 Local path: `llm/ESM/esm/`
 
-| Model | Parameters | Size | Embedding Dim |
-|-------|------------|------|---------------|
-| `esm2_t6_8M_UR50D` | 8M | ~31 MB | 320 |
-| `esm2_t12_35M_UR50D` | 35M | ~138 MB | 480 |
-| `esm2_t30_150M_UR50D` | 150M | ~573 MB | 640 |
-| `esm2_t33_650M_UR50D` | 650M | ~2.5 GB | 1280 |
-| `esm2_t36_3B_UR50D` | 3B | ~11 GB | 2560 |
-| `esm2_t48_15B_UR50D` | 15B | ~55 GB | 5120 |
+| Model | Parameters | Size | Embedding Dim | Layers |
+|-------|------------|------|---------------|--------|
+| `esm2_t6_8M_UR50D` | 8M | ~31 MB | 320 | 6 |
+| `esm2_t12_35M_UR50D` | 35M | ~138 MB | 480 | 12 |
+| `esm2_t30_150M_UR50D` | 150M | ~573 MB | 640 | 30 |
+| `esm2_t33_650M_UR50D` | 650M | ~2.5 GB | 1280 | 33 |
+| `esm2_t36_3B_UR50D` | 3B | ~11 GB | 2560 | 36 |
+| `esm2_t48_15B_UR50D` | 15B | ~55 GB | 5120 | 48 |
 
-#### ESM-C/ESM-3 (EvolutionaryScale)
+#### ESM-3 / ESM-C (EvolutionaryScale)
+Causal transformer trained with Next Token Prediction (NTP). Better for capturing generative protein grammar and long-range dependencies.
+
 Local path: `llm/ESM/esm-3/esm-main/`
 
-| Model | Parameters | Embedding Dim |
-|-------|------------|---------------|
-| `esmc-300m-2024-12` | 300M | 960 |
-| `esmc-600m-2024-12` | 600M | 1152 |
-| `esmc-6b-2024-12` | 6B | 2560 |
-
-#### Boltz-2 (Structure + Affinity Prediction)
-Local path: `llm/BOLTZ-2/boltz-main/src/`
-
-| Model | Parameters | Embedding Dim | Features |
-|-------|------------|---------------|----------|
-| `boltz2` | ~400M | 384 | Structure prediction + binding affinity |
+| Model | Parameters | Embedding Dim | Layers | Notes |
+|-------|------------|---------------|--------|-------|
+| `esmc-300m-2024-12` | 300M | 960 | 30 | Local |
+| `esmc-600m-2024-12` | 600M | 1152 | 36 | Local |
+| `esmc-6b-2024-12` | 6B | 4096 | 56 | API only (requires ESM_API_KEY) |
 
 ### Ligand Embeddings
 
 #### MoLFormer (DeepChem) - RECOMMENDED
+Transformer-based molecular representation model trained on ZINC20 + PubChem.
+
 Local path: `llm/MoLFormer/`
 
 | Model | Parameters | Embedding Dim | Output Type |
 |-------|------------|---------------|-------------|
 | `MoLFormer-c3-1.1B` | 46.8M | 768 | **Matrix** `[seq_len, 768]` |
 
-**Advantages over SMI-TED:**
+**Advantages**:
 - Produces **per-token embeddings** (matrix) for cross-attention compatibility
 - Larger training corpus (ZINC20 + PubChem)
 - Full token-level representations for interaction analysis
+- Recommended for DT-Kinase architecture
 
 #### SMI-TED (IBM Foundation Models for Molecules)
+SMILES-based Transformer Encoder-Decoder from IBM Research.
+
 Local path: `llm/FM4M/model_files/`
 
 | Model | Parameters | Embedding Dim | Output Type |
 |-------|------------|---------------|-------------|
 | `smi-ted-Light` | 40M | 768 | **Vector** `[1, 768]` |
 
-**Comparison:**
+**Use case**: Best for classical ML models that require fixed-size input vectors.
+
+### Model Comparison
+
 | Feature | MoLFormer | SMI-TED |
 |---------|-----------|---------|
 | Output shape | `[seq_len, 768]` | `[1, 768]` |
 | Per-token embeddings | Yes | No |
 | Cross-attention support | Full | Limited |
 | Training data | ZINC20 + PubChem | ChEMBL |
+| Best for | DT-Kinase, attention models | Classical ML |
 
 ## Installation
 
@@ -105,19 +107,15 @@ mkdir -p esm-3
 git clone https://github.com/evolutionaryscale/esm.git esm-3/esm-main
 ```
 
-### Clone Boltz-2 (if not present)
-```bash
-cd llm
-mkdir -p BOLTZ-2
-git clone https://github.com/jwohlwend/boltz.git BOLTZ-2/boltz-main
-cd BOLTZ-2/boltz-main
-pip install -e .  # Optional: install as editable package
-```
-
 ### Clone FM4M (if not present)
 ```bash
 cd llm
 git clone https://github.com/IBM/foundation-models-for-materials.git FM4M
+```
+
+### Download MoLFormer
+```bash
+python llm/MoLFormer/download_model.py
 ```
 
 ## Usage
@@ -132,13 +130,13 @@ import esm
 model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
 ```
 
-### Boltz-2 Embeddings
+### ESM-3/ESM-C Embeddings
 ```python
-from src.build.embeddings.strategies.boltz_strategy import BoltzStrategy
+from src.build.embeddings.strategies.esmc_strategy import ESMCStrategy
 
-strategy = BoltzStrategy()
-strategy.load('boltz2', device=torch.device('cpu'))
-# Automatically finds local installation in llm/BOLTZ-2/boltz-main/src/
+strategy = ESMCStrategy()
+strategy.load('esmc-600m-2024-12', device=torch.device('cuda'))
+embedding = strategy.get_embedding(sequence)
 ```
 
 ### SMI-TED Embeddings
@@ -166,16 +164,11 @@ matrices = embedder.extract_batch(smiles_list, return_matrix=True)
 vectors = embedder.extract_batch(smiles_list, return_matrix=False)
 ```
 
-**First-time download:**
-```bash
-python llm/MoLFormer/download_model.py
-```
-
 ## Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `BOLTZ_HOME` | Override Boltz installation path | `/path/to/boltz` |
+| `ESM_API_KEY` | API key for ESM-C 6B (EvolutionaryScale Forge) | `your_api_key` |
 | `ESM_CACHE` | Override ESM model cache | `/path/to/cache` |
 
 ## Notes
@@ -183,15 +176,9 @@ python llm/MoLFormer/download_model.py
 - This directory is ignored by Git (`.gitignore`)
 - Models can occupy several GB of disk space
 - Large models (15B+) require `accelerate` package for CPU offloading
-- Use `--esm-model` to select which protein model to use in the pipeline
+- Use `--protein-model` to select which protein model to use in the pipeline
 
 ## Troubleshooting
-
-### Boltz not found
-```
-RuntimeError: Boltz CLI not found
-```
-**Solution**: Clone Boltz to `llm/BOLTZ-2/boltz-main/` or set `BOLTZ_HOME` environment variable.
 
 ### ESM import error
 ```
@@ -208,3 +195,21 @@ OutOfMemoryError: CUDA out of memory
 pip install accelerate>=0.20.0
 ```
 
+### ESM-C 6B API error
+```
+Error: ESM_API_KEY not found
+```
+**Solution**: Set the API key:
+```bash
+export ESM_API_KEY="your_api_key"
+```
+Or pass via command line: `--api your_api_key`
+
+### MoLFormer not found
+```
+FileNotFoundError: Model not found in cache
+```
+**Solution**: Download the model first:
+```bash
+python llm/MoLFormer/download_model.py
+```
