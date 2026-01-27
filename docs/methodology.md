@@ -1,14 +1,14 @@
 # semantic-screening: Semantic Interaction Prediction via Multi-Modal Foundation Models
 
-**Author**: Leon Sulfierry (GMMSB-LNCC)  
-**Date**: January 2026  
-**Version**: 2.0 (Aligned with PhD Thesis)
+**Author**: Leon Sulfierry (GMMSB-LNCC)
+**Date**: January 2026
+**Version**: 2.1 (Aligned with PhD Thesis and Codebase)
 
 ---
 
 ## Abstract
 
-The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-3/ESM-C) and Chemical Foundation Models (SMI-TED, MoLFormer) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology to mitigate data leakage, ensuring that performance metrics reflect true generalization capabilities across the kinaseome. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
+The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-3/ESM-C) and Chemical Foundation Models (SMI-TED, MoLFormer) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology with three distinct split modes—**Random**, **Compound-Only**, and **Compound+Protein**—to rigorously evaluate generalization capabilities and prevent data leakage. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
 
 ---
 
@@ -28,7 +28,7 @@ To effectively prioritize drug candidates, semantic-screening solves two distinc
 
 1.  **Binary Bioactivity Prediction (Classification)**:
     *   **Goal**: Filter the vast chemical space to identify "Active" compounds.
-    *   **Definition**: A compound is labeled $y=1$ (Active) if its affinity exceeds a threshold (e.g., $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$), and $y=0$ otherwise.
+    *   **Definition**: A compound is labeled $y=1$ (Active) if its affinity exceeds a threshold (e.g., $pChEMBL \ge 6.0$ or $IC_{50} \le 1000nM$), and $y=0$ otherwise.
     *   **Role**: High-recall screening to reduce the search space.
 
 2.  **Binding Affinity Prediction (Regression)**:
@@ -64,7 +64,7 @@ Before detailing the specific architecture of semantic-screening, it is essentia
 
 Proteins are the molecular machines of life, performing a vast array of functions from catalysis (enzymes) to signaling (receptors). Structurally, a protein is a linear polymer composed of a specific sequence of small molecules called **amino acids**. There are 20 standard amino acids, each represented by a single letter (e.g., 'A' for Alanine, 'K' for Lysine).
 
-$$ P = \{a_1, a_2, ..., a_L\} \quad \text{where} \quad a_i \in \mathcal{A} = \{A, C, D, E, ...\} $$
+$$ P = \{a_1, a_2, ..., a_L\} \quad \text{where} \quad a_i \in \mathcal{A} = \{A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y\} $$
 
 This linear structure is remarkably similar to human language, where a sentence is a sequence of words. Just as the meaning of a word depends on its context within a sentence, the function of an amino acid depends on its neighbors and its position in the 3D structure.
 
@@ -79,7 +79,7 @@ Small molecule drugs (ligands) are fundamentally different from proteins. They a
 
 A SMILES string encodes the molecular graph into a sequence of characters. For example, Benzene is represented as `c1ccccc1`.
 
-$$ L = \{s_1, s_2, \dots, s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, (, ), \dots\} $$
+$$ L = \{s_1, s_2, \dots, s_M\} \quad \text{where} \quad s_i \in \mathcal{S} = \{C, N, O, =, (, ), [, ], @, \#, \dots\} $$
 
 #### 2.2.2 Chemical Foundation Models
 Similar to pLMs, **Chemical Foundation Models** are trained on massive databases of chemical structures (like PubChem or ChEMBL). They learn to understand chemical syntax and semantics, generating vector representations that capture molecular properties such as solubility, toxicity, and binding potential.
@@ -167,7 +167,7 @@ The efficacy of any deep learning model is fundamentally limited by the quality 
 Proteins are treated as sequences of amino acids, analogous to sentences in natural language. We utilize **Protein Language Models (pLMs)** trained on billions of sequences (e.g., UniRef50) to extract embeddings that capture deep evolutionary and structural context.
 
 #### 4.1.1 ESM-2 (Evolutionary Scale Modeling)
-ESM-2 (Lin et al., 2023) is a BERT-style transformer trained with a Masked Language Modeling (MLM) objective. For a protein sequence $S = \{x_1, x_2, ..., x_L\}$, the model outputs a matrix $E \in \mathbb{R}^{L \times D}$, where $D$ is the embedding dimension.
+ESM-2 (Lin et al., 2023) is a BERT-style transformer trained with a Masked Language Modeling (MLM) objective. For a protein sequence $S = \{x_1, x_2, ..., x_L\}$, the model outputs a matrix $\mathbf{H}_P \in \mathbb{R}^{L \times D}$, where $D$ is the embedding dimension.
 
 *   **Architecture**: Transformer Encoder with Rotary Position Embeddings (RoPE).
 *   **Scale**: We support the full range of ESM-2 models, from 8M parameters ($D=320$) to 15B parameters ($D=5120$).
@@ -189,11 +189,21 @@ $$ P(x) = \prod_{t=1}^L P(x_t | x_{<t}) $$
 
 ### 4.2 Ligand Representation: Chemical Foundation Models
 
-Small molecules are represented using SMILES (Simplified Molecular Input Line Entry System) strings. To process these, we employ **SMI-TED** (SMILES-based Transformer Encoder-Decoder), a model from the FM4M (Foundation Models for Molecules) suite.
+Small molecules are represented using SMILES (Simplified Molecular Input Line Entry System) strings. semantic-screening supports two chemical foundation models:
+
+#### 4.2.1 SMI-TED (SMILES-based Transformer Encoder-Decoder)
+A model from the FM4M (Foundation Models for Molecules) suite by IBM Research.
 
 *   **Tokenization**: SMILES strings are tokenized into chemical atoms and bond symbols (e.g., `C`, `N`, `=`, `(`).
 *   **Architecture**: A Transformer encoder trained on large chemical databases (PubChem, ChEMBL).
-*   **Output**: A sequence of vectors $L \in \mathbb{R}^{M \times 768}$, where $M$ is the number of atoms/tokens.
+*   **Output**: A sequence of vectors $\mathbf{H}_L \in \mathbb{R}^{M \times 768}$, where $M$ is the number of atoms/tokens.
+
+#### 4.2.2 MoLFormer
+An alternative chemical foundation model optimized for molecular property prediction.
+
+*   **Architecture**: Transformer encoder with linear attention for efficiency.
+*   **Output**: Per-token embeddings $\mathbf{H}_L \in \mathbb{R}^{M \times 768}$.
+*   **Advantage**: Better suited for cross-attention models due to richer per-token representations.
 
 ### 4.3 From Sequences to Vectors: Pooling Strategies
 
@@ -280,75 +290,152 @@ semantic-screening introduces a specialized neural architecture designed to mode
 
 ### 6.1 The Cross-Attention Mechanism
 
-The core of our architecture (`src.attention_matrix.model.CrossAttentionModel`) is the Cross-Attention mechanism (Vaswani et al., 2017). Unlike self-attention, which models relationships within a sequence, cross-attention models relationships *between* two distinct sequences.
+The core of our architecture (`src.classifier.models.cross_attention_model.CrossAttentionAffinityModel`) is the Cross-Attention mechanism (Vaswani et al., 2017). Unlike self-attention, which models relationships within a sequence, cross-attention models relationships *between* two distinct sequences.
 
-Let $H_P \in \mathbb{R}^{L \times d}$ be the protein embedding sequence (acting as **Queries**) and $H_L \in \mathbb{R}^{M \times d}$ be the ligand embedding sequence (acting as **Keys** and **Values**), projected to a common hidden dimension $d$. The attention weights $A \in \mathbb{R}^{L \times M}$ are computed as:
+Let $\mathbf{H}_P \in \mathbb{R}^{L \times d}$ be the protein embedding sequence (acting as **Queries**) and $\mathbf{H}_L \in \mathbb{R}^{M \times d}$ be the ligand embedding sequence (acting as **Keys** and **Values**), projected to a common hidden dimension $d$. The attention weights $\mathbf{A} \in \mathbb{R}^{L \times M}$ are computed as:
 
-$$ Q = H_P W_Q, \quad K = H_L W_K, \quad V = H_L W_V $$
+$$ \mathbf{Q} = \mathbf{H}_P \mathbf{W}_Q, \quad \mathbf{K} = \mathbf{H}_L \mathbf{W}_K, \quad \mathbf{V} = \mathbf{H}_L \mathbf{W}_V $$
 
-$$ A_{ij} = \frac{\exp(Q_i \cdot K_j^T / \sqrt{d_k})}{\sum_{k=1}^M \exp(Q_i \cdot K_k^T / \sqrt{d_k})} $$
+$$ A_{ij} = \frac{\exp(\mathbf{Q}_i \cdot \mathbf{K}_j^T / \sqrt{d_k})}{\sum_{k=1}^M \exp(\mathbf{Q}_i \cdot \mathbf{K}_k^T / \sqrt{d_k})} $$
 
-Where $W_Q, W_K, W_V \in \mathbb{R}^{d \times d}$ are learnable projection matrices. The output context matrix $C_P$ for the protein is then:
+Where $\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V \in \mathbb{R}^{d \times d}$ are learnable projection matrices. The output context matrix $\mathbf{C}_P$ for the protein is then:
 
-$$ C_P = A V $$
+$$ \mathbf{C}_P = \mathbf{A} \mathbf{V} $$
 
 **Biological Interpretation**: The attention weight $A_{ij}$ represents the learned probability of interaction between protein residue $i$ and ligand atom $j$. A high weight implies that the model considers this specific atom-residue pair critical for binding, effectively performing "soft docking" in latent space.
 
-### 6.2 The Hybrid CNN-Attention Architecture
+### 6.2 The DT-Kinase Architecture: CNN + Cross-Attention
 
-While Transformers excel at capturing global dependencies, Convolutional Neural Networks (CNNs) are superior at extracting local features. In biological sequences, local motifs (e.g., binding sites, functional domains) are critical.
+The **DT-Kinase** architecture combines multi-scale Convolutional Neural Networks (CNNs) for local feature extraction with bidirectional Cross-Attention for global interaction modeling.
 
-**Why CNNs on top of Transformers?**
-While ESM-2 captures global evolutionary context, its embeddings are trained on the objective of *masked language modeling*, not binding. The CNN layers serve a critical dual purpose:
-1.  **Task Adaptation**: They project the general-purpose evolutionary features into a binding-specific latent space.
-2.  **Local Motif Enhancement**: They explicitly emphasize local physicochemical motifs (e.g., hydrophobic patches, charge clusters) that drive the initial stages of molecular recognition, filtering out evolutionary noise that is irrelevant to the specific binding task.
+#### 6.2.1 Architecture Overview
 
-semantic-screening employs a **Hybrid Architecture** that combines the best of both worlds:
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  INPUT: Per-Token Embeddings                                                │
+│  ├── Protein: ESM-2/ESM-C per-residue embeddings [batch, L, d_protein]     │
+│  └── Ligand:  SMI-TED/MoLFormer per-token embeddings [batch, M, d_ligand]  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 1: LINEAR PROJECTION                                                 │
+│  ├── Protein: W_p ∈ ℝ^(d_protein × hidden_dim)                             │
+│  └── Ligand:  W_l ∈ ℝ^(d_ligand × hidden_dim)                              │
+│  └─→ Output: [batch, seq_len, hidden_dim]                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 2: MULTI-SCALE CNN ENCODERS (Local Feature Extraction)               │
+│                                                                             │
+│  For each input (protein and ligand separately):                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Conv1DBlock(kernel=3) ──┐                                          │   │
+│  │  Conv1DBlock(kernel=5) ──┼── Concatenate → Fusion → Residual        │   │
+│  │  Conv1DBlock(kernel=7) ──┘                                          │   │
+│  │                                                                      │   │
+│  │  Conv1DBlock = Conv1D → BatchNorm → GELU → Dropout → Conv1D → BN   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│  • Residual connections preserve feature hierarchy                          │
+│  • LayerNorm for training stability                                         │
+│  └─→ Output: [batch, seq_len, hidden_dim]                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 3: POSITIONAL ENCODING (Optional)                                    │
+│                                                                             │
+│  Option A: Sinusoidal (Vaswani et al., 2017)                               │
+│    PE(pos, 2i) = sin(pos / 10000^(2i/d))                                   │
+│    PE(pos, 2i+1) = cos(pos / 10000^(2i/d))                                 │
+│                                                                             │
+│  Option B: RoPE (Rotary Position Embedding)                                 │
+│    RoPE(x, m)_{2i} = x_{2i}cos(mθ_i) - x_{2i+1}sin(mθ_i)                  │
+│    RoPE(x, m)_{2i+1} = x_{2i}sin(mθ_i) + x_{2i+1}cos(mθ_i)                │
+│    where θ_i = 10000^(-2i/d)                                               │
+│                                                                             │
+│  RoPE Advantages: Unlimited sequence length, relative position awareness    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 4: BIDIRECTIONAL CROSS-ATTENTION (N=2 layers)                        │
+│                                                                             │
+│  For each layer:                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  a) Protein → Ligand Attention                                      │   │
+│  │     protein' = LayerNorm(protein + MultiHeadAttn(Q=protein,K=V=lig))│   │
+│  │     protein' = LayerNorm(protein' + FFN(protein'))                  │   │
+│  │                                                                      │   │
+│  │  b) Ligand → Protein Attention                                      │   │
+│  │     ligand' = LayerNorm(ligand + MultiHeadAttn(Q=ligand,K=V=prot)) │   │
+│  │     ligand' = LayerNorm(ligand' + FFN(ligand'))                    │   │
+│  │                                                                      │   │
+│  │  FFN = Linear(d→4d) → GELU → Dropout → Linear(4d→d)                │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│  • Multi-Head Attention (8 heads) for diverse interaction patterns          │
+│  └─→ Output: Learned attention weights indicating residue-atom affinities   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 5: GLOBAL POOLING                                                    │
+│                                                                             │
+│  protein_pooled = mean(protein', dim=1)  → [batch, hidden_dim]             │
+│  ligand_pooled = mean(ligand', dim=1)    → [batch, hidden_dim]             │
+│  combined = concat(protein_pooled, ligand_pooled) → [batch, 2*hidden_dim]  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 6: MULTI-TASK PREDICTION HEAD                                        │
+│                                                                             │
+│  Shared: Linear(2*hidden → hidden) → LayerNorm → GELU → Dropout            │
+│                        │                                                    │
+│         ┌──────────────┴──────────────┐                                    │
+│         ▼                             ▼                                    │
+│  Classification Head            Regression Head                            │
+│  Linear(hidden → hidden/2)      Linear(hidden → hidden/2)                  │
+│  → GELU → Dropout               → GELU → Dropout                           │
+│  → Linear(hidden/2 → 1)         → Linear(hidden/2 → 1)                     │
+│  → Sigmoid                      → Identity                                 │
+│         │                             │                                    │
+│         ▼                             ▼                                    │
+│  P(active) ∈ [0,1]              pChEMBL ∈ ℝ                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-1.  **Local Feature Extraction (CNN)**: The raw embeddings from the Foundation Models are first passed through a multi-scale 1D-CNN encoder (`src.classifier.models.cnn_encoder`).
-    *   **Kernels**: We use varying kernel sizes (3, 5, 7) to capture motifs of different lengths.
-    *   **Length-Preserving Convolutions**: To ensure that the learned features can be mapped back to specific residues for interpretability, we employ padding strategies (e.g., `padding='same'`) that preserve the original sequence length $L$.
-    *   **Residual Connections**: To facilitate gradient flow across deep networks.
+#### 6.2.2 CNN Encoder Mathematical Formulation
 
-$$ H_{local} = \text{CNN}(H_{raw}) $$
+The CNN encoder extracts local patterns at multiple scales:
 
-2.  **Positional Encoding**: Position information is critical for sequence modeling. DT-Kinase supports two encoding strategies:
-    
-    *   **Sinusoidal (Vaswani et al., 2017)**: Classical additive encoding using sine/cosine functions. Fixed maximum length.
-    *   **RoPE (Su et al., 2024)**: Rotary Position Embedding - encodes position through rotation rather than addition.
+$$ \mathbf{H}^{(k)} = \text{Conv1D}(\mathbf{X}, \mathbf{W}^{(k)}, \text{kernel}=k) \quad \text{for } k \in \{3, 5, 7\} $$
 
-    **RoPE Mathematical Formulation**: For position $m$ and dimension pair $(2i, 2i+1)$:
-    $$\text{RoPE}(x, m)_{2i} = x_{2i} \cos(m\theta_i) - x_{2i+1} \sin(m\theta_i)$$
-    $$\text{RoPE}(x, m)_{2i+1} = x_{2i} \sin(m\theta_i) + x_{2i+1} \cos(m\theta_i)$$
-    where $\theta_i = 10000^{-2i/d}$.
+Where each Conv1D operation with kernel size $k$ is:
 
-    **Key RoPE Advantages**:
-    - **Unlimited sequence length**: No pre-defined max_len—proteins of any size can be processed
-    - **Relative position awareness**: Attention depends on position *difference*, not absolute position
-    - **Better extrapolation**: Models trained on shorter sequences generalize to longer ones
-    - **Geometry preservation**: Rotation preserves vector norms, maintaining embedding space structure
-    - **State-of-the-art compatibility**: Used by LLaMA, ESM-2, GPT-NeoX
+$$ \mathbf{H}^{(k)}_i = \sigma\left(\sum_{j=0}^{k-1} \mathbf{W}^{(k)}_j \cdot \mathbf{X}_{i+j-\lfloor k/2 \rfloor} + \mathbf{b}^{(k)}\right) $$
 
-3.  **Global Interaction Modeling (Cross-Attention)**: The locally enriched features $H_{local}$ (with positional encoding applied) are then fed into the Cross-Attention mechanism described above.
+The multi-scale features are fused:
 
-### 6.3 Architecture Variants
+$$ \mathbf{H}_{fused} = \text{Fusion}\left([\mathbf{H}^{(3)}; \mathbf{H}^{(5)}; \mathbf{H}^{(7)}]\right) + \mathbf{X} $$
 
-#### 6.3.1 Improved Cross-Attention Model
-To improve gradient flow and capacity, the `ImprovedCrossAttentionModel` incorporates:
-*   **Deep Projections**: Multi-layer perceptrons (MLPs) with GELU activations before the attention block.
-*   **Stacked Layers**: Multiple cross-attention blocks ($N=2$) to model higher-order interactions.
-*   **Feed-Forward Networks (FFN)**: Transformer-style FFNs after each attention block.
-*   **Layer Normalization**: Applied pre- and post-attention (Pre-LN) for training stability.
+Where the residual connection preserves the original information.
 
-#### 6.3.2 Vision Transformer (ViT) Adaptation
-We also explore a global context approach (`VisionTransformerModel`) where the protein and ligand sequences are concatenated into a single sequence $S_{joint} = [H_P; H_L]$. A learnable `[CLS]` token is prepended, and the entire sequence is processed by a standard Transformer Encoder. This allows for bidirectional information flow (Protein $\leftrightarrow$ Ligand) via self-attention, offering an alternative inductive bias.
+### 6.3 Key Design Principles
+
+- **Primacy of Sequence**: No 3D coordinates required—information is encoded in primary sequence via PLM embeddings
+- **Contextuality**: Transformer self-attention captures long-range dependencies and global sequence context
+- **Semantic Compatibility**: Answers "How compatible are these latent representations?" rather than "How well does this geometrically fit?"
+- **Scalability**: Inference is pure neural network forward pass, enabling trillion-compound screening against entire proteome
+- **Universality**: Applicable to any protein with known sequence, including those without experimental structures
 
 ### 6.4 The Dual-Task Strategy: Classification & Regression
 
 semantic-screening is designed to solve two distinct but related problems simultaneously: identifying *active* compounds (Classification) and predicting their *potency* (Regression).
 
 #### 6.4.1 Binary Bioactivity Prediction
-The primary goal is to filter the vast chemical space for potential hits. We define a binary label $y_{cls} \in \{0, 1\}$ based on a threshold (typically $pChEMBL \ge 7.0$ or $IC_{50} \le 100nM$).
+The primary goal is to filter the vast chemical space for potential hits. We define a binary label $y_{cls} \in \{0, 1\}$ based on a threshold (typically $pChEMBL \ge 6.0$ or $IC_{50} \le 1000nM$).
 The model outputs a probability $p = \sigma(z_{cls})$ using a sigmoid activation.
 
 **Handling Class Imbalance**: To address the inherent imbalance (inactives $\gg$ actives) typical of screening libraries, we employ a **Weighted Binary Cross-Entropy (BCE)** loss, assigning a higher penalty to false negatives:
@@ -362,7 +449,7 @@ $$ \mathcal{L}_{MSE} = \frac{1}{N} \sum_{i=1}^N (y_i - \hat{y}_i)^2 $$
 #### 6.4.3 Multi-Task Learning (MTL)
 By training on both tasks simultaneously, the model learns a shared representation that captures features relevant to both binding (binary) and binding strength (continuous). This acts as a powerful regularizer.
 $$ \mathcal{L}_{total} = \lambda_{cls} \mathcal{L}_{BCE} + \lambda_{reg} \mathcal{L}_{MSE} $$
-Where $\lambda_{cls}$ and $\lambda_{reg}$ are hyperparameters balancing the tasks (typically 1.0).
+Where $\lambda_{cls}=1.0$ and $\lambda_{reg}=0.5$ are the default task weights.
 
 ### 6.5 Training Strategy & Hyperparameters
 
@@ -372,21 +459,28 @@ The architecture is defined by a set of hyperparameters optimized for the kinase
 *   **Optimizer**: We use **AdamW** (Adam with Decoupled Weight Decay) to prevent overfitting in the high-dimensional parameter space.
 *   **Scheduler**: A **Linear Warmup** (first 10% of steps) followed by **Cosine Decay** is used to ensure stable convergence and escape local minima.
 *   **Regularization**: In addition to Dropout ($p=0.1$), we apply Weight Decay ($1e-2$) to the projection layers.
+*   **Gradient Clipping**: Maximum gradient norm of 1.0 to prevent exploding gradients.
 
-#### 6.5.2 Hyperparameter Configuration (Base Model)
+#### 6.5.2 Hyperparameter Configuration (Default)
 
 | Component | Parameter | Value | Description |
 | :--- | :--- | :--- | :--- |
-| **Inputs** | Protein Dim | 320 | Dimension of ESM-2 (8M) embeddings (Configurable) |
-| | Ligand Dim | 768 | Dimension of SMI-TED embeddings |
+| **Inputs** | Protein Dim | 640 | Dimension of ESM-2 (150M) embeddings |
+| | Ligand Dim | 768 | Dimension of SMI-TED/MoLFormer embeddings |
 | **Projections** | Hidden Dim | 256 | Common latent space dimension |
 | | Activation | GELU | Gaussian Error Linear Unit |
-| **Attention** | Heads | 8 | Number of parallel attention heads |
-| | Layers | 2 | Number of stacked cross-attention blocks |
-| | Dropout | 0.1 | Regularization rate |
 | **CNN Encoder** | Layers | 3 | Number of convolutional blocks |
 | | Kernels | (3, 5, 7) | Multi-scale kernel sizes |
 | | Filters | 256 | Number of output channels per block |
+| **Attention** | Heads | 8 | Number of parallel attention heads |
+| | Layers | 2 | Number of stacked cross-attention blocks |
+| | FF Dim | 1024 | Feed-forward hidden dimension (4× hidden) |
+| | Dropout | 0.1 | Regularization rate |
+| **Training** | Batch Size | 32 | Samples per batch |
+| | Learning Rate | 1e-4 | Initial learning rate |
+| | Weight Decay | 0.01 | L2 regularization |
+| | Epochs | 500 | Maximum training epochs |
+| | Patience | 30 | Early stopping patience |
 
 This configuration results in a model with approximately **1.5M trainable parameters** (excluding the frozen foundation models), which is small enough to train on a single GPU yet expressive enough to capture complex interaction patterns.
 
@@ -394,38 +488,144 @@ This configuration results in a model with approximately **1.5M trainable parame
 
 ## Chapter 7: Stratification & Validation Methodology
 
-A pervasive issue in machine learning for biology is **data leakage** caused by evolutionary homology. Proteins often share high sequence similarity; if homologous proteins are distributed across training and test sets, a model can achieve high accuracy simply by "memorizing" the family rather than learning the physics of binding.
+A pervasive issue in machine learning for biology is **data leakage** caused by molecular similarity. If similar compounds or proteins are distributed across training and test sets, a model can achieve high accuracy simply by "memorizing" chemical scaffolds rather than learning the physics of binding.
 
-### 7.1 The Homology Problem
+### 7.1 The Data Leakage Problem
 
-Standard random splitting assumes independent and identically distributed (i.i.d.) data. However, biological data is structured into families. A random split might place Kinase A in the training set and its close homolog Kinase B in the test set. Since they share 90% sequence identity and likely bind similar ligands, the test performance will be optimistically biased.
+Standard random splitting assumes independent and identically distributed (i.i.d.) data. However, drug discovery data is structured:
+- **Compound families**: Many compounds share the same scaffold
+- **Protein families**: Kinases share high sequence similarity (>85% in ATP-binding pocket)
 
-### 7.2 Adaptive Clustering Stratification
+A random split might place Compound A in the training set and its close analog Compound B in the test set. Since they share 90% structural similarity and likely bind the same targets, the test performance will be optimistically biased.
 
-To address this, semantic-screening implements a rigorous **Clustering-based Stratification** strategy. The goal is to ensure that no cluster of similar proteins spans across the train/test boundary.
+### 7.2 Three Split Modes for Rigorous Evaluation
 
-#### 7.2.1 Algorithm
-We employ a rigorous **Clustering-based Stratification** strategy using **MiniBatchKMeans** with **k-means++** initialization. This approach ensures robust cluster centers and computational efficiency ($O(n)$) for large datasets.
+semantic-screening implements three distinct split strategies, ordered from **easiest to hardest**:
 
-1.  **Multi-Modal Embedding Integration**: We construct a unified representation vector for each interaction pair by concatenating the protein embedding ($E_P$) and ligand embedding ($E_L$), weighted by hyperparameters $\alpha$ and $\beta$ (typically 0.6 and 0.4):
-    $$ V_{joint} = [\alpha \cdot E_P ; \beta \cdot E_L] $$
+#### 7.2.1 Random Split (Baseline with Leakage)
 
-2.  **Cosine Similarity Approximation**: To cluster based on directional similarity (cosine similarity) rather than magnitude, we apply **L2-normalization** to the joint vectors:
-    $$ \hat{V}_{joint} = \frac{V_{joint}}{||V_{joint}||_2} $$
-    Clustering these normalized vectors with K-means is mathematically equivalent to clustering based on cosine similarity.
+**Implementation**: `crossattention_split_analysis/data/splits.py::split_random()`
 
-3.  **Adaptive Clustering**: We determine the optimal number of clusters $k$ adaptively based on dataset size ($k \approx \sqrt{N}$), bounded between 10 and 1000. This ensures that clusters are neither too coarse (high variance) nor too fine (overfitting).
+The simplest approach: stratified random sampling by label distribution.
 
-4.  **Greedy Cluster Assignment**: To populate the Train, Validation, and Test sets, we employ a **Greedy Assignment Strategy**:
-    *   Clusters are sorted by size (number of samples) in descending order.
-    *   Iterating through the sorted clusters, we assign each *entire* cluster to the split (Test, Validation, or Train) that is currently furthest below its target quota (e.g., 10%, 10%, 80%).
-    *   **Constraint**: A cluster is never split. All samples belonging to Cluster $C_i$ are assigned to the same set.
+**Algorithm**:
+1. Stratify by label to maintain class balance
+2. Split: 80% train+val, 20% temporary
+3. Further split temporary: 50% validation, 50% test
+4. Result: ~80% train, ~10% val, ~10% test
 
-$$ \forall x \in \text{Train}, \forall y \in \text{Test}, \text{Cluster}(x) \neq \text{Cluster}(y) $$
+**Mathematical Formulation**:
+Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$ be the dataset. The random split partitions:
 
-This methodology guarantees that chemically and biologically similar instances are strictly separated, preventing the model from "memorizing" molecular families and ensuring that performance metrics reflect true generalization to novel chemical space.
+$$ \mathcal{D} = \mathcal{D}_{train} \cup \mathcal{D}_{val} \cup \mathcal{D}_{test} $$
 
-### 7.3 Validation Metrics
+Where samples are drawn uniformly at random, with stratification ensuring:
+
+$$ \frac{|\{i : y_i = 1, i \in \mathcal{D}_k\}|}{|\mathcal{D}_k|} \approx \frac{|\{i : y_i = 1\}|}{N} \quad \forall k \in \{train, val, test\} $$
+
+**Characteristics**:
+- ✅ Both compounds and kinases may appear in multiple splits
+- ⚠️ **Allows data leakage** - compounds and kinases can overlap
+- 📊 Serves as upper-bound baseline (optimistic performance)
+- 🎯 Use case: Initial model development and debugging
+
+#### 7.2.2 Compound-Only Split (Medium Difficulty)
+
+**Implementation**: `crossattention_split_analysis/data/splits.py::split_by_compound()`
+
+Stratification by unique compounds to prevent compound leakage.
+
+**Algorithm**:
+1. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
+2. Shuffle compounds with fixed seed
+3. Partition compounds:
+   - Train compounds: $\mathcal{C}_{train} = \{c_1, ..., c_{\lfloor 0.8K \rfloor}\}$
+   - Validation compounds: $\mathcal{C}_{val} = \{c_{\lfloor 0.8K \rfloor+1}, ..., c_{\lfloor 0.9K \rfloor}\}$
+   - Test compounds: $\mathcal{C}_{test} = \{c_{\lfloor 0.9K \rfloor+1}, ..., c_K\}$
+4. Assign all samples where compound $\in$ compound set
+
+**Mathematical Formulation**:
+Let $c(x_i)$ denote the compound ID of sample $x_i$. The split ensures:
+
+$$ \mathcal{C}_{train} \cap \mathcal{C}_{val} = \emptyset, \quad \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset, \quad \mathcal{C}_{val} \cap \mathcal{C}_{test} = \emptyset $$
+
+$$ \mathcal{D}_{train} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{train}\} $$
+
+**Characteristics**:
+- ✅ **No compound leakage** - same compound never in train and test
+- ⚠️ Kinases may still overlap between splits
+- 📊 Evaluates generalization to **new compounds**
+- 🎯 Use case: Drug discovery scenario - predict activity for novel molecules
+
+#### 7.2.3 Compound + Protein Split (Hardest - True Generalization)
+
+**Implementation**: `crossattention_split_analysis/data/splits.py::split_new_compound_new_kinase()`
+
+The most stringent split: both compounds AND kinases are held out.
+
+**Algorithm**:
+1. Extract unique kinases: $\mathcal{P} = \{p_1, p_2, ..., p_J\}$
+2. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
+3. Shuffle each independently with seed
+4. Select test kinases: $\mathcal{P}_{test} = \{p_1, ..., p_{\lfloor 0.15J \rfloor}\}$
+5. Select test compounds: $\mathcal{C}_{test} = \{c_1, ..., c_{\lfloor 0.15K \rfloor}\}$
+6. Create masks:
+   - $train\_mask = (c(x) \in \mathcal{C}_{train}) \land (p(x) \in \mathcal{P}_{train})$
+   - $test\_mask = (c(x) \in \mathcal{C}_{test}) \land (p(x) \in \mathcal{P}_{test})$
+   - $val\_mask = \neg train\_mask \land \neg test\_mask$
+7. Recursive expansion if test set < 50 samples
+
+**Mathematical Formulation**:
+Let $c(x_i)$ and $p(x_i)$ denote the compound and protein IDs of sample $x_i$. The split ensures:
+
+$$ \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset \quad \text{AND} \quad \mathcal{P}_{train} \cap \mathcal{P}_{test} = \emptyset $$
+
+The test set contains only samples where **both** compound and protein are unseen:
+
+$$ \mathcal{D}_{test} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{test} \land p(x_i) \in \mathcal{P}_{test}\} $$
+
+**Characteristics**:
+- ✅ **No compound leakage** - compounds are completely held out
+- ✅ **No protein leakage** - kinases are completely held out
+- 📊 Evaluates **true generalization** to unseen chemical and biological space
+- 🎯 Use case: Most realistic evaluation for drug lead optimization
+
+### 7.3 Split Comparison Summary
+
+| Aspect | Random | Compound | Compound+Protein |
+|--------|--------|----------|-----------------|
+| **Compound Leakage** | Yes | **No** | **No** |
+| **Protein Leakage** | Yes | Yes | **No** |
+| **Difficulty** | Easiest | Medium | **Hardest** |
+| **Realistic** | No | Partial | **Yes** |
+| **Test Size** | ~10% | ~10% | Adaptive (min 50) |
+| **Use Case** | Upper bound | New compound discovery | True generalization |
+
+### 7.4 Clustering-Based Stratification (Alternative)
+
+For the classical ML pipeline, semantic-screening also supports **clustering-based stratification** using the embedding space.
+
+#### 7.4.1 Multi-View Stratification
+
+**Implementation**: `src/build/stratification/stratifier.py::multi_view_stratified_split()`
+
+Combines protein and ligand embeddings with weighted similarity:
+
+$$ \mathbf{V}_{joint} = [\sqrt{\alpha} \cdot \hat{\mathbf{E}}_P ; \sqrt{\beta} \cdot \hat{\mathbf{E}}_L] $$
+
+Where $\hat{\mathbf{E}}$ denotes L2-normalized embeddings and $\alpha=0.6$, $\beta=0.4$ are the default weights.
+
+**Algorithm**:
+1. Normalize embeddings: $\hat{\mathbf{E}} = \mathbf{E} / ||\mathbf{E}||_2$
+2. Combine with weights
+3. Cluster using MiniBatchKMeans with k-means++ initialization
+4. Assign entire clusters to train/val/test (no cluster splitting)
+
+**Constraint**: A cluster is never split across sets:
+
+$$ \forall x \in \mathcal{D}_{train}, \forall y \in \mathcal{D}_{test}: \text{Cluster}(x) \neq \text{Cluster}(y) $$
+
+### 7.5 Validation Metrics
 
 We evaluate model performance using a comprehensive suite of metrics:
 
@@ -433,11 +633,24 @@ We evaluate model performance using a comprehensive suite of metrics:
     *   **AUC-ROC**: Area Under the Receiver Operating Characteristic curve.
     *   **F1-Score**: Harmonic mean of precision and recall.
     *   **MCC (Matthews Correlation Coefficient)**: A robust metric for imbalanced datasets.
+    $$ MCC = \frac{TP \cdot TN - FP \cdot FN}{\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}} $$
 
 *   **Regression**:
     *   **RMSE (Root Mean Squared Error)**: Measures the average magnitude of error in $pChEMBL$ units.
     *   **Pearson Correlation ($r$)**: Measures linear correlation between predicted and actual affinity.
     *   **Concordance Index (CI)**: Measures the probability that the predicted order of affinities matches the true order.
+
+### 7.6 Statistical Rigor: Multi-Seed Evaluation
+
+To ensure reproducibility and statistical significance, semantic-screening uses multiple random seeds:
+
+```python
+DEFAULT_SEEDS = [42, 123, 456, 789, 1024]  # 5 seeds
+MIN_SEEDS_FOR_STATISTICS = 3
+RECOMMENDED_SEEDS_FOR_PUBLICATION = 5
+```
+
+All results are reported as mean ± standard deviation across seeds.
 
 ---
 
@@ -457,6 +670,7 @@ For data preprocessing and matrix construction, we utilize **Apache Spark** (via
 
 Given the computational cost of embedding generation, semantic-screening implements a granular checkpointing system.
 *   **Embedding Cache**: Embeddings for unique proteins and ligands are cached on disk (`.npy` format). If a sequence reappears in a new dataset, its embedding is retrieved rather than recomputed.
+
 ### 8.3 Dynamic Dimension Synchronization
 
 A significant engineering challenge in multi-modal learning is handling the varying dimensionality of upstream models. A 15B parameter protein model outputs 5120-dimensional vectors, while a standard ligand model outputs 768 dimensions.
@@ -464,14 +678,18 @@ A significant engineering challenge in multi-modal learning is handling the vary
 semantic-screening implements a **Dynamic Dimension Synchronization** system within `src.build.core.config.BuildConfig`. This system automatically detects the selected model configuration and adjusts the input layers of the downstream neural networks accordingly.
 
 ```python
-# Conceptual Logic
-if model == 'esm2_t36_3B_UR50D':
-    protein_dim = 2560
-elif model == 'esmc-600m-2024-12':
-    protein_dim = 1152
-
-# Downstream Projection
-self.protein_proj = nn.Linear(protein_dim, hidden_dim)
+# Model dimension mapping (run_complete_pipeline.py)
+protein_dims = {
+    'esm2_t6_8M_UR50D': 320,
+    'esm2_t12_35M_UR50D': 480,
+    'esm2_t30_150M_UR50D': 640,
+    'esm2_t33_650M_UR50D': 1280,
+    'esm2_t36_3B_UR50D': 2560,
+    'esm2_t48_15B_UR50D': 5120,
+    'esmc-300m-2024-12': 960,
+    'esmc-600m-2024-12': 1152,
+    'esmc-6b-2024-12': 3072,
+}
 ```
 
 This ensures that the architecture is agnostic to the specific foundation model being used, facilitating rapid benchmarking and ablation studies.
@@ -489,6 +707,7 @@ These models serve as the feature extraction engine, transforming raw biological
 | Model | Variant | Parameters | Layers | Embedding Dim ($d$) | Architecture | Training Objective |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **SMI-TED** | Standard | ~100M | 12 | 768 | Transformer Enc-Dec | Masked Language Modeling |
+| **MoLFormer** | Standard | ~47M | 12 | 768 | Transformer Encoder | Masked Language Modeling |
 | **ESM-2** | t6_8M | 8M | 6 | 320 | Transformer Encoder | Masked Language Modeling |
 | **ESM-2** | t12_35M | 35M | 12 | 480 | Transformer Encoder | Masked Language Modeling |
 | **ESM-2** | t30_150M | 150M | 30 | 640 | Transformer Encoder | Masked Language Modeling |
@@ -536,7 +755,7 @@ Traditional lead optimization relies on medicinal chemists' intuition to modify 
 
 ### 10.2 Step 1: Attention-Guided Masking
 
-We utilize the **Cross-Attention Matrix** ($A \in \mathbb{R}^{L \times M}$) generated by the architecture described in Chapter 6.
+We utilize the **Cross-Attention Matrix** ($\mathbf{A} \in \mathbb{R}^{L \times M}$) generated by the architecture described in Chapter 6.
 Let $A_{ij}$ be the attention weight between protein residue $i$ and ligand atom $j$. We compute the **Ligand Relevance Score** $R_j$ for each atom $j$:
 
 $$ R_j = \max_{i} A_{ij} $$
@@ -569,7 +788,7 @@ This closes the loop, creating a self-improving cycle where the model diagnoses 
 
 ## Conclusion
 
-semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-3/ESM-C, SMI-TED, MoLFormer) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology, it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
+semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-3/ESM-C, SMI-TED, MoLFormer) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology with three distinct split modes (Random, Compound-Only, Compound+Protein), it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
 
 ---
 
@@ -582,3 +801,4 @@ semantic-screening represents a holistic approach to the protein-ligand affinity
 5.  **Eldridge, M. D., et al. (1997)**. *Empirical scoring functions: I. The development of a fast empirical scoring function to estimate the binding affinity of ligands in receptor complexes*. Journal of Computer-Aided Molecular Design, 11, 425-445.
 6.  **Dosovitskiy, A., et al. (2020)**. *An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*. ICLR. (ViT)
 7.  **Wu, Z., et al. (2021)**. *MolFormer: Large-scale chemical language representations capture molecular structure and properties*. arXiv:2106.09553. (MoLFormer)
+8.  **Su, J., et al. (2024)**. *RoFormer: Enhanced transformer with rotary position embedding*. Neurocomputing, 568, 127063. (RoPE)
