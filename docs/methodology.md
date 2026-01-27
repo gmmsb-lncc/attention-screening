@@ -519,9 +519,9 @@ Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$ be the dataset. The random split part
 
 $$ \mathcal{D} = \mathcal{D}_{train} \cup \mathcal{D}_{val} \cup \mathcal{D}_{test} $$
 
-Where samples are drawn uniformly at random, with stratification ensuring:
+Where samples are drawn uniformly at random, with stratification ensuring that the class distribution is preserved in each split:
 
-$$ \frac{|\{i : y_i = 1, i \in \mathcal{D}_k\}|}{|\mathcal{D}_k|} \approx \frac{|\{i : y_i = 1\}|}{N} \quad \forall k \in \{train, val, test\} $$
+$$\frac{N_{positive,k}}{N_k} \approx \frac{N_{positive}}{N} \quad \text{for } k \in \{train, val, test\}$$
 
 **Characteristics**:
 - ✅ Both compounds and kinases may appear in multiple splits
@@ -539,17 +539,19 @@ Stratification by unique compounds to prevent compound leakage.
 1. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
 2. Shuffle compounds with fixed seed
 3. Partition compounds:
-   - Train compounds: $\mathcal{C}_{train} = \{c_1, ..., c_{\lfloor 0.8K \rfloor}\}$
-   - Validation compounds: $\mathcal{C}_{val} = \{c_{\lfloor 0.8K \rfloor+1}, ..., c_{\lfloor 0.9K \rfloor}\}$
-   - Test compounds: $\mathcal{C}_{test} = \{c_{\lfloor 0.9K \rfloor+1}, ..., c_K\}$
+   - Train compounds: first 80% of unique compounds
+   - Validation compounds: next 10% of unique compounds
+   - Test compounds: final 10% of unique compounds
 4. Assign all samples where compound $\in$ compound set
 
 **Mathematical Formulation**:
-Let $c(x_i)$ denote the compound ID of sample $x_i$. The split ensures:
+Let $c(x_i)$ denote the compound ID of sample $x_i$. The split ensures no overlap between compound sets:
 
-$$ \mathcal{C}_{train} \cap \mathcal{C}_{val} = \emptyset, \quad \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset, \quad \mathcal{C}_{val} \cap \mathcal{C}_{test} = \emptyset $$
+$$\mathcal{C}_{train} \cap \mathcal{C}_{val} = \emptyset, \quad \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset, \quad \mathcal{C}_{val} \cap \mathcal{C}_{test} = \emptyset$$
 
-$$ \mathcal{D}_{train} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{train}\} $$
+The training set contains all samples whose compounds belong to the training compound set:
+
+$$\mathcal{D}_{train} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{train}\}$$
 
 **Characteristics**:
 - ✅ **No compound leakage** - same compound never in train and test
@@ -567,22 +569,22 @@ The most stringent split: both compounds AND kinases are held out.
 1. Extract unique kinases: $\mathcal{P} = \{p_1, p_2, ..., p_J\}$
 2. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
 3. Shuffle each independently with seed
-4. Select test kinases: $\mathcal{P}_{test} = \{p_1, ..., p_{\lfloor 0.15J \rfloor}\}$
-5. Select test compounds: $\mathcal{C}_{test} = \{c_1, ..., c_{\lfloor 0.15K \rfloor}\}$
+4. Select test kinases: first 15% of unique kinases
+5. Select test compounds: first 15% of unique compounds
 6. Create masks:
-   - $train\_mask = (c(x) \in \mathcal{C}_{train}) \land (p(x) \in \mathcal{P}_{train})$
-   - $test\_mask = (c(x) \in \mathcal{C}_{test}) \land (p(x) \in \mathcal{P}_{test})$
-   - $val\_mask = \neg train\_mask \land \neg test\_mask$
+   - Train mask: samples where compound and kinase are both in training sets
+   - Test mask: samples where compound and kinase are both in test sets
+   - Validation mask: all remaining samples
 7. Recursive expansion if test set < 50 samples
 
 **Mathematical Formulation**:
-Let $c(x_i)$ and $p(x_i)$ denote the compound and protein IDs of sample $x_i$. The split ensures:
+Let $c(x_i)$ and $p(x_i)$ denote the compound and protein IDs of sample $x_i$. The split ensures no overlap in both dimensions:
 
-$$ \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset \quad \text{AND} \quad \mathcal{P}_{train} \cap \mathcal{P}_{test} = \emptyset $$
+$$\mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset \quad \text{and} \quad \mathcal{P}_{train} \cap \mathcal{P}_{test} = \emptyset$$
 
 The test set contains only samples where **both** compound and protein are unseen:
 
-$$ \mathcal{D}_{test} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{test} \land p(x_i) \in \mathcal{P}_{test}\} $$
+$$\mathcal{D}_{test} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{test} \text{ and } p(x_i) \in \mathcal{P}_{test}\}$$
 
 **Characteristics**:
 - ✅ **No compound leakage** - compounds are completely held out
@@ -621,9 +623,7 @@ Where $\hat{\mathbf{E}}$ denotes L2-normalized embeddings and $\alpha=0.6$, $\be
 3. Cluster using MiniBatchKMeans with k-means++ initialization
 4. Assign entire clusters to train/val/test (no cluster splitting)
 
-**Constraint**: A cluster is never split across sets:
-
-$$ \forall x \in \mathcal{D}_{train}, \forall y \in \mathcal{D}_{test}: \text{Cluster}(x) \neq \text{Cluster}(y) $$
+**Constraint**: A cluster is never split across sets. All samples from the same cluster are assigned to the same split (train, val, or test).
 
 ### 7.5 Validation Metrics
 
@@ -632,8 +632,9 @@ We evaluate model performance using a comprehensive suite of metrics:
 *   **Classification**:
     *   **AUC-ROC**: Area Under the Receiver Operating Characteristic curve.
     *   **F1-Score**: Harmonic mean of precision and recall.
-    *   **MCC (Matthews Correlation Coefficient)**: A robust metric for imbalanced datasets.
-    $$ MCC = \frac{TP \cdot TN - FP \cdot FN}{\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}} $$
+    *   **MCC (Matthews Correlation Coefficient)**: A robust metric for imbalanced datasets, defined as:
+
+$$MCC = \frac{TP \times TN - FP \times FN}{\sqrt{(TP+FP) \times (TP+FN) \times (TN+FP) \times (TN+FN)}}$$
 
 *   **Regression**:
     *   **RMSE (Root Mean Squared Error)**: Measures the average magnitude of error in $pChEMBL$ units.
@@ -780,7 +781,7 @@ We sample $K$ candidate tokens from this distribution, generating a set of new m
 
 The generated variants are not guaranteed to be better binders. To verify this, we pass each candidate $L'_k$ back through the **Regression Module** (Chapter 6.4.2) to predict its affinity $\hat{y}_k$.
 
-$$ L_{optimized} = \operatorname*{argmax}_{L'_k} \text{Regressor}(P, L'_k) $$
+$$ L_{optimized} = \underset{L'_k}{\text{argmax}} \, \text{Regressor}(P, L'_k) $$
 
 This closes the loop, creating a self-improving cycle where the model diagnoses its own weak interactions and proposes specific chemical modifications to fix them.
 
