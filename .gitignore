@@ -158,6 +158,7 @@ FM4M/examples/*.ipynb
 # Images and Media
 # ============================================
 *.png
+!semantic-screening-DT-kinase.png
 *.jpg
 *.jpeg
 *.gif
