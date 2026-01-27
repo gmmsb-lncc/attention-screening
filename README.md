@@ -9,6 +9,8 @@
 
 semantic-screening is an extensible platform combining state-of-the-art protein language models (ESM-2, ESM-C/ESM-3) with molecular embeddings (SMI-TED, MoLFormer) to predict compound activity against protein targets. It implements the **DT-Kinase** architecture—a hybrid CNN + Cross-Attention neural network for interaction modeling—alongside classical ML pipelines and rigorous stratification to prevent data leakage.
 
+![Semantic Screening Methodology](semantic-screening-DT-kinase.png)
+
 ### 🔬 Scientific Context & Motivation
 
 **Kinases** comprise ~2% of the human proteome (518 genes) but regulate ~30% of all cellular proteins through phosphorylation. Dysregulation drives oncogenic transformation and other diseases. The central pharmacological challenge is achieving **selectivity across a highly conserved catalytic domain**—all 518 kinases share >85% structural similarity in their ATP-binding pocket, making it notoriously difficult to design selective inhibitors without off-target toxicity or emergent drug resistance mutations.
