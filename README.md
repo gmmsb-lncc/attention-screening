@@ -42,7 +42,7 @@ For detailed information:
 - **[User Guide](docs/02-user-guide/)** - Detailed usage instructions and workflows.
 - **[Architecture](docs/03-architecture/)** - System design patterns and diagrams.
 - **[Modules](docs/04-modules/)** - Deep dive into specific components.
-- **[Stratification Guide](docs/02-user-guide/stratification-methodology.md)** - Details on the K-means++ splitting strategy.
+- **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Three split modes: Random, Compound-Only, Compound+Protein.
 
 ---
 
@@ -55,7 +55,7 @@ For detailed information:
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
-| 🔀 **K-means++ Stratification** | Cluster-aware train/val/test splitting with cosine similarity validation |
+| 🔀 **Rigorous Split Modes** | Random, Compound-Only, Compound+Protein splits to prevent data leakage |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 
 ## Supported Models
