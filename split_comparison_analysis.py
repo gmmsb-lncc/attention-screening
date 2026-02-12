@@ -18,19 +18,24 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import faiss
+from scipy.stats import wilcoxon
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, matthews_corrcoef
+from sklearn.metrics import (
+    accuracy_score, matthews_corrcoef, f1_score,
+    precision_score, recall_score, roc_auc_score
+)
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
 from crossattention_split_analysis.config import (
     DATASET_PATHS, DEFAULT_AFFINITY_THRESHOLD,
-    AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS
+    AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS, DEFAULT_SEEDS
 )
 
 DEFAULT_SPLIT_SEED = 42
@@ -38,8 +43,10 @@ DEFAULT_N_ROUNDS = 5
 DEFAULT_TEST_FRACTION = 0.2
 DEFAULT_N_SPLIT_CANDIDATES = 25
 MIN_TEST_SAMPLES = 100
-SPLIT_PROTOCOL_VERSION = "80_20_balanced_tanimoto_candidates_v2"
+SPLIT_PROTOCOL_VERSION = "80_20_balanced_tanimoto_candidates_v3"
 MAX_DIVERSITY_COMPOUNDS = 8000
+# Well-separated seeds for multi-round experiments (avoids correlated splits)
+ROUND_SEEDS = DEFAULT_SEEDS  # [42, 123, 456, 789, 1024]
 
 # Plot style
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -48,11 +55,14 @@ plt.rcParams['font.size'] = 12
 
 
 def faiss_knn_predict(X_train: np.ndarray, y_train: np.ndarray,
-                      X_test: np.ndarray, k: int = 5) -> np.ndarray:
+                      X_test: np.ndarray, k: int = 5):
     """KNN classification via FAISS with cosine similarity and distance-weighted voting.
 
     Uses L2-normalized inner product (equivalent to cosine similarity).
     Implements distance-weighted voting equivalent to sklearn weights='distance'.
+
+    Returns (predictions, probabilities) where probabilities are the normalized
+    class scores for the positive class (used for AUROC computation).
     """
     X_train_f32 = np.ascontiguousarray(X_train, dtype=np.float32)
     X_test_f32 = np.ascontiguousarray(X_test, dtype=np.float32)
@@ -78,7 +88,14 @@ def faiss_knn_predict(X_train: np.ndarray, y_train: np.ndarray,
         class_scores[:, ci] = np.where(mask, weights, 0.0).sum(axis=1)
 
     best_class_idx = class_scores.argmax(axis=1)
-    return classes[best_class_idx]
+    predictions = classes[best_class_idx]
+
+    # Compute probability for positive class (class=1) for AUROC
+    row_sums = class_scores.sum(axis=1, keepdims=True)
+    row_sums = np.maximum(row_sums, 1e-12)  # avoid division by zero
+    proba_positive = class_scores[:, -1] / row_sums.ravel()  # last class = 1
+
+    return predictions, proba_positive
 
 
 def load_dataset(filepath: str):
@@ -88,11 +105,25 @@ def load_dataset(filepath: str):
     threshold = DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl  # 6.0
 
     # Calculate pChEMBL from standard_value when missing
+    # NOTE: assumes standard_value is in nM. pChEMBL = 9 - log10(nM)
     n_missing = df['pchembl_value'].isna().sum()
     if n_missing > 0:
         print(f"  Calculating pChEMBL for {n_missing} samples with missing values...")
         mask_missing = df['pchembl_value'].isna()
-        df.loc[mask_missing, 'pchembl_value'] = 9 - np.log10(df.loc[mask_missing, 'standard_value'])
+        std_vals = df.loc[mask_missing, 'standard_value']
+        # Sanity check: standard_value should be positive and in nM range
+        if (std_vals <= 0).any():
+            n_invalid = (std_vals <= 0).sum()
+            print(f"  WARNING: {n_invalid} rows with standard_value <= 0, skipping imputation for those")
+            mask_valid = mask_missing & (df['standard_value'] > 0)
+            df.loc[mask_valid, 'pchembl_value'] = 9 - np.log10(df.loc[mask_valid, 'standard_value'])
+        else:
+            df.loc[mask_missing, 'pchembl_value'] = 9 - np.log10(std_vals)
+        # Warn if values suggest wrong units (e.g. molar instead of nM)
+        computed = df.loc[mask_missing, 'pchembl_value'].dropna()
+        if len(computed) > 0 and (computed > 15).any():
+            print(f"  WARNING: {(computed > 15).sum()} computed pChEMBL values > 15, "
+                  f"check that standard_value is in nM (not M or uM)")
 
     df['label'] = (df['pchembl_value'] >= threshold).astype(int)
 
@@ -114,6 +145,7 @@ def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing finger
     """Compute Morgan fingerprints for a list of SMILES. Returns float32."""
     fingerprints = []
     valid_indices = []
+    n_invalid = 0
 
     for i, smi in enumerate(tqdm(smiles_list, desc=desc, disable=len(smiles_list) < 1000)):
         mol = Chem.MolFromSmiles(smi)
@@ -121,6 +153,12 @@ def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing finger
             fp = _MORGAN_GEN.GetFingerprintAsNumPy(mol).astype(np.float32)
             fingerprints.append(fp)
             valid_indices.append(i)
+        else:
+            n_invalid += 1
+
+    if n_invalid > 0:
+        print(f"  WARNING: {n_invalid}/{len(smiles_list)} SMILES failed RDKit parsing "
+              f"({100*n_invalid/len(smiles_list):.1f}% dropped)")
 
     return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 2048), dtype=np.float32), valid_indices
 
@@ -179,9 +217,42 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
 # TRAINING AND EVALUATION
 # =============================================================================
 
+def _compute_metrics(y_true, y_pred, y_proba=None):
+    """Compute all classification metrics."""
+    metrics = {
+        'accuracy': float(accuracy_score(y_true, y_pred)),
+        'mcc': float(matthews_corrcoef(y_true, y_pred)),
+        'f1': float(f1_score(y_true, y_pred, zero_division=0)),
+        'precision': float(precision_score(y_true, y_pred, zero_division=0)),
+        'recall': float(recall_score(y_true, y_pred, zero_division=0)),
+    }
+    if y_proba is not None and len(np.unique(y_true)) == 2:
+        try:
+            metrics['auroc'] = float(roc_auc_score(y_true, y_proba))
+        except ValueError:
+            metrics['auroc'] = float('nan')
+    else:
+        metrics['auroc'] = float('nan')
+    return metrics
+
+
 def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
                        seed: int = 42, fp_cache: dict = None):
-    """Train KNN (FAISS) and MLP and return metrics."""
+    """Train KNN (FAISS) and MLP and return metrics.
+
+    NOTE on blind-target condition: When unseen kinases appear in the test set
+    (kinase and new_compound_new_kinase scenarios), their one-hot encoding is
+    all-zeros. This means the model has NO target identity information for those
+    samples. The performance drop in these scenarios reflects BOTH data leakage
+    removal AND loss of target representation. Models using sequence embeddings
+    (e.g., ESM-2) would retain some generalization signal for novel kinases.
+
+    NOTE on MLP early stopping: sklearn MLPClassifier carves a random 10%
+    validation split from training data for early stopping. This internal split
+    does NOT respect compound/kinase boundaries, which is a known limitation
+    of using sklearn for this evaluation. It affects only when training stops,
+    not the test evaluation integrity.
+    """
 
     train_df = df.iloc[train_idx].reset_index(drop=True)
     test_df = df.iloc[test_idx].reset_index(drop=True)
@@ -201,12 +272,9 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
     # KNN via FAISS (cosine similarity with distance-weighted voting)
     print("    Training KNN (FAISS)...")
     t0 = time.time()
-    knn_pred = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=5)
+    knn_pred, knn_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=5)
     knn_time = time.time() - t0
-    results['KNN'] = {
-        'accuracy': accuracy_score(y_test, knn_pred),
-        'mcc': matthews_corrcoef(y_test, knn_pred)
-    }
+    results['KNN'] = _compute_metrics(y_test, knn_pred, knn_proba)
     print(f"    KNN done in {format_time(knn_time)}")
 
     # MLP
@@ -227,11 +295,9 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
     )
     mlp.fit(X_train_scaled, y_train)
     mlp_pred = mlp.predict(X_test_scaled)
+    mlp_proba = mlp.predict_proba(X_test_scaled)[:, 1]
     mlp_time = time.time() - t0
-    results['MLP'] = {
-        'accuracy': accuracy_score(y_test, mlp_pred),
-        'mcc': matthews_corrcoef(y_test, mlp_pred)
-    }
+    results['MLP'] = _compute_metrics(y_test, mlp_pred, mlp_proba)
     print(f"    MLP done in {format_time(mlp_time)}")
 
     return results
@@ -244,15 +310,23 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
 # Scenario configuration: map CLI key -> (display_name, plot_key)
 ALL_SCENARIOS_CONFIG = {
     'new_compound_new_kinase': (
-        'New Compound + New Kinase (true generalization)',
+        'New Compound + New Kinase (true generalization, S4)',
         'New Comp.\n+ New Kinase'
     ),
+    'scaffold': (
+        'Split by Scaffold (cold-scaffold)',
+        'Split by\nScaffold'
+    ),
     'compound': (
-        'Split by Compound (no leakage)',
+        'Split by Compound (cold-drug, S2)',
         'Split by\nCompound'
     ),
+    'kinase': (
+        'Split by Kinase (cold-target, S3)',
+        'Split by\nKinase'
+    ),
     'random': (
-        'Random Split (with leakage)',
+        'Random Split (with leakage, S1)',
         'Random Split\n(Original)'
     ),
 }
@@ -289,6 +363,30 @@ def _build_compound_fp_map(df: pd.DataFrame):
         comp_id = unique_comp.iloc[src_i]['chembl_id']
         fp_map[comp_id] = fps[fp_i].astype(bool)
     return fp_map
+
+
+def _get_murcko_scaffold(smiles: str) -> str:
+    """Return Murcko scaffold SMILES for a compound. Returns 'UNKNOWN' on failure."""
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return 'UNKNOWN'
+        scaffold = MurckoScaffold.GetScaffoldForMol(mol)
+        return Chem.MolToSmiles(scaffold)
+    except Exception:
+        return 'UNKNOWN'
+
+
+def _build_compound_scaffold_map(df: pd.DataFrame) -> dict:
+    """Build mapping: chembl_id -> Murcko scaffold SMILES."""
+    unique_comp = df[['chembl_id', 'canonical_smiles']].drop_duplicates(subset=['chembl_id'])
+    scaffold_map = {}
+    for _, row in tqdm(unique_comp.iterrows(), total=len(unique_comp),
+                       desc="Computing Murcko scaffolds", disable=len(unique_comp) < 1000):
+        scaffold_map[row['chembl_id']] = _get_murcko_scaffold(row['canonical_smiles'])
+    n_scaffolds = len(set(scaffold_map.values()) - {'UNKNOWN'})
+    print(f"  Murcko scaffolds: {n_scaffolds} unique scaffolds from {len(scaffold_map)} compounds")
+    return scaffold_map
 
 
 def _pairwise_tanimoto_mean_sampled(fp_matrix: np.ndarray, rng: np.random.Generator, n_pairs: int = 5000):
@@ -344,7 +442,8 @@ def _distribution_l1(values: np.ndarray, reference_probs: dict):
     return float(0.5 * dist)
 
 
-def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int, test_fraction: float):
+def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int,
+                               test_fraction: float, scaffold_map: dict = None):
     """
     Generate a candidate split for one scenario.
     Returns (train_idx, val_idx, test_idx, metadata).
@@ -363,6 +462,27 @@ def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int, tes
 
     compounds = np.array(df['chembl_id'].unique())
 
+    if scenario_id == 'scaffold':
+        # Split by Murcko scaffold: all compounds sharing a scaffold go together
+        if scaffold_map is None:
+            raise ValueError("scaffold scenario requires scaffold_map")
+        # Assign scaffold to each row
+        row_scaffolds = df['chembl_id'].map(scaffold_map).fillna('UNKNOWN')
+        unique_scaffolds = np.array(row_scaffolds.unique())
+        rng.shuffle(unique_scaffolds)
+        n_test_scaff = max(1, int(round(len(unique_scaffolds) * test_fraction)))
+        test_scaffolds = set(unique_scaffolds[:n_test_scaff])
+        test_mask = row_scaffolds.isin(test_scaffolds).values
+        train_mask = ~test_mask
+        train_idx = np.where(train_mask)[0]
+        test_idx = np.where(test_mask)[0]
+        val_idx = np.array([], dtype=np.int64)
+        return train_idx, val_idx, test_idx, {
+            'strategy': 'scaffold_split',
+            'n_test_scaffolds': n_test_scaff,
+            'n_total_scaffolds': len(unique_scaffolds)
+        }
+
     if scenario_id == 'compound':
         rng.shuffle(compounds)
         n_test_comp = max(1, int(round(len(compounds) * test_fraction)))
@@ -373,6 +493,18 @@ def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int, tes
         test_idx = np.where(test_mask)[0]
         val_idx = np.array([], dtype=np.int64)
         return train_idx, val_idx, test_idx, {'strategy': 'new_compound_80_20'}
+
+    if scenario_id == 'kinase':
+        kinases = np.array(df['target_kinase'].unique())
+        rng.shuffle(kinases)
+        n_test_kin = max(1, int(round(len(kinases) * test_fraction)))
+        test_kinases = set(kinases[:n_test_kin])
+        test_mask = df['target_kinase'].isin(test_kinases).values
+        train_mask = ~test_mask
+        train_idx = np.where(train_mask)[0]
+        test_idx = np.where(test_mask)[0]
+        val_idx = np.array([], dtype=np.int64)
+        return train_idx, val_idx, test_idx, {'strategy': 'new_kinase_80_20'}
 
     if scenario_id == 'new_compound_new_kinase':
         kinases = np.array(df['target_kinase'].unique())
@@ -440,7 +572,7 @@ def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray, t
         return False, "compound_leakage", {'leaked_compounds': len(leaked_comp)}
 
     leaked_kin = set()
-    if scenario_id == 'new_compound_new_kinase':
+    if scenario_id in ('kinase', 'new_compound_new_kinase'):
         train_kin = set(df.iloc[train_idx]['target_kinase'])
         test_kin = set(df.iloc[test_idx]['target_kinase'])
         leaked_kin = train_kin & test_kin
@@ -455,7 +587,7 @@ def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray, t
         'test_kinases': n_test_kinases,
         'leaked_compounds': len(leaked_comp),
     }
-    if scenario_id == 'new_compound_new_kinase':
+    if scenario_id in ('kinase', 'new_compound_new_kinase'):
         diagnostics['test_kinases'] = len(set(df.iloc[test_idx]['target_kinase']))
         diagnostics['leaked_kinases'] = len(leaked_kin)
     return True, "ok", diagnostics
@@ -538,7 +670,8 @@ def _select_best_split_candidate(
     global_label_rate: float,
     global_protein_probs: dict,
     global_diversity: float,
-    fp_map: dict
+    fp_map: dict,
+    scaffold_map: dict = None
 ):
     """Select best split candidate for one round by constrained quality score."""
     best = None
@@ -547,7 +680,8 @@ def _select_best_split_candidate(
     for cand_i in range(n_candidates):
         candidate_seed = int(round_seed + 10007 * cand_i)
         train_idx, val_idx, test_idx, meta = _generate_candidate_split(
-            df, scenario_id=scenario_id, seed=candidate_seed, test_fraction=test_fraction
+            df, scenario_id=scenario_id, seed=candidate_seed,
+            test_fraction=test_fraction, scaffold_map=scaffold_map
         )
         valid, reason, diag = _validate_split(df, scenario_id, train_idx, test_idx)
         if not valid:
@@ -611,7 +745,8 @@ def run_comparison(
     print("=" * 70)
     print("COMPARISON: RANDOM SPLIT VS CORRECT SPLIT")
     print("=" * 70)
-    split_seeds = [seed + i for i in range(n_rounds)]
+    # Use well-separated seeds to avoid correlated splits
+    split_seeds = ROUND_SEEDS[:n_rounds] if n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [seed + i for i in range(n_rounds - len(ROUND_SEEDS))]
     print(f"Model seed (fixed): {seed}")
     print(f"Split rounds: {n_rounds}")
     print(f"Split seeds by round: {split_seeds}")
@@ -650,6 +785,12 @@ def run_comparison(
     fp_cache = {cid: fp.astype(np.float32) for cid, fp in fp_map.items()}
     print(f"Fingerprint cache: {len(fp_cache)} unique compounds precomputed")
 
+    # Build scaffold map if scaffold scenario is requested
+    scaffold_map = None
+    scenario_ids = [s for s, _, _ in scenarios_config]
+    if 'scaffold' in scenario_ids:
+        scaffold_map = _build_compound_scaffold_map(df)
+
     all_kinases = list(df['target_kinase'].unique())
     all_results = {}
     split_stats = {}
@@ -674,7 +815,8 @@ def run_comparison(
                 global_label_rate=global_label_rate,
                 global_protein_probs=global_protein_probs,
                 global_diversity=global_diversity,
-                fp_map=fp_map
+                fp_map=fp_map,
+                scaffold_map=scaffold_map
             )
             train_idx = best['train_idx']
             val_idx = best['val_idx']
@@ -692,7 +834,7 @@ def run_comparison(
                 'leaked_compounds': len(leaked),
                 'leak_pct': 100 * len(leaked) / len(test_compounds) if test_compounds else 0
             }
-            if scenario_key == 'New Comp.\n+ New Kinase':
+            if scenario_id in ('kinase', 'new_compound_new_kinase'):
                 train_kinases = set(df.iloc[train_idx]['target_kinase'])
                 test_kinases_set = set(df.iloc[test_idx]['target_kinase'])
                 stats['test_kinases'] = len(test_kinases_set)
@@ -723,8 +865,10 @@ def run_comparison(
                     'split_metadata': best['metadata'],
                     'metrics': results
                 }
-                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}")
-                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}")
+                knn_auroc = f", AUROC={results['KNN']['auroc']:.4f}" if not np.isnan(results['KNN'].get('auroc', float('nan'))) else ""
+                mlp_auroc = f", AUROC={results['MLP']['auroc']:.4f}" if not np.isnan(results['MLP'].get('auroc', float('nan'))) else ""
+                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auroc}")
+                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auroc}")
 
         # Aggregate across rounds
         if round_results:
@@ -746,10 +890,15 @@ def run_comparison(
                 aggregated = {}
                 for model in ['KNN', 'MLP']:
                     model_agg = {}
-                    for metric in ['accuracy', 'mcc']:
-                        values = [r['metrics'][model][metric] for r in round_results.values()]
-                        model_agg[metric] = float(np.mean(values))
-                        model_agg[f'{metric}_std'] = float(np.std(values, ddof=1))
+                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                        values = [r['metrics'][model][metric] for r in round_results.values()
+                                  if not np.isnan(r['metrics'][model].get(metric, float('nan')))]
+                        if values:
+                            model_agg[metric] = float(np.mean(values))
+                            model_agg[f'{metric}_std'] = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+                        else:
+                            model_agg[metric] = float('nan')
+                            model_agg[f'{metric}_std'] = 0.0
                     model_agg['round_results'] = {
                         str(r_idx): {
                             'round_seed': r_data['round_seed'],
@@ -772,8 +921,10 @@ def run_comparison(
                 print(f"\n  --- Aggregate ({len(round_results)} rounds) ---")
                 for model in ['KNN', 'MLP']:
                     m = aggregated[model]
+                    auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
                     print(f"  {model}: Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
-                          f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}")
+                          f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}, "
+                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auroc_str}")
 
     return all_results, split_stats
 
@@ -964,13 +1115,16 @@ def run_single_dataset(
         scenario_json = {}
         for model in ['KNN', 'MLP']:
             m = all_results[scenario_key][model]
-            scenario_json[model] = {
-                'accuracy': m['accuracy'],
-                'mcc': m['mcc'],
-            }
+            scenario_json[model] = {}
+            for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                val = m.get(metric)
+                if val is not None and not (isinstance(val, float) and np.isnan(val)):
+                    scenario_json[model][metric] = val
             if multi_round:
-                scenario_json[model]['accuracy_std'] = m.get('accuracy_std', 0.0)
-                scenario_json[model]['mcc_std'] = m.get('mcc_std', 0.0)
+                for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                    std_val = m.get(f'{metric}_std', 0.0)
+                    if not (isinstance(std_val, float) and np.isnan(std_val)):
+                        scenario_json[model][f'{metric}_std'] = std_val
                 scenario_json[model]['n_rounds'] = m.get('n_rounds', 1)
                 if 'round_results' in m:
                     scenario_json[model]['round_results'] = m['round_results']
@@ -983,7 +1137,7 @@ def run_single_dataset(
             'split_protocol_version': SPLIT_PROTOCOL_VERSION,
             'model_seed': seed,
             'n_rounds': n_rounds,
-            'split_seeds': [seed + i for i in range(n_rounds)],
+            'split_seeds': ROUND_SEEDS[:n_rounds] if n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [seed + i for i in range(n_rounds - len(ROUND_SEEDS))],
             'target_test_fraction': test_fraction,
             'n_split_candidates': n_split_candidates,
             'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
@@ -1016,6 +1170,32 @@ def run_single_dataset(
             new_mlp_std = _get_metric_std(all_results, new_key, 'MLP', 'mcc')
             print(f"  KNN: {orig_knn_mcc:.3f}+/-{orig_knn_std:.3f} -> {new_knn_mcc:.3f}+/-{new_knn_std:.3f}")
             print(f"  MLP: {orig_mlp_mcc:.3f}+/-{orig_mlp_std:.3f} -> {new_mlp_mcc:.3f}+/-{new_mlp_std:.3f}")
+
+            # Wilcoxon signed-rank test (paired comparison across rounds)
+            random_data = all_results[random_key]
+            new_data = all_results[new_key]
+            for model in ['KNN', 'MLP']:
+                if 'round_results' in random_data[model] and 'round_results' in new_data[model]:
+                    r_keys = sorted(random_data[model]['round_results'].keys())
+                    n_keys = sorted(new_data[model]['round_results'].keys())
+                    if len(r_keys) >= 5 and len(n_keys) >= 5:
+                        r_mcc = [random_data[model]['round_results'][k]['metrics']['mcc'] for k in r_keys]
+                        n_mcc = [new_data[model]['round_results'][k]['metrics']['mcc'] for k in n_keys]
+                        try:
+                            stat, p_val = wilcoxon(r_mcc, n_mcc, alternative='greater')
+                            print(f"  {model} Wilcoxon signed-rank (random > new_comp_new_kin): "
+                                  f"stat={stat:.1f}, p={p_val:.4f}"
+                                  f"{' ***' if p_val < 0.01 else ' **' if p_val < 0.05 else ' (n.s.)'}")
+                        except ValueError as e:
+                            print(f"  {model} Wilcoxon test: could not compute ({e})")
+                    else:
+                        print(f"  {model} Wilcoxon test: requires >= 5 rounds (have {min(len(r_keys), len(n_keys))})")
+
+        # Document blind-target limitation
+        print(f"\n  NOTE: One-hot kinase encoding creates a 'blind target' condition for")
+        print(f"  cold-kinase scenarios (kinase, new_compound_new_kinase). Unseen kinases")
+        print(f"  receive all-zero vectors, so the performance drop reflects BOTH leakage")
+        print(f"  removal AND loss of target representation.")
     else:
         print("\nMCC drop summary skipped: requires both random and new_compound_new_kinase scenarios.")
 
@@ -1179,10 +1359,11 @@ Examples:
   # Debug mode for detailed error traces
   %(prog)s --dataset all --debug
 
-Available scenarios:
-  - new_compound_new_kinase : Hardest - both compound and kinase unseen
-  - compound                : Medium - compound unseen, kinase may overlap
-  - random                  : Easiest - random split (baseline with leakage)
+Available scenarios (Pahikkala et al. 2015 framework):
+  - new_compound_new_kinase : S4 - both compound and kinase unseen (hardest)
+  - compound                : S2 - compound unseen (cold-drug)
+  - kinase                  : S3 - kinase unseen (cold-target)
+  - random                  : S1 - random split (baseline with leakage)
         """
     )
 
@@ -1278,7 +1459,8 @@ Available scenarios:
     print(f"Split protocol:   {SPLIT_PROTOCOL_VERSION}")
     print(f"Model seed:       {args.seed} (fixed)")
     print(f"Split rounds:     {args.n_rounds}")
-    print(f"Split seeds:      {[args.seed + i for i in range(args.n_rounds)]}")
+    display_seeds = ROUND_SEEDS[:args.n_rounds] if args.n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [args.seed + i for i in range(args.n_rounds - len(ROUND_SEEDS))]
+    print(f"Split seeds:      {display_seeds}")
     print(f"Target test frac: {args.test_fraction:.2f}")
     print(f"Split candidates: {args.n_split_candidates}/round")
     print(f"Force recalc:     {args.force}")

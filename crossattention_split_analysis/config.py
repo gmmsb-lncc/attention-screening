@@ -174,8 +174,10 @@ DEFAULT_SEEDS = [42, 123, 456, 789, 1024]  # 5 seeds for statistical rigor
 
 AVAILABLE_SCENARIOS = {
     'new_compound_new_kinase': 'New Compound + New Kinase',
+    'scaffold': 'Split by Scaffold',
     'compound': 'Split by Compound',
+    'kinase': 'Split by Kinase',
     'random': 'Random Split'
 }
 
-DEFAULT_SCENARIOS = ['new_compound_new_kinase', 'compound', 'random']
+DEFAULT_SCENARIOS = ['new_compound_new_kinase', 'scaffold', 'compound', 'kinase', 'random']
