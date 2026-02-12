@@ -17,13 +17,14 @@ import traceback
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import faiss
 from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, matthews_corrcoef
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import rdFingerprintGenerator
+from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -44,6 +45,40 @@ MAX_DIVERSITY_COMPOUNDS = 8000
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams['figure.figsize'] = (14, 6)
 plt.rcParams['font.size'] = 12
+
+
+def faiss_knn_predict(X_train: np.ndarray, y_train: np.ndarray,
+                      X_test: np.ndarray, k: int = 5) -> np.ndarray:
+    """KNN classification via FAISS with cosine similarity and distance-weighted voting.
+
+    Uses L2-normalized inner product (equivalent to cosine similarity).
+    Implements distance-weighted voting equivalent to sklearn weights='distance'.
+    """
+    X_train_f32 = np.ascontiguousarray(X_train, dtype=np.float32)
+    X_test_f32 = np.ascontiguousarray(X_test, dtype=np.float32)
+    faiss.normalize_L2(X_train_f32)
+    faiss.normalize_L2(X_test_f32)
+
+    index = faiss.IndexFlatIP(X_train_f32.shape[1])
+    index.add(X_train_f32)
+    similarities, indices = index.search(X_test_f32, k)
+
+    # Distance-weighted voting: weight = similarity (higher = closer)
+    # Clamp similarities to avoid negative weights from numerical noise
+    weights = np.maximum(similarities, 0.0)
+
+    classes = np.unique(y_train)
+    n_test = X_test_f32.shape[0]
+
+    # Vectorized weighted voting
+    neighbor_labels = y_train[indices]  # (n_test, k)
+    class_scores = np.zeros((n_test, len(classes)), dtype=np.float64)
+    for ci, cls in enumerate(classes):
+        mask = (neighbor_labels == cls)
+        class_scores[:, ci] = np.where(mask, weights, 0.0).sum(axis=1)
+
+    best_class_idx = class_scores.argmax(axis=1)
+    return classes[best_class_idx]
 
 
 def load_dataset(filepath: str):
@@ -72,74 +107,111 @@ def load_dataset(filepath: str):
     return df
 
 
-def compute_morgan_fingerprints(smiles_list: list, radius: int = 2, n_bits: int = 2048):
-    """Compute Morgan fingerprints for a list of SMILES."""
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+
+
+def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing fingerprints"):
+    """Compute Morgan fingerprints for a list of SMILES. Returns float32."""
     fingerprints = []
     valid_indices = []
 
-    for i, smi in enumerate(smiles_list):
+    for i, smi in enumerate(tqdm(smiles_list, desc=desc, disable=len(smiles_list) < 1000)):
         mol = Chem.MolFromSmiles(smi)
         if mol is not None:
-            fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
-            fingerprints.append(np.array(fp))
+            fp = _MORGAN_GEN.GetFingerprintAsNumPy(mol).astype(np.float32)
+            fingerprints.append(fp)
             valid_indices.append(i)
 
-    return np.array(fingerprints), valid_indices
+    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 2048), dtype=np.float32), valid_indices
 
 
-def prepare_features(df: pd.DataFrame, all_kinases: list):
-    """Prepare features: Morgan FP + One-Hot Kinase."""
-    fps, valid_idx = compute_morgan_fingerprints(df['canonical_smiles'].tolist())
+def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None):
+    """Prepare features: Morgan FP + One-Hot Kinase (float32).
 
+    If fp_cache is provided, reuses precomputed fingerprints keyed by chembl_id.
+    """
+    n_kinases = len(all_kinases)
     kinase_to_idx = {k: i for i, k in enumerate(all_kinases)}
 
-    def one_hot_kinase(kinase):
-        vec = np.zeros(len(all_kinases))
+    if fp_cache is not None:
+        # Use cached fingerprints: vectorized lookup by chembl_id
+        chembl_ids = df['chembl_id'].values
+        smiles = df['canonical_smiles'].values
+        fps_list = []
+        valid_idx_pos = []
+        n = len(df)
+
+        for pos in tqdm(range(n), desc="    Preparing features", disable=n < 10000):
+            cid = chembl_ids[pos]
+            if cid in fp_cache:
+                fps_list.append(fp_cache[cid])
+                valid_idx_pos.append(pos)
+            else:
+                mol = Chem.MolFromSmiles(smiles[pos])
+                if mol is not None:
+                    fp_arr = _MORGAN_GEN.GetFingerprintAsNumPy(mol).astype(np.float32)
+                    fp_cache[cid] = fp_arr
+                    fps_list.append(fp_arr)
+                    valid_idx_pos.append(pos)
+
+        if not fps_list:
+            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+
+        fps = np.stack(fps_list)
+    else:
+        fps, valid_idx_pos = compute_morgan_fingerprints(df['canonical_smiles'].tolist())
+        if len(fps) == 0:
+            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+
+    kinase_oh = np.zeros((len(valid_idx_pos), n_kinases), dtype=np.float32)
+    for j, pos in enumerate(valid_idx_pos):
+        kinase = df.iloc[pos]['target_kinase']
         if kinase in kinase_to_idx:
-            vec[kinase_to_idx[kinase]] = 1
-        return vec
+            kinase_oh[j, kinase_to_idx[kinase]] = 1.0
 
-    kinase_oh = np.array([one_hot_kinase(k) for k in df.iloc[valid_idx]['target_kinase']])
     X = np.hstack([fps, kinase_oh])
-    y = df.iloc[valid_idx]['label'].values
+    y = df.iloc[valid_idx_pos]['label'].values
 
-    return X, y, valid_idx
+    return X, y, valid_idx_pos
 
 
 # =============================================================================
 # TRAINING AND EVALUATION
 # =============================================================================
 
-def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list, seed: int = 42):
-    """Train KNN and MLP and return metrics."""
+def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
+                       seed: int = 42, fp_cache: dict = None):
+    """Train KNN (FAISS) and MLP and return metrics."""
 
     train_df = df.iloc[train_idx].reset_index(drop=True)
     test_df = df.iloc[test_idx].reset_index(drop=True)
 
-    X_train, y_train, train_valid = prepare_features(train_df, all_kinases)
-    X_test, y_test, test_valid = prepare_features(test_df, all_kinases)
+    X_train, y_train, train_valid = prepare_features(train_df, all_kinases, fp_cache)
+    X_test, y_test, test_valid = prepare_features(test_df, all_kinases, fp_cache)
 
     if len(X_test) == 0 or len(X_train) == 0:
         return None
 
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    X_train_scaled = scaler.fit_transform(X_train).astype(np.float32)
+    X_test_scaled = scaler.transform(X_test).astype(np.float32)
 
     results = {}
 
-    # KNN
-    print("    Training KNN...")
-    knn = KNeighborsClassifier(n_neighbors=5, weights='distance', metric='cosine', n_jobs=-1)
-    knn.fit(X_train_scaled, y_train)
-    knn_pred = knn.predict(X_test_scaled)
+    # KNN via FAISS (cosine similarity with distance-weighted voting)
+    print("    Training KNN (FAISS)...")
+    t0 = time.time()
+    knn_pred = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=5)
+    knn_time = time.time() - t0
     results['KNN'] = {
         'accuracy': accuracy_score(y_test, knn_pred),
         'mcc': matthews_corrcoef(y_test, knn_pred)
     }
+    print(f"    KNN done in {format_time(knn_time)}")
 
     # MLP
     print("    Training MLP...")
+    t0 = time.time()
     mlp = MLPClassifier(
         hidden_layer_sizes=(256, 128),
         activation='relu',
@@ -155,10 +227,12 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
     )
     mlp.fit(X_train_scaled, y_train)
     mlp_pred = mlp.predict(X_test_scaled)
+    mlp_time = time.time() - t0
     results['MLP'] = {
         'accuracy': accuracy_score(y_test, mlp_pred),
         'mcc': matthews_corrcoef(y_test, mlp_pred)
     }
+    print(f"    MLP done in {format_time(mlp_time)}")
 
     return results
 
@@ -209,7 +283,7 @@ def _build_compound_fp_map(df: pd.DataFrame):
     """Build mapping: compound_id -> Morgan fingerprint (bool vector)."""
     unique_comp = df[['chembl_id', 'canonical_smiles']].drop_duplicates(subset=['chembl_id'])
     smiles = unique_comp['canonical_smiles'].tolist()
-    fps, valid_idx = compute_morgan_fingerprints(smiles)
+    fps, valid_idx = compute_morgan_fingerprints(smiles, desc="Building FP map (unique compounds)")
     fp_map = {}
     for fp_i, src_i in enumerate(valid_idx):
         comp_id = unique_comp.iloc[src_i]['chembl_id']
@@ -572,6 +646,10 @@ def run_comparison(
     print(f"Protein-group column for balancing: {protein_group_col}")
     print(f"Global internal diversity (unique compounds): {global_diversity:.4f}")
 
+    # Build fp_cache for model features (float32) from the already-computed fp_map (bool)
+    fp_cache = {cid: fp.astype(np.float32) for cid, fp in fp_map.items()}
+    print(f"Fingerprint cache: {len(fp_cache)} unique compounds precomputed")
+
     all_kinases = list(df['target_kinase'].unique())
     all_results = {}
     split_stats = {}
@@ -635,7 +713,7 @@ def run_comparison(
                 f"div_dev={best['quality']['diversity_dev_test']:.4f}"
             )
 
-            results = train_and_evaluate(df, train_idx, test_idx, all_kinases, seed=seed)
+            results = train_and_evaluate(df, train_idx, test_idx, all_kinases, seed=seed, fp_cache=fp_cache)
             if results is not None:
                 round_results[round_idx] = {
                     'round_seed': split_seed,
