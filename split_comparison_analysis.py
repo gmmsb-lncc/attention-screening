@@ -40,10 +40,11 @@ from crossattention_split_analysis.config import (
 
 DEFAULT_SPLIT_SEED = 42
 DEFAULT_N_ROUNDS = 5
-DEFAULT_TEST_FRACTION = 0.2
+DEFAULT_TEST_FRACTION = 0.10
+DEFAULT_VAL_FRACTION = 0.10
 DEFAULT_N_SPLIT_CANDIDATES = 25
-MIN_TEST_SAMPLES = 100
-SPLIT_PROTOCOL_VERSION = "80_20_balanced_tanimoto_candidates_v3"
+MIN_TEST_SAMPLES = 50
+SPLIT_PROTOCOL_VERSION = "80_10_10_balanced_tanimoto_candidates_v4"
 MAX_DIVERSITY_COMPOUNDS = 8000
 # Well-separated seeds for multi-round experiments (avoids correlated splits)
 ROUND_SEEDS = DEFAULT_SEEDS  # [42, 123, 456, 789, 1024]
@@ -98,8 +99,13 @@ def faiss_knn_predict(X_train: np.ndarray, y_train: np.ndarray,
     return predictions, proba_positive
 
 
-def load_dataset(filepath: str):
-    """Load dataset and create binary labels using pChEMBL threshold."""
+def load_dataset(filepath: str, keep_monotonic: bool = False):
+    """Load dataset and create binary labels using pChEMBL threshold.
+
+    By default, removes kinases with monotonic activity profiles (100% active
+    or 100% inactive), as they provide no discriminative signal and inflate
+    metrics. Use keep_monotonic=True to retain them.
+    """
     df = pd.read_csv(filepath, sep='\t')
 
     threshold = DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl  # 6.0
@@ -126,6 +132,19 @@ def load_dataset(filepath: str):
                   f"check that standard_value is in nM (not M or uM)")
 
     df['label'] = (df['pchembl_value'] >= threshold).astype(int)
+
+    # Filter monotonic kinases (100% active or 100% inactive)
+    if not keep_monotonic:
+        kin_rates = df.groupby('target_kinase')['label'].mean()
+        mono_kinases = set(kin_rates[(kin_rates == 0.0) | (kin_rates == 1.0)].index)
+        if mono_kinases:
+            n_before = len(df)
+            k_before = df['target_kinase'].nunique()
+            df = df[~df['target_kinase'].isin(mono_kinases)].reset_index(drop=True)
+            n_removed = n_before - len(df)
+            k_removed = k_before - df['target_kinase'].nunique()
+            print(f"  Monotonic kinase filter: removed {k_removed} kinases ({n_removed} samples, "
+                  f"{100*n_removed/n_before:.1f}%) with 100% single-class profiles")
 
     # Report class distribution
     n_active = df['label'].sum()
@@ -443,76 +462,82 @@ def _distribution_l1(values: np.ndarray, reference_probs: dict):
 
 
 def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int,
-                               test_fraction: float, scaffold_map: dict = None):
+                               test_fraction: float, val_fraction: float = 0.10,
+                               scaffold_map: dict = None):
     """
-    Generate a candidate split for one scenario.
+    Generate a candidate 80/10/10 split for one scenario.
     Returns (train_idx, val_idx, test_idx, metadata).
     """
     n = len(df)
     indices = np.arange(n, dtype=np.int64)
     labels = np.asarray(df['label'].values)
     rng = np.random.default_rng(seed)
+    holdout_fraction = test_fraction + val_fraction
 
     if scenario_id == 'random':
-        train_idx, test_idx = train_test_split(
-            indices, test_size=test_fraction, stratify=labels, random_state=seed
+        # Stratified 80/20, then split the 20% into val/test
+        train_idx, holdout_idx = train_test_split(
+            indices, test_size=holdout_fraction, stratify=labels, random_state=seed
         )
-        val_idx = np.array([], dtype=np.int64)
-        return train_idx, val_idx, test_idx, {'strategy': 'stratified_random'}
+        holdout_labels = labels[holdout_idx]
+        relative_test = test_fraction / holdout_fraction
+        val_idx, test_idx = train_test_split(
+            holdout_idx, test_size=relative_test, stratify=holdout_labels, random_state=seed + 1
+        )
+        return train_idx, val_idx, test_idx, {'strategy': 'stratified_random_80_10_10'}
 
     compounds = np.array(df['chembl_id'].unique())
 
     if scenario_id == 'scaffold':
-        # Split by Murcko scaffold: all compounds sharing a scaffold go together
         if scaffold_map is None:
             raise ValueError("scaffold scenario requires scaffold_map")
-        # Assign scaffold to each row
         row_scaffolds = df['chembl_id'].map(scaffold_map).fillna('UNKNOWN')
         unique_scaffolds = np.array(row_scaffolds.unique())
         rng.shuffle(unique_scaffolds)
-        n_test_scaff = max(1, int(round(len(unique_scaffolds) * test_fraction)))
-        test_scaffolds = set(unique_scaffolds[:n_test_scaff])
+        n_test = max(1, int(round(len(unique_scaffolds) * test_fraction)))
+        n_val = max(1, int(round(len(unique_scaffolds) * val_fraction)))
+        test_scaffolds = set(unique_scaffolds[:n_test])
+        val_scaffolds = set(unique_scaffolds[n_test:n_test + n_val])
         test_mask = row_scaffolds.isin(test_scaffolds).values
-        train_mask = ~test_mask
-        train_idx = np.where(train_mask)[0]
-        test_idx = np.where(test_mask)[0]
-        val_idx = np.array([], dtype=np.int64)
-        return train_idx, val_idx, test_idx, {
-            'strategy': 'scaffold_split',
-            'n_test_scaffolds': n_test_scaff,
-            'n_total_scaffolds': len(unique_scaffolds)
-        }
+        val_mask = row_scaffolds.isin(val_scaffolds).values
+        train_mask = ~(test_mask | val_mask)
+        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
+                {'strategy': 'scaffold_split_80_10_10',
+                 'n_test_scaffolds': n_test, 'n_val_scaffolds': n_val,
+                 'n_total_scaffolds': len(unique_scaffolds)})
 
     if scenario_id == 'compound':
         rng.shuffle(compounds)
-        n_test_comp = max(1, int(round(len(compounds) * test_fraction)))
-        test_compounds = set(compounds[:n_test_comp])
+        n_test = max(1, int(round(len(compounds) * test_fraction)))
+        n_val = max(1, int(round(len(compounds) * val_fraction)))
+        test_compounds = set(compounds[:n_test])
+        val_compounds = set(compounds[n_test:n_test + n_val])
         test_mask = df['chembl_id'].isin(test_compounds).values
-        train_mask = ~test_mask
-        train_idx = np.where(train_mask)[0]
-        test_idx = np.where(test_mask)[0]
-        val_idx = np.array([], dtype=np.int64)
-        return train_idx, val_idx, test_idx, {'strategy': 'new_compound_80_20'}
+        val_mask = df['chembl_id'].isin(val_compounds).values
+        train_mask = ~(test_mask | val_mask)
+        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
+                {'strategy': 'compound_split_80_10_10'})
 
     if scenario_id == 'kinase':
         kinases = np.array(df['target_kinase'].unique())
         rng.shuffle(kinases)
-        n_test_kin = max(1, int(round(len(kinases) * test_fraction)))
-        test_kinases = set(kinases[:n_test_kin])
+        n_test = max(1, int(round(len(kinases) * test_fraction)))
+        n_val = max(1, int(round(len(kinases) * val_fraction)))
+        test_kinases = set(kinases[:n_test])
+        val_kinases = set(kinases[n_test:n_test + n_val])
         test_mask = df['target_kinase'].isin(test_kinases).values
-        train_mask = ~test_mask
-        train_idx = np.where(train_mask)[0]
-        test_idx = np.where(test_mask)[0]
-        val_idx = np.array([], dtype=np.int64)
-        return train_idx, val_idx, test_idx, {'strategy': 'new_kinase_80_20'}
+        val_mask = df['target_kinase'].isin(val_kinases).values
+        train_mask = ~(test_mask | val_mask)
+        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
+                {'strategy': 'kinase_split_80_10_10'})
 
     if scenario_id == 'new_compound_new_kinase':
         kinases = np.array(df['target_kinase'].unique())
         rng.shuffle(compounds)
         rng.shuffle(kinases)
 
-        # Use broader candidate fractions; scoring selects the best candidate near target test size.
-        frac_min = max(0.10, test_fraction * 0.6)
+        # Broader candidate fractions; scoring selects the best near target test size
+        frac_min = max(0.06, test_fraction * 0.6)
         frac_max = min(0.85, test_fraction * 3.0)
         frac_comp = float(rng.uniform(frac_min, frac_max))
         frac_kin = float(rng.uniform(frac_min, frac_max))
@@ -526,39 +551,46 @@ def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int,
         kin_test = df['target_kinase'].isin(test_kinases).values
         test_mask = comp_test & kin_test
         train_mask = (~comp_test) & (~kin_test)
+        # Orphan rows (new compound + old kinase, or old compound + new kinase) = val
         val_mask = ~(train_mask | test_mask)
 
-        train_idx = np.where(train_mask)[0]
-        val_idx = np.where(val_mask)[0]
-        test_idx = np.where(test_mask)[0]
-        return train_idx, val_idx, test_idx, {
-            'strategy': 'new_compound_new_kinase_with_holdout_sets',
-            'frac_compound_holdout': frac_comp,
-            'frac_kinase_holdout': frac_kin,
-            'n_test_compounds_target': n_test_comp,
-            'n_test_kinases_target': n_test_kin,
-        }
+        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
+                {'strategy': 'new_compound_new_kinase_80_10_10',
+                 'frac_compound_holdout': frac_comp, 'frac_kinase_holdout': frac_kin,
+                 'n_test_compounds_target': n_test_comp, 'n_test_kinases_target': n_test_kin})
 
     raise ValueError(f"Unknown scenario_id: {scenario_id}")
 
 
-def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray, test_idx: np.ndarray):
+def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray,
+                     val_idx: np.ndarray, test_idx: np.ndarray):
     """Validate hard split constraints and minimum viability."""
     if len(train_idx) == 0 or len(test_idx) == 0:
         return False, "empty_train_or_test", {}
+    if len(val_idx) == 0:
+        return False, "empty_val", {}
     if len(test_idx) < MIN_TEST_SAMPLES:
         return False, "test_too_small", {'test_size': len(test_idx)}
 
     train_set = set(train_idx.tolist())
+    val_set = set(val_idx.tolist())
     test_set = set(test_idx.tolist())
     if train_set & test_set:
-        return False, "index_overlap", {}
+        return False, "index_overlap_train_test", {}
+    if train_set & val_set:
+        return False, "index_overlap_train_val", {}
+    if val_set & test_set:
+        return False, "index_overlap_val_test", {}
 
     y_test = np.asarray(df.iloc[test_idx]['label'].values)
     n_pos = int(y_test.sum())
     n_neg = int(len(y_test) - n_pos)
     if n_pos == 0 or n_neg == 0:
         return False, "single_class_test", {'n_pos': n_pos, 'n_neg': n_neg}
+
+    y_val = np.asarray(df.iloc[val_idx]['label'].values)
+    if int(y_val.sum()) == 0 or int(len(y_val) - y_val.sum()) == 0:
+        return False, "single_class_val", {'val_n_pos': int(y_val.sum()), 'val_n_neg': int(len(y_val) - y_val.sum())}
 
     n_test_kinases = int(df.iloc[test_idx]['target_kinase'].nunique())
     if n_test_kinases < 2:
@@ -581,8 +613,10 @@ def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray, t
 
     diagnostics = {
         'train_size': len(train_idx),
+        'val_size': len(val_idx),
         'test_size': len(test_idx),
         'test_positive_rate': float(y_test.mean()),
+        'val_positive_rate': float(y_val.mean()),
         'test_compounds': len(test_comp),
         'test_kinases': n_test_kinases,
         'leaked_compounds': len(leaked_comp),
@@ -666,6 +700,7 @@ def _select_best_split_candidate(
     round_seed: int,
     n_candidates: int,
     test_fraction: float,
+    val_fraction: float,
     protein_group_col: str,
     global_label_rate: float,
     global_protein_probs: dict,
@@ -681,9 +716,10 @@ def _select_best_split_candidate(
         candidate_seed = int(round_seed + 10007 * cand_i)
         train_idx, val_idx, test_idx, meta = _generate_candidate_split(
             df, scenario_id=scenario_id, seed=candidate_seed,
-            test_fraction=test_fraction, scaffold_map=scaffold_map
+            test_fraction=test_fraction, val_fraction=val_fraction,
+            scaffold_map=scaffold_map
         )
-        valid, reason, diag = _validate_split(df, scenario_id, train_idx, test_idx)
+        valid, reason, diag = _validate_split(df, scenario_id, train_idx, val_idx, test_idx)
         if not valid:
             invalid_reasons[reason] = invalid_reasons.get(reason, 0) + 1
             continue
@@ -728,6 +764,7 @@ def run_comparison(
     seed: int = DEFAULT_SPLIT_SEED,
     n_rounds: int = DEFAULT_N_ROUNDS,
     test_fraction: float = DEFAULT_TEST_FRACTION,
+    val_fraction: float = DEFAULT_VAL_FRACTION,
     n_split_candidates: int = DEFAULT_N_SPLIT_CANDIDATES,
     scenarios: list = None
 ):
@@ -750,7 +787,7 @@ def run_comparison(
     print(f"Model seed (fixed): {seed}")
     print(f"Split rounds: {n_rounds}")
     print(f"Split seeds by round: {split_seeds}")
-    print(f"Target test fraction: {test_fraction:.2f}")
+    print(f"Target split: {1-test_fraction-val_fraction:.0%}/{val_fraction:.0%}/{test_fraction:.0%} (train/val/test)")
     print(f"Split candidates per round: {n_split_candidates}")
     print(f"Scenarios: {scenarios}")
 
@@ -811,6 +848,7 @@ def run_comparison(
                 round_seed=split_seed,
                 n_candidates=n_split_candidates,
                 test_fraction=test_fraction,
+                val_fraction=val_fraction,
                 protein_group_col=protein_group_col,
                 global_label_rate=global_label_rate,
                 global_protein_probs=global_protein_probs,
@@ -1055,8 +1093,10 @@ def run_single_dataset(
     seed: int = DEFAULT_SPLIT_SEED,
     n_rounds: int = DEFAULT_N_ROUNDS,
     test_fraction: float = DEFAULT_TEST_FRACTION,
+    val_fraction: float = DEFAULT_VAL_FRACTION,
     n_split_candidates: int = DEFAULT_N_SPLIT_CANDIDATES,
-    scenarios: list = None
+    scenarios: list = None,
+    keep_monotonic: bool = False
 ):
     """Run analysis for a single dataset type."""
     data_path = DATASET_PATHS.get(dataset_type)
@@ -1081,7 +1121,7 @@ def run_single_dataset(
 
     print(f"\nLoading dataset: {dataset_type}...")
     try:
-        df = load_dataset(data_path)
+        df = load_dataset(data_path, keep_monotonic=keep_monotonic)
     except FileNotFoundError:
         print(f"  ERROR: File not found: {data_path}")
         return None
@@ -1094,6 +1134,7 @@ def run_single_dataset(
         seed=seed,
         n_rounds=n_rounds,
         test_fraction=test_fraction,
+        val_fraction=val_fraction,
         n_split_candidates=n_split_candidates,
         scenarios=scenarios
     )
@@ -1139,6 +1180,9 @@ def run_single_dataset(
             'n_rounds': n_rounds,
             'split_seeds': ROUND_SEEDS[:n_rounds] if n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [seed + i for i in range(n_rounds - len(ROUND_SEEDS))],
             'target_test_fraction': test_fraction,
+            'target_val_fraction': val_fraction,
+            'target_split_ratio': f'{1-test_fraction-val_fraction:.0%}/{val_fraction:.0%}/{test_fraction:.0%}',
+            'monotonic_kinase_filter': not keep_monotonic,
             'n_split_candidates': n_split_candidates,
             'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
             'affinity_threshold_pchembl': DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
@@ -1382,7 +1426,7 @@ Available scenarios (Pahikkala et al. 2015 framework):
         type=str,
         default=None,
         help='Comma-separated list of scenarios to run (default: all). '
-             'Options: new_compound_new_kinase, compound, random'
+             'Options: new_compound_new_kinase, scaffold, compound, kinase, random'
     )
     parser.add_argument(
         '--output_dir', '-o',
@@ -1406,6 +1450,18 @@ Available scenarios (Pahikkala et al. 2015 framework):
         type=float,
         default=DEFAULT_TEST_FRACTION,
         help=f'Target test fraction for candidate selection (default: {DEFAULT_TEST_FRACTION})'
+    )
+    parser.add_argument(
+        '--val_fraction',
+        type=float,
+        default=DEFAULT_VAL_FRACTION,
+        help=f'Target validation fraction (default: {DEFAULT_VAL_FRACTION})'
+    )
+    parser.add_argument(
+        '--keep_monotonic',
+        action='store_true',
+        help='Keep kinases with monotonic activity profiles (100%% active or inactive). '
+             'By default these are removed as they provide no discriminative signal.'
     )
     parser.add_argument(
         '--n_split_candidates',
@@ -1434,6 +1490,10 @@ Available scenarios (Pahikkala et al. 2015 framework):
         parser.error("--n_split_candidates must be >= 1")
     if not (0.05 <= args.test_fraction <= 0.5):
         parser.error("--test_fraction must be in [0.05, 0.5]")
+    if not (0.0 <= args.val_fraction <= 0.5):
+        parser.error("--val_fraction must be in [0.0, 0.5]")
+    if args.test_fraction + args.val_fraction >= 1.0:
+        parser.error("test_fraction + val_fraction must be < 1.0")
 
     if args.scenarios:
         scenarios = [s.strip() for s in args.scenarios.split(',')]
@@ -1453,6 +1513,7 @@ Available scenarios (Pahikkala et al. 2015 framework):
     print("=" * 70)
     print("SPLIT COMPARISON ANALYSIS (KNN/MLP)")
     print("=" * 70)
+    train_frac = 1 - args.test_fraction - args.val_fraction
     print(f"Datasets:         {datasets_to_run}")
     print(f"Scenarios:        {scenarios}")
     print(f"Output directory: {args.output_dir}")
@@ -1461,8 +1522,10 @@ Available scenarios (Pahikkala et al. 2015 framework):
     print(f"Split rounds:     {args.n_rounds}")
     display_seeds = ROUND_SEEDS[:args.n_rounds] if args.n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [args.seed + i for i in range(args.n_rounds - len(ROUND_SEEDS))]
     print(f"Split seeds:      {display_seeds}")
-    print(f"Target test frac: {args.test_fraction:.2f}")
+    print(f"Split ratio:      {train_frac:.0%}/{args.val_fraction:.0%}/{args.test_fraction:.0%} (train/val/test)")
     print(f"Split candidates: {args.n_split_candidates}/round")
+    mono_status = 'OFF (keeping all)' if args.keep_monotonic else 'ON (removing 100% single-class kinases)'
+    print(f"Monotonic filter: {mono_status}")
     print(f"Force recalc:     {args.force}")
     print(f"Debug mode:       {args.debug}")
     print("=" * 70)
@@ -1483,8 +1546,10 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 seed=args.seed,
                 n_rounds=args.n_rounds,
                 test_fraction=args.test_fraction,
+                val_fraction=args.val_fraction,
                 n_split_candidates=args.n_split_candidates,
-                scenarios=scenarios
+                scenarios=scenarios,
+                keep_monotonic=args.keep_monotonic
             )
             dataset_time = time.time() - dataset_start_time
             all_dataset_times[dataset_type] = dataset_time
