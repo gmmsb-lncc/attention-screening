@@ -19,7 +19,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import faiss
 from scipy.stats import wilcoxon
-from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -35,19 +34,20 @@ warnings.filterwarnings('ignore')
 
 from crossattention_split_analysis.config import (
     DATASET_PATHS, DEFAULT_AFFINITY_THRESHOLD,
-    AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS, DEFAULT_SEEDS
+    AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS
+)
+from crossattention_split_analysis.utils.json_io import read_json, write_json
+from crossattention_split_analysis.visualization.leakage_analysis import (
+    run_leakage_diagnostics,
+)
+from crossattention_split_analysis.visualization.image_readme import (
+    write_images_readme,
 )
 
 DEFAULT_SPLIT_SEED = 42
-DEFAULT_N_ROUNDS = 5
-DEFAULT_TEST_FRACTION = 0.10
-DEFAULT_VAL_FRACTION = 0.10
-DEFAULT_N_SPLIT_CANDIDATES = 25
+DEFAULT_N_FOLDS = 10
 MIN_TEST_SAMPLES = 50
-SPLIT_PROTOCOL_VERSION = "80_10_10_balanced_tanimoto_candidates_v4"
-MAX_DIVERSITY_COMPOUNDS = 8000
-# Well-separated seeds for multi-round experiments (avoids correlated splits)
-ROUND_SEEDS = DEFAULT_SEEDS  # [42, 123, 456, 789, 1024]
+SPLIT_PROTOCOL_VERSION = "kfold_cv_v5"
 
 # Plot style
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -255,7 +255,7 @@ def _compute_metrics(y_true, y_pred, y_proba=None):
     return metrics
 
 
-def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
+def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx,
                        seed: int = 42, fp_cache: dict = None):
     """Train KNN (FAISS) and MLP and return metrics.
 
@@ -276,10 +276,16 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx, all_kinases: list,
     train_df = df.iloc[train_idx].reset_index(drop=True)
     test_df = df.iloc[test_idx].reset_index(drop=True)
 
-    X_train, y_train, train_valid = prepare_features(train_df, all_kinases, fp_cache)
-    X_test, y_test, test_valid = prepare_features(test_df, all_kinases, fp_cache)
+    # IMPORTANT: one-hot kinase space is defined from TRAIN only.
+    # Unseen kinases in test therefore map to all-zero vectors (blind-target).
+    train_kinases = list(train_df['target_kinase'].unique())
+    X_train, y_train, train_valid = prepare_features(train_df, train_kinases, fp_cache)
+    X_test, y_test, test_valid = prepare_features(test_df, train_kinases, fp_cache)
 
     if len(X_test) == 0 or len(X_train) == 0:
+        return None
+    if len(np.unique(y_train)) < 2:
+        print("    WARNING: training fold has single class; skipping fold.")
         return None
 
     scaler = StandardScaler()
@@ -360,18 +366,6 @@ def format_time(seconds: float) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
-def _protein_group_column(df: pd.DataFrame) -> str:
-    """Return the best available protein-group column for balancing."""
-    candidates = [
-        'protein_class', 'protein_family', 'kinase_group', 'kinase_family',
-        'target_family', 'target_class'
-    ]
-    for col in candidates:
-        if col in df.columns:
-            return col
-    return 'target_kinase'
-
-
 def _build_compound_fp_map(df: pd.DataFrame):
     """Build mapping: compound_id -> Morgan fingerprint (bool vector)."""
     unique_comp = df[['chembl_id', 'canonical_smiles']].drop_duplicates(subset=['chembl_id'])
@@ -408,387 +402,198 @@ def _build_compound_scaffold_map(df: pd.DataFrame) -> dict:
     return scaffold_map
 
 
-def _pairwise_tanimoto_mean_sampled(fp_matrix: np.ndarray, rng: np.random.Generator, n_pairs: int = 5000):
+# =============================================================================
+# K-FOLD CROSS-VALIDATION
+# =============================================================================
+
+def _assign_stratified_folds(labels, n_folds, rng):
+    """Assign samples to folds with stratification by class label.
+
+    Within each class, samples are shuffled and cyclically assigned to folds,
+    ensuring approximately equal class proportions in each fold.
     """
-    Estimate mean pairwise Tanimoto similarity by random pair sampling.
-    Uses sampled all-vs-all pairs for scalability on large sets.
+    labels = np.asarray(labels)
+    fold_assignments = np.empty(len(labels), dtype=np.int64)
+
+    for cls in np.unique(labels):
+        cls_indices = np.where(labels == cls)[0].copy()
+        rng.shuffle(cls_indices)
+        for i, idx in enumerate(cls_indices):
+            fold_assignments[idx] = i % n_folds
+
+    return fold_assignments
+
+
+def _assign_group_folds(groups, n_folds, rng):
+    """Assign samples to folds by group using greedy bin-packing.
+
+    All members of a group go to the same fold. Groups are shuffled for
+    randomness, then sorted by size descending. Each group is assigned to
+    the fold with the fewest samples so far, producing balanced fold sizes.
     """
-    n = fp_matrix.shape[0]
-    if n < 2:
-        return 0.0
+    groups = np.asarray(groups)
+    unique_groups = np.unique(groups)
 
-    n_pairs = int(min(max(1000, n_pairs), n * (n - 1)))
-    i = rng.integers(0, n, size=n_pairs)
-    j = rng.integers(0, n, size=n_pairs)
-    neq = i != j
-    if not np.any(neq):
-        return 0.0
-    i = i[neq]
-    j = j[neq]
+    # Compute group sizes
+    group_sizes = {}
+    for g in unique_groups:
+        group_sizes[g] = int((groups == g).sum())
 
-    a = fp_matrix[i]
-    b = fp_matrix[j]
-    inter = np.logical_and(a, b).sum(axis=1).astype(np.float64)
-    union = np.logical_or(a, b).sum(axis=1).astype(np.float64)
-    sim = np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
-    return float(sim.mean()) if len(sim) else 0.0
+    # Shuffle for randomness, then stable-sort by size descending
+    perm = rng.permutation(len(unique_groups))
+    shuffled = unique_groups[perm]
+    sorted_groups = sorted(shuffled, key=lambda g: group_sizes[g], reverse=True)
 
+    # Greedy bin-packing: assign each group to the fold with fewest samples
+    fold_counts = np.zeros(n_folds, dtype=np.int64)
+    group_to_fold = {}
 
-def _estimate_internal_diversity(df: pd.DataFrame, idx: np.ndarray, fp_map: dict, rng: np.random.Generator):
-    """Estimate internal chemical diversity (1 - mean Tanimoto) on unique compounds."""
-    compounds = pd.unique(df.iloc[idx]['chembl_id'])
-    compounds = [c for c in compounds if c in fp_map]
-    n_total_compounds = len(compounds)
-    if n_total_compounds < 2:
-        return 0.0, n_total_compounds
-    if n_total_compounds > MAX_DIVERSITY_COMPOUNDS:
-        sample_idx = rng.choice(n_total_compounds, size=MAX_DIVERSITY_COMPOUNDS, replace=False)
-        compounds = [compounds[i] for i in sample_idx]
-    fp_matrix = np.stack([fp_map[c] for c in compounds], axis=0)
-    mean_tanimoto = _pairwise_tanimoto_mean_sampled(fp_matrix, rng=rng, n_pairs=5000)
-    return 1.0 - mean_tanimoto, n_total_compounds
+    for g in sorted_groups:
+        target_fold = int(np.argmin(fold_counts))
+        group_to_fold[g] = target_fold
+        fold_counts[target_fold] += group_sizes[g]
+
+    # Assign fold to each sample
+    fold_assignments = np.empty(len(groups), dtype=np.int64)
+    for i, g in enumerate(groups):
+        fold_assignments[i] = group_to_fold[g]
+
+    return fold_assignments
 
 
-def _distribution_l1(values: np.ndarray, reference_probs: dict):
-    """L1 distance between empirical distribution(values) and reference_probs."""
-    if len(values) == 0:
-        return 1.0
-    counts = pd.Series(values).value_counts(normalize=True)
-    dist = 0.0
-    for key, p_ref in reference_probs.items():
-        p = float(counts.get(key, 0.0))
-        dist += abs(p - p_ref)
-    return float(0.5 * dist)
+def _generate_cv_folds(df, scenario_id, n_folds, seed, scaffold_map=None):
+    """Generate k-fold cross-validation splits for a given scenario.
 
+    Returns list of (fold_i, train_idx, val_idx, test_idx) tuples.
+    Folds with < MIN_TEST_SAMPLES test samples or single-class test sets
+    are skipped with a warning.
 
-def _generate_candidate_split(df: pd.DataFrame, scenario_id: str, seed: int,
-                               test_fraction: float, val_fraction: float = 0.10,
-                               scaffold_map: dict = None):
+    For non-S4 scenarios: test = fold i, val = fold (i+1)%k, train = rest.
+    For S4 (new_compound_new_kinase): compounds and kinases are independently
+    assigned to folds; test = rows where BOTH are in fold i, train = rows
+    where NEITHER is in fold i, val = orphans.
     """
-    Generate a candidate 80/10/10 split for one scenario.
-    Returns (train_idx, val_idx, test_idx, metadata).
-    """
-    n = len(df)
-    indices = np.arange(n, dtype=np.int64)
-    labels = np.asarray(df['label'].values)
     rng = np.random.default_rng(seed)
-    holdout_fraction = test_fraction + val_fraction
-
-    if scenario_id == 'random':
-        # Stratified 80/20, then split the 20% into val/test
-        train_idx, holdout_idx = train_test_split(
-            indices, test_size=holdout_fraction, stratify=labels, random_state=seed
-        )
-        holdout_labels = labels[holdout_idx]
-        relative_test = test_fraction / holdout_fraction
-        val_idx, test_idx = train_test_split(
-            holdout_idx, test_size=relative_test, stratify=holdout_labels, random_state=seed + 1
-        )
-        return train_idx, val_idx, test_idx, {'strategy': 'stratified_random_80_10_10'}
-
-    compounds = np.array(df['chembl_id'].unique())
-
-    if scenario_id == 'scaffold':
-        if scaffold_map is None:
-            raise ValueError("scaffold scenario requires scaffold_map")
-        row_scaffolds = df['chembl_id'].map(scaffold_map).fillna('UNKNOWN')
-        unique_scaffolds = np.array(row_scaffolds.unique())
-        rng.shuffle(unique_scaffolds)
-        n_test = max(1, int(round(len(unique_scaffolds) * test_fraction)))
-        n_val = max(1, int(round(len(unique_scaffolds) * val_fraction)))
-        test_scaffolds = set(unique_scaffolds[:n_test])
-        val_scaffolds = set(unique_scaffolds[n_test:n_test + n_val])
-        test_mask = row_scaffolds.isin(test_scaffolds).values
-        val_mask = row_scaffolds.isin(val_scaffolds).values
-        train_mask = ~(test_mask | val_mask)
-        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
-                {'strategy': 'scaffold_split_80_10_10',
-                 'n_test_scaffolds': n_test, 'n_val_scaffolds': n_val,
-                 'n_total_scaffolds': len(unique_scaffolds)})
-
-    if scenario_id == 'compound':
-        rng.shuffle(compounds)
-        n_test = max(1, int(round(len(compounds) * test_fraction)))
-        n_val = max(1, int(round(len(compounds) * val_fraction)))
-        test_compounds = set(compounds[:n_test])
-        val_compounds = set(compounds[n_test:n_test + n_val])
-        test_mask = df['chembl_id'].isin(test_compounds).values
-        val_mask = df['chembl_id'].isin(val_compounds).values
-        train_mask = ~(test_mask | val_mask)
-        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
-                {'strategy': 'compound_split_80_10_10'})
-
-    if scenario_id == 'kinase':
-        kinases = np.array(df['target_kinase'].unique())
-        rng.shuffle(kinases)
-        n_test = max(1, int(round(len(kinases) * test_fraction)))
-        n_val = max(1, int(round(len(kinases) * val_fraction)))
-        test_kinases = set(kinases[:n_test])
-        val_kinases = set(kinases[n_test:n_test + n_val])
-        test_mask = df['target_kinase'].isin(test_kinases).values
-        val_mask = df['target_kinase'].isin(val_kinases).values
-        train_mask = ~(test_mask | val_mask)
-        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
-                {'strategy': 'kinase_split_80_10_10'})
+    labels = df['label'].values
+    folds = []
 
     if scenario_id == 'new_compound_new_kinase':
-        kinases = np.array(df['target_kinase'].unique())
-        rng.shuffle(compounds)
-        rng.shuffle(kinases)
+        # Double-group: compounds AND kinases independently assigned to folds
+        compounds = df['chembl_id'].values
+        kinases = df['target_kinase'].values
+        rng_comp = np.random.default_rng(seed)
+        rng_kin = np.random.default_rng(seed + 1)
+        comp_folds = _assign_group_folds(compounds, n_folds, rng_comp)
+        kin_folds = _assign_group_folds(kinases, n_folds, rng_kin)
 
-        # Broader candidate fractions; scoring selects the best near target test size
-        frac_min = max(0.06, test_fraction * 0.6)
-        frac_max = min(0.85, test_fraction * 3.0)
-        frac_comp = float(rng.uniform(frac_min, frac_max))
-        frac_kin = float(rng.uniform(frac_min, frac_max))
+        for i in range(n_folds):
+            comp_in = (comp_folds == i)
+            kin_in = (kin_folds == i)
+            test_mask = comp_in & kin_in
+            train_mask = (~comp_in) & (~kin_in)
+            val_mask = ~(test_mask | train_mask)  # orphans
 
-        n_test_comp = max(1, int(round(len(compounds) * frac_comp)))
-        n_test_kin = max(1, int(round(len(kinases) * frac_kin)))
-        test_compounds = set(compounds[:n_test_comp])
-        test_kinases = set(kinases[:n_test_kin])
+            test_idx = np.where(test_mask)[0]
+            train_idx = np.where(train_mask)[0]
+            val_idx = np.where(val_mask)[0]
 
-        comp_test = df['chembl_id'].isin(test_compounds).values
-        kin_test = df['target_kinase'].isin(test_kinases).values
-        test_mask = comp_test & kin_test
-        train_mask = (~comp_test) & (~kin_test)
-        # Orphan rows (new compound + old kinase, or old compound + new kinase) = val
-        val_mask = ~(train_mask | test_mask)
+            if len(test_idx) < MIN_TEST_SAMPLES:
+                print(f"  WARNING: Fold {i} skipped (test_size={len(test_idx)} < {MIN_TEST_SAMPLES})")
+                continue
+            if len(train_idx) == 0 or len(val_idx) == 0:
+                print(f"  WARNING: Fold {i} skipped (empty train/val partition)")
+                continue
+            y_train = labels[train_idx]
+            y_test = labels[test_idx]
+            y_val = labels[val_idx]
+            if len(np.unique(y_train)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in train)")
+                continue
+            if len(np.unique(y_test)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in test)")
+                continue
+            if len(np.unique(y_val)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in val)")
+                continue
 
-        return (np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0],
-                {'strategy': 'new_compound_new_kinase_80_10_10',
-                 'frac_compound_holdout': frac_comp, 'frac_kinase_holdout': frac_kin,
-                 'n_test_compounds_target': n_test_comp, 'n_test_kinases_target': n_test_kin})
+            folds.append((i, train_idx, val_idx, test_idx))
+    else:
+        # Standard scenarios: assign to folds, test=fold_i, val=fold_(i+1)%k
+        if scenario_id == 'random':
+            fold_assignments = _assign_stratified_folds(labels, n_folds, rng)
+        elif scenario_id == 'compound':
+            fold_assignments = _assign_group_folds(df['chembl_id'].values, n_folds, rng)
+        elif scenario_id == 'kinase':
+            fold_assignments = _assign_group_folds(df['target_kinase'].values, n_folds, rng)
+        elif scenario_id == 'scaffold':
+            if scaffold_map is None:
+                raise ValueError("scaffold scenario requires scaffold_map")
+            scaffolds = df['chembl_id'].map(scaffold_map).fillna('UNKNOWN').values
+            fold_assignments = _assign_group_folds(scaffolds, n_folds, rng)
+        else:
+            raise ValueError(f"Unknown scenario_id: {scenario_id}")
 
-    raise ValueError(f"Unknown scenario_id: {scenario_id}")
+        for i in range(n_folds):
+            val_fold = (i + 1) % n_folds
+            test_idx = np.where(fold_assignments == i)[0]
+            val_idx = np.where(fold_assignments == val_fold)[0]
+            train_idx = np.where(
+                (fold_assignments != i) & (fold_assignments != val_fold)
+            )[0]
 
+            if len(test_idx) < MIN_TEST_SAMPLES:
+                print(f"  WARNING: Fold {i} skipped (test_size={len(test_idx)} < {MIN_TEST_SAMPLES})")
+                continue
+            if len(train_idx) == 0 or len(val_idx) == 0:
+                print(f"  WARNING: Fold {i} skipped (empty train/val partition)")
+                continue
+            y_train = labels[train_idx]
+            y_test = labels[test_idx]
+            y_val = labels[val_idx]
+            if len(np.unique(y_train)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in train)")
+                continue
+            if len(np.unique(y_test)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in test)")
+                continue
+            if len(np.unique(y_val)) < 2:
+                print(f"  WARNING: Fold {i} skipped (single class in val)")
+                continue
 
-def _validate_split(df: pd.DataFrame, scenario_id: str, train_idx: np.ndarray,
-                     val_idx: np.ndarray, test_idx: np.ndarray):
-    """Validate hard split constraints and minimum viability."""
-    if len(train_idx) == 0 or len(test_idx) == 0:
-        return False, "empty_train_or_test", {}
-    if len(val_idx) == 0:
-        return False, "empty_val", {}
-    if len(test_idx) < MIN_TEST_SAMPLES:
-        return False, "test_too_small", {'test_size': len(test_idx)}
+            folds.append((i, train_idx, val_idx, test_idx))
 
-    train_set = set(train_idx.tolist())
-    val_set = set(val_idx.tolist())
-    test_set = set(test_idx.tolist())
-    if train_set & test_set:
-        return False, "index_overlap_train_test", {}
-    if train_set & val_set:
-        return False, "index_overlap_train_val", {}
-    if val_set & test_set:
-        return False, "index_overlap_val_test", {}
-
-    y_test = np.asarray(df.iloc[test_idx]['label'].values)
-    n_pos = int(y_test.sum())
-    n_neg = int(len(y_test) - n_pos)
-    if n_pos == 0 or n_neg == 0:
-        return False, "single_class_test", {'n_pos': n_pos, 'n_neg': n_neg}
-
-    y_val = np.asarray(df.iloc[val_idx]['label'].values)
-    if int(y_val.sum()) == 0 or int(len(y_val) - y_val.sum()) == 0:
-        return False, "single_class_val", {'val_n_pos': int(y_val.sum()), 'val_n_neg': int(len(y_val) - y_val.sum())}
-
-    n_test_kinases = int(df.iloc[test_idx]['target_kinase'].nunique())
-    if n_test_kinases < 2:
-        return False, "too_few_test_kinases", {'test_kinases': n_test_kinases}
-
-    train_comp = set(df.iloc[train_idx]['chembl_id'])
-    test_comp = set(df.iloc[test_idx]['chembl_id'])
-    leaked_comp = train_comp & test_comp
-
-    if scenario_id in ('compound', 'new_compound_new_kinase') and leaked_comp:
-        return False, "compound_leakage", {'leaked_compounds': len(leaked_comp)}
-
-    leaked_kin = set()
-    if scenario_id in ('kinase', 'new_compound_new_kinase'):
-        train_kin = set(df.iloc[train_idx]['target_kinase'])
-        test_kin = set(df.iloc[test_idx]['target_kinase'])
-        leaked_kin = train_kin & test_kin
-        if leaked_kin:
-            return False, "kinase_leakage", {'leaked_kinases': len(leaked_kin)}
-
-    diagnostics = {
-        'train_size': len(train_idx),
-        'val_size': len(val_idx),
-        'test_size': len(test_idx),
-        'test_positive_rate': float(y_test.mean()),
-        'val_positive_rate': float(y_val.mean()),
-        'test_compounds': len(test_comp),
-        'test_kinases': n_test_kinases,
-        'leaked_compounds': len(leaked_comp),
-    }
-    if scenario_id in ('kinase', 'new_compound_new_kinase'):
-        diagnostics['test_kinases'] = len(set(df.iloc[test_idx]['target_kinase']))
-        diagnostics['leaked_kinases'] = len(leaked_kin)
-    return True, "ok", diagnostics
+    return folds
 
 
-def _split_quality_score(
-    df: pd.DataFrame,
-    train_idx: np.ndarray,
-    test_idx: np.ndarray,
-    protein_group_col: str,
-    global_label_rate: float,
-    global_protein_probs: dict,
-    global_diversity: float,
-    fp_map: dict,
-    target_test_fraction: float,
-    rng: np.random.Generator
-):
-    """Compute split quality score: lower is better."""
-    y_train = np.asarray(df.iloc[train_idx]['label'].values)
-    y_test = np.asarray(df.iloc[test_idx]['label'].values)
-    label_dev = abs(float(y_test.mean()) - global_label_rate)
-    label_dev_train = abs(float(y_train.mean()) - global_label_rate)
-
-    protein_test = df.iloc[test_idx][protein_group_col].fillna('UNKNOWN').astype(str).values
-    protein_train = df.iloc[train_idx][protein_group_col].fillna('UNKNOWN').astype(str).values
-    protein_l1_test = _distribution_l1(protein_test, global_protein_probs)
-    protein_l1_train = _distribution_l1(protein_train, global_protein_probs)
-
-    test_fraction = len(test_idx) / len(df)
-    test_fraction_dev = abs(test_fraction - target_test_fraction)
-
-    div_test, n_comp_test = _estimate_internal_diversity(df, test_idx, fp_map, rng)
-    div_train, n_comp_train = _estimate_internal_diversity(df, train_idx, fp_map, rng)
-    div_dev_test = abs(div_test - global_diversity)
-    div_dev_train = abs(div_train - global_diversity)
-
-    # Weighted composite score:
-    # - hard emphasis on distribution stability in test
-    # - moderate emphasis on target test fraction and train representativity
-    score = (
-        2.0 * test_fraction_dev +
-        2.0 * label_dev +
-        0.8 * label_dev_train +
-        3.0 * protein_l1_test +
-        1.0 * protein_l1_train +
-        2.0 * div_dev_test +
-        0.8 * div_dev_train
-    )
-
-    quality = {
-        'score': float(score),
-        'test_fraction': float(test_fraction),
-        'target_test_fraction': float(target_test_fraction),
-        'test_fraction_dev': float(test_fraction_dev),
-        'label_rate_train': float(y_train.mean()),
-        'label_rate_test': float(y_test.mean()),
-        'label_rate_global': float(global_label_rate),
-        'label_dev_test': float(label_dev),
-        'label_dev_train': float(label_dev_train),
-        'protein_l1_test_vs_global': float(protein_l1_test),
-        'protein_l1_train_vs_global': float(protein_l1_train),
-        'diversity_test': float(div_test),
-        'diversity_train': float(div_train),
-        'diversity_global': float(global_diversity),
-        'diversity_dev_test': float(div_dev_test),
-        'diversity_dev_train': float(div_dev_train),
-        'n_compounds_test_for_diversity': int(n_comp_test),
-        'n_compounds_train_for_diversity': int(n_comp_train),
-    }
-    return float(score), quality
-
-
-def _select_best_split_candidate(
-    df: pd.DataFrame,
-    scenario_id: str,
-    round_seed: int,
-    n_candidates: int,
-    test_fraction: float,
-    val_fraction: float,
-    protein_group_col: str,
-    global_label_rate: float,
-    global_protein_probs: dict,
-    global_diversity: float,
-    fp_map: dict,
-    scaffold_map: dict = None
-):
-    """Select best split candidate for one round by constrained quality score."""
-    best = None
-    invalid_reasons = {}
-
-    for cand_i in range(n_candidates):
-        candidate_seed = int(round_seed + 10007 * cand_i)
-        train_idx, val_idx, test_idx, meta = _generate_candidate_split(
-            df, scenario_id=scenario_id, seed=candidate_seed,
-            test_fraction=test_fraction, val_fraction=val_fraction,
-            scaffold_map=scaffold_map
-        )
-        valid, reason, diag = _validate_split(df, scenario_id, train_idx, val_idx, test_idx)
-        if not valid:
-            invalid_reasons[reason] = invalid_reasons.get(reason, 0) + 1
-            continue
-
-        rng = np.random.default_rng(candidate_seed + 17)
-        score, quality = _split_quality_score(
-            df=df,
-            train_idx=train_idx,
-            test_idx=test_idx,
-            protein_group_col=protein_group_col,
-            global_label_rate=global_label_rate,
-            global_protein_probs=global_protein_probs,
-            global_diversity=global_diversity,
-            fp_map=fp_map,
-            target_test_fraction=test_fraction,
-            rng=rng
-        )
-        candidate = {
-            'candidate_seed': candidate_seed,
-            'train_idx': train_idx,
-            'val_idx': val_idx,
-            'test_idx': test_idx,
-            'score': score,
-            'quality': quality,
-            'diagnostics': diag,
-            'metadata': meta,
-        }
-        if best is None or score < best['score']:
-            best = candidate
-
-    if best is None:
-        raise RuntimeError(
-            f"No valid split found for scenario={scenario_id} at round_seed={round_seed}. "
-            f"Invalid reason counts: {invalid_reasons}"
-        )
-    return best
-
+# =============================================================================
+# COMPARISON RUNNER
+# =============================================================================
 
 def run_comparison(
     df: pd.DataFrame,
     output_dir: str = '.',
     seed: int = DEFAULT_SPLIT_SEED,
-    n_rounds: int = DEFAULT_N_ROUNDS,
-    test_fraction: float = DEFAULT_TEST_FRACTION,
-    val_fraction: float = DEFAULT_VAL_FRACTION,
-    n_split_candidates: int = DEFAULT_N_SPLIT_CANDIDATES,
-    scenarios: list = None
+    n_folds: int = DEFAULT_N_FOLDS,
+    scenarios: list = None,
+    checkpoint_path: str = None,
+    force: bool = False
 ):
-    """Run comparison across split scenarios with multi-round partitioning."""
+    """Run comparison across split scenarios with k-fold cross-validation.
 
-    if n_rounds < 1:
-        raise ValueError("n_rounds must be >= 1")
-    if not (0.05 <= test_fraction <= 0.5):
-        raise ValueError("test_fraction must be in [0.05, 0.5]")
-    if n_split_candidates < 1:
-        raise ValueError("n_split_candidates must be >= 1")
+    Supports checkpoint/resume by scenario. If a checkpoint exists and matches
+    the current config, completed scenarios are skipped.
+    """
+
+    if n_folds < 2:
+        raise ValueError("n_folds must be >= 2")
     if scenarios is None:
         scenarios = DEFAULT_SCENARIOS
 
     print("=" * 70)
     print("COMPARISON: RANDOM SPLIT VS CORRECT SPLIT")
     print("=" * 70)
-    # Use well-separated seeds to avoid correlated splits
-    split_seeds = ROUND_SEEDS[:n_rounds] if n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [seed + i for i in range(n_rounds - len(ROUND_SEEDS))]
     print(f"Model seed (fixed): {seed}")
-    print(f"Split rounds: {n_rounds}")
-    print(f"Split seeds by round: {split_seeds}")
-    print(f"Target split: {1-test_fraction-val_fraction:.0%}/{val_fraction:.0%}/{test_fraction:.0%} (train/val/test)")
-    print(f"Split candidates per round: {n_split_candidates}")
+    print(f"k-folds: {n_folds}")
     print(f"Scenarios: {scenarios}")
 
     scenarios_config = [
@@ -799,26 +604,41 @@ def run_comparison(
         print("  No valid scenarios selected. Nothing to run.")
         return {}, {}
 
-    protein_group_col = _protein_group_column(df)
-    global_label_rate = float(df['label'].mean())
-    global_protein_probs = (
-        df[protein_group_col].fillna('UNKNOWN').astype(str).value_counts(normalize=True).to_dict()
-    )
-    fp_map = _build_compound_fp_map(df)
-    global_rng = np.random.default_rng(seed)
-    if len(fp_map) >= 2:
-        global_compounds = list(fp_map.keys())
-        if len(global_compounds) > MAX_DIVERSITY_COMPOUNDS:
-            sel = global_rng.choice(len(global_compounds), size=MAX_DIVERSITY_COMPOUNDS, replace=False)
-            global_compounds = [global_compounds[i] for i in sel]
-        global_fp = np.stack([fp_map[c] for c in global_compounds], axis=0)
-        global_diversity = 1.0 - _pairwise_tanimoto_mean_sampled(global_fp, rng=global_rng, n_pairs=10000)
-    else:
-        global_diversity = 0.0
-    print(f"Protein-group column for balancing: {protein_group_col}")
-    print(f"Global internal diversity (unique compounds): {global_diversity:.4f}")
+    all_results = {}
+    split_stats = {}
+    completed_scenarios = []
 
-    # Build fp_cache for model features (float32) from the already-computed fp_map (bool)
+    # Checkpoint resume (scenario-level)
+    if checkpoint_path:
+        checkpoint_data = read_json(checkpoint_path)
+        if checkpoint_data and not force:
+            cfg = checkpoint_data.get('config', {})
+            cfg_matches = (
+                cfg.get('seed') == seed and
+                cfg.get('n_folds') == n_folds and
+                cfg.get('scenarios') == [s for s, _, _ in scenarios_config]
+            )
+            if cfg_matches:
+                all_results = checkpoint_data.get('all_results', {})
+                split_stats = checkpoint_data.get('split_stats', {})
+                completed_scenarios = checkpoint_data.get('completed_scenarios', [])
+                completed_scenarios = [
+                    s for s in completed_scenarios if s in all_results and s in split_stats
+                ]
+                if completed_scenarios:
+                    print(
+                        f"[CHECKPOINT] Resuming comparison from {checkpoint_path} "
+                        f"({len(completed_scenarios)}/{len(scenarios_config)} scenarios ready)"
+                    )
+            else:
+                print("[CHECKPOINT] Existing comparison checkpoint ignored (configuration mismatch).")
+
+    if len(completed_scenarios) == len(scenarios_config):
+        print("[CHECKPOINT] All scenarios already completed. Reusing cached comparison results.")
+        return all_results, split_stats
+
+    # Build fp_cache for model features
+    fp_map = _build_compound_fp_map(df)
     fp_cache = {cid: fp.astype(np.float32) for cid, fp in fp_map.items()}
     print(f"Fingerprint cache: {len(fp_cache)} unique compounds precomputed")
 
@@ -828,37 +648,27 @@ def run_comparison(
     if 'scaffold' in scenario_ids:
         scaffold_map = _build_compound_scaffold_map(df)
 
-    all_kinases = list(df['target_kinase'].unique())
-    all_results = {}
-    split_stats = {}
-
-    for scenario_id, scenario_name, scenario_key in scenarios_config:
+    for scenario_pos, (scenario_id, scenario_name, scenario_key) in enumerate(scenarios_config, 1):
         print(f"\n{'-' * 50}")
-        print(f"SCENARIO: {scenario_name}")
+        print(f"SCENARIO [{scenario_pos}/{len(scenarios_config)}]: {scenario_name}")
         print("-" * 50)
 
-        round_results = {}
-        round_split_stats = []
+        if scenario_key in completed_scenarios and scenario_key in all_results and scenario_key in split_stats:
+            print("  [checkpoint] Scenario already computed. Skipping recalculation.")
+            continue
 
-        for round_idx, split_seed in enumerate(split_seeds, 1):
-            print(f"\n  Round {round_idx}/{n_rounds} (round_seed={split_seed})")
-            best = _select_best_split_candidate(
-                df=df,
-                scenario_id=scenario_id,
-                round_seed=split_seed,
-                n_candidates=n_split_candidates,
-                test_fraction=test_fraction,
-                val_fraction=val_fraction,
-                protein_group_col=protein_group_col,
-                global_label_rate=global_label_rate,
-                global_protein_probs=global_protein_probs,
-                global_diversity=global_diversity,
-                fp_map=fp_map,
-                scaffold_map=scaffold_map
-            )
-            train_idx = best['train_idx']
-            val_idx = best['val_idx']
-            test_idx = best['test_idx']
+        cv_folds = _generate_cv_folds(df, scenario_id, n_folds, seed, scaffold_map)
+        print(f"  Valid folds: {len(cv_folds)}/{n_folds}")
+
+        if not cv_folds:
+            print(f"  WARNING: No valid folds for scenario {scenario_id}. Skipping.")
+            continue
+
+        fold_results = {}
+        fold_split_stats = []
+
+        for fold_pos, (fold_i, train_idx, val_idx, test_idx) in enumerate(cv_folds, 1):
+            print(f"\n  Fold {fold_pos}/{len(cv_folds)} (id={fold_i})")
 
             train_compounds = set(df.iloc[train_idx]['chembl_id'])
             test_compounds = set(df.iloc[test_idx]['chembl_id'])
@@ -877,30 +687,16 @@ def run_comparison(
                 test_kinases_set = set(df.iloc[test_idx]['target_kinase'])
                 stats['test_kinases'] = len(test_kinases_set)
                 stats['leaked_kinases'] = len(train_kinases & test_kinases_set)
-            round_split_stats.append(stats)
+            fold_split_stats.append(stats)
 
-            print(
-                f"  Selected candidate_seed={best['candidate_seed']} | "
-                f"score={best['score']:.4f} | "
-                f"test_frac={best['quality']['test_fraction']:.3f} "
-                f"(target={best['quality']['target_test_fraction']:.3f})"
-            )
             print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
             print(f"  Test compounds: {len(test_compounds)}, Leaked: {len(leaked)} ({stats['leak_pct']:.1f}%)")
-            print(
-                f"  Balance diagnostics: label_dev={best['quality']['label_dev_test']:.4f}, "
-                f"protein_l1={best['quality']['protein_l1_test_vs_global']:.4f}, "
-                f"div_dev={best['quality']['diversity_dev_test']:.4f}"
-            )
+            if 'leaked_kinases' in stats:
+                print(f"  Test kinases: {stats['test_kinases']}, Leaked kinases: {stats['leaked_kinases']}")
 
-            results = train_and_evaluate(df, train_idx, test_idx, all_kinases, seed=seed, fp_cache=fp_cache)
+            results = train_and_evaluate(df, train_idx, test_idx, seed=seed, fp_cache=fp_cache)
             if results is not None:
-                round_results[round_idx] = {
-                    'round_seed': split_seed,
-                    'candidate_seed': best['candidate_seed'],
-                    'split_quality': best['quality'],
-                    'split_diagnostics': best['diagnostics'],
-                    'split_metadata': best['metadata'],
+                fold_results[fold_i] = {
                     'metrics': results
                 }
                 knn_auroc = f", AUROC={results['KNN']['auroc']:.4f}" if not np.isnan(results['KNN'].get('auroc', float('nan'))) else ""
@@ -908,28 +704,28 @@ def run_comparison(
                 print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auroc}")
                 print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auroc}")
 
-        # Aggregate across rounds
-        if round_results:
+        # Aggregate across folds
+        if fold_results:
             # Aggregate split stats for plotting/summary
             agg_split = {}
             for k in ['train_size', 'val_size', 'test_size', 'test_compounds', 'leaked_compounds', 'leak_pct', 'test_kinases', 'leaked_kinases']:
-                vals = [s[k] for s in round_split_stats if k in s]
+                vals = [s[k] for s in fold_split_stats if k in s]
                 if vals:
                     agg_split[k] = int(round(np.mean(vals))) if k.endswith('size') or 'compounds' in k or 'kinases' in k else float(np.mean(vals))
                     agg_split[f'{k}_std'] = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
             split_stats[scenario_key] = agg_split
 
-            if len(round_results) == 1:
-                # Single round: use metrics directly
-                single = list(round_results.values())[0]['metrics']
+            if len(fold_results) == 1:
+                # Single fold: use metrics directly
+                single = list(fold_results.values())[0]['metrics']
                 all_results[scenario_key] = single
             else:
-                # Multi-round: mean +/- std
+                # Multi-fold: mean +/- std
                 aggregated = {}
                 for model in ['KNN', 'MLP']:
                     model_agg = {}
                     for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
-                        values = [r['metrics'][model][metric] for r in round_results.values()
+                        values = [r['metrics'][model][metric] for r in fold_results.values()
                                   if not np.isnan(r['metrics'][model].get(metric, float('nan')))]
                         if values:
                             model_agg[metric] = float(np.mean(values))
@@ -937,26 +733,18 @@ def run_comparison(
                         else:
                             model_agg[metric] = float('nan')
                             model_agg[f'{metric}_std'] = 0.0
-                    model_agg['round_results'] = {
-                        str(r_idx): {
-                            'round_seed': r_data['round_seed'],
-                            'candidate_seed': r_data['candidate_seed'],
-                            'split_quality': r_data['split_quality'],
-                            'split_diagnostics': r_data['split_diagnostics'],
-                            'split_metadata': r_data['split_metadata'],
-                            'metrics': r_data['metrics'][model]
+                    model_agg['fold_results'] = {
+                        str(f_idx): {
+                            'metrics': f_data['metrics'][model]
                         }
-                        for r_idx, r_data in round_results.items()
+                        for f_idx, f_data in fold_results.items()
                     }
-                    quality_scores = [r['split_quality']['score'] for r in round_results.values()]
-                    model_agg['split_quality_score_mean'] = float(np.mean(quality_scores))
-                    model_agg['split_quality_score_std'] = float(np.std(quality_scores, ddof=1)) if len(quality_scores) > 1 else 0.0
-                    model_agg['n_rounds'] = len(round_results)
+                    model_agg['n_folds'] = len(fold_results)
                     aggregated[model] = model_agg
                 all_results[scenario_key] = aggregated
 
                 # Print aggregate summary
-                print(f"\n  --- Aggregate ({len(round_results)} rounds) ---")
+                print(f"\n  --- Aggregate ({len(fold_results)} folds) ---")
                 for model in ['KNN', 'MLP']:
                     m = aggregated[model]
                     auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
@@ -964,24 +752,58 @@ def run_comparison(
                           f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}, "
                           f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auroc_str}")
 
+            if scenario_key not in completed_scenarios:
+                completed_scenarios.append(scenario_key)
+            if checkpoint_path:
+                write_json(checkpoint_path, {
+                    'status': 'running',
+                    'config': {
+                        'seed': seed,
+                        'n_folds': n_folds,
+                        'scenarios': [s for s, _, _ in scenarios_config],
+                        'split_protocol_version': SPLIT_PROTOCOL_VERSION,
+                    },
+                    'completed_scenarios': completed_scenarios,
+                    'all_results': all_results,
+                    'split_stats': split_stats
+                })
+                print(
+                    f"  [checkpoint] Saved {len(completed_scenarios)}/{len(scenarios_config)} scenarios "
+                    f"-> {checkpoint_path}"
+                )
+
+    if checkpoint_path:
+        write_json(checkpoint_path, {
+            'status': 'completed' if len(completed_scenarios) == len(scenarios_config) else 'partial',
+            'config': {
+                'seed': seed,
+                'n_folds': n_folds,
+                'scenarios': [s for s, _, _ in scenarios_config],
+                'split_protocol_version': SPLIT_PROTOCOL_VERSION,
+            },
+            'completed_scenarios': completed_scenarios,
+            'all_results': all_results,
+            'split_stats': split_stats
+        })
+
     return all_results, split_stats
 
 
 def _get_metric(all_results: dict, scenario_key: str, model: str, metric: str):
-    """Extract metric value from results dict (works for single and multi-round)."""
+    """Extract metric value from results dict (works for single and multi-fold)."""
     return all_results[scenario_key][model][metric]
 
 
 def _get_metric_std(all_results: dict, scenario_key: str, model: str, metric: str):
-    """Extract metric std from results dict (returns 0 for single-round)."""
+    """Extract metric std from results dict (returns 0 for single-fold)."""
     return all_results[scenario_key][model].get(f'{metric}_std', 0.0)
 
 
 def _is_multi_round(all_results: dict):
-    """Check if results contain multi-round aggregation."""
+    """Check if results contain multi-fold aggregation."""
     first_scenario = list(all_results.values())[0]
     knn = first_scenario.get('KNN', {})
-    return ('n_rounds' in knn) or ('n_seeds' in knn)
+    return 'n_folds' in knn
 
 
 def plot_inflated_vs_real(all_results: dict, output_dir: str = '.', prefix: str = ''):
@@ -1091,10 +913,7 @@ def run_single_dataset(
     output_dir: str,
     force: bool = False,
     seed: int = DEFAULT_SPLIT_SEED,
-    n_rounds: int = DEFAULT_N_ROUNDS,
-    test_fraction: float = DEFAULT_TEST_FRACTION,
-    val_fraction: float = DEFAULT_VAL_FRACTION,
-    n_split_candidates: int = DEFAULT_N_SPLIT_CANDIDATES,
+    n_folds: int = DEFAULT_N_FOLDS,
     scenarios: list = None,
     keep_monotonic: bool = False
 ):
@@ -1104,10 +923,15 @@ def run_single_dataset(
         print(f"Error: Unknown dataset type '{dataset_type}'")
         return None
 
-    prefix = f"{dataset_type}_" if dataset_type != 'non_human' else ""
+    # Output is already dataset-scoped (e.g. .../non_human, .../human, .../all).
+    # Keep filenames canonical without dataset prefix.
+    prefix = ""
 
-    # Check cache
+    # Cache and checkpoint files
     json_file = os.path.join(output_dir, f'{prefix}split_comparison_results.json')
+    leakage_checkpoint_file = os.path.join(output_dir, f'{prefix}leakage_diagnostics_checkpoint.json')
+    comparison_checkpoint_file = os.path.join(output_dir, f'{prefix}comparison_progress_checkpoint.json')
+
     if os.path.exists(json_file) and not force:
         print(f"\n[CACHE] Results already exist for {dataset_type}: {json_file}")
         print(f"        Use --force to recalculate.")
@@ -1118,8 +942,18 @@ def run_single_dataset(
     print("\n" + "=" * 70)
     print(f"ANALYSIS: {dataset_type.upper()}")
     print("=" * 70)
+    print(f"Output directory: {output_dir}")
 
-    print(f"\nLoading dataset: {dataset_type}...")
+    if force:
+        for ckpt in [leakage_checkpoint_file, comparison_checkpoint_file]:
+            if os.path.exists(ckpt):
+                try:
+                    os.remove(ckpt)
+                    print(f"[FORCE] Removed checkpoint: {ckpt}")
+                except OSError:
+                    pass
+
+    print(f"\n[1/4] Loading dataset: {dataset_type}...")
     try:
         df = load_dataset(data_path, keep_monotonic=keep_monotonic)
     except FileNotFoundError:
@@ -1128,26 +962,95 @@ def run_single_dataset(
 
     print(f"  Total: {len(df)} rows, {df['chembl_id'].nunique()} compounds, {df['target_kinase'].nunique()} kinases")
 
+    # Generate (or reuse) legacy leakage diagnostics (plots 01-05)
+    print("\n[2/4] Leakage diagnostics (01-05)")
+    print("\n" + "-" * 50)
+    print("GENERATING LEAKAGE DIAGNOSTICS (01-05)")
+    print("-" * 50)
+    leakage_artifacts = None
+    if not force:
+        leakage_ckpt = read_json(leakage_checkpoint_file)
+        if leakage_ckpt:
+            cfg_matches = (
+                leakage_ckpt.get('dataset') == dataset_type and
+                leakage_ckpt.get('seed') == seed and
+                leakage_ckpt.get('n_folds') == n_folds
+            )
+            cached_artifacts = leakage_ckpt.get('artifacts', {})
+            missing = [
+                p for p in cached_artifacts.values()
+                if p and not os.path.exists(p)
+            ]
+            if cfg_matches and not missing and cached_artifacts:
+                leakage_artifacts = cached_artifacts
+                print(f"[CHECKPOINT] Reusing leakage diagnostics from {leakage_checkpoint_file}")
+            elif cfg_matches and missing:
+                print(f"[CHECKPOINT] Leakage checkpoint found but {len(missing)} artifact(s) missing. Recomputing...")
+            elif not cfg_matches:
+                print("[CHECKPOINT] Leakage checkpoint ignored (configuration mismatch).")
+
+    if leakage_artifacts is None:
+        # CV protocol uses one fold for val and one for test
+        test_fraction = 1.0 / n_folds
+        val_fraction = 1.0 / n_folds if n_folds > 2 else 0.0
+        leakage_artifacts = run_leakage_diagnostics(
+            df=df,
+            output_dir=output_dir,
+            prefix=prefix,
+            seed=seed,
+            test_fraction=test_fraction,
+            val_fraction=val_fraction,
+            knn_k=5,
+            similarity_sample_size=500
+        )
+        write_json(leakage_checkpoint_file, {
+            'status': 'completed',
+            'dataset': dataset_type,
+            'seed': seed,
+            'n_folds': n_folds,
+            'artifacts': leakage_artifacts
+        })
+        print(f"[CHECKPOINT] Leakage diagnostics saved: {leakage_checkpoint_file}")
+
+    for artifact_key, artifact_path in leakage_artifacts.items():
+        if artifact_path:
+            print(f"  [{artifact_key}] {artifact_path}")
+
+    print("\n[3/4] Split comparison (06-07)")
     all_results, split_stats = run_comparison(
         df,
         output_dir,
         seed=seed,
-        n_rounds=n_rounds,
-        test_fraction=test_fraction,
-        val_fraction=val_fraction,
-        n_split_candidates=n_split_candidates,
-        scenarios=scenarios
+        n_folds=n_folds,
+        scenarios=scenarios,
+        checkpoint_path=comparison_checkpoint_file,
+        force=force
     )
     if not all_results:
         print("  No results generated.")
         return None
 
+    print("\n[4/4] Finalizing artifacts and report")
     # Generate plots
     print("\n" + "-" * 50)
     print("GENERATING PLOTS")
     print("-" * 50)
 
     plot_comparison(all_results, split_stats, output_dir, prefix)
+
+    # Write README explaining the logic behind all generated images
+    readme_path = write_images_readme(
+        output_dir=output_dir,
+        dataset_type=dataset_type,
+        seed=seed,
+        n_folds=n_folds,
+        scenarios=scenarios if scenarios else DEFAULT_SCENARIOS,
+        split_protocol_version=SPLIT_PROTOCOL_VERSION,
+        affinity_threshold_pchembl=DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
+        leakage_artifacts=leakage_artifacts,
+        prefix=prefix
+    )
+    print(f"README saved: {readme_path}")
 
     # Save JSON results
     json_results = {}
@@ -1166,9 +1069,9 @@ def run_single_dataset(
                     std_val = m.get(f'{metric}_std', 0.0)
                     if not (isinstance(std_val, float) and np.isnan(std_val)):
                         scenario_json[model][f'{metric}_std'] = std_val
-                scenario_json[model]['n_rounds'] = m.get('n_rounds', 1)
-                if 'round_results' in m:
-                    scenario_json[model]['round_results'] = m['round_results']
+                scenario_json[model]['n_folds'] = m.get('n_folds', 1)
+                if 'fold_results' in m:
+                    scenario_json[model]['fold_results'] = m['fold_results']
         json_results[scenario_key.replace('\n', ' ')] = scenario_json
 
     json_file = os.path.join(output_dir, f'{prefix}split_comparison_results.json')
@@ -1177,15 +1080,18 @@ def run_single_dataset(
             'dataset': dataset_type,
             'split_protocol_version': SPLIT_PROTOCOL_VERSION,
             'model_seed': seed,
-            'n_rounds': n_rounds,
-            'split_seeds': ROUND_SEEDS[:n_rounds] if n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [seed + i for i in range(n_rounds - len(ROUND_SEEDS))],
-            'target_test_fraction': test_fraction,
-            'target_val_fraction': val_fraction,
-            'target_split_ratio': f'{1-test_fraction-val_fraction:.0%}/{val_fraction:.0%}/{test_fraction:.0%}',
+            'n_folds': n_folds,
             'monotonic_kinase_filter': not keep_monotonic,
-            'n_split_candidates': n_split_candidates,
             'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
             'affinity_threshold_pchembl': DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
+            'auxiliary_artifacts': leakage_artifacts,
+            'checkpoints': {
+                'leakage_diagnostics': leakage_checkpoint_file,
+                'split_comparison_progress': comparison_checkpoint_file
+            },
+            'documentation': {
+                'readme': readme_path
+            },
             'results': json_results,
             'split_stats': {k.replace('\n', ' '): v for k, v in split_stats.items()}
         }, f, indent=2)
@@ -1215,16 +1121,16 @@ def run_single_dataset(
             print(f"  KNN: {orig_knn_mcc:.3f}+/-{orig_knn_std:.3f} -> {new_knn_mcc:.3f}+/-{new_knn_std:.3f}")
             print(f"  MLP: {orig_mlp_mcc:.3f}+/-{orig_mlp_std:.3f} -> {new_mlp_mcc:.3f}+/-{new_mlp_std:.3f}")
 
-            # Wilcoxon signed-rank test (paired comparison across rounds)
+            # Wilcoxon signed-rank test (paired comparison across folds)
             random_data = all_results[random_key]
             new_data = all_results[new_key]
             for model in ['KNN', 'MLP']:
-                if 'round_results' in random_data[model] and 'round_results' in new_data[model]:
-                    r_keys = sorted(random_data[model]['round_results'].keys())
-                    n_keys = sorted(new_data[model]['round_results'].keys())
+                if 'fold_results' in random_data[model] and 'fold_results' in new_data[model]:
+                    r_keys = sorted(random_data[model]['fold_results'].keys(), key=int)
+                    n_keys = sorted(new_data[model]['fold_results'].keys(), key=int)
                     if len(r_keys) >= 5 and len(n_keys) >= 5:
-                        r_mcc = [random_data[model]['round_results'][k]['metrics']['mcc'] for k in r_keys]
-                        n_mcc = [new_data[model]['round_results'][k]['metrics']['mcc'] for k in n_keys]
+                        r_mcc = [random_data[model]['fold_results'][k]['metrics']['mcc'] for k in r_keys]
+                        n_mcc = [new_data[model]['fold_results'][k]['metrics']['mcc'] for k in n_keys]
                         try:
                             stat, p_val = wilcoxon(r_mcc, n_mcc, alternative='greater')
                             print(f"  {model} Wilcoxon signed-rank (random > new_comp_new_kin): "
@@ -1233,7 +1139,7 @@ def run_single_dataset(
                         except ValueError as e:
                             print(f"  {model} Wilcoxon test: could not compute ({e})")
                     else:
-                        print(f"  {model} Wilcoxon test: requires >= 5 rounds (have {min(len(r_keys), len(n_keys))})")
+                        print(f"  {model} Wilcoxon test: requires >= 5 folds (have {min(len(r_keys), len(n_keys))})")
 
         # Document blind-target limitation
         print(f"\n  NOTE: One-hot kinase encoding creates a 'blind target' condition for")
@@ -1385,7 +1291,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run single dataset with default scenarios
+  # Run single dataset with default scenarios (10-fold CV)
   %(prog)s --dataset non_human
 
   # Run all datasets (non_human, human, all)
@@ -1394,11 +1300,8 @@ Examples:
   # Run specific scenarios only
   %(prog)s --dataset non_human --scenarios random,compound
 
-  # Fixed model seed + 5 split rounds (default)
-  %(prog)s --dataset human --seed 42 --n_rounds 5
-
-  # More rigorous split selection (more candidate partitions)
-  %(prog)s --dataset non_human --n_rounds 5 --n_split_candidates 40 --test_fraction 0.20
+  # 5-fold CV (60/20/20 train/val/test)
+  %(prog)s --dataset human --n_folds 5
 
   # Debug mode for detailed error traces
   %(prog)s --dataset all --debug
@@ -1426,6 +1329,7 @@ Available scenarios (Pahikkala et al. 2015 framework):
         type=str,
         default=None,
         help='Comma-separated list of scenarios to run (default: all). '
+             'Use "all" to run all scenarios. '
              'Options: new_compound_new_kinase, scaffold, compound, kinase, random'
     )
     parser.add_argument(
@@ -1437,37 +1341,20 @@ Available scenarios (Pahikkala et al. 2015 framework):
         '--seed',
         type=int,
         default=DEFAULT_SPLIT_SEED,
-        help=f'Fixed random seed for model + split-seed base (default: {DEFAULT_SPLIT_SEED})'
+        help=f'Fixed random seed for model + CV fold assignment (default: {DEFAULT_SPLIT_SEED})'
     )
     parser.add_argument(
-        '--n_rounds',
+        '--n_folds',
         type=int,
-        default=DEFAULT_N_ROUNDS,
-        help=f'Number of split rounds to aggregate (default: {DEFAULT_N_ROUNDS})'
-    )
-    parser.add_argument(
-        '--test_fraction',
-        type=float,
-        default=DEFAULT_TEST_FRACTION,
-        help=f'Target test fraction for candidate selection (default: {DEFAULT_TEST_FRACTION})'
-    )
-    parser.add_argument(
-        '--val_fraction',
-        type=float,
-        default=DEFAULT_VAL_FRACTION,
-        help=f'Target validation fraction (default: {DEFAULT_VAL_FRACTION})'
+        default=DEFAULT_N_FOLDS,
+        help=f'Number of CV folds (default: {DEFAULT_N_FOLDS}). '
+             'k=10 gives 80/10/10 train/val/test, k=5 gives 60/20/20.'
     )
     parser.add_argument(
         '--keep_monotonic',
         action='store_true',
         help='Keep kinases with monotonic activity profiles (100%% active or inactive). '
              'By default these are removed as they provide no discriminative signal.'
-    )
-    parser.add_argument(
-        '--n_split_candidates',
-        type=int,
-        default=DEFAULT_N_SPLIT_CANDIDATES,
-        help=f'Candidate splits evaluated per round (default: {DEFAULT_N_SPLIT_CANDIDATES})'
     )
     parser.add_argument(
         '--force',
@@ -1484,22 +1371,17 @@ Available scenarios (Pahikkala et al. 2015 framework):
 
     if not args.run_all and args.dataset is None:
         parser.error("--dataset is required unless --run_all is specified")
-    if args.n_rounds < 1:
-        parser.error("--n_rounds must be >= 1")
-    if args.n_split_candidates < 1:
-        parser.error("--n_split_candidates must be >= 1")
-    if not (0.05 <= args.test_fraction <= 0.5):
-        parser.error("--test_fraction must be in [0.05, 0.5]")
-    if not (0.0 <= args.val_fraction <= 0.5):
-        parser.error("--val_fraction must be in [0.0, 0.5]")
-    if args.test_fraction + args.val_fraction >= 1.0:
-        parser.error("test_fraction + val_fraction must be < 1.0")
+    if args.n_folds < 2:
+        parser.error("--n_folds must be >= 2")
 
     if args.scenarios:
-        scenarios = [s.strip() for s in args.scenarios.split(',')]
-        for s in scenarios:
-            if s not in AVAILABLE_SCENARIOS:
-                parser.error(f"Unknown scenario: {s}. Available: {list(AVAILABLE_SCENARIOS.keys())}")
+        if args.scenarios.strip().lower() == 'all':
+            scenarios = DEFAULT_SCENARIOS
+        else:
+            scenarios = [s.strip() for s in args.scenarios.split(',')]
+            for s in scenarios:
+                if s not in AVAILABLE_SCENARIOS:
+                    parser.error(f"Unknown scenario: {s}. Available: {list(AVAILABLE_SCENARIOS.keys())}")
     else:
         scenarios = DEFAULT_SCENARIOS
 
@@ -1513,17 +1395,17 @@ Available scenarios (Pahikkala et al. 2015 framework):
     print("=" * 70)
     print("SPLIT COMPARISON ANALYSIS (KNN/MLP)")
     print("=" * 70)
-    train_frac = 1 - args.test_fraction - args.val_fraction
+    # With k folds: train = (k-2)/k, val = 1/k, test = 1/k
+    train_pct = (args.n_folds - 2) / args.n_folds
+    val_pct = 1.0 / args.n_folds
+    test_pct = 1.0 / args.n_folds
     print(f"Datasets:         {datasets_to_run}")
     print(f"Scenarios:        {scenarios}")
-    print(f"Output directory: {args.output_dir}")
+    print(f"Output root dir:  {args.output_dir}")
     print(f"Split protocol:   {SPLIT_PROTOCOL_VERSION}")
     print(f"Model seed:       {args.seed} (fixed)")
-    print(f"Split rounds:     {args.n_rounds}")
-    display_seeds = ROUND_SEEDS[:args.n_rounds] if args.n_rounds <= len(ROUND_SEEDS) else ROUND_SEEDS + [args.seed + i for i in range(args.n_rounds - len(ROUND_SEEDS))]
-    print(f"Split seeds:      {display_seeds}")
-    print(f"Split ratio:      {train_frac:.0%}/{args.val_fraction:.0%}/{args.test_fraction:.0%} (train/val/test)")
-    print(f"Split candidates: {args.n_split_candidates}/round")
+    print(f"k-folds:          {args.n_folds}")
+    print(f"Split ratio:      {train_pct:.0%}/{val_pct:.0%}/{test_pct:.0%} (train/val/test)")
     mono_status = 'OFF (keeping all)' if args.keep_monotonic else 'ON (removing 100% single-class kinases)'
     print(f"Monotonic filter: {mono_status}")
     print(f"Force recalc:     {args.force}")
@@ -1534,20 +1416,21 @@ Available scenarios (Pahikkala et al. 2015 framework):
     all_dataset_times = {}
     total_start_time = time.time()
 
+    dataset_output_dirs = {}
     for i, dataset_type in enumerate(datasets_to_run, 1):
         print(f"\n{'#' * 70}")
         print(f"# [{i}/{len(datasets_to_run)}] Running analysis for dataset={dataset_type}...")
         print(f"{'#' * 70}")
+        dataset_output_dir = os.path.join(args.output_dir, dataset_type)
+        dataset_output_dirs[dataset_type] = dataset_output_dir
+        print(f"# Output: {dataset_output_dir}")
 
         dataset_start_time = time.time()
         try:
             result = run_single_dataset(
-                dataset_type, args.output_dir, args.force,
+                dataset_type, dataset_output_dir, args.force,
                 seed=args.seed,
-                n_rounds=args.n_rounds,
-                test_fraction=args.test_fraction,
-                val_fraction=args.val_fraction,
-                n_split_candidates=args.n_split_candidates,
+                n_folds=args.n_folds,
                 scenarios=scenarios,
                 keep_monotonic=args.keep_monotonic
             )
@@ -1557,7 +1440,10 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 print(f"  Skipped {dataset_type} (results already exist or data not found)")
                 all_dataset_results[dataset_type] = None
             else:
-                print(f"  Completed {dataset_type} analysis in {format_time(dataset_time)}")
+                print(
+                    f"  Completed {dataset_type} analysis in {format_time(dataset_time)} "
+                    f"(output: {dataset_output_dir})"
+                )
                 all_dataset_results[dataset_type] = result
         except Exception as e:
             dataset_time = time.time() - dataset_start_time
@@ -1591,7 +1477,9 @@ Available scenarios (Pahikkala et al. 2015 framework):
             print_comparative_summary(valid_results)
 
     print("\nAnalysis complete!")
-    print(f"Results saved in: {args.output_dir}")
+    print(f"Results saved under: {args.output_dir}")
+    for dataset_type in datasets_to_run:
+        print(f"  - {dataset_type}: {dataset_output_dirs.get(dataset_type, os.path.join(args.output_dir, dataset_type))}")
 
 
 if __name__ == '__main__':
