@@ -6,6 +6,29 @@
 
 ---
 
+## Índice de Figuras
+
+As figuras estão organizadas por experimento. Prefixo **A-** = ANTES, **D-** = DEPOIS.
+
+| ID | Figura | Descrição | Seção |
+|----|--------|-----------|-------|
+| **A-01** | `non_human_13_02_2026/.../01_leakage_analysis.png` | Análise de vazamento (ANTES) | §4 |
+| **A-02** | `non_human_13_02_2026/.../02_baseline_comparison.png` | Comparação de baselines (ANTES) | §4.1 |
+| **A-03** | `non_human_13_02_2026/.../03_kinase_imbalance.png` | Desbalanceamento de kinases (ANTES) | §6.3 |
+| **A-04** | `non_human_13_02_2026/.../04_compound_consistency.png` | Consistência de compostos (ANTES) | §6.1, §6.2 |
+| **A-05** | `non_human_13_02_2026/.../05_similarity_analysis.png` | Análise de similaridade (ANTES) | §6.3 |
+| **A-06** | `non_human_13_02_2026/.../06_split_comparison.png` | Comparação de splits (ANTES) | §2 |
+| **A-07** | `non_human_13_02_2026/.../07_inflated_vs_real_performance.png` | Inflação de métricas (ANTES) | §3 |
+| **D-01** | `non_human_monotonic_17_02_2026/.../01_leakage_analysis.png` | Análise de vazamento (DEPOIS) | §4 |
+| **D-02** | `non_human_monotonic_17_02_2026/.../02_baseline_comparison.png` | Comparação de baselines (DEPOIS) | §4.1 |
+| **D-03** | `non_human_monotonic_17_02_2026/.../03_kinase_imbalance.png` | Desbalanceamento de kinases (DEPOIS) | §6.3 |
+| **D-04** | `non_human_monotonic_17_02_2026/.../04_compound_consistency.png` | Consistência de compostos (DEPOIS) | §6.1, §6.2 |
+| **D-05** | `non_human_monotonic_17_02_2026/.../05_similarity_analysis.png` | Análise de similaridade (DEPOIS) | §6.3 |
+| **D-06** | `non_human_monotonic_17_02_2026/.../06_split_comparison.png` | Comparação de splits (DEPOIS) | §2 |
+| **D-07** | `non_human_monotonic_17_02_2026/.../07_inflated_vs_real_performance.png` | Inflação de métricas (DEPOIS) | §3 |
+
+---
+
 ## Resumo Executivo
 
 Este documento compara os resultados do dataset Non-Human **antes** (apenas filtro de kinases monotônicas) e **depois** (filtro de kinases + compostos monotônicos) para avaliar o impacto na avaliação de modelos.
@@ -46,6 +69,8 @@ Este documento compara os resultados do dataset Non-Human **antes** (apenas filt
 ---
 
 ## 2. Comparação de Métricas por Cenário
+
+> **Figuras de referência**: A-06, D-06 (`06_split_comparison.png`)
 
 ### 2.1 MCC (Matthews Correlation Coefficient) - Métrica Principal
 
@@ -94,6 +119,8 @@ S4 (New C+K)     █████             0.233
 
 ## 3. Análise do Fator de Inflação
 
+> **Figuras de referência**: A-07, D-07 (`07_inflated_vs_real_performance.png`)
+
 O **fator de inflação** mede quanto o Random Split superestima a performance real (S4).
 
 ### 3.1 Cálculo do Fator de Inflação (MLP MCC)
@@ -115,6 +142,8 @@ O fator de inflação **aumentou** após aplicar o filtro de compostos monotôni
 ---
 
 ## 4. Análise por Tipo de Split
+
+> **Figuras de referência**: A-01, D-01 (`01_leakage_analysis.png`) e A-02, D-02 (`02_baseline_comparison.png`)
 
 ### 4.1 Random Split (S1) - Baseline com Vazamento
 
@@ -186,6 +215,8 @@ O fator de inflação **aumentou** após aplicar o filtro de compostos monotôni
 
 ### 6.1 Por que o Split por Kinase (S3) Colapsou?
 
+> **Figuras de referência**: A-04, D-04 (`04_compound_consistency.png`) - mostram a distribuição de compostos monotônicos
+
 O MCC do S3 caiu de **0.303 → 0.061** (praticamente chance). Isso revela:
 
 1. **Compostos monotônicos eram "âncoras"**: Compostos que sempre são ativos/inativos independente da kinase ajudavam o modelo a "acertar" mesmo em kinases novas
@@ -202,12 +233,14 @@ O MCC do S2 subiu de **0.674 → 0.694**. Possíveis explicações:
 
 ### 6.3 Limitações do Dataset Non-Human
 
-| Limitação | Impacto |
-|-----------|---------|
-| **Poucas kinases** (112) | Dificulta generalização para kinases novas |
-| **93.6% compostos testados em 1 kinase** | Não há dados para aprender seletividade |
-| **Kinases de espécies diversas** | Baixa homologia entre targets |
-| **Alto desbalanceamento** | 53.6% das kinases são desbalanceadas |
+> **Figuras de referência**: A-03, D-03 (`03_kinase_imbalance.png`) e A-05, D-05 (`05_similarity_analysis.png`)
+
+| Limitação | Impacto | Figura |
+|-----------|---------|--------|
+| **Poucas kinases** (112) | Dificulta generalização para kinases novas | A-03, D-03 |
+| **93.6% compostos testados em 1 kinase** | Não há dados para aprender seletividade | A-04, D-04 |
+| **Kinases de espécies diversas** | Baixa homologia entre targets | A-05, D-05 |
+| **Alto desbalanceamento** | 53.6% das kinases são desbalanceadas | A-03, D-03 |
 
 ---
 
