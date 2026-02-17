@@ -99,12 +99,17 @@ def faiss_knn_predict(X_train: np.ndarray, y_train: np.ndarray,
     return predictions, proba_positive
 
 
-def load_dataset(filepath: str, keep_monotonic: bool = False):
+def load_dataset(filepath: str, keep_monotonic: bool = False,
+                 filter_monotonic_compounds: bool = False):
     """Load dataset and create binary labels using pChEMBL threshold.
 
     By default, removes kinases with monotonic activity profiles (100% active
     or 100% inactive), as they provide no discriminative signal and inflate
     metrics. Use keep_monotonic=True to retain them.
+
+    filter_monotonic_compounds: if True, also removes compounds that are 100%
+    active (pan-active) or 100% inactive (pan-inactive) across all kinases
+    they were tested against. These "monotonic compounds" are trivial cases.
     """
     df = pd.read_csv(filepath, sep='\t')
 
@@ -145,6 +150,29 @@ def load_dataset(filepath: str, keep_monotonic: bool = False):
             k_removed = k_before - df['target_kinase'].nunique()
             print(f"  Monotonic kinase filter: removed {k_removed} kinases ({n_removed} samples, "
                   f"{100*n_removed/n_before:.1f}%) with 100% single-class profiles")
+
+    # Filter monotonic compounds (pan-active or pan-inactive across all tested kinases)
+    if filter_monotonic_compounds:
+        # Only consider compounds tested against >1 kinase (single-kinase compounds are not "pan")
+        compound_kinase_counts = df.groupby('chembl_id')['target_kinase'].nunique()
+        multi_kinase_compounds = set(compound_kinase_counts[compound_kinase_counts > 1].index)
+
+        # For multi-kinase compounds, compute activity rate
+        df_multi = df[df['chembl_id'].isin(multi_kinase_compounds)]
+        if len(df_multi) > 0:
+            compound_rates = df_multi.groupby('chembl_id')['label'].mean()
+            mono_compounds = set(compound_rates[(compound_rates == 0.0) | (compound_rates == 1.0)].index)
+
+            if mono_compounds:
+                n_before = len(df)
+                c_before = df['chembl_id'].nunique()
+                df = df[~df['chembl_id'].isin(mono_compounds)].reset_index(drop=True)
+                n_removed = n_before - len(df)
+                c_removed = c_before - df['chembl_id'].nunique()
+                pan_active = sum(1 for c in mono_compounds if compound_rates[c] == 1.0)
+                pan_inactive = len(mono_compounds) - pan_active
+                print(f"  Monotonic compound filter: removed {c_removed} compounds ({n_removed} samples, "
+                      f"{100*n_removed/n_before:.1f}%): {pan_active} pan-active, {pan_inactive} pan-inactive")
 
     # Report class distribution
     n_active = df['label'].sum()
@@ -915,7 +943,8 @@ def run_single_dataset(
     seed: int = DEFAULT_SPLIT_SEED,
     n_folds: int = DEFAULT_N_FOLDS,
     scenarios: list = None,
-    keep_monotonic: bool = False
+    keep_monotonic: bool = False,
+    filter_monotonic_compounds: bool = False
 ):
     """Run analysis for a single dataset type."""
     data_path = DATASET_PATHS.get(dataset_type)
@@ -955,7 +984,8 @@ def run_single_dataset(
 
     print(f"\n[1/4] Loading dataset: {dataset_type}...")
     try:
-        df = load_dataset(data_path, keep_monotonic=keep_monotonic)
+        df = load_dataset(data_path, keep_monotonic=keep_monotonic,
+                          filter_monotonic_compounds=filter_monotonic_compounds)
     except FileNotFoundError:
         print(f"  ERROR: File not found: {data_path}")
         return None
@@ -1082,6 +1112,7 @@ def run_single_dataset(
             'model_seed': seed,
             'n_folds': n_folds,
             'monotonic_kinase_filter': not keep_monotonic,
+            'monotonic_compound_filter': filter_monotonic_compounds,
             'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
             'affinity_threshold_pchembl': DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
             'auxiliary_artifacts': leakage_artifacts,
@@ -1357,6 +1388,12 @@ Available scenarios (Pahikkala et al. 2015 framework):
              'By default these are removed as they provide no discriminative signal.'
     )
     parser.add_argument(
+        '--filter_monotonic_compounds',
+        action='store_true',
+        help='Remove compounds with monotonic activity profiles (pan-active or pan-inactive). '
+             'These are compounds that are 100%% active or 100%% inactive across all kinases tested.'
+    )
+    parser.add_argument(
         '--force',
         action='store_true',
         help='Force recalculation even if results exist'
@@ -1406,8 +1443,10 @@ Available scenarios (Pahikkala et al. 2015 framework):
     print(f"Model seed:       {args.seed} (fixed)")
     print(f"k-folds:          {args.n_folds}")
     print(f"Split ratio:      {train_pct:.0%}/{val_pct:.0%}/{test_pct:.0%} (train/val/test)")
-    mono_status = 'OFF (keeping all)' if args.keep_monotonic else 'ON (removing 100% single-class kinases)'
-    print(f"Monotonic filter: {mono_status}")
+    mono_kin_status = 'OFF (keeping all)' if args.keep_monotonic else 'ON (removing 100% single-class kinases)'
+    mono_cmp_status = 'ON (removing pan-active/pan-inactive)' if args.filter_monotonic_compounds else 'OFF (keeping all)'
+    print(f"Monotonic kinase filter:   {mono_kin_status}")
+    print(f"Monotonic compound filter: {mono_cmp_status}")
     print(f"Force recalc:     {args.force}")
     print(f"Debug mode:       {args.debug}")
     print("=" * 70)
@@ -1432,7 +1471,8 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 seed=args.seed,
                 n_folds=args.n_folds,
                 scenarios=scenarios,
-                keep_monotonic=args.keep_monotonic
+                keep_monotonic=args.keep_monotonic,
+                filter_monotonic_compounds=args.filter_monotonic_compounds
             )
             dataset_time = time.time() - dataset_start_time
             all_dataset_times[dataset_type] = dataset_time
