@@ -1,0 +1,591 @@
+target_kinase,n_active,n_total,activity_rate,n_compounds,n_inactive
+1-phosphatidylinositol 3-phosphate 5-kinase,65,88,0.7386363636363636,42,23
+3-phosphoinositide dependent protein kinase-1,809,1828,0.4425601750547046,1655,1019
+"6-phosphofructo-2-kinase/fructose-2,6-bisphosphatase 1",4,37,0.10810810810810811,37,33
+"6-phosphofructo-2-kinase/fructose-2,6-bisphosphatase 2",11,36,0.3055555555555556,36,25
+"6-phosphofructo-2-kinase/fructose-2,6-bisphosphatase 3",520,656,0.7926829268292683,522,136
+"6-phosphofructo-2-kinase/fructose-2,6-bisphosphatase 4",16,18,0.8888888888888888,18,2
+ALK tyrosine kinase receptor,2893,4276,0.6765668849391955,2996,1383
+AMP-activated protein kinase (AMPK) alpha-1/beta-1/gamma-1,93,129,0.7209302325581395,39,36
+"AMP-activated protein kinase, AMPK",217,1736,0.125,194,1519
+"AMP-activated protein kinase, alpha-1 subunit",234,1305,0.1793103448275862,1187,1071
+"AMP-activated protein kinase, alpha-2 subunit",39,110,0.35454545454545455,108,71
+"AMP-activated protein kinase, beta-1 subunit",10,25,0.4,24,15
+"AMP-activated protein kinase, beta-2 subunit",1,2,0.5,2,1
+"AMP-activated protein kinase, gamma-1 subunit",12,245,0.04897959183673469,245,233
+"AMP-activated protein kinase, gamma-2 subunit",13,242,0.05371900826446281,242,229
+"Acylglycerol kinase, mitochondrial",0,1,0.0,1,1
+Adaptor-associated kinase,393,717,0.5481171548117155,539,324
+Adenosine kinase,453,930,0.4870967741935484,810,477
+Adenylate kinase 2,0,239,0.0,239,239
+Ankyrin repeat and protein kinase domain-containing protein 1,15,84,0.17857142857142858,83,69
+Aurora kinase A-interacting protein,1,3,0.3333333333333333,3,2
+Aurora kinase A/Targeting protein for Xklp2,30,42,0.7142857142857143,20,12
+Aurora kinase B/Inner centromere protein,222,410,0.5414634146341464,190,188
+Aurora kinase B/Receptor-type tyrosine-protein kinase,4,4,1.0,2,0
+BMP-2-inducible protein kinase,99,402,0.2462686567164179,318,303
+BR serine/threonine-protein kinase 1,75,711,0.10548523206751055,689,636
+BR serine/threonine-protein kinase 2,10,96,0.10416666666666667,92,86
+Beta-adrenergic receptor kinase 2,36,47,0.7659574468085106,46,11
+Bifunctional UDP-N-acetylglucosamine 2-epimerase/N-acetylmannosamine kinase,0,1,0.0,1,1
+Bifunctional polynucleotide phosphatase/kinase,3,3,1.0,2,0
+CDC7/DBF4 (Cell division cycle 7-related protein kinase/Activator of S phase kinase),540,704,0.7670454545454546,279,164
+CaM kinase I alpha,43,808,0.053217821782178217,777,765
+CaM kinase I delta,81,480,0.16875,431,399
+CaM kinase I gamma,20,124,0.16129032258064516,112,104
+CaM kinase II,136,384,0.3541666666666667,93,248
+CaM kinase II alpha,67,493,0.1359026369168357,436,426
+CaM kinase II beta,42,705,0.059574468085106386,679,663
+CaM kinase II delta,226,1125,0.2008888888888889,1033,899
+CaM kinase II gamma,102,926,0.1101511879049676,839,824
+CaM kinase IV,25,367,0.0681198910081744,314,342
+CaM-kinase kinase alpha,43,127,0.33858267716535434,117,84
+CaM-kinase kinase beta,151,522,0.289272030651341,401,371
+Calcium/calmodulin-dependent protein kinase type 1B,8,16,0.5,15,8
+Casein kinase 2,492,864,0.5694444444444444,190,372
+Casein kinase I,30,245,0.12244897959183673,49,215
+Casein kinase I alpha,192,1363,0.1408657373440939,1248,1171
+Casein kinase I delta,612,1745,0.35071633237822347,1607,1133
+Casein kinase I delta/epsilon,4,44,0.09090909090909091,22,40
+Casein kinase I epsilon,492,1170,0.4205128205128205,1087,678
+Casein kinase I gamma 1,101,909,0.1111111111111111,823,808
+Casein kinase I gamma 2,128,930,0.13763440860215054,843,802
+Casein kinase I isoform alpha-like,7,87,0.08045977011494253,83,80
+Casein kinase I isoform alpha/subunit beta,0,36,0.0,18,36
+Casein kinase I isoform gamma-3,82,871,0.09414466130884042,794,789
+Casein kinase II,753,1713,0.4395796847635727,524,960
+Casein kinase II alpha,895,1937,0.46205472379969026,1615,1042
+Casein kinase II alpha (prime),243,757,0.32100396301188905,633,514
+Casein kinase II alpha'/ beta,124,178,0.6966292134831461,88,54
+Casein kinase II alpha/beta,2532,2568,0.985981308411215,1256,36
+Casein kinase II beta,514,955,0.5382198952879581,920,441
+Cell division cycle 2-like protein kinase 6,41,305,0.13442622950819672,297,264
+Cell division cycle 7-related protein kinase,654,1269,0.5153664302600472,1175,615
+Cell division protein kinase 8,496,957,0.5182863113897597,842,461
+Cellular tumor antigen p53/Death-associated protein kinase 1,0,20,0.0,10,20
+Ceramide kinase,1,5,0.2,5,4
+Cereblon/Cyclin-dependent kinase 12,6,6,1.0,3,0
+Cereblon/Leucine-rich repeat serine/threonine-protein kinase 2,2,2,1.0,1,0
+Cereblon/Serine/threonine-protein kinase RIPK2,4,4,1.0,2,0
+Choline kinase alpha,99,259,0.38223938223938225,230,160
+Choline/ethanolamine kinase,0,44,0.0,44,44
+Citron Rho-interacting kinase,40,347,0.11527377521613832,288,307
+Coiled-coil domain-containing protein 6/Tyrosine-protein kinase receptor RET,48,48,1.0,22,0
+Connector enhancer of kinase suppressor of ras 1,13,44,0.29545454545454547,42,31
+Cyclin-A1/Cyclin-dependent kinase 4,8,8,1.0,4,0
+Cyclin-C/Cyclin-dependent kinase 19,206,216,0.9537037037037037,106,10
+Cyclin-T1/Cyclin-dependent-like kinase 5,4,4,1.0,2,0
+Cyclin-Y/Cyclin-dependent kinase 16,12,18,0.6666666666666666,8,6
+Cyclin-dependent kinase,0,80,0.0,4,80
+Cyclin-dependent kinase 1,939,2560,0.366796875,2391,1621
+Cyclin-dependent kinase 1/ G1/S-specific cyclin-D3,8,48,0.16666666666666666,24,40
+Cyclin-dependent kinase 1/G1/S-specific cyclin-D1,8,8,1.0,4,0
+Cyclin-dependent kinase 1/cyclin B,1200,2656,0.45180722891566266,605,1456
+Cyclin-dependent kinase 1/cyclin B1,808,2102,0.384395813510942,987,1294
+Cyclin-dependent kinase 10,1,67,0.014925373134328358,67,66
+Cyclin-dependent kinase 12,124,372,0.3333333333333333,324,248
+Cyclin-dependent kinase 13,107,411,0.26034063260340634,332,304
+Cyclin-dependent kinase 13/Cyclin-K,76,94,0.8085106382978723,44,18
+Cyclin-dependent kinase 14/Cyclin-Y,194,202,0.9603960396039604,99,8
+Cyclin-dependent kinase 2,1858,4233,0.43893219938577843,3690,2375
+Cyclin-dependent kinase 2-associated protein 1,0,24,0.0,24,24
+Cyclin-dependent kinase 2-associated protein 2,0,2,0.0,2,2
+Cyclin-dependent kinase 2/G1/S-specific cyclin-D1,14,18,0.7777777777777778,9,4
+Cyclin-dependent kinase 2/cyclin A,2082,3975,0.5237735849056604,1290,1893
+Cyclin-dependent kinase 2/cyclin E,1638,2586,0.6334106728538283,836,948
+Cyclin-dependent kinase 2/cyclin E1,1906,3224,0.5911910669975186,1526,1318
+Cyclin-dependent kinase 20,0,2,0.0,2,2
+Cyclin-dependent kinase 3,34,342,0.09941520467836257,285,308
+Cyclin-dependent kinase 4,1028,1589,0.6469477658904972,1420,561
+Cyclin-dependent kinase 4/6,8,10,0.8,5,2
+Cyclin-dependent kinase 4/G1/S-specific cyclin-E1,62,62,1.0,31,0
+Cyclin-dependent kinase 4/cyclin D,460,628,0.732484076433121,155,168
+Cyclin-dependent kinase 4/cyclin D1,2090,3422,0.6107539450613676,1567,1332
+Cyclin-dependent kinase 4/cyclin D2,2,4,0.5,2,2
+Cyclin-dependent kinase 5,403,1751,0.23015419760137065,1596,1348
+Cyclin-dependent kinase 5 regulatory subunit 1,3,7,0.42857142857142855,7,4
+Cyclin-dependent kinase 5/CDK5 activator 1,1770,4664,0.3795025728987993,2245,2894
+Cyclin-dependent kinase 6,451,735,0.6136054421768707,694,284
+Cyclin-dependent kinase 7,345,1133,0.30450132391879964,968,788
+Cyclin-dependent kinase 7/ cyclin H,330,590,0.559322033898305,276,260
+Cyclin-dependent kinase 8/19,142,148,0.9594594594594594,66,6
+Cyclin-dependent kinase 9,1236,1979,0.6245578575037898,1671,743
+Cyclin-dependent kinase inhibitor 2A,0,1,0.0,1,1
+Cyclin-dependent kinase-like 1,6,78,0.07692307692307693,77,72
+Cyclin-dependent kinase-like 2,16,82,0.1951219512195122,81,66
+Cyclin-dependent kinase-like 3,9,85,0.10588235294117647,81,76
+Cyclin-dependent kinase-like 4,3,4,0.75,4,1
+Cyclin-dependent kinase-like 5,10,228,0.043859649122807015,196,218
+Cyclin-dependent kinases regulatory subunit 1/S-phase kinase-associated protein 2,10,54,0.18518518518518517,27,44
+DNA-dependent protein kinase,811,1409,0.5755855216465579,1302,598
+Death-associated protein kinase 1,48,159,0.3018867924528302,145,111
+Death-associated protein kinase 2,29,111,0.26126126126126126,104,82
+Death-associated protein kinase 3,309,1118,0.276386404293381,1048,809
+Deoxycytidine kinase,126,380,0.33157894736842103,344,254
+Diacylglycerol kinase alpha,9,27,0.3333333333333333,19,18
+Diacylglycerol kinase alpha/zeta,22,28,0.7857142857142857,7,6
+Diacylglycerol kinase beta,1,5,0.2,5,4
+Diacylglycerol kinase gamma,1,5,0.2,5,4
+Diacylglycerol kinase iota,2,6,0.3333333333333333,6,4
+Diacylglycerol kinase kappa,0,2,0.0,2,2
+Diacylglycerol kinase zeta,5,15,0.3333333333333333,15,10
+Dual serine/threonine and tyrosine protein kinase,16,81,0.19753086419753085,77,65
+Dual specificity mitogen-activated protein kinase kinase 1,907,1811,0.5008282716731087,1534,904
+Dual specificity mitogen-activated protein kinase kinase 1/Mitogen-activated protein kinase 1/RAF proto-oncogene serine/threonine-protein kinase,0,6,0.0,2,6
+Dual specificity mitogen-activated protein kinase kinase 2,127,721,0.17614424410540916,594,594
+Dual specificity mitogen-activated protein kinase kinase 3,19,343,0.05539358600583091,282,324
+Dual specificity mitogen-activated protein kinase kinase 4,160,392,0.40816326530612246,301,232
+Dual specificity mitogen-activated protein kinase kinase 5,67,343,0.19533527696793002,286,276
+Dual specificity mitogen-activated protein kinase kinase 6,22,367,0.05994550408719346,306,345
+Dual specificity mitogen-activated protein kinase kinase 7,202,323,0.6253869969040248,316,121
+Dual specificity mitogen-activated protein kinase kinase; MEK1/2,164,292,0.5616438356164384,121,128
+Dual specificity protein kinase CLK1,808,1367,0.5910753474762254,1169,559
+Dual specificity protein kinase CLK1/CLK4,0,12,0.0,2,12
+Dual specificity protein kinase CLK2,710,1780,0.398876404494382,1622,1070
+Dual specificity protein kinase CLK3,204,684,0.2982456140350877,607,480
+Dual specificity protein kinase CLK4,1049,1916,0.5474947807933194,1743,867
+Dual specificity protein kinase TTK,1401,1774,0.7897406989853438,1400,373
+Dual specificity testis-specific protein kinase 1,14,317,0.04416403785488959,267,303
+Dual specificity testis-specific protein kinase 2,9,166,0.05421686746987952,166,157
+Dual specificity tyrosine-phosphorylation-regulated kinase 1B,856,1525,0.5613114754098361,1362,669
+Dual specificity tyrosine-phosphorylation-regulated kinase 4,150,854,0.1756440281030445,840,704
+Dual-specificity tyrosine-phosphorylation regulated kinase 1A,1715,3551,0.48296254576175723,3088,1836
+Dual-specificity tyrosine-phosphorylation regulated kinase 2,420,839,0.5005959475566151,782,419
+Dual-specificity tyrosine-phosphorylation regulated kinase 3,318,995,0.31959798994974875,974,677
+E3 ubiquitin-protein ligase XIAP/Receptor-interacting serine/threonine-protein kinase 2,42,42,1.0,20,0
+Eukaryotic translation initiation factor 2-alpha kinase 1,39,356,0.10955056179775281,305,317
+Eukaryotic translation initiation factor 2-alpha kinase 3,197,248,0.7943548387096774,160,51
+Eukaryotic translation initiation factor 2-alpha kinase 4,112,189,0.5925925925925926,165,77
+Extracellular serine/threonine protein kinase FAM20C,0,1,0.0,1,1
+Focal adhesion kinase 1,1546,3224,0.4795285359801489,2831,1678
+G protein-coupled receptor kinase 4,24,90,0.26666666666666666,87,66
+G protein-coupled receptor kinase 5,124,619,0.20032310177705978,588,495
+G protein-coupled receptor kinase 6,53,384,0.13802083333333334,373,331
+G protein-coupled receptor kinase 7,21,93,0.22580645161290322,89,72
+G-protein coupled receptor kinase 2,242,657,0.3683409436834094,636,415
+Galactokinase,73,449,0.16258351893095768,368,376
+Glucokinase regulatory protein,73,102,0.7156862745098039,88,29
+Glucokinase/Glucokinase regulatory protein,66,80,0.825,40,14
+Glycerol kinase,0,1,0.0,1,1
+Glycogen synthase kinase-3,652,1312,0.4969512195121951,644,660
+Glycogen synthase kinase-3 alpha,675,1888,0.357521186440678,1734,1213
+Glycogen synthase kinase-3 beta,2979,5993,0.4970799265810112,5369,3014
+Hexokinase type I,12,153,0.0784313725490196,152,141
+Hexokinase type II,21,54,0.3888888888888889,49,33
+Hexokinase type IV,101,122,0.8278688524590164,118,21
+Homeodomain-interacting protein kinase 1,48,179,0.2681564245810056,169,131
+Homeodomain-interacting protein kinase 2,303,859,0.35273573923166474,831,556
+Homeodomain-interacting protein kinase 3,45,123,0.36585365853658536,114,78
+Homeodomain-interacting protein kinase 4,207,725,0.28551724137931034,696,518
+Hormonally up-regulated neu tumor-associated kinase,11,77,0.14285714285714285,76,66
+Inactive tyrosine-protein kinase transmembrane receptor ROR1,17,17,1.0,15,0
+Inhibitor of NF-kappa-B kinase (IKK),81,141,0.574468085106383,25,60
+Inhibitor of NF-kappa-B kinase alpha/beta,4,22,0.18181818181818182,11,18
+Inhibitor of nuclear factor kappa B kinase alpha subunit,191,929,0.20559741657696448,880,738
+Inhibitor of nuclear factor kappa B kinase beta subunit,1329,2408,0.5519102990033222,2113,1079
+Inhibitor of nuclear factor kappa B kinase epsilon subunit,555,1359,0.4083885209713024,1227,804
+Inositol hexakisphosphate and diphosphoinositol-pentakisphosphate kinase 2,1,1,1.0,1,0
+Inositol hexakisphosphate kinase 1,36,94,0.3829787234042553,91,58
+Inositol hexakisphosphate kinase 2,34,63,0.5396825396825397,60,29
+Inositol hexakisphosphate kinase 3,14,49,0.2857142857142857,47,35
+Inositol polyphosphate multikinase,0,17,0.0,17,17
+Inositol-trisphosphate 3-kinase B,43,43,1.0,43,0
+"Interferon-induced, double-stranded RNA-activated protein kinase",39,187,0.20855614973262032,183,148
+Interleukin-1 receptor-associated kinase 1,209,1074,0.1945996275605214,987,865
+Interleukin-1 receptor-associated kinase 3,63,360,0.175,299,297
+Interleukin-1 receptor-associated kinase 4,2774,4187,0.6625268688798662,3590,1413
+Interleukin-1 receptor-associated kinase-like 2,1,2,0.5,2,1
+Ketohexokinase,236,368,0.6413043478260869,285,132
+Kinesin-1 heavy chain/ Tyrosine-protein kinase receptor RET,90,210,0.42857142857142855,99,120
+LIM domain kinase 1,425,1525,0.2786885245901639,1325,1100
+LIM domain kinase 1/2,22,34,0.6470588235294118,17,12
+LIM domain kinase 2,278,644,0.43167701863354035,521,366
+Leucine-rich repeat serine/threonine-protein kinase 2,3177,3822,0.8312401883830455,2529,645
+Leukocyte tyrosine kinase receptor,148,470,0.3148936170212766,432,322
+MAP kinase ERK1,121,604,0.20033112582781457,518,483
+MAP kinase ERK2,3298,5017,0.6573649591389277,4379,1719
+MAP kinase p38,2576,4016,0.6414342629482072,734,1440
+MAP kinase p38 alpha,4752,7006,0.6782757636311733,5622,2254
+MAP kinase p38 beta,202,668,0.3023952095808383,568,466
+MAP kinase p38 delta,104,925,0.11243243243243244,880,821
+MAP kinase p38 gamma,118,956,0.12343096234309624,903,838
+MAP kinase signal-integrating kinase 2,964,1665,0.578978978978979,1570,701
+MAP kinase-activated protein kinase 2,546,2217,0.2462787550744249,1950,1671
+MAP kinase-activated protein kinase 3,20,862,0.02320185614849188,844,842
+MAP kinase-activated protein kinase 5,74,938,0.07889125799573561,833,864
+MAP kinase-interacting serine/threonine-protein kinase 1/2,88,124,0.7096774193548387,62,36
+MAP kinase-interacting serine/threonine-protein kinase MNK1,360,676,0.5325443786982249,626,316
+MAP/microtubule affinity-regulating kinase 2,143,1010,0.14158415841584157,917,867
+MAP/microtubule affinity-regulating kinase 4,52,399,0.13032581453634084,325,347
+MAPK/MAK/MRK overlapping kinase,0,2,0.0,2,2
+Maternal embryonic leucine zipper kinase,1063,1844,0.5764642082429501,1668,781
+Membrane-associated guanylate kinase-related 3,3,15,0.2,14,12
+Microtubule-associated serine/threonine-protein kinase 1,11,78,0.14102564102564102,76,67
+Microtubule-associated serine/threonine-protein kinase 3,7,9,0.7777777777777778,9,2
+Microtubule-associated serine/threonine-protein kinase 4,3,3,1.0,3,0
+Misshapen-like kinase 1,231,899,0.25695216907675195,834,668
+Mitogen-activated protein kinase 15,43,350,0.12285714285714286,289,307
+Mitogen-activated protein kinase 4,2,86,0.023255813953488372,84,84
+Mitogen-activated protein kinase 6,50,175,0.2857142857142857,105,125
+Mitogen-activated protein kinase 7,139,518,0.26833976833976836,399,379
+Mitogen-activated protein kinase 8/9,4,4,1.0,2,0
+Mitogen-activated protein kinase kinase kinase 1,18,342,0.05263157894736842,287,324
+Mitogen-activated protein kinase kinase kinase 10,35,156,0.22435897435897437,133,121
+Mitogen-activated protein kinase kinase kinase 11,111,433,0.25635103926096997,368,322
+Mitogen-activated protein kinase kinase kinase 12,837,933,0.8971061093247589,779,96
+Mitogen-activated protein kinase kinase kinase 13,46,105,0.4380952380952381,104,59
+Mitogen-activated protein kinase kinase kinase 14,938,1198,0.7829716193656093,902,260
+Mitogen-activated protein kinase kinase kinase 15,3,74,0.04054054054054054,73,71
+Mitogen-activated protein kinase kinase kinase 2,43,338,0.12721893491124261,283,295
+Mitogen-activated protein kinase kinase kinase 3,26,326,0.07975460122699386,271,300
+Mitogen-activated protein kinase kinase kinase 4,10,331,0.030211480362537766,269,321
+Mitogen-activated protein kinase kinase kinase 5,521,1099,0.4740673339399454,727,578
+Mitogen-activated protein kinase kinase kinase 6,12,330,0.03636363636363636,277,318
+Mitogen-activated protein kinase kinase kinase 7,191,342,0.5584795321637427,323,151
+Mitogen-activated protein kinase kinase kinase 7-interacting protein 1,34,37,0.918918918918919,37,3
+Mitogen-activated protein kinase kinase kinase 8,175,343,0.5102040816326531,310,168
+Mitogen-activated protein kinase kinase kinase 9,97,206,0.470873786407767,193,109
+Mitogen-activated protein kinase kinase kinase MLK4,1,3,0.3333333333333333,2,2
+Mitogen-activated protein kinase kinase kinase kinase 1,619,949,0.6522655426765016,724,330
+Mitogen-activated protein kinase kinase kinase kinase 2,344,1311,0.2623951182303585,1210,967
+Mitogen-activated protein kinase kinase kinase kinase 3,117,427,0.27400468384074944,353,310
+Mitogen-activated protein kinase kinase kinase kinase 4,568,1604,0.3541147132169576,1417,1036
+Mitogen-activated protein kinase kinase kinase kinase 5,317,1035,0.30628019323671496,934,718
+Mitogen-activated protein kinase; ERK1/ERK2,300,392,0.7653061224489796,183,92
+Mitotic checkpoint serine/threonine-protein kinase BUB1,25,256,0.09765625,245,231
+Mixed lineage kinase 7,145,1039,0.1395572666025024,946,894
+Mixed lineage kinase domain-like protein,8,20,0.4,18,12
+"Muscle, skeletal receptor tyrosine protein kinase",32,103,0.3106796116504854,98,71
+Myosin light chain kinase,31,309,0.10032362459546926,260,278
+Myosin light chain kinase family member 4,24,94,0.2553191489361702,89,70
+"Myosin light chain kinase, smooth muscle",61,430,0.14186046511627906,359,369
+Myotonin-protein kinase,24,114,0.21052631578947367,108,90
+NAD kinase,1,20,0.05,14,19
+NPM/ALK (Nucleophosmin/ALK tyrosine kinase receptor),102,170,0.6,65,68
+NUAK family SNF1-like kinase 1,75,186,0.4032258064516129,174,111
+NUAK family SNF1-like kinase 2,47,326,0.1441717791411043,274,279
+Neurotrophic tyrosine kinase receptor type 2,598,1640,0.3646341463414634,1536,1042
+Non-receptor tyrosine-protein kinase TNK1,57,342,0.16666666666666666,280,285
+Nuclear receptor subfamily 2 group C member 2/TGF-beta-activated kinase 1 and MAP3K7-binding protein 1,56,72,0.7777777777777778,36,16
+Nucleoside diphosphate kinase 2,1,95,0.010526315789473684,59,94
+PAS domain-containing serine/threonine-protein kinase,24,1023,0.02346041055718475,1016,999
+PDZ-binding kinase,129,748,0.17245989304812834,743,619
+PI3-kinase class I,2304,3432,0.6713286713286714,428,1128
+PI3-kinase p110-alpha subunit,5777,7987,0.7233003630900213,7167,2210
+PI3-kinase p110-alpha/p85-alpha,2848,4322,0.6589541878759834,2020,1474
+PI3-kinase p110-beta subunit,2090,3277,0.637778455904791,2745,1187
+PI3-kinase p110-delta subunit,3888,4823,0.8061372589674477,4137,935
+PI3-kinase p110-delta/p85-alpha,2402,2726,0.8811445341159208,1276,324
+PI3-kinase p110-gamma subunit,2790,4390,0.6355353075170843,3854,1600
+PI3-kinase p85-alpha subunit,37,270,0.13703703703703704,269,233
+PI3-kinase p85-beta subunit,1,2,0.5,2,1
+PI3-kinase subunit gamma/Phosphoinositide 3-kinase regulatory subunit 5,22,22,1.0,10,0
+PI4-kinase alpha subunit,59,145,0.4068965517241379,143,86
+PI4-kinase beta subunit,214,523,0.4091778202676864,463,309
+PI4-kinase type II,0,27,0.0,26,27
+PITSLRE serine/threonine-protein kinase CDC2L1,12,88,0.13636363636363635,87,76
+PITSLRE serine/threonine-protein kinase CDC2L2,46,142,0.323943661971831,118,96
+Pantothenate kinase 1,8,22,0.36363636363636365,21,14
+"Pantothenate kinase 2, mitochondrial",1,1,1.0,1,0
+Pantothenate kinase 3,33,77,0.42857142857142855,76,44
+Phosphatidylinositol 3-kinase catalytic subunit type 3,178,282,0.6312056737588653,253,104
+"Phosphatidylinositol 3-kinase regulatory subunit beta/Phosphatidylinositol 4,5-bisphosphate 3-kinase catalytic subunit beta isoform",30,32,0.9375,16,2
+"Phosphatidylinositol 4,5-bisphosphate 3-kinase catalytic subunit alpha isoform/[Pyruvate dehydrogenase (acetyl-transferring)] kinase isozyme 1, mitochondrial",0,28,0.0,14,28
+"Phosphatidylinositol 4,5-bisphosphate 3-kinase catalytic subunit delta isoform/gamma isoform",16,26,0.6153846153846154,12,10
+"Phosphatidylinositol 4-kinase, PI4K",0,316,0.0,43,316
+Phosphatidylinositol 4-phosphate 5-kinase type-1 beta,4,4,1.0,4,0
+Phosphatidylinositol-4-phosphate 3-kinase C2 domain-containing beta polypeptide,55,168,0.3273809523809524,154,113
+Phosphatidylinositol-4-phosphate 3-kinase C2 domain-containing subunit alpha,55,115,0.4782608695652174,108,60
+Phosphatidylinositol-4-phosphate 3-kinase C2 domain-containing subunit gamma,15,93,0.16129032258064516,92,78
+Phosphatidylinositol-4-phosphate 5-kinase type-1 alpha,17,88,0.19318181818181818,87,71
+Phosphatidylinositol-4-phosphate 5-kinase type-1 gamma,35,159,0.22012578616352202,155,124
+Phosphatidylinositol-5-phosphate 4-kinase type-2 alpha,145,601,0.24126455906821964,466,456
+Phosphatidylinositol-5-phosphate 4-kinase type-2 beta,12,165,0.07272727272727272,156,153
+Phosphatidylinositol-5-phosphate 4-kinase type-2 gamma,99,480,0.20625,414,381
+Phosphoenolpyruvate carboxykinase cytosolic,11,21,0.5238095238095238,21,10
+Phosphofructokinase platelet type,1,223,0.004484304932735426,223,222
+Phosphoglycerate kinase,18,100,0.18,40,82
+Phosphoglycerate kinase 1,49,91,0.5384615384615384,91,42
+Phosphoinositide 3-kinase regulatory subunit 4,0,2,0.0,2,2
+Phosphorylase kinase,10,25,0.4,4,15
+Phosphorylase kinase alpha L subunit,1,2,0.5,2,1
+Phosphorylase kinase gamma subunit 1,25,99,0.25252525252525254,90,74
+Phosphorylase kinase gamma subunit 2,86,931,0.09237379162191192,838,845
+Protein cereblon/Cyclin-dependent kinase 2,4,4,1.0,2,0
+Protein cereblon/Cyclin-dependent-like kinase 5,4,4,1.0,2,0
+Protein cereblon/Serine/threonine-protein kinase WEE1,34,38,0.8947368421052632,19,4
+Protein cereblon/Tyrosine-protein kinase receptor FLT3,2,2,1.0,1,0
+Protein kinase C (PKC),1727,4510,0.3829268292682927,383,2783
+Protein kinase C alpha,899,1767,0.5087719298245614,1610,868
+Protein kinase C beta,774,1244,0.6221864951768489,980,470
+Protein kinase C delta,753,1916,0.3930062630480167,1705,1163
+Protein kinase C epsilon,400,655,0.6106870229007634,569,255
+Protein kinase C eta,268,387,0.6925064599483204,345,119
+Protein kinase C gamma,233,1047,0.22254059216809932,975,814
+Protein kinase C iota,440,1419,0.31007751937984496,1345,979
+Protein kinase C mu,184,306,0.6013071895424836,245,122
+Protein kinase C nu,254,1256,0.20222929936305734,1142,1002
+Protein kinase C theta,953,1701,0.5602586713697825,1530,748
+Protein kinase C zeta,110,1201,0.09159034138218151,1121,1091
+"Protein kinase C, PKC; classical/novel",72,81,0.8888888888888888,8,9
+Protein kinase C-binding protein 1,0,1,0.0,1,1
+Protein kinase N1,71,437,0.16247139588100687,352,366
+Protein kinase N2,248,1141,0.21735319894829097,1014,893
+Protein tyrosine kinase 2 beta,374,1299,0.2879137798306389,1192,925
+Proto-oncogene tyrosine-protein kinase MER,428,674,0.6350148367952523,612,246
+Proto-oncogene tyrosine-protein kinase ROS,320,856,0.37383177570093457,780,536
+Proto-oncogene tyrosine-protein kinase receptor Ret /Nuclear receptor coactivator 4 fusion protein,4,4,1.0,2,0
+Pseudopodium-enriched atypical kinase 1,3,3,1.0,2,0
+Putative hexokinase HKDC1,0,562,0.0,340,562
+Putative nucleoside diphosphate kinase,1,8,0.125,8,7
+Putative uncharacterized serine/threonine-protein kinase SgK110,10,77,0.12987012987012986,76,67
+Pyridoxal kinase,2,247,0.008097165991902834,247,245
+Pyruvate dehydrogenase kinase,1468,1748,0.8398169336384439,410,280
+Pyruvate dehydrogenase kinase isoform 1,603,826,0.7300242130750605,759,223
+Pyruvate dehydrogenase kinase isoform 2,547,831,0.6582430806257521,786,284
+Pyruvate dehydrogenase kinase isoform 3,20,39,0.5128205128205128,35,19
+Pyruvate dehydrogenase kinase isoform 4,47,105,0.44761904761904764,96,58
+Pyruvate kinase isozymes M1/M2,27,123,0.21951219512195122,85,96
+Pyruvate kinase isozymes R/L,11,35,0.3142857142857143,33,24
+RAC-alpha serine/threonine-protein kinase/Ribosomal protein S6 kinase beta-1,2,2,1.0,1,0
+RAF serine/threonine protein kinase,6,6,1.0,2,0
+Ras and Rab interactor 1/Tyrosine-protein kinase ABL1,52,460,0.11304347826086956,229,408
+Receptor protein-tyrosine kinase erbB-2,2172,3765,0.5768924302788845,3325,1593
+Receptor protein-tyrosine kinase erbB-4,310,1077,0.2878365831012071,1000,767
+Receptor tyrosine-protein kinase erbB-3,47,132,0.3560606060606061,129,85
+Receptor-interacting serine/threonine-protein kinase 1,588,778,0.7557840616966581,499,190
+Receptor-interacting serine/threonine-protein kinase 3,85,368,0.23097826086956522,354,283
+Receptor-interacting serine/threonine-protein kinase 4,14,81,0.1728395061728395,80,67
+Rho-associated protein kinase,180,222,0.8108108108108109,110,42
+Rho-associated protein kinase 1,1463,2933,0.4988066825775656,2641,1470
+Rho-associated protein kinase 2,2731,4052,0.6739881539980257,3497,1321
+Rhodopsin kinase,27,173,0.15606936416184972,170,146
+Ribosomal protein S6 kinase,88,88,1.0,11,0
+Ribosomal protein S6 kinase (P70S6K),8,42,0.19047619047619047,21,34
+Ribosomal protein S6 kinase 1,1664,2658,0.6260346124905944,2510,994
+Ribosomal protein S6 kinase 2,7,19,0.3684210526315789,18,12
+Ribosomal protein S6 kinase alpha 1,120,532,0.22556390977443608,420,412
+Ribosomal protein S6 kinase alpha 2,294,440,0.6681818181818182,392,146
+Ribosomal protein S6 kinase alpha 3,533,1866,0.28563772775991425,1665,1333
+Ribosomal protein S6 kinase alpha 4,59,412,0.14320388349514562,316,353
+Ribosomal protein S6 kinase alpha 5,219,991,0.2209889001009082,857,772
+Ribosomal protein S6 kinase alpha 6,66,422,0.15639810426540285,328,356
+S-phase kinase-associated protein 2,0,2,0.0,1,2
+SNF-related serine/threonine-protein kinase,7,81,0.08641975308641975,77,74
+SPS1/STE20-related protein kinase YSK4,60,95,0.631578947368421,90,35
+SRC kinase signaling inhibitor 1,0,1,0.0,1,1
+STE20-related kinase adapter protein alpha,5,239,0.02092050209205021,239,234
+STE20/SPS1-related proline-alanine-rich protein kinase,18,118,0.15254237288135594,115,100
+Serine-protein kinase ATM,566,832,0.6802884615384616,685,266
+Serine-protein kinase ATR,428,903,0.4739756367663344,736,475
+Serine/threonine protein kinase NLK,58,375,0.15466666666666667,313,317
+Serine/threonine-protein kinase 10,125,440,0.2840909090909091,355,315
+Serine/threonine-protein kinase 11,16,325,0.04923076923076923,267,309
+Serine/threonine-protein kinase 16,67,388,0.17268041237113402,310,321
+Serine/threonine-protein kinase 17A,274,797,0.3437892095357591,740,523
+Serine/threonine-protein kinase 17B,115,286,0.4020979020979021,226,171
+Serine/threonine-protein kinase 19,25,25,1.0,17,0
+Serine/threonine-protein kinase 2,307,1071,0.28664799253034545,953,764
+Serine/threonine-protein kinase 24,29,266,0.10902255639097744,232,237
+Serine/threonine-protein kinase 25,20,102,0.19607843137254902,95,82
+Serine/threonine-protein kinase 31,0,1,0.0,1,1
+Serine/threonine-protein kinase 32A,7,79,0.08860759493670886,78,72
+Serine/threonine-protein kinase 32B,10,91,0.10989010989010989,88,81
+Serine/threonine-protein kinase 32C,9,92,0.09782608695652174,88,83
+Serine/threonine-protein kinase 33,44,137,0.32116788321167883,130,93
+Serine/threonine-protein kinase 35,17,76,0.2236842105263158,75,59
+Serine/threonine-protein kinase 36,13,93,0.13978494623655913,82,80
+Serine/threonine-protein kinase 38,11,152,0.07236842105263158,139,141
+Serine/threonine-protein kinase 38-like,10,191,0.05235602094240838,167,181
+Serine/threonine-protein kinase A-Raf,66,334,0.19760479041916168,326,268
+Serine/threonine-protein kinase AKT,3275,5603,0.5845082991254685,4551,2328
+Serine/threonine-protein kinase AKT2,975,2255,0.43237250554323725,2016,1280
+Serine/threonine-protein kinase AKT3,324,1517,0.21357943309162822,1380,1193
+Serine/threonine-protein kinase Aurora,3,6,0.5,2,3
+Serine/threonine-protein kinase Aurora-A,3051,5089,0.5995283945765376,4595,2038
+Serine/threonine-protein kinase Aurora-B,2208,3774,0.5850556438791733,3351,1566
+Serine/threonine-protein kinase Aurora-C,100,182,0.5494505494505495,165,82
+Serine/threonine-protein kinase B-raf,5373,7004,0.7671330668189605,5290,1631
+Serine/threonine-protein kinase Chk1,2032,3860,0.5264248704663212,3579,1828
+Serine/threonine-protein kinase Chk1/2,0,4,0.0,2,4
+Serine/threonine-protein kinase Chk2,596,1443,0.41302841302841303,1358,847
+Serine/threonine-protein kinase D2,225,1160,0.1939655172413793,1055,935
+Serine/threonine-protein kinase DCLK1,60,737,0.0814111261872456,716,677
+Serine/threonine-protein kinase DCLK2,12,95,0.12631578947368421,90,83
+Serine/threonine-protein kinase DCLK3,21,96,0.21875,91,75
+Serine/threonine-protein kinase EEF2K,42,534,0.07865168539325842,529,492
+Serine/threonine-protein kinase GAK,299,644,0.4642857142857143,493,345
+Serine/threonine-protein kinase H1,3,3,1.0,3,0
+Serine/threonine-protein kinase ICK,26,302,0.08609271523178808,256,276
+Serine/threonine-protein kinase ILK-1,110,396,0.2777777777777778,396,286
+Serine/threonine-protein kinase LATS,102,506,0.2015810276679842,187,404
+Serine/threonine-protein kinase LATS1,291,622,0.4678456591639871,559,331
+Serine/threonine-protein kinase LATS2,46,120,0.38333333333333336,116,74
+Serine/threonine-protein kinase LMTK3,8,11,0.7272727272727273,11,3
+Serine/threonine-protein kinase MAK,7,78,0.08974358974358974,75,71
+Serine/threonine-protein kinase MARK1,24,113,0.21238938053097345,109,89
+Serine/threonine-protein kinase MRCK beta,13,328,0.039634146341463415,270,315
+Serine/threonine-protein kinase MRCK gamma,12,302,0.039735099337748346,247,290
+Serine/threonine-protein kinase MRCK-A,119,1126,0.10568383658969804,1033,1007
+Serine/threonine-protein kinase MST1,405,730,0.5547945205479452,563,325
+Serine/threonine-protein kinase MST2,310,1262,0.24564183835182252,1131,952
+Serine/threonine-protein kinase MST4,38,380,0.1,318,342
+Serine/threonine-protein kinase N3,5,152,0.03289473684210526,150,147
+Serine/threonine-protein kinase NEK2,214,1528,0.1400523560209424,1379,1314
+Serine/threonine-protein kinase NEK6,12,153,0.0784313725490196,145,141
+Serine/threonine-protein kinase NEK7,4,231,0.017316017316017316,196,227
+Serine/threonine-protein kinase NEK9,20,337,0.05934718100890208,275,317
+Serine/threonine-protein kinase NIM1,7,94,0.07446808510638298,91,87
+Serine/threonine-protein kinase Nek1,259,613,0.42251223491027734,542,354
+Serine/threonine-protein kinase Nek10,2,3,0.6666666666666666,3,1
+Serine/threonine-protein kinase Nek11,10,82,0.12195121951219512,79,72
+Serine/threonine-protein kinase Nek3,12,326,0.03680981595092025,270,314
+Serine/threonine-protein kinase Nek4,82,690,0.11884057971014493,663,608
+Serine/threonine-protein kinase Nek5,10,90,0.1111111111111111,85,80
+Serine/threonine-protein kinase Nek8,4,4,1.0,3,0
+Serine/threonine-protein kinase OSR1,6,79,0.0759493670886076,77,73
+Serine/threonine-protein kinase PAK 1,319,1310,0.2435114503816794,1182,991
+Serine/threonine-protein kinase PAK 1/PAK 2,30,36,0.8333333333333334,18,6
+Serine/threonine-protein kinase PAK 1/PAK 2/PAK 3,39,39,1.0,13,0
+Serine/threonine-protein kinase PAK 2,35,356,0.09831460674157304,296,321
+Serine/threonine-protein kinase PAK 3,28,118,0.23728813559322035,108,90
+Serine/threonine-protein kinase PAK 4,417,1850,0.2254054054054054,1677,1433
+Serine/threonine-protein kinase PAK6,24,245,0.09795918367346938,209,221
+Serine/threonine-protein kinase PAK7,27,102,0.2647058823529412,95,75
+Serine/threonine-protein kinase PCTAIRE-1,40,343,0.11661807580174927,277,303
+Serine/threonine-protein kinase PCTAIRE-2,32,306,0.10457516339869281,252,274
+Serine/threonine-protein kinase PCTAIRE-3,12,118,0.1016949152542373,106,106
+Serine/threonine-protein kinase PFTAIRE-1,32,104,0.3076923076923077,101,72
+Serine/threonine-protein kinase PFTAIRE-2,8,74,0.10810810810810811,73,66
+Serine/threonine-protein kinase PIM,144,210,0.6857142857142857,70,66
+Serine/threonine-protein kinase PIM1,4459,6445,0.6918541505042669,5766,1986
+Serine/threonine-protein kinase PIM2,2514,3708,0.6779935275080906,3400,1194
+Serine/threonine-protein kinase PIM3,1461,2121,0.6888260254596889,2022,660
+"Serine/threonine-protein kinase PINK1, mitochondrial",3,3,1.0,3,0
+Serine/threonine-protein kinase PLK1,914,2696,0.33902077151335314,2485,1782
+Serine/threonine-protein kinase PLK2,161,352,0.45738636363636365,324,191
+Serine/threonine-protein kinase PLK3,238,1130,0.21061946902654868,1073,892
+Serine/threonine-protein kinase PLK4,592,1424,0.4157303370786517,1288,832
+Serine/threonine-protein kinase PRKX,216,871,0.24799081515499427,831,655
+Serine/threonine-protein kinase PRP4 homolog,8,77,0.1038961038961039,76,69
+Serine/threonine-protein kinase RAF,1461,1961,0.7450280469148394,1827,500
+Serine/threonine-protein kinase RAF and Dual specificity mitogen-activated protein kinase kinase 1 (Raf/MEK),230,276,0.8333333333333334,137,46
+Serine/threonine-protein kinase RIO1,14,84,0.16666666666666666,82,70
+Serine/threonine-protein kinase RIO2,56,141,0.3971631205673759,133,85
+Serine/threonine-protein kinase RIO3,26,102,0.2549019607843137,83,76
+Serine/threonine-protein kinase RIPK2,361,704,0.5127840909090909,563,343
+Serine/threonine-protein kinase SBK1,15,79,0.189873417721519,76,64
+Serine/threonine-protein kinase SIK1,125,202,0.6188118811881188,183,77
+Serine/threonine-protein kinase SIK2,182,504,0.3611111111111111,407,322
+Serine/threonine-protein kinase SIK3,125,446,0.2802690582959641,377,321
+Serine/threonine-protein kinase SMG1,25,27,0.9259259259259259,27,2
+Serine/threonine-protein kinase SRPK1,106,758,0.13984168865435356,728,652
+Serine/threonine-protein kinase SRPK2,38,124,0.3064516129032258,114,86
+Serine/threonine-protein kinase SRPK3,22,96,0.22916666666666666,88,74
+Serine/threonine-protein kinase Sgk1,263,430,0.6116279069767442,304,167
+Serine/threonine-protein kinase Sgk2,106,751,0.1411451398135819,748,645
+Serine/threonine-protein kinase Sgk3,20,93,0.21505376344086022,90,73
+Serine/threonine-protein kinase TAO1,251,1352,0.1856508875739645,1213,1101
+Serine/threonine-protein kinase TAO2,31,346,0.08959537572254335,291,315
+Serine/threonine-protein kinase TAO3,104,433,0.24018475750577367,378,329
+Serine/threonine-protein kinase TBK1,731,1462,0.5,1245,731
+Serine/threonine-protein kinase TNNI3K,240,341,0.7038123167155426,304,101
+Serine/threonine-protein kinase ULK1,107,432,0.24768518518518517,351,325
+Serine/threonine-protein kinase ULK2,45,118,0.3813559322033898,103,73
+Serine/threonine-protein kinase ULK3,44,332,0.13253012048192772,278,288
+Serine/threonine-protein kinase VRK1,9,12,0.75,11,3
+Serine/threonine-protein kinase VRK2,6,81,0.07407407407407407,80,75
+Serine/threonine-protein kinase WEE1,699,1142,0.6120840630472855,836,443
+Serine/threonine-protein kinase WNK1,13,35,0.37142857142857144,26,22
+Serine/threonine-protein kinase WNK2,0,13,0.0,12,13
+Serine/threonine-protein kinase WNK3,4,8,0.5,8,4
+Serine/threonine-protein kinase WNK4,0,1,0.0,1,1
+Serine/threonine-protein kinase c-TAK1,227,1216,0.18667763157894737,1105,989
+Serine/threonine-protein kinase greatwall,3,3,1.0,3,0
+Serine/threonine-protein kinase haspin,83,169,0.4911242603550296,160,86
+Serine/threonine-protein kinase mTOR,4330,5698,0.7599157599157599,5182,1368
+Serine/threonine-protein kinase receptor R3,146,275,0.5309090909090909,246,129
+Serine/threonine-protein kinase tousled-like 1,13,94,0.13829787234042554,88,81
+Serine/threonine-protein kinase tousled-like 2,11,97,0.1134020618556701,94,86
+Serine/threonine-protein kinase/endoribonuclease IRE1,456,948,0.4810126582278481,806,492
+Serine/threonine-protein kinase/endoribonuclease IRE2,6,241,0.024896265560165973,240,235
+Sphingosine kinase 1,243,546,0.44505494505494503,452,303
+Sphingosine kinase 2,107,346,0.3092485549132948,314,239
+TANK-binding kinase 1-binding protein 1,0,1,0.0,1,1
+TP53-regulating kinase,3,242,0.012396694214876033,242,239
+TRAF2- and NCK-interacting kinase,276,645,0.42790697674418604,541,369
+Tau-tubulin kinase 1,64,115,0.5565217391304348,87,51
+Tau-tubulin kinase 2,9,56,0.16071428571428573,56,47
+Testis-specific serine/threonine-protein kinase 1,72,622,0.1157556270096463,602,550
+Testis-specific serine/threonine-protein kinase 2,41,534,0.07677902621722846,532,493
+Testis-specific serine/threonine-protein kinase 3,8,11,0.7272727272727273,10,3
+Testis-specific serine/threonine-protein kinase 4,0,1,0.0,1,1
+Testis-specific serine/threonine-protein kinase 6,2,3,0.6666666666666666,2,1
+"Thymidine kinase, cytosolic",18,114,0.15789473684210525,80,96
+"Thymidine kinase, mitochondrial",18,51,0.35294117647058826,44,33
+Thymidylate kinase,2,13,0.15384615384615385,13,11
+Tyrosine kinase non-receptor protein 2,588,1405,0.4185053380782918,1204,817
+Tyrosine- and threonine-specific cdc2-inhibitory kinase,162,564,0.2872340425531915,371,402
+Tyrosine-protein kinase ABL,4202,5978,0.7029106724657076,3839,1776
+Tyrosine-protein kinase ABL2,107,396,0.2702020202020202,305,289
+Tyrosine-protein kinase BAZ1B,0,2,0.0,2,2
+Tyrosine-protein kinase BLK,402,934,0.430406852248394,878,532
+Tyrosine-protein kinase BMX,199,361,0.5512465373961218,317,162
+Tyrosine-protein kinase BRK,251,1005,0.24975124378109453,851,754
+Tyrosine-protein kinase BTK,4310,5771,0.7468376364581528,4449,1461
+Tyrosine-protein kinase CSK,90,504,0.17857142857142858,421,414
+Tyrosine-protein kinase CTK,34,538,0.06319702602230483,523,504
+Tyrosine-protein kinase FER,191,847,0.2255017709563164,760,656
+Tyrosine-protein kinase FES,93,753,0.12350597609561753,674,660
+Tyrosine-protein kinase FGR,87,248,0.35080645161290325,204,161
+Tyrosine-protein kinase FRK,249,871,0.28587830080367393,774,622
+Tyrosine-protein kinase FYN,784,1589,0.4933920704845815,1388,805
+Tyrosine-protein kinase HCK,392,877,0.4469783352337514,756,485
+Tyrosine-protein kinase ITK/TSK,1134,2098,0.540514775977121,1676,964
+Tyrosine-protein kinase JAK1,5339,6340,0.8421135646687697,5777,1001
+Tyrosine-protein kinase JAK2,7250,9701,0.7473456344706731,8568,2451
+Tyrosine-protein kinase JAK3,3963,5922,0.6691995947315096,5331,1959
+Tyrosine-protein kinase LCK,1721,3637,0.47319219136651086,3236,1916
+Tyrosine-protein kinase Lyn,498,1400,0.3557142857142857,1249,902
+Tyrosine-protein kinase SRC,2711,5727,0.4733717478610093,4915,3016
+Tyrosine-protein kinase SYK,3610,4892,0.7379394930498774,4307,1282
+Tyrosine-protein kinase Srms,76,574,0.13240418118466898,559,498
+Tyrosine-protein kinase TEC,186,509,0.3654223968565815,414,323
+Tyrosine-protein kinase TIE-2,829,1247,0.6647955092221332,1066,418
+Tyrosine-protein kinase TXK,120,210,0.5714285714285714,195,90
+Tyrosine-protein kinase TYK2,2252,3670,0.6136239782016348,3061,1418
+Tyrosine-protein kinase YES,193,550,0.3509090909090909,451,357
+Tyrosine-protein kinase ZAP-70,180,493,0.36511156186612576,467,313
+Tyrosine-protein kinase receptor FLT3,3951,6660,0.5932432432432433,5080,2709
+Tyrosine-protein kinase receptor RET,1231,2387,0.5157100963552577,1858,1156
+Tyrosine-protein kinase receptor TYRO3,397,1304,0.3044478527607362,1251,907
+Tyrosine-protein kinase receptor Tie-1,31,101,0.3069306930693069,96,70
+Tyrosine-protein kinase receptor UFO,889,1600,0.555625,1474,711
+Tyrosine-protein kinase transmembrane receptor ROR2,4,4,1.0,4,0
+UMP-CMP kinase,2,129,0.015503875968992248,129,127
+Uncharacterized aarF domain-containing protein kinase 1,12,242,0.049586776859504134,242,230
+Uncharacterized aarF domain-containing protein kinase 4,5,85,0.058823529411764705,83,80
+Uncharacterized aarF domain-containing protein kinase 5,2,142,0.014084507042253521,142,140
+Uridine-cytidine kinase 2,1,17,0.058823529411764705,7,16
+Urokinase plasminogen activator surface receptor,16,68,0.23529411764705882,54,52
+Urokinase-type plasminogen activator,547,1361,0.4019103600293902,1280,814
+Urokinase-type plasminogen activator/surface receptor,8,42,0.19047619047619047,11,34
+VHL/Leucine-rich repeat serine/threonine-protein kinase 2,2,2,1.0,1,0
+Voltage-gated potassium channel subunit Kv7.1/Misshapen-like kinase 1,0,2,0.0,1,2
+Wee1-like protein kinase 2,15,88,0.17045454545454544,83,73
+"[3-methyl-2-oxobutanoate dehydrogenase [lipoamide]] kinase, mitochondrial",0,3,0.0,3,3
+c-Jun N-terminal kinase 1,1360,3253,0.41807562250230557,2915,1893
+c-Jun N-terminal kinase 2,1088,2554,0.42599843382928737,2337,1466
+c-Jun N-terminal kinase 3,1050,2276,0.46133567662565905,2067,1226
+"c-Jun N-terminal kinase, JNK",249,972,0.25617283950617287,302,723
+cAMP-dependent protein kinase (PKA),390,1551,0.2514506769825919,492,1161
+cAMP-dependent protein kinase alpha-catalytic subunit,376,1687,0.2228808535862478,1544,1311
+cAMP-dependent protein kinase beta-1 catalytic subunit,25,342,0.07309941520467836,284,317
+cAMP-dependent protein kinase type II-alpha regulatory subunit,12,239,0.0502092050209205,239,227
+cAMP-dependent protein kinase type II-beta regulatory subunit,7,7,1.0,7,0
+"cAMP-dependent protein kinase, gamma catalytic subunit",11,207,0.05314009661835749,206,196
+cGMP-dependent protein kinase 1 beta,146,899,0.16240266963292546,810,753
+cGMP-dependent protein kinase 2,94,611,0.15384615384615385,593,517
+myosin light chain kinase 2,27,109,0.24770642201834864,98,82
+p38 MAP kinase alpha/beta,2,2,1.0,1,0
+von Hippel-Lindau disease tumor suppressor/Receptor-interacting serine/threonine-protein kinase 2,4,4,1.0,2,0
