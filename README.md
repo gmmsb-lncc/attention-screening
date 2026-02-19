@@ -148,6 +148,68 @@ Causal transformer trained with Next Token Prediction (NTP). Better for capturin
 **Biological Interpretation:**
 The attention matrix $A_{ij}$ represents how much protein residue $i$ "attends to" ligand atom $j$. High attention weights correlate with physical interactions (H-bonds, hydrophobic contacts) in the binding pocket, enabling "semantic docking" without explicit 3D coordinates.
 
+---
+
+## Monotonic Filtering: Removing Trivial Cases
+
+### The Problem: Data Triviality
+
+In kinase-compound interaction datasets, some entities exhibit **monotonic behavior**—they are 100% active or 100% inactive across all their interactions. These cases are "trivial" because a model can predict them correctly without learning any chemistry:
+
+| Term | Definition | Problem |
+|------|------------|---------|
+| **Monotonic Kinase** | A kinase where ALL tested compounds are active (100%) OR ALL are inactive (0%) | Model can memorize "kinase X → always active" without learning binding features |
+| **Monotonic Compound** | A compound that is active against ALL tested kinases (pan-active) OR inactive against ALL (pan-inactive) | Model can memorize "compound Y → always active" without learning selectivity |
+
+### Dataset Statistics
+
+Analysis of ChEMBL kinase datasets reveals significant monotonic contamination:
+
+| Metric | Non-Human Dataset | Human Dataset |
+|--------|-------------------|---------------|
+| **Monotonic Kinases** | 117 (50.6% of 231) | 73 (12.4% of 590) |
+| **Samples in monotonic kinases** | 1,536 (9.8%) | 1,953 (0.4%) |
+| **Monotonic Compounds** | 1,296 (75% of multi-kinase) | 29,768 (64% of multi-kinase) |
+| **"Trivial" samples (union)** | 5,103 (32.7%) | 100,599 (21.1%) |
+
+**Note**: A sample is "trivial" if it belongs to a monotonic kinase OR involves a monotonic compound. In the Non-Human dataset, nearly one-third of samples can be predicted without learning any chemistry.
+
+### Filtering Options
+
+The `split_comparison_analysis.py` script provides filtering to remove trivial cases:
+
+```bash
+# Default: removes monotonic kinases (recommended)
+python crossattention_split_analysis_main.py --embedding 150M --dataset human
+
+# Keep monotonic kinases (NOT recommended, inflates metrics)
+python crossattention_split_analysis_main.py --embedding 150M --dataset human --keep_monotonic
+
+# Remove monotonic compounds (pan-active and pan-inactive)
+python crossattention_split_analysis_main.py --embedding 150M --dataset human --filter_monotonic_compounds
+```
+
+### What Gets Removed
+
+When `--filter_monotonic_compounds` is enabled:
+
+| Category | Compounds Removed | Kinases Affected |
+|----------|-------------------|------------------|
+| **Pan-active** | Compounds active against ALL kinases tested | All kinases they bind |
+| **Pan-inactive** | Compounds inactive against ALL kinases tested | All kinases they were tested against |
+
+**Example**: CHEMBL4088216 is active against 251 different kinases—this is likely a promiscuous pan-kinase inhibitor or experimental artifact. Removing such compounds forces the model to learn genuine selectivity patterns.
+
+### Scientific Rationale
+
+1. **Avoid Metric Inflation**: Random splits allow trivial samples to leak between train/test, artificially boosting performance by ~3.3x
+2. **Force Generalization**: After filtering, the model must learn chemical features that determine selectivity
+3. **Identify Artifacts**: Pan-active compounds may indicate assay interference; pan-inactive may be negative controls
+
+**Detailed analysis**: See [KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md](KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md) for complete statistics.
+
+---
+
 ## Project Structure
 
 ```
