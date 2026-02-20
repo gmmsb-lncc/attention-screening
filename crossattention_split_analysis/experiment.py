@@ -25,7 +25,12 @@ from .config import (
 from .data import (
     create_attention_dataloader
 )
-from .training import train_model, evaluate, EvaluationError
+from .training import (
+    train_model,
+    evaluate,
+    optimize_decision_threshold,
+    EvaluationError,
+)
 from .utils import get_device, set_seed, get_checkpoint_path
 from .visualization import plot_results, save_results, print_summary
 
@@ -33,6 +38,20 @@ DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
 SCAFFOLD_SCENARIO_CODE = "Sc"
 SCAFFOLD_SCENARIO_NAME = "Split by Scaffold"
 SCAFFOLD_SCENARIO_KEY = "Split by\nScaffold"
+
+
+def _compute_class_pos_weight(train_df: pd.DataFrame) -> float:
+    """
+    Compute BCE positive-class weight from the training split.
+
+    pos_weight = n_negative / n_positive
+    """
+    n_pos = int(train_df["label"].sum())
+    n_total = int(len(train_df))
+    n_neg = n_total - n_pos
+    if n_pos <= 0 or n_neg <= 0:
+        return 1.0
+    return float(n_neg / n_pos)
 
 
 def _ensure_required_columns(df: pd.DataFrame, split_name: str) -> None:
@@ -245,10 +264,15 @@ def run_scenario(
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Model parameters: {n_params:,}")
 
+    # Class imbalance correction (computed only from training labels).
+    class_pos_weight = _compute_class_pos_weight(train_df)
+    print(f"  Class weighting: pos_weight={class_pos_weight:.4f} (computed from train split)")
+
     # Loss function
     loss_fn = MultiTaskLoss(
-        classification_weight=1.0,
-        regression_weight=0.5
+        classification_weight=config.classification_weight,
+        regression_weight=config.regression_weight,
+        classification_pos_weight=class_pos_weight,
     )
 
     # Train
@@ -258,13 +282,42 @@ def run_scenario(
         checkpoint_interval=10
     )
 
+    # Calibrate decision threshold on validation (no test leakage).
+    if config.optimize_threshold:
+        print(f"  Optimizing decision threshold on validation ({config.threshold_metric})...")
+        threshold_result = optimize_decision_threshold(
+            model,
+            val_loader,
+            device,
+            metric=config.threshold_metric,
+            raise_on_invalid=False,
+        )
+        if not threshold_result.is_valid:
+            raise EvaluationError(f"Threshold optimization failed: {threshold_result.failure_reason}")
+        decision_threshold = float(threshold_result.metrics["decision_threshold"])
+        threshold_source = f"validation_{config.threshold_metric}"
+        print(
+            f"  Selected threshold={decision_threshold:.4f} "
+            f"(best {config.threshold_metric}={threshold_result.metrics.get('threshold_optimized_score', np.nan):.4f})"
+        )
+    else:
+        decision_threshold = float(config.fixed_threshold)
+        threshold_source = "fixed"
+        print(f"  Using fixed decision threshold={decision_threshold:.4f}")
+
     # Evaluate on requested split (external-test mode evaluates on validation only).
     if evaluation_split == "test" and test_loader is None:
         raise EvaluationError("Test evaluation requested, but test split is unavailable")
     eval_loader = test_loader if evaluation_split == "test" else val_loader
     eval_name = "test" if evaluation_split == "test" else "validation"
     print(f"  Evaluating on {eval_name} set...")
-    eval_result = evaluate(model, eval_loader, device, raise_on_invalid=False)
+    eval_result = evaluate(
+        model,
+        eval_loader,
+        device,
+        raise_on_invalid=False,
+        decision_threshold=decision_threshold,
+    )
 
     if not eval_result.is_valid:
         raise EvaluationError(f"{eval_name.capitalize()} evaluation failed: {eval_result.failure_reason}")
@@ -272,12 +325,26 @@ def run_scenario(
     test_metrics = eval_result.metrics
     test_metrics['n_params'] = n_params
     test_metrics['evaluation_split'] = eval_name
+    test_metrics['threshold_source'] = threshold_source
+    test_metrics['class_pos_weight'] = class_pos_weight
+
+    if config.optimize_threshold:
+        test_metrics['threshold_optimized_metric'] = config.threshold_metric
+        test_metrics['threshold_optimized_score'] = float(
+            threshold_result.metrics.get('threshold_optimized_score', np.nan)
+        )
+        test_metrics['threshold_candidates'] = int(
+            threshold_result.metrics.get('threshold_candidates', 0)
+        )
 
     # Loss is now calculated as log_loss on test set (from evaluate())
     # This is consistent with baseline models (KNN, MLP) and is the standard practice
 
-    print(f"  Results ({eval_name}): Acc={test_metrics['accuracy']:.4f}, MCC={test_metrics['mcc']:.4f}, "
-          f"AUC={test_metrics['auc']:.4f}, Loss={test_metrics['loss']:.4f}")
+    print(
+        f"  Results ({eval_name}): Acc={test_metrics['accuracy']:.4f}, MCC={test_metrics['mcc']:.4f}, "
+        f"AUC={test_metrics['auc']:.4f}, Loss={test_metrics['loss']:.4f}, "
+        f"Threshold={test_metrics['decision_threshold']:.4f}"
+    )
 
     return test_metrics
 
@@ -447,15 +514,27 @@ def run_crossattention_analysis(
 
     eval_df = val_df if external_test_mode else test_df
     eval_split_name = "validation" if external_test_mode else "test"
+    train_pos = int(train_df["label"].sum())
+    val_pos = int(val_df["label"].sum())
+    eval_pos = int(eval_df["label"].sum())
     split_stats[SCAFFOLD_SCENARIO_KEY] = {
         'train_size': int(len(train_df)),
         'val_size': int(len(val_df)),
         'test_size': int(len(eval_df)),
+        'train_positive_rate': float(train_pos / len(train_df)) if len(train_df) > 0 else np.nan,
+        'val_positive_rate': float(val_pos / len(val_df)) if len(val_df) > 0 else np.nan,
+        'test_positive_rate': float(eval_pos / len(eval_df)) if len(eval_df) > 0 else np.nan,
         'test_compounds': int(eval_df['chembl_id'].nunique()),
         'test_kinases': int(eval_df['target_kinase'].nunique()) if 'target_kinase' in eval_df.columns else 0,
         'evaluation_split': eval_split_name,
         'split_source': split_source_metadata,
     }
+    print(
+        "  Split class distribution: "
+        f"train={100*split_stats[SCAFFOLD_SCENARIO_KEY]['train_positive_rate']:.1f}% pos, "
+        f"val={100*split_stats[SCAFFOLD_SCENARIO_KEY]['val_positive_rate']:.1f}% pos, "
+        f"{eval_split_name}={100*split_stats[SCAFFOLD_SCENARIO_KEY]['test_positive_rate']:.1f}% pos"
+    )
 
     scenario_seed_results = {}
     for seed in seeds:
@@ -496,11 +575,32 @@ def run_crossattention_analysis(
             all_results[SCAFFOLD_SCENARIO_KEY] = {'CNN+CrossAttn': seed_metrics}
         else:
             aggregated = {}
-            for metric in ['accuracy', 'mcc', 'auc', 'f1', 'loss']:
+            for metric in [
+                'accuracy',
+                'mcc',
+                'auc',
+                'f1',
+                'loss',
+                'decision_threshold',
+                'threshold_optimized_score',
+                'class_pos_weight',
+            ]:
                 values = [r[metric] for r in scenario_seed_results.values() if metric in r]
                 if values:
                     aggregated[metric] = float(np.mean(values))
                     aggregated[f'{metric}_std'] = float(np.std(values, ddof=1))
+
+            threshold_sources = {r.get('threshold_source') for r in scenario_seed_results.values() if 'threshold_source' in r}
+            if len(threshold_sources) == 1:
+                aggregated['threshold_source'] = threshold_sources.pop()
+
+            threshold_metric_names = {
+                r.get('threshold_optimized_metric')
+                for r in scenario_seed_results.values()
+                if 'threshold_optimized_metric' in r
+            }
+            if len(threshold_metric_names) == 1:
+                aggregated['threshold_optimized_metric'] = threshold_metric_names.pop()
 
             aggregated['seed_results'] = scenario_seed_results
             aggregated['n_seeds'] = len(scenario_seed_results)
@@ -521,6 +621,19 @@ def run_single_analysis(
     patience: Optional[int] = 30,
     batch_size: int = 32,
     learning_rate: float = 1e-4,
+    weight_decay: float = 0.01,
+    hidden_dim: int = 256,
+    num_cnn_layers: int = 3,
+    num_cross_attn_layers: int = 2,
+    num_heads: int = 8,
+    ff_dim: int = 1024,
+    dropout: float = 0.1,
+    max_grad_norm: float = 1.0,
+    classification_weight: float = 1.0,
+    regression_weight: float = 0.5,
+    optimize_threshold: bool = True,
+    threshold_metric: str = "mcc",
+    fixed_threshold: float = 0.5,
     use_molformer_ligand: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     external_test_mode: bool = False,
@@ -540,6 +653,19 @@ def run_single_analysis(
         patience: Early stopping patience
         batch_size: Training batch size
         learning_rate: Learning rate
+        weight_decay: AdamW weight decay
+        hidden_dim: Hidden dimension used by encoders and heads
+        num_cnn_layers: Number of CNN encoder layers
+        num_cross_attn_layers: Number of cross-attention blocks
+        num_heads: Number of attention heads per block
+        ff_dim: Feed-forward hidden size in attention blocks
+        dropout: Dropout applied throughout model
+        max_grad_norm: Gradient clipping max norm
+        classification_weight: Weight for classification loss term
+        regression_weight: Weight for regression loss term
+        optimize_threshold: If True, calibrate threshold on validation
+        threshold_metric: Metric optimized during threshold calibration
+        fixed_threshold: Threshold used when optimize_threshold=False
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
         scaffold_split_dir: Directory generated by scaffold_split.py
         external_test_mode: Train/val-only mode using precomputed scaffold split; test is external
@@ -554,6 +680,15 @@ def run_single_analysis(
 
     if scenarios is None:
         scenarios = DEFAULT_SCENARIOS
+
+    supported_threshold_metrics = {"mcc", "f1", "balanced_accuracy"}
+    if optimize_threshold and threshold_metric not in supported_threshold_metrics:
+        raise ValueError(
+            f"Unsupported threshold_metric={threshold_metric!r}. "
+            f"Expected one of {sorted(supported_threshold_metrics)}"
+        )
+    if not (0.0 <= fixed_threshold <= 1.0):
+        raise ValueError(f"fixed_threshold must be in [0, 1], got {fixed_threshold}")
 
     # Resolve embedding name
     if embedding_name in SUPPORTED_EMBEDDINGS:
@@ -586,6 +721,10 @@ def run_single_analysis(
         print(f"EVALUATION MODE: EXTERNAL TEST (precomputed scaffold train/val)")
     else:
         print(f"EVALUATION MODE: INTERNAL TEST (precomputed train/val/test)")
+    if optimize_threshold:
+        print(f"DECISION THRESHOLD: OPTIMIZED ON VALIDATION ({threshold_metric})")
+    else:
+        print(f"DECISION THRESHOLD: FIXED ({fixed_threshold})")
     if patience is None:
         print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
     else:
@@ -604,10 +743,23 @@ def run_single_analysis(
     config = TrainingConfig(
         protein_dim=protein_dim,
         ligand_dim=ligand_dim,
+        hidden_dim=hidden_dim,
+        num_cnn_layers=num_cnn_layers,
+        num_cross_attn_layers=num_cross_attn_layers,
+        num_heads=num_heads,
+        ff_dim=ff_dim,
+        dropout=dropout,
         num_epochs=num_epochs,
         patience=patience,
         batch_size=batch_size,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        max_grad_norm=max_grad_norm,
+        classification_weight=classification_weight,
+        regression_weight=regression_weight,
+        optimize_threshold=optimize_threshold,
+        threshold_metric=threshold_metric,
+        fixed_threshold=fixed_threshold,
     )
 
     # Create output directory
