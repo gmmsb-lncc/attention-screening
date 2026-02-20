@@ -2,7 +2,7 @@
 CrossAttention Split Analysis Package.
 
 Evaluates CNN + Cross-Attention models for protein-ligand affinity prediction
-using three evaluation scenarios with scientific rigor.
+using the precomputed scaffold split protocol with scientific rigor.
 """
 
 from .config import TrainingConfig, SUPPORTED_EMBEDDINGS, PROTEIN_DIMS
