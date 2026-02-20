@@ -1,7 +1,7 @@
 """Configuration and constants for CrossAttention split analysis."""
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 # =============================================================================
 # EMBEDDINGS
@@ -113,6 +113,11 @@ class TrainingConfig:
         weight_decay: AdamW weight decay
         num_epochs: Maximum training epochs
         patience: Early stopping patience (epochs without improvement)
+        classification_weight: Weight for BCE classification loss
+        regression_weight: Weight for MSE regression loss
+        optimize_threshold: If True, calibrate decision threshold on validation
+        threshold_metric: Metric optimized for threshold selection
+        fixed_threshold: Fixed threshold used when optimize_threshold=False
         affinity_threshold: Configuration for label generation
     """
     # Model architecture
@@ -130,8 +135,13 @@ class TrainingConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     num_epochs: int = 500
-    patience: int = 30
+    patience: Optional[int] = 30
     max_grad_norm: float = 1.0
+    classification_weight: float = 1.0
+    regression_weight: float = 0.5
+    optimize_threshold: bool = True
+    threshold_metric: str = 'mcc'
+    fixed_threshold: float = 0.5
 
     # Reproducibility
     affinity_threshold: AffinityThresholdConfig = field(
@@ -155,6 +165,11 @@ class TrainingConfig:
             'num_epochs': self.num_epochs,
             'patience': self.patience,
             'max_grad_norm': self.max_grad_norm,
+            'classification_weight': self.classification_weight,
+            'regression_weight': self.regression_weight,
+            'optimize_threshold': self.optimize_threshold,
+            'threshold_metric': self.threshold_metric,
+            'fixed_threshold': self.fixed_threshold,
             'affinity_threshold': self.affinity_threshold.to_dict()
         }
 
