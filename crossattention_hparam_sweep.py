@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""
+Hyperparameter sweep for CrossAttention with MCC-first model selection.
+
+Protocol:
+1. Screen a grid of configurations using a validation-driven objective.
+2. Rank by MCC (primary), accuracy (secondary), loss (tertiary).
+3. Optionally rerun top-K with a larger seed set for robust selection.
+"""
+
+import argparse
+import json
+import math
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import pandas as pd
+
+from crossattention_split_analysis.experiment import run_single_analysis
+
+
+DEFAULT_SCREEN_SEEDS = [42, 123]
+DEFAULT_FINAL_SEEDS = [42, 123, 456, 789, 1024]
+
+
+@dataclass(frozen=True)
+class SweepConfig:
+    hidden_dim: int
+    learning_rate: float
+    weight_decay: float
+    dropout: float
+    num_cnn_layers: int
+    num_cross_attn_layers: int
+    num_heads: int
+    ff_dim: int
+    batch_size: int
+
+    def to_dict(self) -> Dict:
+        return {
+            "hidden_dim": self.hidden_dim,
+            "learning_rate": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "dropout": self.dropout,
+            "num_cnn_layers": self.num_cnn_layers,
+            "num_cross_attn_layers": self.num_cross_attn_layers,
+            "num_heads": self.num_heads,
+            "ff_dim": self.ff_dim,
+            "batch_size": self.batch_size,
+        }
+
+
+def _iter_product(space: Dict[str, Iterable]) -> Iterable[Dict]:
+    """Simple cartesian product helper for dict-based grids."""
+    keys = list(space.keys())
+    values = [list(space[k]) for k in keys]
+    if not keys:
+        yield {}
+        return
+
+    def _recurse(idx: int, current: Dict):
+        if idx == len(keys):
+            yield current.copy()
+            return
+        key = keys[idx]
+        for value in values[idx]:
+            current[key] = value
+            yield from _recurse(idx + 1, current)
+
+    yield from _recurse(0, {})
+
+
+def build_search_space(profile: str) -> List[SweepConfig]:
+    """
+    Build preset search spaces.
+
+    quick: 8 configs
+    standard: 36 configs
+    aggressive: 72 configs
+    """
+    if profile == "quick":
+        base = {
+            "hidden_dim": [192, 256],
+            "learning_rate": [1e-4, 2e-4],
+            "weight_decay": [0.01],
+            "dropout": [0.1, 0.2],
+            "num_cnn_layers": [3],
+            "num_cross_attn_layers": [2],
+            "batch_size": [32],
+        }
+    elif profile == "standard":
+        base = {
+            "hidden_dim": [224, 256, 320],
+            "learning_rate": [5e-5, 1e-4, 2e-4],
+            "weight_decay": [1e-3, 1e-2],
+            "dropout": [0.05, 0.1],
+            "num_cnn_layers": [3],
+            "num_cross_attn_layers": [2],
+            "batch_size": [32],
+        }
+    elif profile == "aggressive":
+        base = {
+            "hidden_dim": [224, 256, 320],
+            "learning_rate": [5e-5, 1e-4, 2e-4],
+            "weight_decay": [1e-3, 1e-2],
+            "dropout": [0.05, 0.1],
+            "num_cnn_layers": [2, 3],
+            "num_cross_attn_layers": [2, 3],
+            "batch_size": [32],
+        }
+    else:
+        raise ValueError(f"Unsupported profile: {profile!r}")
+
+    configs: List[SweepConfig] = []
+    for raw in _iter_product(base):
+        hidden_dim = int(raw["hidden_dim"])
+        # Keep attention heads valid for hidden_dim.
+        num_heads = 8 if hidden_dim % 8 == 0 else 4 if hidden_dim % 4 == 0 else 1
+        ff_dim = int(hidden_dim * 4)
+        cfg = SweepConfig(
+            hidden_dim=hidden_dim,
+            learning_rate=float(raw["learning_rate"]),
+            weight_decay=float(raw["weight_decay"]),
+            dropout=float(raw["dropout"]),
+            num_cnn_layers=int(raw["num_cnn_layers"]),
+            num_cross_attn_layers=int(raw["num_cross_attn_layers"]),
+            num_heads=num_heads,
+            ff_dim=ff_dim,
+            batch_size=int(raw["batch_size"]),
+        )
+        configs.append(cfg)
+    return configs
+
+
+def _extract_metrics(results: Dict) -> Dict[str, float]:
+    """Extract flat metric dictionary from run_single_analysis return object."""
+    if not results:
+        return {}
+
+    scenario_key = next(iter(results.keys()))
+    scenario_block = results.get(scenario_key, {})
+    model_block = scenario_block.get("CNN+CrossAttn", {})
+
+    wanted = [
+        "accuracy",
+        "mcc",
+        "auc",
+        "f1",
+        "loss",
+        "decision_threshold",
+        "threshold_optimized_score",
+        "n_params",
+        "accuracy_std",
+        "mcc_std",
+        "auc_std",
+        "f1_std",
+        "loss_std",
+    ]
+    out = {}
+    for key in wanted:
+        if key in model_block:
+            out[key] = model_block[key]
+    return out
+
+
+def _as_float(value, default: float) -> float:
+    try:
+        if value is None:
+            return default
+        x = float(value)
+        if math.isnan(x):
+            return default
+        return x
+    except Exception:
+        return default
+
+
+def _rank_trials(df: pd.DataFrame) -> pd.DataFrame:
+    """Rank trials by MCC desc, accuracy desc, loss asc."""
+    ranked = df.copy()
+    ranked["sort_mcc"] = ranked["mcc"].apply(lambda x: _as_float(x, -1e9))
+    ranked["sort_accuracy"] = ranked["accuracy"].apply(lambda x: _as_float(x, -1e9))
+    ranked["sort_loss"] = ranked["loss"].apply(lambda x: _as_float(x, 1e9))
+    ranked = ranked.sort_values(
+        by=["sort_mcc", "sort_accuracy", "sort_loss"],
+        ascending=[False, False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranked["rank"] = ranked.index + 1
+    return ranked.drop(columns=["sort_mcc", "sort_accuracy", "sort_loss"])
+
+
+def _build_main_command(
+    args: argparse.Namespace,
+    best_cfg: SweepConfig,
+    output_dir: str,
+) -> str:
+    cmd = [
+        "python crossattention_split_analysis_main.py",
+        f"--dataset {args.dataset}",
+        f"--embedding {args.embedding}",
+        "--scenarios scaffold",
+        f"--scaffold_split_dir {args.scaffold_split_dir}",
+        f"--epochs {args.epochs}",
+        f"--batch_size {best_cfg.batch_size}",
+        f"--learning_rate {best_cfg.learning_rate}",
+        f"--weight_decay {best_cfg.weight_decay}",
+        f"--hidden_dim {best_cfg.hidden_dim}",
+        f"--num_cnn_layers {best_cfg.num_cnn_layers}",
+        f"--num_cross_attn_layers {best_cfg.num_cross_attn_layers}",
+        f"--num_heads {best_cfg.num_heads}",
+        f"--ff_dim {best_cfg.ff_dim}",
+        f"--dropout {best_cfg.dropout}",
+        f"--max_grad_norm {args.max_grad_norm}",
+        f"--classification_weight {args.classification_weight}",
+        f"--regression_weight {args.regression_weight}",
+        f"--threshold_metric {args.threshold_metric}",
+        f"--output_dir {output_dir}",
+    ]
+    if args.external_test_mode:
+        cmd.append("--external_test_mode")
+    if args.molformer_ligand:
+        cmd.append("--molformer_ligand")
+    if args.no_early_stopping:
+        cmd.append("--no-early-stopping")
+    else:
+        cmd.append(f"--patience {args.patience}")
+    if args.disable_threshold_optimization:
+        cmd.append("--disable-threshold-optimization")
+        cmd.append(f"--fixed_threshold {args.fixed_threshold}")
+    return " \\\n  ".join(cmd)
+
+
+def _run_phase(
+    phase_name: str,
+    configs: List[Tuple[int, SweepConfig]],
+    seeds: List[int],
+    args: argparse.Namespace,
+    phase_dir: Path,
+) -> pd.DataFrame:
+    rows = []
+    for idx, cfg in configs:
+        trial_dir = phase_dir / f"trial_{idx:03d}"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        print(
+            f"\n[{phase_name}] trial {idx:03d} | hidden={cfg.hidden_dim} "
+            f"lr={cfg.learning_rate:.1e} wd={cfg.weight_decay:.1e} dropout={cfg.dropout}"
+        )
+        start = time.time()
+        status = "ok"
+        error_message = None
+        metrics = {}
+        try:
+            result = run_single_analysis(
+                embedding_name=args.embedding,
+                dataset_type=args.dataset,
+                output_dir=str(trial_dir),
+                seeds=seeds,
+                force=args.force,
+                use_attention=False,
+                scenarios=["scaffold"],
+                num_epochs=args.epochs,
+                patience=None if args.no_early_stopping else args.patience,
+                batch_size=cfg.batch_size,
+                learning_rate=cfg.learning_rate,
+                weight_decay=cfg.weight_decay,
+                hidden_dim=cfg.hidden_dim,
+                num_cnn_layers=cfg.num_cnn_layers,
+                num_cross_attn_layers=cfg.num_cross_attn_layers,
+                num_heads=cfg.num_heads,
+                ff_dim=cfg.ff_dim,
+                dropout=cfg.dropout,
+                max_grad_norm=args.max_grad_norm,
+                classification_weight=args.classification_weight,
+                regression_weight=args.regression_weight,
+                optimize_threshold=not args.disable_threshold_optimization,
+                threshold_metric=args.threshold_metric,
+                fixed_threshold=args.fixed_threshold,
+                use_molformer_ligand=args.molformer_ligand,
+                scaffold_split_dir=args.scaffold_split_dir,
+                external_test_mode=args.external_test_mode,
+            )
+            if result is None:
+                status = "failed"
+                error_message = "run_single_analysis returned None"
+            else:
+                metrics = _extract_metrics(result)
+        except Exception as exc:  # noqa: BLE001
+            status = "failed"
+            error_message = str(exc)
+
+        runtime_sec = time.time() - start
+        row = {
+            "phase": phase_name,
+            "trial_id": idx,
+            "status": status,
+            "runtime_sec": runtime_sec,
+            "output_dir": str(trial_dir),
+            "n_seeds": len(seeds),
+            "error": error_message,
+            **cfg.to_dict(),
+            **metrics,
+        }
+        rows.append(row)
+
+        if status == "ok":
+            print(
+                f"  -> MCC={_as_float(row.get('mcc'), float('nan')):.4f}, "
+                f"Acc={_as_float(row.get('accuracy'), float('nan')):.4f}, "
+                f"Loss={_as_float(row.get('loss'), float('nan')):.4f}"
+            )
+        else:
+            print(f"  -> failed: {error_message}")
+
+    return pd.DataFrame(rows)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="CrossAttention hyperparameter sweep (MCC-first selection)."
+    )
+    parser.add_argument("--dataset", "-d", choices=["human", "non_human", "all"], required=True)
+    parser.add_argument("--embedding", "-e", choices=["8M", "150M", "650M"], default="8M")
+    parser.add_argument("--profile", choices=["quick", "standard", "aggressive"], default="quick")
+    parser.add_argument("--max_trials", type=int, default=None, help="Optional cap on number of trials.")
+    parser.add_argument("--top_k", type=int, default=3, help="Top-K configs for final rerun.")
+
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--patience", type=int, default=30)
+    parser.add_argument("--no-early-stopping", action="store_true")
+
+    parser.add_argument("--screen_seeds", nargs="+", type=int, default=DEFAULT_SCREEN_SEEDS)
+    parser.add_argument("--final_seeds", nargs="+", type=int, default=DEFAULT_FINAL_SEEDS)
+
+    parser.add_argument("--classification_weight", type=float, default=1.0)
+    parser.add_argument("--regression_weight", type=float, default=0.5)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+
+    parser.add_argument("--threshold_metric", choices=["mcc", "f1", "balanced_accuracy"], default="mcc")
+    parser.add_argument("--disable-threshold-optimization", action="store_true")
+    parser.add_argument("--fixed_threshold", type=float, default=0.5)
+
+    parser.add_argument("--scaffold_split_dir", type=str, default="scaffolds_splits/output")
+    parser.add_argument("--external_test_mode", action="store_true", default=True)
+    parser.add_argument("--molformer_ligand", action="store_true", default=True)
+    parser.add_argument("--smited_ligand", action="store_true", help="Use SMI-TED instead of MoLFormer ligand matrices.")
+
+    parser.add_argument("--output_dir", "-o", type=str, default="results/crossattention_hparam_sweep")
+    parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--dry_run", action="store_true")
+    args = parser.parse_args()
+
+    if args.smited_ligand:
+        args.molformer_ligand = False
+
+    if args.max_trials is not None and args.max_trials <= 0:
+        raise ValueError("--max_trials must be > 0 when provided")
+    if args.top_k <= 0:
+        raise ValueError("--top_k must be > 0")
+
+    configs = build_search_space(args.profile)
+    if args.max_trials is not None:
+        configs = configs[: args.max_trials]
+    indexed_configs = [(i + 1, cfg) for i, cfg in enumerate(configs)]
+
+    print("=" * 80)
+    print("CROSSATTENTION HYPERPARAMETER SWEEP (MCC-FIRST)")
+    print("=" * 80)
+    print(f"Dataset: {args.dataset}")
+    print(f"Embedding: {args.embedding}")
+    print(f"Profile: {args.profile}")
+    print(f"Trials: {len(indexed_configs)}")
+    print(f"Screen seeds: {args.screen_seeds}")
+    print(f"Final seeds: {args.final_seeds}")
+    print(f"Threshold metric: {args.threshold_metric}")
+    print(f"External test mode: {args.external_test_mode}")
+    print(f"MoLFormer ligand: {args.molformer_ligand}")
+    print("=" * 80)
+
+    if args.dry_run:
+        preview = pd.DataFrame(
+            [{"trial_id": idx, **cfg.to_dict()} for idx, cfg in indexed_configs]
+        )
+        print(preview.to_string(index=False))
+        return
+
+    run_name = args.run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = Path(args.output_dir) / f"{args.dataset}_{args.embedding}_{args.profile}_{run_name}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    screen_dir = run_dir / "screen"
+    final_dir = run_dir / "final"
+    screen_dir.mkdir(parents=True, exist_ok=True)
+    final_dir.mkdir(parents=True, exist_ok=True)
+
+    df_screen = _run_phase(
+        phase_name="screen",
+        configs=indexed_configs,
+        seeds=args.screen_seeds,
+        args=args,
+        phase_dir=screen_dir,
+    )
+    df_screen_ranked = _rank_trials(df_screen)
+    df_screen_ranked.to_csv(run_dir / "screen_results.tsv", sep="\t", index=False)
+
+    successful_screen = df_screen_ranked[df_screen_ranked["status"] == "ok"].copy()
+    if successful_screen.empty:
+        print("\nNo successful trial in screening phase.")
+        return
+
+    top_rows = successful_screen.head(args.top_k).copy()
+    top_ids = [int(x) for x in top_rows["trial_id"].tolist()]
+    config_map = {idx: cfg for idx, cfg in indexed_configs}
+    top_configs = [(idx, config_map[idx]) for idx in top_ids]
+
+    rerun_final = args.final_seeds != args.screen_seeds
+    if rerun_final:
+        df_final = _run_phase(
+            phase_name="final",
+            configs=top_configs,
+            seeds=args.final_seeds,
+            args=args,
+            phase_dir=final_dir,
+        )
+        df_final_ranked = _rank_trials(df_final)
+        df_final_ranked.to_csv(run_dir / "final_results.tsv", sep="\t", index=False)
+        successful_final = df_final_ranked[df_final_ranked["status"] == "ok"].copy()
+        winner_row = successful_final.iloc[0] if not successful_final.empty else top_rows.iloc[0]
+    else:
+        df_final_ranked = pd.DataFrame()
+        winner_row = top_rows.iloc[0]
+
+    winner_id = int(winner_row["trial_id"])
+    winner_cfg = config_map[winner_id]
+    best_output_dir = str((final_dir / f"trial_{winner_id:03d}") if rerun_final else (screen_dir / f"trial_{winner_id:03d}"))
+    best_cmd = _build_main_command(args, winner_cfg, best_output_dir)
+
+    summary = {
+        "dataset": args.dataset,
+        "embedding": args.embedding,
+        "profile": args.profile,
+        "selection_rule": "maximize MCC, tie-break by accuracy, then minimize loss",
+        "threshold_metric": args.threshold_metric,
+        "winner_trial_id": winner_id,
+        "winner_metrics": {
+            "mcc": winner_row.get("mcc"),
+            "accuracy": winner_row.get("accuracy"),
+            "loss": winner_row.get("loss"),
+            "decision_threshold": winner_row.get("decision_threshold"),
+            "mcc_std": winner_row.get("mcc_std"),
+            "accuracy_std": winner_row.get("accuracy_std"),
+        },
+        "winner_config": winner_cfg.to_dict(),
+        "recommended_command": best_cmd,
+    }
+
+    with open(run_dir / "best_config.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    with open(run_dir / "README.txt", "w", encoding="utf-8") as f:
+        f.write("CrossAttention Hyperparameter Sweep Artifacts\n")
+        f.write(f"Run dir: {run_dir}\n")
+        f.write("Selection rule: maximize MCC, tie-break by accuracy, then minimize loss.\n\n")
+        f.write("Recommended command:\n")
+        f.write(best_cmd + "\n")
+
+    print("\n" + "=" * 80)
+    print("SWEEP FINISHED")
+    print("=" * 80)
+    print(f"Run directory: {run_dir}")
+    print(f"Best trial: {winner_id:03d}")
+    print(
+        f"Best metrics: MCC={_as_float(winner_row.get('mcc'), float('nan')):.4f}, "
+        f"Acc={_as_float(winner_row.get('accuracy'), float('nan')):.4f}, "
+        f"Loss={_as_float(winner_row.get('loss'), float('nan')):.4f}"
+    )
+    print(f"Saved: {run_dir / 'best_config.json'}")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()
