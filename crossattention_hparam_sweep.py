@@ -183,6 +183,46 @@ def _extract_metrics(results: Dict) -> Dict[str, float]:
     return out
 
 
+def _extract_metrics_from_saved_json(trial_dir: Path) -> Dict[str, float]:
+    """Load metrics from an existing result JSON inside a trial directory."""
+    candidates = sorted(trial_dir.glob("*crossattention_analysis_results.json"))
+    if not candidates:
+        return {}
+    try:
+        with open(candidates[0], "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {}
+
+    model_results = payload.get("model_results", {})
+    if not model_results:
+        return {}
+    first_block = next(iter(model_results.values()))
+    if not isinstance(first_block, dict):
+        return {}
+
+    wanted = [
+        "accuracy",
+        "mcc",
+        "auc",
+        "f1",
+        "loss",
+        "decision_threshold",
+        "threshold_optimized_score",
+        "n_params",
+        "accuracy_std",
+        "mcc_std",
+        "auc_std",
+        "f1_std",
+        "loss_std",
+    ]
+    out = {}
+    for key in wanted:
+        if key in first_block:
+            out[key] = first_block[key]
+    return out
+
+
 def _as_float(value, default: float) -> float:
     try:
         if value is None:
@@ -251,12 +291,53 @@ def _build_main_command(
     return " \\\n  ".join(cmd)
 
 
+def _parse_pruning_epochs(raw: str, final_epochs: int) -> List[int]:
+    """
+    Parse pruning schedule and guarantee final epoch budget is included.
+
+    Example:
+      raw='80,200' and final_epochs=500 -> [80, 200, 500]
+      raw='' and final_epochs=500 -> [500]
+    """
+    if final_epochs <= 0:
+        raise ValueError("--epochs must be > 0")
+
+    parsed = []
+    tokens = [t.strip() for t in raw.split(",")] if raw else []
+    for token in tokens:
+        if not token:
+            continue
+        value = int(token)
+        if value <= 0:
+            raise ValueError(f"Invalid pruning epoch budget: {value} (must be > 0)")
+        if value < final_epochs:
+            parsed.append(value)
+    stages = sorted(set(parsed))
+    stages.append(final_epochs)
+    return stages
+
+
+def _stage_patience(
+    base_patience: Optional[int],
+    stage_epochs: int,
+    no_early_stopping: bool,
+) -> Optional[int]:
+    """Compute patience for a pruning stage while keeping behavior stable."""
+    if no_early_stopping or base_patience is None:
+        return None
+    stage_cap = max(5, int(0.3 * stage_epochs))
+    return min(base_patience, stage_cap)
+
+
 def _run_phase(
     phase_name: str,
     configs: List[Tuple[int, SweepConfig]],
     seeds: List[int],
     args: argparse.Namespace,
     phase_dir: Path,
+    num_epochs: int,
+    patience: Optional[int],
+    stage_index: Optional[int] = None,
 ) -> pd.DataFrame:
     rows = []
     for idx, cfg in configs:
@@ -270,6 +351,7 @@ def _run_phase(
         status = "ok"
         error_message = None
         metrics = {}
+        cache_hit = False
         try:
             result = run_single_analysis(
                 embedding_name=args.embedding,
@@ -279,8 +361,8 @@ def _run_phase(
                 force=args.force,
                 use_attention=False,
                 scenarios=["scaffold"],
-                num_epochs=args.epochs,
-                patience=None if args.no_early_stopping else args.patience,
+                num_epochs=num_epochs,
+                patience=patience,
                 batch_size=cfg.batch_size,
                 learning_rate=cfg.learning_rate,
                 weight_decay=cfg.weight_decay,
@@ -301,8 +383,13 @@ def _run_phase(
                 external_test_mode=args.external_test_mode,
             )
             if result is None:
-                status = "failed"
-                error_message = "run_single_analysis returned None"
+                cached = _extract_metrics_from_saved_json(trial_dir)
+                if cached:
+                    metrics = cached
+                    cache_hit = True
+                else:
+                    status = "failed"
+                    error_message = "run_single_analysis returned None"
             else:
                 metrics = _extract_metrics(result)
         except Exception as exc:  # noqa: BLE001
@@ -317,6 +404,10 @@ def _run_phase(
             "runtime_sec": runtime_sec,
             "output_dir": str(trial_dir),
             "n_seeds": len(seeds),
+            "num_epochs": num_epochs,
+            "patience": patience,
+            "stage_index": stage_index,
+            "cache_hit": cache_hit,
             "error": error_message,
             **cfg.to_dict(),
             **metrics,
@@ -335,6 +426,95 @@ def _run_phase(
     return pd.DataFrame(rows)
 
 
+def _run_screen_with_pruning(
+    indexed_configs: List[Tuple[int, SweepConfig]],
+    args: argparse.Namespace,
+    run_dir: Path,
+    screen_dir: Path,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Run screening phase with optional Successive Halving pruning.
+
+    Returns:
+        df_screen_all: concatenated results for all stages
+        df_last_stage_ranked: ranked successful trials from last executed stage
+    """
+    if args.pruning_mode == "none":
+        stage_epochs = [args.epochs]
+    else:
+        stage_epochs = _parse_pruning_epochs(args.prune_epochs, args.epochs)
+
+    active = list(indexed_configs)
+    all_stage_frames: List[pd.DataFrame] = []
+    last_stage_ranked = pd.DataFrame()
+    id_to_cfg = {idx: cfg for idx, cfg in indexed_configs}
+
+    print(f"\nPruning mode: {args.pruning_mode}")
+    print(f"Pruning stages (epochs): {stage_epochs}")
+
+    for stage_idx, stage_ep in enumerate(stage_epochs, start=1):
+        if not active:
+            break
+
+        stage_patience = _stage_patience(
+            base_patience=args.patience,
+            stage_epochs=stage_ep,
+            no_early_stopping=args.no_early_stopping,
+        )
+        stage_name = f"screen_stage{stage_idx:02d}_e{stage_ep}"
+        stage_dir = screen_dir / f"stage_{stage_idx:02d}_e{stage_ep}"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+
+        print(
+            f"\n[{stage_name}] active_trials={len(active)} "
+            f"(epochs={stage_ep}, patience={'None' if stage_patience is None else stage_patience})"
+        )
+        df_stage = _run_phase(
+            phase_name=stage_name,
+            configs=active,
+            seeds=args.screen_seeds,
+            args=args,
+            phase_dir=stage_dir,
+            num_epochs=stage_ep,
+            patience=stage_patience,
+            stage_index=stage_idx,
+        )
+        all_stage_frames.append(df_stage)
+
+        successful_stage = df_stage[df_stage["status"] == "ok"].copy()
+        if successful_stage.empty:
+            print(f"[{stage_name}] no successful trials.")
+            break
+
+        ranked_stage = _rank_trials(successful_stage)
+        ranked_stage.to_csv(run_dir / f"screen_stage_{stage_idx:02d}_ranked.tsv", sep="\t", index=False)
+        last_stage_ranked = ranked_stage
+
+        is_last_stage = (stage_idx == len(stage_epochs))
+        if is_last_stage:
+            break
+
+        n_keep = max(
+            args.prune_min_keep,
+            int(math.ceil(len(ranked_stage) * args.prune_keep_ratio)),
+            min(args.top_k, len(ranked_stage)),
+        )
+        n_keep = min(n_keep, len(ranked_stage))
+
+        survivor_ids = [int(x) for x in ranked_stage.head(n_keep)["trial_id"].tolist()]
+        print(
+            f"[{stage_name}] keeping {n_keep}/{len(ranked_stage)} trials "
+            f"for next stage (ratio={args.prune_keep_ratio})"
+        )
+        active = [(trial_id, id_to_cfg[trial_id]) for trial_id in survivor_ids]
+
+    if all_stage_frames:
+        df_screen_all = pd.concat(all_stage_frames, axis=0, ignore_index=True)
+    else:
+        df_screen_all = pd.DataFrame()
+    return df_screen_all, last_stage_ranked
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="CrossAttention hyperparameter sweep (MCC-first selection)."
@@ -344,6 +524,30 @@ def main():
     parser.add_argument("--profile", choices=["quick", "standard", "aggressive"], default="quick")
     parser.add_argument("--max_trials", type=int, default=None, help="Optional cap on number of trials.")
     parser.add_argument("--top_k", type=int, default=3, help="Top-K configs for final rerun.")
+    parser.add_argument(
+        "--pruning_mode",
+        choices=["none", "halving"],
+        default="halving",
+        help="Trial pruning strategy during screening (default: halving).",
+    )
+    parser.add_argument(
+        "--prune_epochs",
+        type=str,
+        default="80,200",
+        help="Comma-separated early stage epoch budgets for pruning; final --epochs is always added.",
+    )
+    parser.add_argument(
+        "--prune_keep_ratio",
+        type=float,
+        default=0.5,
+        help="Fraction of trials kept between pruning stages (default: 0.5).",
+    )
+    parser.add_argument(
+        "--prune_min_keep",
+        type=int,
+        default=3,
+        help="Minimum number of trials kept between pruning stages (default: 3).",
+    )
 
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--patience", type=int, default=30)
@@ -378,11 +582,16 @@ def main():
         raise ValueError("--max_trials must be > 0 when provided")
     if args.top_k <= 0:
         raise ValueError("--top_k must be > 0")
+    if not (0.0 < args.prune_keep_ratio <= 1.0):
+        raise ValueError("--prune_keep_ratio must be in (0, 1]")
+    if args.prune_min_keep <= 0:
+        raise ValueError("--prune_min_keep must be > 0")
 
     configs = build_search_space(args.profile)
     if args.max_trials is not None:
         configs = configs[: args.max_trials]
     indexed_configs = [(i + 1, cfg) for i, cfg in enumerate(configs)]
+    stage_epochs_preview = [args.epochs] if args.pruning_mode == "none" else _parse_pruning_epochs(args.prune_epochs, args.epochs)
 
     print("=" * 80)
     print("CROSSATTENTION HYPERPARAMETER SWEEP (MCC-FIRST)")
@@ -394,6 +603,8 @@ def main():
     print(f"Screen seeds: {args.screen_seeds}")
     print(f"Final seeds: {args.final_seeds}")
     print(f"Threshold metric: {args.threshold_metric}")
+    print(f"Pruning mode: {args.pruning_mode}")
+    print(f"Pruning stages (epochs): {stage_epochs_preview}")
     print(f"External test mode: {args.external_test_mode}")
     print(f"MoLFormer ligand: {args.molformer_ligand}")
     print("=" * 80)
@@ -414,17 +625,19 @@ def main():
     screen_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
 
-    df_screen = _run_phase(
-        phase_name="screen",
-        configs=indexed_configs,
-        seeds=args.screen_seeds,
+    df_screen_all, df_screen_last_stage_ranked = _run_screen_with_pruning(
+        indexed_configs=indexed_configs,
         args=args,
-        phase_dir=screen_dir,
+        run_dir=run_dir,
+        screen_dir=screen_dir,
     )
-    df_screen_ranked = _rank_trials(df_screen)
-    df_screen_ranked.to_csv(run_dir / "screen_results.tsv", sep="\t", index=False)
+    df_screen_all.to_csv(run_dir / "screen_results.tsv", sep="\t", index=False)
 
-    successful_screen = df_screen_ranked[df_screen_ranked["status"] == "ok"].copy()
+    if df_screen_last_stage_ranked.empty or "status" not in df_screen_last_stage_ranked.columns:
+        print("\nNo successful trial in screening phase.")
+        return
+
+    successful_screen = df_screen_last_stage_ranked[df_screen_last_stage_ranked["status"] == "ok"].copy()
     if successful_screen.empty:
         print("\nNo successful trial in screening phase.")
         return
@@ -436,12 +649,20 @@ def main():
 
     rerun_final = args.final_seeds != args.screen_seeds
     if rerun_final:
+        final_patience = _stage_patience(
+            base_patience=args.patience,
+            stage_epochs=args.epochs,
+            no_early_stopping=args.no_early_stopping,
+        )
         df_final = _run_phase(
             phase_name="final",
             configs=top_configs,
             seeds=args.final_seeds,
             args=args,
             phase_dir=final_dir,
+            num_epochs=args.epochs,
+            patience=final_patience,
+            stage_index=None,
         )
         df_final_ranked = _rank_trials(df_final)
         df_final_ranked.to_csv(run_dir / "final_results.tsv", sep="\t", index=False)
@@ -462,6 +683,12 @@ def main():
         "profile": args.profile,
         "selection_rule": "maximize MCC, tie-break by accuracy, then minimize loss",
         "threshold_metric": args.threshold_metric,
+        "pruning": {
+            "mode": args.pruning_mode,
+            "keep_ratio": args.prune_keep_ratio,
+            "min_keep": args.prune_min_keep,
+            "stage_epochs": stage_epochs_preview,
+        },
         "winner_trial_id": winner_id,
         "winner_metrics": {
             "mcc": winner_row.get("mcc"),
@@ -482,6 +709,8 @@ def main():
         f.write("CrossAttention Hyperparameter Sweep Artifacts\n")
         f.write(f"Run dir: {run_dir}\n")
         f.write("Selection rule: maximize MCC, tie-break by accuracy, then minimize loss.\n\n")
+        f.write(f"Pruning mode: {args.pruning_mode}\n")
+        f.write(f"Pruning stages (epochs): {stage_epochs_preview}\n\n")
         f.write("Recommended command:\n")
         f.write(best_cmd + "\n")
 
