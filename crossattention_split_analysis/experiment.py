@@ -57,14 +57,19 @@ def _ensure_label_column(df: pd.DataFrame, threshold: float, split_name: str) ->
     return out
 
 
-def _read_split_tsv(path: Path, split_name: str) -> pd.DataFrame:
-    """Read one TSV split file with clear error messaging."""
-    if not path.exists():
-        raise FileNotFoundError(f"Required precomputed split file not found: {path}")
+def _read_split_tsv(path: Path, split_name: str) -> Tuple[pd.DataFrame, Path]:
+    """Read one split file from .tsv or .tsv.gz with clear error messaging."""
+    candidates = [path, path.with_suffix(path.suffix + ".gz")]
+    selected = next((p for p in candidates if p.exists()), None)
+    if selected is None:
+        raise FileNotFoundError(
+            f"Required precomputed split file not found: {path} "
+            f"(also checked: {path.with_suffix(path.suffix + '.gz')})"
+        )
     try:
-        return pd.read_csv(path, sep="\t")
+        return pd.read_csv(selected, sep="\t"), selected
     except Exception as exc:
-        raise RuntimeError(f"Failed to read {split_name} split file {path}: {exc}") from exc
+        raise RuntimeError(f"Failed to read {split_name} split file {selected}: {exc}") from exc
 
 
 def _load_precomputed_scaffold_splits(
@@ -89,9 +94,9 @@ def _load_precomputed_scaffold_splits(
         val_path = scenario_dir / f"{ds}_val.tsv"
         test_path = base / f"{ds}_test.tsv"
 
-        train_df = _read_split_tsv(train_path, f"{ds} train")
-        val_df = _read_split_tsv(val_path, f"{ds} val")
-        test_df = _read_split_tsv(test_path, f"{ds} test")
+        train_df, train_used = _read_split_tsv(train_path, f"{ds} train")
+        val_df, val_used = _read_split_tsv(val_path, f"{ds} val")
+        test_df, test_used = _read_split_tsv(test_path, f"{ds} test")
 
         train_df = _ensure_label_column(train_df, threshold, f"{ds} train")
         val_df = _ensure_label_column(val_df, threshold, f"{ds} val")
@@ -102,9 +107,9 @@ def _load_precomputed_scaffold_splits(
         _ensure_required_columns(test_df, f"{ds} test")
 
         return train_df, val_df, test_df, {
-            "train_path": str(train_path),
-            "val_path": str(val_path),
-            "test_path": str(test_path),
+            "train_path": str(train_used),
+            "val_path": str(val_used),
+            "test_path": str(test_used),
         }
 
     if dataset_type in {"human", "non_human"}:
