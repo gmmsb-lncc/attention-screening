@@ -193,6 +193,96 @@ Available scenarios:
         help='Learning rate (default: 1e-4)'
     )
 
+    parser.add_argument(
+        '--weight_decay',
+        type=float,
+        default=0.01,
+        help='AdamW weight decay (default: 0.01)'
+    )
+
+    parser.add_argument(
+        '--hidden_dim',
+        type=int,
+        default=256,
+        help='Model hidden dimension (default: 256)'
+    )
+
+    parser.add_argument(
+        '--num_cnn_layers',
+        type=int,
+        default=3,
+        help='Number of CNN encoder layers (default: 3)'
+    )
+
+    parser.add_argument(
+        '--num_cross_attn_layers',
+        type=int,
+        default=2,
+        help='Number of cross-attention layers (default: 2)'
+    )
+
+    parser.add_argument(
+        '--num_heads',
+        type=int,
+        default=8,
+        help='Number of attention heads (default: 8)'
+    )
+
+    parser.add_argument(
+        '--ff_dim',
+        type=int,
+        default=1024,
+        help='Feed-forward dimension inside attention blocks (default: 1024)'
+    )
+
+    parser.add_argument(
+        '--dropout',
+        type=float,
+        default=0.1,
+        help='Dropout rate (default: 0.1)'
+    )
+
+    parser.add_argument(
+        '--max_grad_norm',
+        type=float,
+        default=1.0,
+        help='Gradient clipping max norm (default: 1.0)'
+    )
+
+    parser.add_argument(
+        '--classification_weight',
+        type=float,
+        default=1.0,
+        help='Classification loss weight alpha (default: 1.0)'
+    )
+
+    parser.add_argument(
+        '--regression_weight',
+        type=float,
+        default=0.5,
+        help='Regression loss weight beta (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--threshold_metric',
+        choices=['mcc', 'f1', 'balanced_accuracy'],
+        default='mcc',
+        help='Metric optimized when calibrating threshold on validation (default: mcc)'
+    )
+
+    parser.add_argument(
+        '--fixed_threshold',
+        type=float,
+        default=0.5,
+        help='Fixed threshold used when threshold optimization is disabled (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--disable-threshold-optimization',
+        action='store_true',
+        help='Disable threshold calibration on validation and use --fixed_threshold'
+    )
+
     # Output and reproducibility
     parser.add_argument(
         '--output_dir', '-o',
@@ -286,6 +376,19 @@ Available scenarios:
         print(f"  Patience:       {args.patience}")
     print(f"  Batch size:     {args.batch_size}")
     print(f"  Learning rate:  {args.learning_rate}")
+    print(f"  Weight decay:   {args.weight_decay}")
+    print(f"  Hidden dim:     {args.hidden_dim}")
+    print(f"  CNN layers:     {args.num_cnn_layers}")
+    print(f"  CrossAttn layers:{args.num_cross_attn_layers}")
+    print(f"  Heads:          {args.num_heads}")
+    print(f"  FF dim:         {args.ff_dim}")
+    print(f"  Dropout:        {args.dropout}")
+    print(f"  Max grad norm:  {args.max_grad_norm}")
+    print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
+    if args.disable_threshold_optimization:
+        print(f"  Threshold:      FIXED ({args.fixed_threshold})")
+    else:
+        print(f"  Threshold:      OPTIMIZED on val ({args.threshold_metric})")
     print("-" * 70)
     print(f"Debug mode:       {args.debug}")
     print(f"Force recalc:     {args.force}")
@@ -321,6 +424,19 @@ Available scenarios:
                 patience=patience,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
+                weight_decay=args.weight_decay,
+                hidden_dim=args.hidden_dim,
+                num_cnn_layers=args.num_cnn_layers,
+                num_cross_attn_layers=args.num_cross_attn_layers,
+                num_heads=args.num_heads,
+                ff_dim=args.ff_dim,
+                dropout=args.dropout,
+                max_grad_norm=args.max_grad_norm,
+                classification_weight=args.classification_weight,
+                regression_weight=args.regression_weight,
+                optimize_threshold=not args.disable_threshold_optimization,
+                threshold_metric=args.threshold_metric,
+                fixed_threshold=args.fixed_threshold,
                 use_molformer_ligand=args.molformer_ligand,
                 scaffold_split_dir=args.scaffold_split_dir,
                 external_test_mode=args.external_test_mode
