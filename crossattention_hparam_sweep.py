@@ -76,20 +76,38 @@ def build_search_space(profile: str) -> List[SweepConfig]:
     """
     Build preset search spaces.
 
-    quick: 8 configs
+    quick: 12 configs
     standard: 36 configs
     aggressive: 72 configs
     """
     if profile == "quick":
-        base = {
-            "hidden_dim": [192, 256],
-            "learning_rate": [1e-4, 2e-4],
-            "weight_decay": [0.01],
-            "dropout": [0.1, 0.2],
-            "num_cnn_layers": [3],
-            "num_cross_attn_layers": [2],
-            "batch_size": [32],
-        }
+        # Quick profile now includes batch-size variation with LR scaling.
+        # (batch, lr) pairs: (16, 5e-5), (32, 1e-4), (64, 2e-4)
+        quick_pairs = [
+            (16, 5e-5),
+            (32, 1e-4),
+            (64, 2e-4),
+        ]
+        configs: List[SweepConfig] = []
+        for hidden_dim in [192, 256]:
+            num_heads = 8 if hidden_dim % 8 == 0 else 4 if hidden_dim % 4 == 0 else 1
+            ff_dim = int(hidden_dim * 4)
+            for dropout in [0.1, 0.2]:
+                for batch_size, learning_rate in quick_pairs:
+                    configs.append(
+                        SweepConfig(
+                            hidden_dim=hidden_dim,
+                            learning_rate=float(learning_rate),
+                            weight_decay=0.01,
+                            dropout=float(dropout),
+                            num_cnn_layers=3,
+                            num_cross_attn_layers=2,
+                            num_heads=num_heads,
+                            ff_dim=ff_dim,
+                            batch_size=int(batch_size),
+                        )
+                    )
+        return configs
     elif profile == "standard":
         base = {
             "hidden_dim": [224, 256, 320],
