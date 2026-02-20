@@ -33,6 +33,7 @@ DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
 SCAFFOLD_SCENARIO_CODE = "Sc"
 SCAFFOLD_SCENARIO_NAME = "Split by Scaffold"
 SCAFFOLD_SCENARIO_KEY = "Split by\nScaffold"
+EXTERNAL_VAL_FRACTION = 0.10
 
 
 def _ensure_required_columns(df: pd.DataFrame, split_name: str) -> None:
@@ -72,10 +73,89 @@ def _read_split_tsv(path: Path, split_name: str) -> Tuple[pd.DataFrame, Path]:
         raise RuntimeError(f"Failed to read {split_name} split file {selected}: {exc}") from exc
 
 
+def _assign_group_folds(groups: np.ndarray, n_folds: int, rng: np.random.Generator) -> np.ndarray:
+    """Assign group labels to folds with greedy size balancing."""
+    unique_groups, inverse, counts = np.unique(groups, return_inverse=True, return_counts=True)
+    order = np.arange(len(unique_groups))
+    rng.shuffle(order)
+    # Stable sort by size descending after random tie-breaking.
+    order = order[np.argsort(-counts[order], kind="mergesort")]
+
+    fold_sizes = np.zeros(n_folds, dtype=np.int64)
+    group_to_fold = np.empty(len(unique_groups), dtype=np.int64)
+    for g_idx in order:
+        fold_idx = int(np.argmin(fold_sizes))
+        group_to_fold[g_idx] = fold_idx
+        fold_sizes[fold_idx] += counts[g_idx]
+
+    return group_to_fold[inverse]
+
+
+def _resplit_scaffold_train_val(
+    pool_df: pd.DataFrame,
+    seed: int,
+    val_fraction: float = EXTERNAL_VAL_FRACTION,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+    """
+    Build a scaffold-disjoint train/val split from the no-test pool.
+
+    Target ratio is 90/10 by default for external-test mode.
+    """
+    if "scaffold" not in pool_df.columns:
+        raise ValueError("Scaffold resplit requires a 'scaffold' column in the pool dataframe")
+    if not (0.0 < val_fraction < 1.0):
+        raise ValueError(f"val_fraction must be in (0,1); got {val_fraction}")
+
+    df = pool_df.reset_index(drop=True)
+    labels = df["label"].to_numpy()
+    scaffolds = df["scaffold"].fillna("UNKNOWN").astype(str).to_numpy()
+    rng = np.random.default_rng(seed)
+    n_folds = max(2, int(round(1.0 / val_fraction)))
+    assignments = _assign_group_folds(scaffolds, n_folds=n_folds, rng=rng)
+
+    best = None
+    best_loss = float("inf")
+    for fold_i in range(n_folds):
+        val_idx = np.where(assignments == fold_i)[0]
+        train_idx = np.where(assignments != fold_i)[0]
+        if len(val_idx) == 0 or len(train_idx) == 0:
+            continue
+        y_train = labels[train_idx]
+        y_val = labels[val_idx]
+        if len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2:
+            continue
+
+        val_frac_observed = len(val_idx) / len(df)
+        class_gap = abs(float(y_train.mean()) - float(y_val.mean()))
+        loss = abs(val_frac_observed - val_fraction) + 2.0 * class_gap
+        if loss < best_loss:
+            best_loss = loss
+            best = (train_idx, val_idx, val_frac_observed, class_gap)
+
+    if best is None:
+        raise RuntimeError("Could not construct a valid scaffold 90/10 train/val split")
+
+    train_idx, val_idx, val_frac_observed, class_gap = best
+    train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
+
+    metrics = {
+        "target_val_fraction": float(val_fraction),
+        "observed_val_fraction": float(val_frac_observed),
+        "train_size": int(len(train_df)),
+        "val_size": int(len(val_df)),
+        "train_scaffolds": int(train_df["scaffold"].nunique()),
+        "val_scaffolds": int(val_df["scaffold"].nunique()),
+        "class_rate_gap": float(class_gap),
+    }
+    return train_df, val_df, metrics
+
+
 def _load_precomputed_scaffold_splits(
     dataset_type: str,
     scaffold_split_dir: str,
     threshold: float,
+    include_test: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict]:
     """
     Load fixed scaffold splits produced by scaffold_split.py.
@@ -96,20 +176,26 @@ def _load_precomputed_scaffold_splits(
 
         train_df, train_used = _read_split_tsv(train_path, f"{ds} train")
         val_df, val_used = _read_split_tsv(val_path, f"{ds} val")
-        test_df, test_used = _read_split_tsv(test_path, f"{ds} test")
+        if include_test:
+            test_df, test_used = _read_split_tsv(test_path, f"{ds} test")
+        else:
+            test_df = val_df.iloc[0:0].copy()
+            test_used = None
 
         train_df = _ensure_label_column(train_df, threshold, f"{ds} train")
         val_df = _ensure_label_column(val_df, threshold, f"{ds} val")
-        test_df = _ensure_label_column(test_df, threshold, f"{ds} test")
+        if include_test:
+            test_df = _ensure_label_column(test_df, threshold, f"{ds} test")
 
         _ensure_required_columns(train_df, f"{ds} train")
         _ensure_required_columns(val_df, f"{ds} val")
-        _ensure_required_columns(test_df, f"{ds} test")
+        if include_test:
+            _ensure_required_columns(test_df, f"{ds} test")
 
         return train_df, val_df, test_df, {
             "train_path": str(train_used),
             "val_path": str(val_used),
-            "test_path": str(test_used),
+            "test_path": str(test_used) if test_used else None,
         }
 
     if dataset_type in {"human", "non_human"}:
@@ -146,21 +232,22 @@ def run_scenario(
     scenario_name: str,
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
-    test_df: pd.DataFrame,
+    test_df: Optional[pd.DataFrame],
     protein_matrix_dirs: List[str],
     ligand_matrix_dirs: List[str],
     config: TrainingConfig,
     device,
     seed: int,
     checkpoint_path: Optional[str] = None,
-    use_attention: bool = False
+    use_attention: bool = False,
+    evaluation_split: str = "test",
 ) -> Dict:
     """
     Run training and evaluation for one scenario with one seed.
 
     Args:
         scenario_name: Name of the scenario
-        train_df, val_df, test_df: DataFrames for each split
+        train_df, val_df, test_df: DataFrames for each split (test_df can be None)
         protein_matrix_dirs: List of paths to protein embeddings/attention matrices
         ligand_matrix_dirs: List of paths to ligand embeddings
         config: Training configuration
@@ -168,6 +255,7 @@ def run_scenario(
         seed: Random seed
         checkpoint_path: Path for checkpointing
         use_attention: Use attention matrices instead of embeddings
+        evaluation_split: Which split to evaluate after training ("test" or "val")
 
     Returns:
         Dictionary with test metrics
@@ -177,6 +265,9 @@ def run_scenario(
 
     print(f"\n  Creating data loaders...")
     print(f"  Input type: {'Attention Matrices' if use_attention else 'Per-token Embeddings'}")
+
+    if evaluation_split not in {"test", "val"}:
+        raise ValueError(f"evaluation_split must be 'test' or 'val', got {evaluation_split!r}")
 
     # Create data loaders (pass list of directories for multi-source datasets)
     if use_attention:
@@ -190,11 +281,13 @@ def run_scenario(
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
-        test_loader = create_attention_dataloader(
-            test_df, protein_matrix_dirs, ligand_matrix_dirs,
-            max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
-            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
-        )
+        test_loader = None
+        if test_df is not None and len(test_df) > 0:
+            test_loader = create_attention_dataloader(
+                test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
     else:
         train_loader = create_matrix_dataloader(
             train_df, protein_matrix_dirs, ligand_matrix_dirs,
@@ -206,11 +299,13 @@ def run_scenario(
             batch_size=config.batch_size, shuffle=False,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
-        test_loader = create_matrix_dataloader(
-            test_df, protein_matrix_dirs, ligand_matrix_dirs,
-            batch_size=config.batch_size, shuffle=False,
-            label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
-        )
+        test_loader = None
+        if test_df is not None and len(test_df) > 0:
+            test_loader = create_matrix_dataloader(
+                test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                batch_size=config.batch_size, shuffle=False,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
 
     # Create model
     print(f"  Creating model (protein_dim={config.protein_dim}, ligand_dim={config.ligand_dim})...")
@@ -242,20 +337,25 @@ def run_scenario(
         checkpoint_interval=10
     )
 
-    # Evaluate on test set
-    print(f"  Evaluating on test set...")
-    test_result = evaluate(model, test_loader, device, raise_on_invalid=False)
+    # Evaluate on requested split (external-test mode evaluates on validation only).
+    if evaluation_split == "test" and test_loader is None:
+        raise EvaluationError("Test evaluation requested, but test split is unavailable")
+    eval_loader = test_loader if evaluation_split == "test" else val_loader
+    eval_name = "test" if evaluation_split == "test" else "validation"
+    print(f"  Evaluating on {eval_name} set...")
+    eval_result = evaluate(model, eval_loader, device, raise_on_invalid=False)
 
-    if not test_result.is_valid:
-        raise EvaluationError(f"Test evaluation failed: {test_result.failure_reason}")
+    if not eval_result.is_valid:
+        raise EvaluationError(f"{eval_name.capitalize()} evaluation failed: {eval_result.failure_reason}")
 
-    test_metrics = test_result.metrics
+    test_metrics = eval_result.metrics
     test_metrics['n_params'] = n_params
+    test_metrics['evaluation_split'] = eval_name
 
     # Loss is now calculated as log_loss on test set (from evaluate())
     # This is consistent with baseline models (KNN, MLP) and is the standard practice
 
-    print(f"  Results: Acc={test_metrics['accuracy']:.4f}, MCC={test_metrics['mcc']:.4f}, "
+    print(f"  Results ({eval_name}): Acc={test_metrics['accuracy']:.4f}, MCC={test_metrics['mcc']:.4f}, "
           f"AUC={test_metrics['auc']:.4f}, Loss={test_metrics['loss']:.4f}")
 
     return test_metrics
@@ -272,6 +372,7 @@ def run_crossattention_analysis(
     scenarios: List[str] = None,
     use_molformer_ligand: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    external_test_mode: bool = False,
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -287,6 +388,7 @@ def run_crossattention_analysis(
         scenarios: Scenario list (only scaffold is supported)
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
         scaffold_split_dir: Directory generated by scaffold_split.py
+        external_test_mode: If True, use only train/val (90/10) and skip internal test
 
     Returns:
         Tuple of (all_results, split_stats) or (None, None) on failure
@@ -360,19 +462,48 @@ def run_crossattention_analysis(
             dataset_type=dataset_type,
             scaffold_split_dir=scaffold_split_dir,
             threshold=threshold,
+            include_test=not external_test_mode,
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return None, None
 
-    total_df = pd.concat([train_df, val_df, test_df], axis=0, ignore_index=True)
+    if external_test_mode:
+        # Rebuild train/val as scaffold-disjoint 90/10 from the non-test pool.
+        pool_df = pd.concat([train_df, val_df], axis=0, ignore_index=True)
+        train_df, val_df, tv_metrics = _resplit_scaffold_train_val(
+            pool_df=pool_df,
+            seed=seeds[0],
+            val_fraction=EXTERNAL_VAL_FRACTION,
+        )
+        test_df = None
+        split_source_metadata = {
+            **split_source_metadata,
+            "external_test_mode": True,
+            "train_val_protocol": "scaffold_disjoint_90_10",
+            "train_val_metrics": tv_metrics,
+        }
+    else:
+        split_source_metadata = {
+            **split_source_metadata,
+            "external_test_mode": False,
+        }
+
+    total_frames = [train_df, val_df] + ([test_df] if test_df is not None else [])
+    total_df = pd.concat(total_frames, axis=0, ignore_index=True)
     n_active = int(total_df['label'].sum())
     n_inactive = int(len(total_df) - n_active)
 
-    print(
-        f"  Loaded fixed splits: train={len(train_df)}, val={len(val_df)}, test={len(test_df)} "
-        f"(total={len(total_df)})"
-    )
+    if external_test_mode:
+        print(
+            f"  Loaded scaffold pool and rebuilt train/val: train={len(train_df)}, val={len(val_df)} "
+            f"(90/10 target, total={len(total_df)})"
+        )
+    else:
+        print(
+            f"  Loaded fixed splits: train={len(train_df)}, val={len(val_df)}, test={len(test_df)} "
+            f"(total={len(total_df)})"
+        )
     print(f"  Total compounds: {total_df['chembl_id'].nunique()}, kinases: {total_df['target_kinase'].nunique()}")
     print(f"  Affinity threshold: pChEMBL >= {threshold:.1f} (equivalent to <= {threshold_nm_equiv:.0f} nM / {threshold_nm_equiv/1000:.1f} μM)")
     print(f"  Class distribution: {n_active} active ({100*n_active/len(total_df):.1f}%), "
@@ -401,19 +532,25 @@ def run_crossattention_analysis(
     print(f"{'='*60}")
     print(f"  Split source: {split_source_metadata}")
 
+    eval_df = val_df if external_test_mode else test_df
+    eval_split_name = "validation" if external_test_mode else "test"
     split_stats[SCAFFOLD_SCENARIO_KEY] = {
         'train_size': int(len(train_df)),
         'val_size': int(len(val_df)),
-        'test_size': int(len(test_df)),
-        'test_compounds': int(test_df['chembl_id'].nunique()),
-        'test_kinases': int(test_df['target_kinase'].nunique()) if 'target_kinase' in test_df.columns else 0,
+        'test_size': int(len(eval_df)),
+        'test_compounds': int(eval_df['chembl_id'].nunique()),
+        'test_kinases': int(eval_df['target_kinase'].nunique()) if 'target_kinase' in eval_df.columns else 0,
+        'evaluation_split': eval_split_name,
         'split_source': split_source_metadata,
     }
 
     scenario_seed_results = {}
     for seed in seeds:
         print(f"\n  Seed: {seed}")
-        print(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+        if external_test_mode:
+            print(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: external (unused)")
+        else:
+            print(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
         checkpoint_path = get_checkpoint_path(
             output_dir, f"{prefix}seed{seed}_", SCAFFOLD_SCENARIO_NAME
@@ -425,7 +562,7 @@ def run_crossattention_analysis(
                 SCAFFOLD_SCENARIO_NAME,
                 train_df,
                 val_df,
-                test_df,
+                test_df if not external_test_mode else None,
                 protein_matrix_dirs,
                 ligand_matrix_dirs,
                 config,
@@ -433,6 +570,7 @@ def run_crossattention_analysis(
                 seed,
                 checkpoint_path=checkpoint_path,
                 use_attention=use_attention,
+                evaluation_split="val" if external_test_mode else "test",
             )
             scenario_seed_results[seed] = metrics
         except EvaluationError as e:
@@ -472,6 +610,7 @@ def run_single_analysis(
     learning_rate: float = 1e-4,
     use_molformer_ligand: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    external_test_mode: bool = False,
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -490,6 +629,7 @@ def run_single_analysis(
         learning_rate: Learning rate
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
         scaffold_split_dir: Directory generated by scaffold_split.py
+        external_test_mode: Train/val-only mode (90/10); test is external
 
     Returns:
         Results dictionary or None
@@ -529,6 +669,10 @@ def run_single_analysis(
     print(f"SEEDS: {seeds}")
     print(f"SCENARIOS: {scenarios}")
     print(f"SCAFFOLD SPLIT DIR: {scaffold_split_dir}")
+    if external_test_mode:
+        print(f"EVALUATION MODE: EXTERNAL TEST (internal split = train/val 90/10)")
+    else:
+        print(f"EVALUATION MODE: INTERNAL TEST (precomputed train/val/test)")
     if patience is None:
         print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
     else:
@@ -561,7 +705,8 @@ def run_single_analysis(
         embedding_name, dataset_type, output_dir, config,
         seeds=seeds, prefix=prefix, use_attention=use_attention,
         scenarios=scenarios, use_molformer_ligand=use_molformer_ligand,
-        scaffold_split_dir=scaffold_split_dir
+        scaffold_split_dir=scaffold_split_dir,
+        external_test_mode=external_test_mode,
     )
 
     if all_results is None:
