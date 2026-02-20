@@ -151,6 +151,13 @@ Available scenarios:
              '(default: scaffolds_splits/output)'
     )
 
+    parser.add_argument(
+        '--external_test_mode',
+        action='store_true',
+        help='Use train/validation only (90/10) and skip internal test. '
+             'Designed for later evaluation on an external test set.'
+    )
+
     # Training parameters
     parser.add_argument(
         '--epochs',
@@ -266,6 +273,7 @@ Available scenarios:
     print(f"Scenarios:        {scenarios}")
     print(f"Output directory: {args.output_dir}")
     print(f"Scaffold split dir:{args.scaffold_split_dir}")
+    print(f"External test mode: {args.external_test_mode}")
     print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
     print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
@@ -314,7 +322,8 @@ Available scenarios:
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
                 use_molformer_ligand=args.molformer_ligand,
-                scaffold_split_dir=args.scaffold_split_dir
+                scaffold_split_dir=args.scaffold_split_dir,
+                external_test_mode=args.external_test_mode
             )
 
             embedding_time = time.time() - embedding_start_time
