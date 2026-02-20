@@ -154,7 +154,7 @@ Available scenarios:
     parser.add_argument(
         '--external_test_mode',
         action='store_true',
-        help='Use train/validation only (90/10) and skip internal test. '
+        help='Use only precomputed scaffold train/validation splits and skip internal test. '
              'Designed for later evaluation on an external test set.'
     )
 
