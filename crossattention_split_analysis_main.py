@@ -24,9 +24,7 @@ from crossattention_split_analysis import run_crossattention_analysis, TrainingC
 from crossattention_split_analysis.experiment import run_single_analysis
 from crossattention_split_analysis.config import (
     SUPPORTED_EMBEDDINGS,
-    DEFAULT_SEEDS,
-    AVAILABLE_SCENARIOS,
-    DEFAULT_SCENARIOS
+    DEFAULT_SEEDS
 )
 
 
@@ -99,7 +97,7 @@ Examples:
   %(prog)s --run_all --dataset non_human
 
   # Run specific scenarios only
-  %(prog)s --embedding 150M --dataset non_human --scenarios random,compound
+  %(prog)s --embedding 150M --dataset non_human --scenarios scaffold
 
   # Custom training parameters
   %(prog)s --embedding 150M --dataset non_human --epochs 300 --patience 20 --batch_size 64
@@ -111,9 +109,7 @@ Examples:
   %(prog)s --embedding 150M --dataset non_human --debug
 
 Available scenarios:
-  - new_compound_new_kinase : Hardest - both compound and kinase unseen
-  - compound                : Medium - compound unseen, kinase may overlap
-  - random                  : Easiest - random split (baseline with leakage)
+  - scaffold                : Split by scaffold (fixed precomputed Sc split)
         """
     )
 
@@ -143,8 +139,16 @@ Available scenarios:
         '--scenarios', '-s',
         type=str,
         default=None,
-        help='Comma-separated list of scenarios to run (default: all). '
-             'Options: new_compound_new_kinase, compound, random'
+        help='Comma-separated scenario list (only scaffold is supported). '
+             'Use "scaffold" or "all" (maps to scaffold).'
+    )
+
+    parser.add_argument(
+        '--scaffold_split_dir',
+        type=str,
+        default='scaffolds_splits/output',
+        help='Directory with precomputed scaffold splits from scaffold_split.py '
+             '(default: scaffolds_splits/output)'
     )
 
     # Training parameters
@@ -230,13 +234,19 @@ Available scenarios:
 
     # Parse scenarios
     if args.scenarios:
-        scenarios = [s.strip() for s in args.scenarios.split(',')]
-        # Validate scenarios
-        for s in scenarios:
-            if s not in AVAILABLE_SCENARIOS:
-                parser.error(f"Unknown scenario: {s}. Available: {list(AVAILABLE_SCENARIOS.keys())}")
+        if args.scenarios.strip().lower() == 'all':
+            scenarios = ['scaffold']
+        else:
+            scenarios = [s.strip() for s in args.scenarios.split(',') if s.strip()]
+        normalized = {s.lower() for s in scenarios}
+        if normalized not in ({'scaffold'}, {'sc'}, {'split_by_scaffold'}):
+            parser.error(
+                "This pipeline supports only scaffold scenario. "
+                "Use --scenarios scaffold (or --scenarios all)."
+            )
+        scenarios = ['scaffold']
     else:
-        scenarios = DEFAULT_SCENARIOS
+        scenarios = ['scaffold']
 
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
@@ -255,6 +265,7 @@ Available scenarios:
     print(f"Embeddings:       {embeddings_to_run}")
     print(f"Scenarios:        {scenarios}")
     print(f"Output directory: {args.output_dir}")
+    print(f"Scaffold split dir:{args.scaffold_split_dir}")
     print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
     print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
@@ -302,7 +313,8 @@ Available scenarios:
                 patience=patience,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
-                use_molformer_ligand=args.molformer_ligand
+                use_molformer_ligand=args.molformer_ligand,
+                scaffold_split_dir=args.scaffold_split_dir
             )
 
             embedding_time = time.time() - embedding_start_time

@@ -1,7 +1,9 @@
 """Main experiment runner for CrossAttention split analysis."""
 
 import os
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import numpy as np
 import pandas as pd
 
 from src.classifier.models.cross_attention_model import (
@@ -12,27 +14,127 @@ from src.classifier.utils.matrix_dataloader import create_matrix_dataloader
 
 from .config import (
     TrainingConfig,
-    DATASET_PATHS,
     EMBEDDING_BASE_PATH,
     EMBEDDING_BASE_PATHS_ALL,
     PROTEIN_DIMS,
     MAX_SEQ_LEN,
-    DEFAULT_AFFINITY_THRESHOLD,
-    MIN_SEEDS_FOR_STATISTICS,
     DEFAULT_SEEDS,
     LIGAND_MATRIX_DIRS,
     MOLFORMER_DIM
 )
 from .data import (
-    create_attention_dataloader,
-    split_random,
-    split_by_compound,
-    split_new_compound_new_kinase,
-    get_scenarios
+    create_attention_dataloader
 )
 from .training import train_model, evaluate, EvaluationError
 from .utils import get_device, set_seed, get_checkpoint_path
 from .visualization import plot_results, save_results, print_summary
+
+DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
+SCAFFOLD_SCENARIO_CODE = "Sc"
+SCAFFOLD_SCENARIO_NAME = "Split by Scaffold"
+SCAFFOLD_SCENARIO_KEY = "Split by\nScaffold"
+
+
+def _ensure_required_columns(df: pd.DataFrame, split_name: str) -> None:
+    """Validate minimum schema required for training/evaluation."""
+    required = {"chembl_id", "target_kinase", "seq_id"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"{split_name} split is missing required column(s): {missing}")
+
+
+def _ensure_label_column(df: pd.DataFrame, threshold: float, split_name: str) -> pd.DataFrame:
+    """Ensure binary label exists; derive from pChEMBL when needed."""
+    out = df.copy()
+    if "label" not in out.columns:
+        if "pchembl_value" not in out.columns:
+            raise ValueError(f"{split_name} split has no 'label' and no 'pchembl_value' to derive labels")
+        out["label"] = (out["pchembl_value"] >= threshold).astype(int)
+    else:
+        out["label"] = out["label"].astype(int)
+
+    out["seq_id"] = out["seq_id"].astype(str)
+    return out
+
+
+def _read_split_tsv(path: Path, split_name: str) -> pd.DataFrame:
+    """Read one TSV split file with clear error messaging."""
+    if not path.exists():
+        raise FileNotFoundError(f"Required precomputed split file not found: {path}")
+    try:
+        return pd.read_csv(path, sep="\t")
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read {split_name} split file {path}: {exc}") from exc
+
+
+def _load_precomputed_scaffold_splits(
+    dataset_type: str,
+    scaffold_split_dir: str,
+    threshold: float,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict]:
+    """
+    Load fixed scaffold splits produced by scaffold_split.py.
+
+    Expected files:
+      - {dir}/scenarios/Sc/{dataset}_train.tsv
+      - {dir}/scenarios/Sc/{dataset}_val.tsv
+      - {dir}/{dataset}_test.tsv
+    where dataset is human/non_human, or both concatenated when dataset_type=all.
+    """
+    base = Path(scaffold_split_dir)
+    scenario_dir = base / "scenarios" / SCAFFOLD_SCENARIO_CODE
+
+    def _load_one(ds: str):
+        train_path = scenario_dir / f"{ds}_train.tsv"
+        val_path = scenario_dir / f"{ds}_val.tsv"
+        test_path = base / f"{ds}_test.tsv"
+
+        train_df = _read_split_tsv(train_path, f"{ds} train")
+        val_df = _read_split_tsv(val_path, f"{ds} val")
+        test_df = _read_split_tsv(test_path, f"{ds} test")
+
+        train_df = _ensure_label_column(train_df, threshold, f"{ds} train")
+        val_df = _ensure_label_column(val_df, threshold, f"{ds} val")
+        test_df = _ensure_label_column(test_df, threshold, f"{ds} test")
+
+        _ensure_required_columns(train_df, f"{ds} train")
+        _ensure_required_columns(val_df, f"{ds} val")
+        _ensure_required_columns(test_df, f"{ds} test")
+
+        return train_df, val_df, test_df, {
+            "train_path": str(train_path),
+            "val_path": str(val_path),
+            "test_path": str(test_path),
+        }
+
+    if dataset_type in {"human", "non_human"}:
+        train_df, val_df, test_df, paths = _load_one(dataset_type)
+        metadata = {"dataset_type": dataset_type, "split_source": "precomputed_scaffold_split", "paths": paths}
+        return train_df, val_df, test_df, metadata
+
+    if dataset_type == "all":
+        h_train, h_val, h_test, h_paths = _load_one("human")
+        n_train, n_val, n_test, n_paths = _load_one("non_human")
+
+        for frame, source in (
+            (h_train, "human"), (h_val, "human"), (h_test, "human"),
+            (n_train, "non_human"), (n_val, "non_human"), (n_test, "non_human"),
+        ):
+            if "dataset_source" not in frame.columns:
+                frame["dataset_source"] = source
+
+        train_df = pd.concat([h_train, n_train], axis=0, ignore_index=True)
+        val_df = pd.concat([h_val, n_val], axis=0, ignore_index=True)
+        test_df = pd.concat([h_test, n_test], axis=0, ignore_index=True)
+
+        metadata = {
+            "dataset_type": dataset_type,
+            "split_source": "precomputed_scaffold_split",
+            "paths": {"human": h_paths, "non_human": n_paths},
+        }
+        return train_df, val_df, test_df, metadata
+
+    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
 
 
 def run_scenario(
@@ -163,7 +265,8 @@ def run_crossattention_analysis(
     prefix: str = "",
     use_attention: bool = False,
     scenarios: List[str] = None,
-    use_molformer_ligand: bool = False
+    use_molformer_ligand: bool = False,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -176,17 +279,15 @@ def run_crossattention_analysis(
         seeds: List of random seeds
         prefix: Prefix for output files
         use_attention: Use attention matrices instead of embeddings
-        scenarios: List of scenario keys to run (None = all)
+        scenarios: Scenario list (only scaffold is supported)
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
+        scaffold_split_dir: Directory generated by scaffold_split.py
 
     Returns:
         Tuple of (all_results, split_stats) or (None, None) on failure
     """
     if seeds is None:
         seeds = DEFAULT_SEEDS
-
-    # Validate paths
-    dataset_path = DATASET_PATHS.get(dataset_type)
 
     # For dataset 'all', use multiple directories (human + non_human)
     if dataset_type == 'all':
@@ -245,35 +346,32 @@ def run_crossattention_analysis(
         print(f"ERROR: No ligand matrices found in: {ligand_matrix_dirs}")
         return None, None
 
-    # Load dataset
-    print(f"\nLoading dataset: {dataset_path}")
-    df = pd.read_csv(dataset_path, sep='\t')
-
-    # Apply threshold using pChEMBL values (logarithmic scale)
-    # pChEMBL >= threshold means active (higher pChEMBL = higher affinity = lower IC50/Kd)
+    # Load fixed scaffold split produced by scaffold_split.py
     threshold = config.affinity_threshold.threshold_pchembl
     threshold_nm_equiv = 10 ** (9 - threshold)
+    print(f"\nLoading precomputed scaffold splits from: {scaffold_split_dir}")
+    try:
+        train_df, val_df, test_df, split_source_metadata = _load_precomputed_scaffold_splits(
+            dataset_type=dataset_type,
+            scaffold_split_dir=scaffold_split_dir,
+            threshold=threshold,
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return None, None
 
-    # Calculate pChEMBL from standard_value when missing
-    # pChEMBL = -log10(Molar) = -log10(nM / 1e9) = 9 - log10(nM)
-    import numpy as np
-    n_missing = df['pchembl_value'].isna().sum()
-    if n_missing > 0:
-        print(f"  Calculating pChEMBL for {n_missing} samples with missing values...")
-        mask_missing = df['pchembl_value'].isna()
-        df.loc[mask_missing, 'pchembl_value'] = 9 - np.log10(df.loc[mask_missing, 'standard_value'])
+    total_df = pd.concat([train_df, val_df, test_df], axis=0, ignore_index=True)
+    n_active = int(total_df['label'].sum())
+    n_inactive = int(len(total_df) - n_active)
 
-    df['label'] = (df['pchembl_value'] >= threshold).astype(int)
-    df['seq_id'] = df['seq_id'].astype(str)
-
-    # Report class distribution
-    n_active = df['label'].sum()
-    n_inactive = len(df) - n_active
-    print(f"  Total: {len(df)} samples, {df['chembl_id'].nunique()} compounds, "
-          f"{df['target_kinase'].nunique()} kinases")
+    print(
+        f"  Loaded fixed splits: train={len(train_df)}, val={len(val_df)}, test={len(test_df)} "
+        f"(total={len(total_df)})"
+    )
+    print(f"  Total compounds: {total_df['chembl_id'].nunique()}, kinases: {total_df['target_kinase'].nunique()}")
     print(f"  Affinity threshold: pChEMBL >= {threshold:.1f} (equivalent to <= {threshold_nm_equiv:.0f} nM / {threshold_nm_equiv/1000:.1f} μM)")
-    print(f"  Class distribution: {n_active} active ({100*n_active/len(df):.1f}%), "
-          f"{n_inactive} inactive ({100*n_inactive/len(df):.1f}%)")
+    print(f"  Class distribution: {n_active} active ({100*n_active/len(total_df):.1f}%), "
+          f"{n_inactive} inactive ({100*n_inactive/len(total_df):.1f}%)")
 
     device = get_device()
     print(f"  Device: {device}")
@@ -282,92 +380,75 @@ def run_crossattention_analysis(
     all_results = {}
     split_stats = {}
 
-    # Define scenarios in order (hardest to easiest)
-    # Map scenario keys to (display_name, plot_key, split_function)
-    all_scenarios_config = {
-        'new_compound_new_kinase': ('New Compound + New Kinase', 'New Comp.\n+ New Kinase', split_new_compound_new_kinase),
-        'compound': ('Split by Compound', 'Split by\nCompound', split_by_compound),
-        'random': ('Random Split', 'Random Split\n(Original)', split_random),
+    # Only scaffold scenario is supported in this pipeline.
+    if scenarios is None:
+        scenarios = ['scaffold']
+    normalized = {s.strip().lower() for s in scenarios}
+    if normalized not in ({"scaffold"}, {"sc"}, {"split_by_scaffold"}):
+        print(
+            "ERROR: This CrossAttention pipeline now supports only the scaffold scenario "
+            "and consumes precomputed Sc train/val + fixed test splits."
+        )
+        return None, None
+
+    print(f"\n{'='*60}")
+    print(f"SCENARIO: {SCAFFOLD_SCENARIO_NAME}")
+    print(f"{'='*60}")
+    print(f"  Split source: {split_source_metadata}")
+
+    split_stats[SCAFFOLD_SCENARIO_KEY] = {
+        'train_size': int(len(train_df)),
+        'val_size': int(len(val_df)),
+        'test_size': int(len(test_df)),
+        'test_compounds': int(test_df['chembl_id'].nunique()),
+        'test_kinases': int(test_df['target_kinase'].nunique()) if 'target_kinase' in test_df.columns else 0,
+        'split_source': split_source_metadata,
     }
 
-    # Filter scenarios if specified
-    if scenarios is None:
-        scenarios = ['new_compound_new_kinase', 'compound', 'random']
+    scenario_seed_results = {}
+    for seed in seeds:
+        print(f"\n  Seed: {seed}")
+        print(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
-    scenarios_config = [
-        all_scenarios_config[s] for s in scenarios if s in all_scenarios_config
-    ]
+        checkpoint_path = get_checkpoint_path(
+            output_dir, f"{prefix}seed{seed}_", SCAFFOLD_SCENARIO_NAME
+        )
+        print(f"  Checkpoint: {checkpoint_path}")
 
-    for scenario_name, scenario_key, split_fn in scenarios_config:
-        print(f"\n{'='*60}")
-        print(f"SCENARIO: {scenario_name}")
-        print(f"{'='*60}")
-
-        scenario_seed_results = {}
-
-        for seed in seeds:
-            print(f"\n  Seed: {seed}")
-
-            # Split data
-            train_idx, val_idx, test_idx = split_fn(df, seed=seed)
-
-            train_df = df.iloc[train_idx].reset_index(drop=True)
-            val_df = df.iloc[val_idx].reset_index(drop=True)
-            test_df = df.iloc[test_idx].reset_index(drop=True)
-
-            # Record stats (only for first seed)
-            if seed == seeds[0]:
-                split_stats[scenario_key] = {
-                    'train_size': len(train_idx),
-                    'val_size': len(val_idx),
-                    'test_size': len(test_idx),
-                    'test_compounds': test_df['chembl_id'].nunique(),
-                }
-                if 'target_kinase' in test_df.columns:
-                    split_stats[scenario_key]['test_kinases'] = test_df['target_kinase'].nunique()
-
-            print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
-
-            # Checkpoint path includes seed
-            checkpoint_path = get_checkpoint_path(
-                output_dir, f"{prefix}seed{seed}_", scenario_name
+        try:
+            metrics = run_scenario(
+                SCAFFOLD_SCENARIO_NAME,
+                train_df,
+                val_df,
+                test_df,
+                protein_matrix_dirs,
+                ligand_matrix_dirs,
+                config,
+                device,
+                seed,
+                checkpoint_path=checkpoint_path,
+                use_attention=use_attention,
             )
-            print(f"  Checkpoint: {checkpoint_path}")
+            scenario_seed_results[seed] = metrics
+        except EvaluationError as e:
+            print(f"  ERROR: {e}")
+            continue
 
-            # Run scenario
-            try:
-                metrics = run_scenario(
-                    scenario_name, train_df, val_df, test_df,
-                    protein_matrix_dirs, ligand_matrix_dirs,
-                    config, device, seed,
-                    checkpoint_path=checkpoint_path,
-                    use_attention=use_attention
-                )
-                scenario_seed_results[seed] = metrics
-            except EvaluationError as e:
-                print(f"  ERROR: {e}")
-                continue
+    if scenario_seed_results:
+        if len(scenario_seed_results) == 1:
+            seed_metrics = list(scenario_seed_results.values())[0]
+            all_results[SCAFFOLD_SCENARIO_KEY] = {'CNN+CrossAttn': seed_metrics}
+        else:
+            aggregated = {}
+            for metric in ['accuracy', 'mcc', 'auc', 'f1', 'loss']:
+                values = [r[metric] for r in scenario_seed_results.values() if metric in r]
+                if values:
+                    aggregated[metric] = float(np.mean(values))
+                    aggregated[f'{metric}_std'] = float(np.std(values, ddof=1))
 
-        # Aggregate results across seeds
-        if scenario_seed_results:
-            # For single seed, just use the metrics directly
-            if len(scenario_seed_results) == 1:
-                seed_metrics = list(scenario_seed_results.values())[0]
-                all_results[scenario_key] = {'CNN+CrossAttn': seed_metrics}
-            else:
-                # Calculate mean and std across seeds
-                import numpy as np
-
-                aggregated = {}
-                for metric in ['accuracy', 'mcc', 'auc', 'f1', 'loss']:
-                    values = [r[metric] for r in scenario_seed_results.values() if metric in r]
-                    if values:
-                        aggregated[metric] = float(np.mean(values))
-                        aggregated[f'{metric}_std'] = float(np.std(values, ddof=1))
-
-                aggregated['seed_results'] = scenario_seed_results
-                aggregated['n_seeds'] = len(scenario_seed_results)
-                all_results[scenario_key] = {'CNN+CrossAttn': aggregated}
+            aggregated['seed_results'] = scenario_seed_results
+            aggregated['n_seeds'] = len(scenario_seed_results)
+            all_results[SCAFFOLD_SCENARIO_KEY] = {'CNN+CrossAttn': aggregated}
 
     return all_results, split_stats
 
@@ -384,7 +465,8 @@ def run_single_analysis(
     patience: Optional[int] = 30,
     batch_size: int = 32,
     learning_rate: float = 1e-4,
-    use_molformer_ligand: bool = False
+    use_molformer_ligand: bool = False,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -402,6 +484,7 @@ def run_single_analysis(
         batch_size: Training batch size
         learning_rate: Learning rate
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
+        scaffold_split_dir: Directory generated by scaffold_split.py
 
     Returns:
         Results dictionary or None
@@ -440,6 +523,7 @@ def run_single_analysis(
     print(f"LIGAND INPUT: {ligand_input_type}")
     print(f"SEEDS: {seeds}")
     print(f"SCENARIOS: {scenarios}")
+    print(f"SCAFFOLD SPLIT DIR: {scaffold_split_dir}")
     if patience is None:
         print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
     else:
@@ -471,7 +555,8 @@ def run_single_analysis(
     all_results, split_stats = run_crossattention_analysis(
         embedding_name, dataset_type, output_dir, config,
         seeds=seeds, prefix=prefix, use_attention=use_attention,
-        scenarios=scenarios, use_molformer_ligand=use_molformer_ligand
+        scenarios=scenarios, use_molformer_ligand=use_molformer_ligand,
+        scaffold_split_dir=scaffold_split_dir
     )
 
     if all_results is None:
