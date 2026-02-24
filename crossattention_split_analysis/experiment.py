@@ -681,7 +681,6 @@ def run_single_analysis(
     diffusion_loss_anneal: str = "none",
     classification_only: bool = False,
     diffusion_pool_queries: int = 4,
-    diffusion_pool_queries: int = 4,
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
     regression_weight: float = 0.5,
@@ -723,7 +722,6 @@ def run_single_analysis(
         diffusion_loss_weight: Weight for diffusion auxiliary loss
         diffusion_loss_anneal: Anneal schedule for diffusion loss weight
         classification_only: If True, optimize classification head only
-        diffusion_pool_queries: Number of attention pooling queries per modality
         diffusion_pool_queries: Number of attention pooling queries per modality
         max_grad_norm: Gradient clipping max norm
         classification_weight: Weight for classification loss term
