@@ -56,6 +56,7 @@ For detailed information:
 | 🔬 **Ligand Embeddings** | SMI-TED (768-dim vector), MoLFormer (768-dim per-token matrix) |
 | 🎯 **Cross-Attention Module** | CNN + Cross-Attention for protein-ligand interactions |
 | 🧪 **Diffusion Classifier** | Denoising diffusion with SNR‑weighted loss and cross‑attention after denoising |
+| 🧼 **Standardized Normalization** | LayerNorm is applied after token encoders across all pipeline variants (CNN, Lite, Diffusion) |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
 | 🔀 **Rigorous Split Modes** | Random, Compound-Only, Compound+Protein splits to prevent data leakage |

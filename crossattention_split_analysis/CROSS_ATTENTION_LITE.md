@@ -91,6 +91,7 @@ Compared to CNN + CrossAttention:
 - removes CNN stacks from protein and ligand encoders
 - keeps only linear token projection + cross-attention interaction
 - keeps the same training/evaluation pipeline and losses
+- applies standardized `LayerNorm` after token encoders (consistent across all pipeline variants)
 
 So it is lighter in encoder parameters and compute, while preserving token-level cross-modal attention.
 
