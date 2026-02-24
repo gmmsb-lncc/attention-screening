@@ -13,6 +13,7 @@ from .cross_attention_model import (
     CrossAttention,
     CrossAttentionBlock
 )
+from .diffusion_model import DiffusionAffinityModel
 from .matrix_embedding_extractor import (
     MatrixEmbeddingExtractor,
     create_synthetic_embeddings,
@@ -54,6 +55,7 @@ __all__ = [
     "LinearEncoder",
     "CrossAttention",
     "CrossAttentionBlock",
+    "DiffusionAffinityModel",
     # CNN building blocks (modular)
     "SqueezeExcitation",
     "DepthwiseSeparableConv1d",

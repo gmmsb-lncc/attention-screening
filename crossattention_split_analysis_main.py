@@ -242,6 +242,42 @@ Available scenarios:
         help='Feed-forward dimension inside attention blocks (default: 1024)'
     )
 
+    # Diffusion-specific parameters
+    parser.add_argument(
+        '--diffusion_steps',
+        type=int,
+        default=200,
+        help='Number of diffusion timesteps (default: 200)'
+    )
+
+    parser.add_argument(
+        '--diffusion_beta_start',
+        type=float,
+        default=1e-4,
+        help='Diffusion beta start value (default: 1e-4)'
+    )
+
+    parser.add_argument(
+        '--diffusion_beta_end',
+        type=float,
+        default=0.02,
+        help='Diffusion beta end value (default: 0.02)'
+    )
+
+    parser.add_argument(
+        '--diffusion_layers',
+        type=int,
+        default=4,
+        help='Number of diffusion denoiser layers (default: 4)'
+    )
+
+    parser.add_argument(
+        '--diffusion_loss_weight',
+        type=float,
+        default=0.1,
+        help='Weight for diffusion auxiliary loss (default: 0.1)'
+    )
+
     parser.add_argument(
         '--dropout',
         type=float,
@@ -320,9 +356,9 @@ Available scenarios:
 
     parser.add_argument(
         '--model_variant',
-        choices=['cnn_crossattn', 'cross_attention_lite'],
+        choices=['cnn_crossattn', 'cross_attention_lite', 'diffusion'],
         default='cnn_crossattn',
-        help='Model variant: original CNN+CrossAttention or lightweight linear+cross-attention'
+        help='Model variant: CNN+CrossAttention, CrossAttention Lite, or Diffusion'
     )
 
     parser.add_argument(
@@ -397,6 +433,11 @@ Available scenarios:
     print(f"  CrossAttn layers:{args.num_cross_attn_layers}")
     print(f"  Heads:          {args.num_heads}")
     print(f"  FF dim:         {args.ff_dim}")
+    if args.model_variant == 'diffusion':
+        print(f"  Diffusion steps:{args.diffusion_steps}")
+        print(f"  Diff beta:      {args.diffusion_beta_start} -> {args.diffusion_beta_end}")
+        print(f"  Diff layers:    {args.diffusion_layers}")
+        print(f"  Diff loss wt:   {args.diffusion_loss_weight}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
@@ -446,6 +487,11 @@ Available scenarios:
                 num_heads=args.num_heads,
                 ff_dim=args.ff_dim,
                 dropout=args.dropout,
+                diffusion_steps=args.diffusion_steps,
+                diffusion_beta_start=args.diffusion_beta_start,
+                diffusion_beta_end=args.diffusion_beta_end,
+                diffusion_layers=args.diffusion_layers,
+                diffusion_loss_weight=args.diffusion_loss_weight,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
