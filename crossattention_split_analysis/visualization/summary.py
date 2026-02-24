@@ -15,6 +15,16 @@ from scipy import stats as scipy_stats
 from ..utils.device import get_reproducibility_info
 
 
+def _get_primary_model(scenario_block: Dict) -> tuple[str, Dict]:
+    """Return model name and metrics from a scenario block."""
+    if not scenario_block:
+        return "UnknownModel", {}
+    if 'CNN+CrossAttn' in scenario_block:
+        return 'CNN+CrossAttn', scenario_block['CNN+CrossAttn']
+    model_name, metrics = next(iter(scenario_block.items()))
+    return model_name, metrics
+
+
 # =============================================================================
 # ENVIRONMENT LOGGING
 # =============================================================================
@@ -164,11 +174,15 @@ def save_results(
         Path to saved file
     """
     env_info = get_environment_info()
+    model_name = "UnknownModel"
+    if all_results:
+        first_scenario_key = next(iter(all_results))
+        model_name, _ = _get_primary_model(all_results[first_scenario_key])
 
     results_dict = {
         'metadata': {
             'analysis_date': datetime.now().isoformat(),
-            'model': 'CNN+CrossAttention',
+            'model': model_name,
             'embedding': embedding_name,
             'dataset_type': dataset_type,
             'best_model_selection': 'best_val_mcc'
@@ -216,14 +230,16 @@ def print_summary(all_results: Dict) -> None:
     scenarios = list(all_results.keys())
 
     for scenario in scenarios:
-        metrics = all_results[scenario]['CNN+CrossAttn']
+        _, metrics = _get_primary_model(all_results[scenario])
         print(f"  {scenario.replace(chr(10), ' ')}: "
               f"Acc={metrics['accuracy']:.4f}, MCC={metrics['mcc']:.4f}")
 
     # Calculate MCC drop
     if len(scenarios) >= 2:
-        first_mcc = all_results[scenarios[0]]['CNN+CrossAttn']['mcc']
-        last_mcc = all_results[scenarios[-1]]['CNN+CrossAttn']['mcc']
+        _, first_metrics = _get_primary_model(all_results[scenarios[0]])
+        _, last_metrics = _get_primary_model(all_results[scenarios[-1]])
+        first_mcc = first_metrics.get('mcc', 0.0)
+        last_mcc = last_metrics.get('mcc', 0.0)
         if first_mcc > 0:
             drop_pct = 100 * (first_mcc - last_mcc) / first_mcc
             print(f"\n  MCC drop: {first_mcc:.3f} -> {last_mcc:.3f} ({drop_pct:.0f}% drop)")

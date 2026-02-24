@@ -63,13 +63,20 @@ def print_comparative_summary(all_embedding_results: dict):
 
     scenarios = list(first_result.keys())
 
+    def _primary_metrics(scenario_block: dict) -> dict:
+        if not scenario_block:
+            return {}
+        if 'CNN+CrossAttn' in scenario_block:
+            return scenario_block['CNN+CrossAttn']
+        return next(iter(scenario_block.values()))
+
     for scenario in scenarios:
         scenario_clean = scenario.replace('\n', ' ')
         print(f"{scenario_clean:<30} ", end="")
 
         for emb, results in all_embedding_results.items():
             if results and scenario in results:
-                metrics = results[scenario].get('CNN+CrossAttn', {})
+                metrics = _primary_metrics(results[scenario])
                 mcc = metrics.get('mcc', 0)
                 mcc_std = metrics.get('mcc_std', 0)
                 if mcc_std > 0:
@@ -312,6 +319,13 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--model_variant',
+        choices=['cnn_crossattn', 'cross_attention_lite'],
+        default='cnn_crossattn',
+        help='Model variant: original CNN+CrossAttention or lightweight linear+cross-attention'
+    )
+
+    parser.add_argument(
         '--force',
         action='store_true',
         help='Force recalculation even if results exist'
@@ -366,6 +380,7 @@ Available scenarios:
     print(f"External test mode: {args.external_test_mode}")
     print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
     print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
+    print(f"Model variant:    {args.model_variant}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
     print("-" * 70)
     print("Training Parameters:")
@@ -439,7 +454,8 @@ Available scenarios:
                 fixed_threshold=args.fixed_threshold,
                 use_molformer_ligand=args.molformer_ligand,
                 scaffold_split_dir=args.scaffold_split_dir,
-                external_test_mode=args.external_test_mode
+                model_variant=args.model_variant,
+                external_test_mode=args.external_test_mode,
             )
 
             embedding_time = time.time() - embedding_start_time

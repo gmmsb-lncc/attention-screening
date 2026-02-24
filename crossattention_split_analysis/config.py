@@ -1,7 +1,7 @@
 """Configuration and constants for CrossAttention split analysis."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 # =============================================================================
 # EMBEDDINGS
@@ -103,6 +103,7 @@ class TrainingConfig:
         protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
         ligand_dim: Ligand embedding dimension (768 for SMI-TED)
         hidden_dim: Hidden dimension for all layers
+        model_variant: Model variant ('cnn_crossattn' or 'cross_attention_lite')
         num_cnn_layers: Number of CNN encoder layers
         num_cross_attn_layers: Number of cross-attention layers
         num_heads: Number of attention heads
@@ -124,6 +125,7 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8
@@ -154,6 +156,7 @@ class TrainingConfig:
             'protein_dim': self.protein_dim,
             'ligand_dim': self.ligand_dim,
             'hidden_dim': self.hidden_dim,
+            'model_variant': self.model_variant,
             'num_cnn_layers': self.num_cnn_layers,
             'num_cross_attn_layers': self.num_cross_attn_layers,
             'num_heads': self.num_heads,

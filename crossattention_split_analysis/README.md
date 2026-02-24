@@ -2,6 +2,10 @@
 
 This module evaluates the CNN + Cross-Attention model for protein-ligand affinity prediction using three rigorous evaluation scenarios that progressively test generalization capabilities.
 
+## Model Guides
+
+- [CrossAttention Lite: Detailed Visual Guide](./CROSS_ATTENTION_LITE.md)
+
 ## Overview
 
 The CrossAttention Split Analysis module implements a scientifically rigorous evaluation framework that assesses model generalization across three increasingly challenging scenarios:
