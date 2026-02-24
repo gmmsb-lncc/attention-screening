@@ -452,7 +452,20 @@ Available scenarios:
     parser.add_argument(
         '--molformer_ligand',
         action='store_true',
-        help='Use MoLFormer matrices instead of SMI-TED for ligand representation'
+        default=None,
+        help='Use MoLFormer matrices for ligand representation (default: enabled)'
+    )
+
+    parser.add_argument(
+        '--smited_ligand',
+        action='store_true',
+        help='Use SMI-TED ligand matrices (disables MoLFormer)'
+    )
+
+    parser.add_argument(
+        '--ligand_vectors',
+        action='store_true',
+        help='Use ligand vectors instead of ligand matrices (overrides --molformer_ligand)'
     )
 
     parser.add_argument(
@@ -513,6 +526,13 @@ Available scenarios:
     if args.no_persistent_workers:
         args.persistent_workers = False
 
+    if args.ligand_vectors:
+        args.molformer_ligand = False
+    elif args.smited_ligand:
+        args.molformer_ligand = False
+    elif args.molformer_ligand is None:
+        args.molformer_ligand = True
+
     if args.classification_only:
         args.regression_weight = 0.0
 
@@ -556,7 +576,11 @@ Available scenarios:
     print(f"Scaffold split dir:{args.scaffold_split_dir}")
     print(f"External test mode: {args.external_test_mode}")
     print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
-    print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
+    if args.ligand_vectors:
+        ligand_input = "Vector embeddings"
+    else:
+        ligand_input = "Per-token embeddings (MoLFormer)" if args.molformer_ligand else "Per-token embeddings (SMI-TED)"
+    print(f"Ligand input:     {ligand_input}")
     print(f"Model variant:    {args.model_variant}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
     print("-" * 70)
@@ -661,6 +685,7 @@ Available scenarios:
                 threshold_metric=args.threshold_metric,
                 fixed_threshold=args.fixed_threshold,
                 use_molformer_ligand=args.molformer_ligand,
+                use_ligand_vectors=args.ligand_vectors,
                 scaffold_split_dir=args.scaffold_split_dir,
                 model_variant=args.model_variant,
                 external_test_mode=args.external_test_mode,
