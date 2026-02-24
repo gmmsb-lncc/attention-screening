@@ -44,6 +44,7 @@ def train_epoch(
     total_loss = 0
     total_cls_loss = 0
     total_reg_loss = 0
+    total_aux_loss = 0
     num_batches = 0
 
     pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', leave=False)
@@ -68,6 +69,10 @@ def train_epoch(
             reg_targets,
             reg_mask
         )
+        aux_loss = output.get('aux_loss')
+        if aux_loss is not None:
+            losses['total'] = losses['total'] + aux_loss
+            losses['aux'] = aux_loss.detach().item()
 
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
@@ -81,21 +86,29 @@ def train_epoch(
         total_loss += losses['total'].item()
         total_cls_loss += losses['classification'].item()
         total_reg_loss += losses['regression'].item()
+        if 'aux' in losses:
+            total_aux_loss += losses['aux']
         num_batches += 1
 
-        pbar.set_postfix({
+        postfix = {
             'loss': f"{losses['total'].item():.4f}",
             'cls': f"{losses['classification'].item():.4f}"
-        })
+        }
+        if 'aux' in losses:
+            postfix['aux'] = f"{losses['aux']:.4f}"
+        pbar.set_postfix(postfix)
 
     if num_batches == 0:
         raise RuntimeError("All batches were skipped due to NaN/Inf values")
 
-    return {
+    metrics = {
         'total': total_loss / num_batches,
         'classification': total_cls_loss / num_batches,
         'regression': total_reg_loss / num_batches
     }
+    if total_aux_loss > 0:
+        metrics['aux'] = total_aux_loss / num_batches
+    return metrics
 
 
 def train_model(
