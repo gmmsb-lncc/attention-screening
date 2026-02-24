@@ -236,7 +236,7 @@ class MatrixEmbeddingDataset(Dataset):
         protein_matrix = self._load_embedding(
             protein_id,
             self.protein_matrix_dirs,
-            self.protein_vector_dir,
+            None,
             self._protein_cache,
             is_protein=True
         )
@@ -244,7 +244,7 @@ class MatrixEmbeddingDataset(Dataset):
         ligand_matrix = self._load_embedding(
             ligand_id,
             self.ligand_matrix_dirs,
-            self.ligand_vector_dir,
+            None,
             self._ligand_cache,
             is_protein=False
         )
