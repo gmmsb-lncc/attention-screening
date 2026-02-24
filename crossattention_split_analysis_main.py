@@ -11,6 +11,7 @@ in the crossattention_split_analysis package directory.
 """
 
 import argparse
+import socket
 import os
 import sys
 import time
@@ -336,34 +337,54 @@ Available scenarios:
     parser.add_argument(
         '--num_workers',
         type=int,
-        default=0,
-        help='DataLoader worker processes (default: 0)'
+        default=None,
+        help='DataLoader worker processes (default: auto)'
     )
 
     parser.add_argument(
         '--cache_in_memory',
         action='store_true',
+        default=None,
         help='Cache all matrices in memory (use only if RAM allows)'
+    )
+
+    parser.add_argument(
+        '--no-cache_in_memory',
+        action='store_true',
+        help='Disable in-memory caching of matrices'
     )
 
     parser.add_argument(
         '--pin_memory',
         action='store_true',
-        default=True,
-        help='Enable pinned memory for faster GPU transfer (default: enabled)'
+        default=None,
+        help='Enable pinned memory for faster GPU transfer (default: auto)'
+    )
+
+    parser.add_argument(
+        '--no-pin_memory',
+        action='store_true',
+        help='Disable pinned memory for data loading'
     )
 
     parser.add_argument(
         '--prefetch_factor',
         type=int,
-        default=2,
-        help='DataLoader prefetch factor when num_workers > 0 (default: 2)'
+        default=None,
+        help='DataLoader prefetch factor when num_workers > 0 (default: auto)'
     )
 
     parser.add_argument(
         '--persistent_workers',
         action='store_true',
-        help='Keep DataLoader workers alive between epochs'
+        default=None,
+        help='Keep DataLoader workers alive between epochs (default: auto)'
+    )
+
+    parser.add_argument(
+        '--no-persistent_workers',
+        action='store_true',
+        help='Disable persistent DataLoader workers'
     )
 
     parser.add_argument(
@@ -434,6 +455,37 @@ Available scenarios:
     )
 
     args = parser.parse_args()
+
+    hostname = socket.gethostname()
+    if hostname in {"diamante-01", "diamante-02", "diamante-03"}:
+        if args.num_workers is None:
+            args.num_workers = 12
+        if args.prefetch_factor is None:
+            args.prefetch_factor = 4
+        if args.cache_in_memory is None:
+            args.cache_in_memory = True
+        if args.pin_memory is None:
+            args.pin_memory = True
+        if args.persistent_workers is None:
+            args.persistent_workers = True
+    else:
+        if args.num_workers is None:
+            args.num_workers = 0
+        if args.prefetch_factor is None:
+            args.prefetch_factor = 2
+        if args.cache_in_memory is None:
+            args.cache_in_memory = False
+        if args.pin_memory is None:
+            args.pin_memory = True
+        if args.persistent_workers is None:
+            args.persistent_workers = False
+
+    if args.no_cache_in_memory:
+        args.cache_in_memory = False
+    if args.no_pin_memory:
+        args.pin_memory = False
+    if args.no_persistent_workers:
+        args.persistent_workers = False
 
     if args.classification_only:
         args.regression_weight = 0.0
