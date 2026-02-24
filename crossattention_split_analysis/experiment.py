@@ -234,11 +234,13 @@ def run_scenario(
         train_loader = create_attention_dataloader(
             train_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=True,
+            num_workers=config.dataloader_num_workers,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_attention_dataloader(
             val_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+            num_workers=config.dataloader_num_workers,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = None
@@ -246,17 +248,28 @@ def run_scenario(
             test_loader = create_attention_dataloader(
                 test_df, protein_matrix_dirs, ligand_matrix_dirs,
                 max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
                 label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
             )
     else:
         train_loader = create_matrix_dataloader(
             train_df, protein_matrix_dirs, ligand_matrix_dirs,
             batch_size=config.batch_size, shuffle=True,
+            num_workers=config.dataloader_num_workers,
+            pin_memory=config.dataloader_pin_memory,
+            prefetch_factor=config.dataloader_prefetch_factor,
+            persistent_workers=config.dataloader_persistent_workers,
+            cache_in_memory=config.dataloader_cache_in_memory,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_matrix_dataloader(
             val_df, protein_matrix_dirs, ligand_matrix_dirs,
             batch_size=config.batch_size, shuffle=False,
+            num_workers=config.dataloader_num_workers,
+            pin_memory=config.dataloader_pin_memory,
+            prefetch_factor=config.dataloader_prefetch_factor,
+            persistent_workers=config.dataloader_persistent_workers,
+            cache_in_memory=config.dataloader_cache_in_memory,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = None
@@ -264,6 +277,11 @@ def run_scenario(
             test_loader = create_matrix_dataloader(
                 test_df, protein_matrix_dirs, ligand_matrix_dirs,
                 batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                pin_memory=config.dataloader_pin_memory,
+                prefetch_factor=config.dataloader_prefetch_factor,
+                persistent_workers=config.dataloader_persistent_workers,
+                cache_in_memory=config.dataloader_cache_in_memory,
                 label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
             )
 
@@ -681,6 +699,12 @@ def run_single_analysis(
     diffusion_loss_anneal: str = "none",
     classification_only: bool = False,
     diffusion_pool_queries: int = 4,
+    dataloader_num_workers: int = 0,
+    dataloader_cache_in_memory: bool = False,
+    dataloader_pin_memory: bool = True,
+    dataloader_prefetch_factor: int = 2,
+    dataloader_persistent_workers: bool = True,
+    dataloader_persistent_workers: bool = True,
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
     regression_weight: float = 0.5,
@@ -723,6 +747,11 @@ def run_single_analysis(
         diffusion_loss_anneal: Anneal schedule for diffusion loss weight
         classification_only: If True, optimize classification head only
         diffusion_pool_queries: Number of attention pooling queries per modality
+        dataloader_num_workers: DataLoader worker processes
+        dataloader_cache_in_memory: Cache matrices in RAM
+        dataloader_pin_memory: Enable pinned memory
+        dataloader_prefetch_factor: Prefetch factor when num_workers > 0
+        dataloader_persistent_workers: Keep DataLoader workers alive
         max_grad_norm: Gradient clipping max norm
         classification_weight: Weight for classification loss term
         regression_weight: Weight for regression loss term
@@ -830,6 +859,11 @@ def run_single_analysis(
         diffusion_loss_anneal=diffusion_loss_anneal,
         classification_only=classification_only,
         diffusion_pool_queries=diffusion_pool_queries,
+        dataloader_num_workers=dataloader_num_workers,
+        dataloader_cache_in_memory=dataloader_cache_in_memory,
+        dataloader_pin_memory=dataloader_pin_memory,
+        dataloader_prefetch_factor=dataloader_prefetch_factor,
+        dataloader_persistent_workers=dataloader_persistent_workers,
         model_variant=model_variant,
         num_epochs=num_epochs,
         patience=patience,

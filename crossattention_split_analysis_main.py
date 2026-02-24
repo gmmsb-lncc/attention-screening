@@ -334,6 +334,39 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=0,
+        help='DataLoader worker processes (default: 0)'
+    )
+
+    parser.add_argument(
+        '--cache_in_memory',
+        action='store_true',
+        help='Cache all matrices in memory (use only if RAM allows)'
+    )
+
+    parser.add_argument(
+        '--pin_memory',
+        action='store_true',
+        default=True,
+        help='Enable pinned memory for faster GPU transfer (default: enabled)'
+    )
+
+    parser.add_argument(
+        '--prefetch_factor',
+        type=int,
+        default=2,
+        help='DataLoader prefetch factor when num_workers > 0 (default: 2)'
+    )
+
+    parser.add_argument(
+        '--persistent_workers',
+        action='store_true',
+        help='Keep DataLoader workers alive between epochs'
+    )
+
+    parser.add_argument(
         '--threshold_metric',
         choices=['mcc', 'f1', 'balanced_accuracy'],
         default='mcc',
@@ -474,6 +507,9 @@ Available scenarios:
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
+    print(f"  DataLoader:     workers={args.num_workers}, cache={args.cache_in_memory}, "
+          f"pin_memory={args.pin_memory}, prefetch={args.prefetch_factor}, "
+          f"persistent={args.persistent_workers}")
     if args.disable_threshold_optimization:
         print(f"  Threshold:      FIXED ({args.fixed_threshold})")
     else:
@@ -532,6 +568,11 @@ Available scenarios:
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
                 classification_only=args.classification_only,
+                dataloader_num_workers=args.num_workers,
+                dataloader_cache_in_memory=args.cache_in_memory,
+                dataloader_pin_memory=args.pin_memory,
+                dataloader_prefetch_factor=args.prefetch_factor,
+                dataloader_persistent_workers=args.persistent_workers,
                 optimize_threshold=not args.disable_threshold_optimization,
                 threshold_metric=args.threshold_metric,
                 fixed_threshold=args.fixed_threshold,

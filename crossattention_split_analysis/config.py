@@ -142,6 +142,11 @@ class TrainingConfig:
     diffusion_loss_anneal: Literal['none', 'linear'] = 'none'
     classification_only: bool = False
     diffusion_pool_queries: int = 4
+    dataloader_num_workers: int = 0
+    dataloader_cache_in_memory: bool = False
+    dataloader_pin_memory: bool = True
+    dataloader_prefetch_factor: int = 2
+    dataloader_persistent_workers: bool = True
 
     # Training
     batch_size: int = 32
@@ -182,6 +187,11 @@ class TrainingConfig:
             'diffusion_loss_anneal': self.diffusion_loss_anneal,
             'classification_only': self.classification_only,
             'diffusion_pool_queries': self.diffusion_pool_queries,
+            'dataloader_num_workers': self.dataloader_num_workers,
+            'dataloader_cache_in_memory': self.dataloader_cache_in_memory,
+            'dataloader_pin_memory': self.dataloader_pin_memory,
+            'dataloader_prefetch_factor': self.dataloader_prefetch_factor,
+            'dataloader_persistent_workers': self.dataloader_persistent_workers,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,
