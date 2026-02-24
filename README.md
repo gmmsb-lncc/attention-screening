@@ -119,7 +119,7 @@ Causal transformer trained with Next Token Prediction (NTP). Better for capturin
 │  STAGE 1: MULTI-SCALE CNN ENCODERS (Local Feature Extraction)               │
 │  • Conv1D with kernels {3, 5, 7} for multi-scale pattern recognition       │
 │  • Residual connections preserve feature hierarchy                          │
-│  • LayerNorm for training stability                                         │
+│  • LayerNorm post-encoder for standardized feature scaling                  │
 │  └─→ Output: [seq_len/pool, hidden_dim]                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
