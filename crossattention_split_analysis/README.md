@@ -5,6 +5,7 @@ This module evaluates the CNN + Cross-Attention model for protein-ligand affinit
 ## Model Guides
 
 - [CrossAttention Lite: Detailed Visual Guide](./CROSS_ATTENTION_LITE.md)
+- [Diffusion Variant: Detailed Guide](./DIFFUSION.md)
 
 ## Overview
 

@@ -43,6 +43,7 @@ For detailed information:
 - **[Architecture](docs/03-architecture/)** - System design patterns and diagrams.
 - **[Modules](docs/04-modules/)** - Deep dive into specific components.
 - **[CrossAttention Lite (Detailed Visual Guide)](crossattention_split_analysis/CROSS_ATTENTION_LITE.md)** - Detailed explanation of the lightweight bidirectional token-to-token cross-attention variant.
+- **[Diffusion Variant (Detailed Guide)](crossattention_split_analysis/DIFFUSION.md)** - Diffusion-based classifier that denoises protein/ligand matrices before classification.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Three split modes: Random, Compound-Only, Compound+Protein.
 
 ---
