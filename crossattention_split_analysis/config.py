@@ -137,7 +137,9 @@ class TrainingConfig:
     diffusion_beta_start: float = 1e-4
     diffusion_beta_end: float = 0.02
     diffusion_layers: int = 4
+    diffusion_cross_attn_layers: int = 1
     diffusion_loss_weight: float = 0.1
+    diffusion_loss_anneal: Literal['none', 'linear'] = 'none'
 
     # Training
     batch_size: int = 32
@@ -173,7 +175,9 @@ class TrainingConfig:
             'diffusion_beta_start': self.diffusion_beta_start,
             'diffusion_beta_end': self.diffusion_beta_end,
             'diffusion_layers': self.diffusion_layers,
+            'diffusion_cross_attn_layers': self.diffusion_cross_attn_layers,
             'diffusion_loss_weight': self.diffusion_loss_weight,
+            'diffusion_loss_anneal': self.diffusion_loss_anneal,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,

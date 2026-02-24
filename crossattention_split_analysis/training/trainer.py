@@ -22,7 +22,8 @@ def train_epoch(
     device: torch.device,
     epoch: int,
     num_epochs: int,
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 1.0,
+    aux_loss_scale: float = 1.0,
 ) -> Dict[str, float]:
     """
     Train for one epoch.
@@ -71,8 +72,9 @@ def train_epoch(
         )
         aux_loss = output.get('aux_loss')
         if aux_loss is not None:
-            losses['total'] = losses['total'] + aux_loss
-            losses['aux'] = aux_loss.detach().item()
+            scaled_aux = aux_loss * float(aux_loss_scale)
+            losses['total'] = losses['total'] + scaled_aux
+            losses['aux'] = scaled_aux.detach().item()
 
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
@@ -183,11 +185,17 @@ def train_model(
         print(f"  Continuing from epoch {start_epoch + 1}...")
 
     for epoch in range(start_epoch, config.num_epochs):
+        if config.diffusion_loss_anneal == "linear":
+            denom = max(1, config.num_epochs - 1)
+            aux_loss_scale = max(0.0, 1.0 - (epoch / denom))
+        else:
+            aux_loss_scale = 1.0
+
         # Train
         try:
             train_metrics = train_epoch(
                 model, train_loader, optimizer, loss_fn, device,
-                epoch, config.num_epochs, config.max_grad_norm
+                epoch, config.num_epochs, config.max_grad_norm, aux_loss_scale
             )
         except RuntimeError as e:
             if "skipped" in str(e):

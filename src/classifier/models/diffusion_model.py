@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base_model import BaseClassifier
+from .cross_attention_model import CrossAttentionBlock
 
 
 class AttentionPool(nn.Module):
@@ -128,6 +129,7 @@ class DiffusionAffinityModel(BaseClassifier):
         ligand_dim: int,
         hidden_dim: int = 256,
         num_diffusion_layers: int = 4,
+        num_cross_attn_layers: int = 1,
         num_heads: int = 8,
         ff_dim: int = 1024,
         dropout: float = 0.1,
@@ -156,6 +158,12 @@ class DiffusionAffinityModel(BaseClassifier):
         self.protein_pool = AttentionPool(hidden_dim)
         self.ligand_pool = AttentionPool(hidden_dim)
         self.task_head = MultiTaskHead(hidden_dim * 2, hidden_dim, dropout)
+        self.cross_attn_blocks = nn.ModuleList(
+            [
+                CrossAttentionBlock(hidden_dim, num_heads, ff_dim, dropout)
+                for _ in range(max(0, int(num_cross_attn_layers)))
+            ]
+        )
 
         betas = torch.linspace(diffusion_beta_start, diffusion_beta_end, diffusion_steps)
         alphas = 1.0 - betas
@@ -222,6 +230,11 @@ class DiffusionAffinityModel(BaseClassifier):
             ligand_hat = self._predict_x0(ligand, timesteps, eps_l)
             diffusion_loss = None
 
+        for block in self.cross_attn_blocks:
+            protein_hat, ligand_hat = block(
+                protein_hat, ligand_hat, protein_mask, ligand_mask
+            )
+
         protein_pooled = self.protein_pool(protein_hat, protein_mask)
         ligand_pooled = self.ligand_pool(ligand_hat, ligand_mask)
         combined = torch.cat([protein_pooled, ligand_pooled], dim=-1)
@@ -257,4 +270,5 @@ class DiffusionAffinityModel(BaseClassifier):
             "hidden_dim": self.hidden_dim,
             "diffusion_steps": self.diffusion_steps,
             "diffusion_loss_weight": self.diffusion_loss_weight,
+            "diffusion_cross_attn_layers": len(self.cross_attn_blocks),
         }
