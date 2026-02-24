@@ -13,7 +13,7 @@ This is especially useful when you suspect important signal is distributed acros
 
 ## High-Level Idea
 
-We treat each embedding matrix as a sequence of tokens and apply a **denoising diffusion model (DDPM-style)** to it. During training, we add noise at a random timestep and train a denoiser to predict the noise. The denoised matrix is then used for classification.
+We treat each embedding matrix as a sequence of tokens and apply a **denoising diffusion model (DDPM-style)** to it. During training, we add noise at a random timestep and train a denoiser to predict the noise. The denoised matrix is then used for classification. The current implementation adds **lightweight cross-attention** after denoising to explicitly model protein–ligand interaction.
 
 ### Data Flow (Visual)
 
@@ -26,6 +26,10 @@ Protein matrix P (Lp x Dp)     Ligand matrix L (Ll x Dl)
           v                               v
    Diffusion denoiser               Diffusion denoiser
    (Transformer encoder)            (Transformer encoder)
+          |                               |
+          v                               v
+   Cross-attention block           Cross-attention block
+   (protein ↔ ligand)              (protein ↔ ligand)
           |                               |
           v                               v
    Attention pooling                Attention pooling
@@ -60,6 +64,15 @@ The denoiser \(\epsilon_\theta(x_t, t)\) predicts the injected noise:
 
 We apply this loss **separately** to protein and ligand matrices, then sum them.
 
+To improve classification stability and avoid over-emphasizing highly noisy timesteps, the loss is **SNR‑weighted**:
+
+\[
+w(t) = \log(1 + \text{SNR}_t)
+\]
+\[
+\mathcal{L}_{diff} = \mathbb{E}_{t,\epsilon}\left[w(t)\|\epsilon - \epsilon_\theta(x_t, t)\|_2^2\right]
+\]
+
 ### Reconstruction (Used for Classifier Input)
 
 We recover an estimate of \(x_0\):
@@ -77,29 +90,33 @@ The final training objective combines classification/regression loss and diffusi
 \]
 
 Where \(\lambda\) is controlled by `--diffusion_loss_weight`.
+Optionally, \(\lambda\) can be **annealed** linearly during training (`--diffusion_loss_anneal linear`), starting high and decaying to zero.
 
 ## Pooling Strategy (Why Information Is Preserved)
 
-Instead of mean pooling, we use **attention pooling**:
+Instead of mean pooling, we use **multi‑query attention pooling** to capture multiple salient regions:
 
 \[
-\text{score}_i = q^\top W x_i
+\text{score}_{i,k} = q_k^\top W x_i
 \]
 \[
-\text{attn}_i = \text{softmax}(\text{score}_i)
+\text{attn}_{i,k} = \text{softmax}(\text{score}_{i,k})
 \]
 \[
-\text{pool}(x) = \sum_i \text{attn}_i x_i
+\text{pool}(x) = \frac{1}{K}\sum_k \sum_i \text{attn}_{i,k} x_i
 \]
 
-This allows the model to learn **which tokens matter most** without discarding token-level information early.
+This allows the model to learn **multiple token‑level focuses** without discarding information early.
 
 ## Implementation Details
 
-- **Denoiser**: `TransformerEncoder` with time embeddings.
-- **Pooling**: learned attention pooling per modality.
-- **Auxiliary loss**: diffusion MSE loss, added only during training.
-- **No cross-attention** between protein and ligand in this variant.
+- **Denoiser**: separate `TransformerEncoder` for protein and ligand, with time embeddings.
+- **Positional encoding**: **sinusoidal** PE added after projection, with learnable scale.
+- **Normalization**: `LayerNorm` applied after projection per modality.
+- **Pooling**: multi‑query attention pooling per modality (`--diffusion_pool_queries`).
+- **Auxiliary loss**: SNR‑weighted diffusion MSE loss, added only during training.
+- **Cross‑attention**: lightweight protein↔ligand block(s) after denoising (`--diffusion_cross_attn_layers`).
+- **Classification-only mode**: optional regressor removal for pure classification (`--classification_only`).
 - **Compatible with existing split analysis pipeline.**
 
 Key file:
@@ -184,9 +201,13 @@ python crossattention_split_analysis_main.py \
   --dropout 0.1 \
   --diffusion_steps 200 \
   --diffusion_layers 4 \
-  --diffusion_loss_weight 0.1 \
+  --diffusion_cross_attn_layers 1 \
+  --diffusion_pool_queries 4 \
+  --diffusion_loss_weight 0.05 \
+  --diffusion_loss_anneal linear \
+  --classification_only \
   --classification_weight 1.0 \
-  --regression_weight 0.5 \
+  --regression_weight 0.0 \
   --threshold_metric mcc \
   --seeds 42 123 456 789 1024 \
   --force
@@ -194,14 +215,15 @@ python crossattention_split_analysis_main.py \
 
 ## Practical Tips
 
-- If training is unstable, try lowering `--diffusion_loss_weight`.
+- If training is unstable, try lowering `--diffusion_loss_weight` or enabling `--diffusion_loss_anneal linear`.
+- If MCC stalls, increase `--diffusion_pool_queries` (e.g., 8) or `--diffusion_cross_attn_layers`.
 - Increasing `--diffusion_steps` improves denoising but adds computation.
 - Use `--molformer_ligand` if only MoLFormer matrices are available.
 
 ## Limitations (Current)
 
-- No explicit protein-ligand cross-attention in this variant.
-- Diffusion is applied independently to protein and ligand matrices.
+- Cross‑attention is lightweight (not full cross‑attention stack).
+- Diffusion is applied independently per modality before interaction.
 - Attention pooling can still compress information, but it is learned and token-aware.
 
 ## Next Possible Extension

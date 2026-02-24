@@ -141,6 +141,7 @@ class TrainingConfig:
     diffusion_loss_weight: float = 0.1
     diffusion_loss_anneal: Literal['none', 'linear'] = 'none'
     classification_only: bool = False
+    diffusion_pool_queries: int = 4
 
     # Training
     batch_size: int = 32
@@ -180,6 +181,7 @@ class TrainingConfig:
             'diffusion_loss_weight': self.diffusion_loss_weight,
             'diffusion_loss_anneal': self.diffusion_loss_anneal,
             'classification_only': self.classification_only,
+            'diffusion_pool_queries': self.diffusion_pool_queries,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,

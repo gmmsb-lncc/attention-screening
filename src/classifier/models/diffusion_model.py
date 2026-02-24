@@ -20,10 +20,11 @@ from .cross_attention_model import CrossAttentionBlock
 class AttentionPool(nn.Module):
     """Learned attention pooling over sequence dimension."""
 
-    def __init__(self, hidden_dim: int):
+    def __init__(self, hidden_dim: int, num_queries: int = 1):
         super().__init__()
+        self.num_queries = num_queries
         self.proj = nn.Linear(hidden_dim, hidden_dim)
-        self.query = nn.Parameter(torch.randn(hidden_dim))
+        self.query = nn.Parameter(torch.randn(num_queries, hidden_dim))
 
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
         """
@@ -33,11 +34,12 @@ class AttentionPool(nn.Module):
         Returns:
             pooled: [batch, hidden_dim]
         """
-        scores = torch.matmul(self.proj(x), self.query)  # [batch, seq_len]
+        scores = torch.matmul(self.proj(x), self.query.t())  # [batch, seq_len, num_queries]
         if mask is not None:
-            scores = scores.masked_fill(~mask.bool(), float("-inf"))
-        attn = torch.softmax(scores, dim=1).unsqueeze(-1)  # [batch, seq_len, 1]
-        return torch.sum(attn * x, dim=1)
+            scores = scores.masked_fill(~mask.bool().unsqueeze(-1), float("-inf"))
+        attn = torch.softmax(scores, dim=1)  # [batch, seq_len, num_queries]
+        pooled = torch.einsum("bsq,bsh->bqh", attn, x)  # [batch, num_queries, hidden_dim]
+        return pooled.mean(dim=1)
 
 
 class DiffusionDenoiser(nn.Module):
@@ -168,6 +170,7 @@ class DiffusionAffinityModel(BaseClassifier):
         num_heads: int = 8,
         ff_dim: int = 1024,
         dropout: float = 0.1,
+        pool_num_queries: int = 4,
         diffusion_steps: int = 200,
         diffusion_beta_start: float = 1e-4,
         diffusion_beta_end: float = 0.02,
@@ -182,6 +185,8 @@ class DiffusionAffinityModel(BaseClassifier):
 
         self.protein_proj = nn.Linear(protein_dim, hidden_dim)
         self.ligand_proj = nn.Linear(ligand_dim, hidden_dim)
+        self.protein_norm = nn.LayerNorm(hidden_dim)
+        self.ligand_norm = nn.LayerNorm(hidden_dim)
         self.pos_scale = nn.Parameter(torch.tensor(1.0))
 
         self.protein_denoiser = DiffusionDenoiser(
@@ -201,8 +206,8 @@ class DiffusionAffinityModel(BaseClassifier):
             num_timesteps=diffusion_steps,
         )
 
-        self.protein_pool = AttentionPool(hidden_dim)
-        self.ligand_pool = AttentionPool(hidden_dim)
+        self.protein_pool = AttentionPool(hidden_dim, num_queries=pool_num_queries)
+        self.ligand_pool = AttentionPool(hidden_dim, num_queries=pool_num_queries)
         self.task_head = MultiTaskHead(
             hidden_dim * 2,
             hidden_dim,
@@ -282,8 +287,8 @@ class DiffusionAffinityModel(BaseClassifier):
         batch_size = protein_matrix.size(0)
         device = protein_matrix.device
 
-        protein = self.protein_proj(protein_matrix)
-        ligand = self.ligand_proj(ligand_matrix)
+        protein = self.protein_norm(self.protein_proj(protein_matrix))
+        ligand = self.ligand_norm(self.ligand_proj(ligand_matrix))
         protein = protein + self.pos_scale * _sinusoidal_position_encoding(
             protein.size(1), self.hidden_dim, protein.device, protein.dtype
         )
