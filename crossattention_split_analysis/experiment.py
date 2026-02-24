@@ -195,11 +195,13 @@ def run_scenario(
     test_df: Optional[pd.DataFrame],
     protein_matrix_dirs: List[str],
     ligand_matrix_dirs: List[str],
+    ligand_vector_dirs: Optional[List[str]],
     config: TrainingConfig,
     device,
     seed: int,
     checkpoint_path: Optional[str] = None,
     use_attention: bool = False,
+    use_ligand_vectors: bool = False,
     evaluation_split: str = "test",
 ) -> Dict:
     """
@@ -210,11 +212,13 @@ def run_scenario(
         train_df, val_df, test_df: DataFrames for each split (test_df can be None)
         protein_matrix_dirs: List of paths to protein embeddings/attention matrices
         ligand_matrix_dirs: List of paths to ligand embeddings
+        ligand_vector_dirs: List of paths to ligand vectors (optional)
         config: Training configuration
         device: Training device
         seed: Random seed
         checkpoint_path: Path for checkpointing
         use_attention: Use attention matrices instead of embeddings
+        use_ligand_vectors: Use ligand vectors instead of per-token matrices
         evaluation_split: Which split to evaluate after training ("test" or "val")
 
     Returns:
@@ -653,11 +657,13 @@ def run_crossattention_analysis(
                 test_df if not external_test_mode else None,
                 protein_matrix_dirs,
                 ligand_matrix_dirs,
+                ligand_vector_dirs if use_ligand_vectors else None,
                 config,
                 device,
                 seed,
                 checkpoint_path=checkpoint_path,
                 use_attention=use_attention,
+                use_ligand_vectors=use_ligand_vectors,
                 evaluation_split="val" if external_test_mode else "test",
             )
             scenario_seed_results[seed] = metrics
