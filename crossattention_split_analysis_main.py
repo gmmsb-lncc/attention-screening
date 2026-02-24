@@ -522,6 +522,7 @@ Available scenarios:
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
+                classification_only=args.classification_only,
                 optimize_threshold=not args.disable_threshold_optimization,
                 threshold_metric=args.threshold_metric,
                 fixed_threshold=args.fixed_threshold,

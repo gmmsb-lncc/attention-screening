@@ -287,6 +287,7 @@ def run_scenario(
             diffusion_beta_start=config.diffusion_beta_start,
             diffusion_beta_end=config.diffusion_beta_end,
             diffusion_loss_weight=config.diffusion_loss_weight,
+            classification_only=config.classification_only,
         )
     else:
         model = CrossAttentionAffinityModel(
@@ -677,6 +678,7 @@ def run_single_analysis(
     diffusion_cross_attn_layers: int = 1,
     diffusion_loss_weight: float = 0.1,
     diffusion_loss_anneal: str = "none",
+    classification_only: bool = False,
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
     regression_weight: float = 0.5,
@@ -717,6 +719,7 @@ def run_single_analysis(
         diffusion_cross_attn_layers: Number of cross-attention blocks after diffusion
         diffusion_loss_weight: Weight for diffusion auxiliary loss
         diffusion_loss_anneal: Anneal schedule for diffusion loss weight
+        classification_only: If True, optimize classification head only
         max_grad_norm: Gradient clipping max norm
         classification_weight: Weight for classification loss term
         regression_weight: Weight for regression loss term
@@ -822,6 +825,7 @@ def run_single_analysis(
         diffusion_cross_attn_layers=diffusion_cross_attn_layers,
         diffusion_loss_weight=diffusion_loss_weight,
         diffusion_loss_anneal=diffusion_loss_anneal,
+        classification_only=classification_only,
         model_variant=model_variant,
         num_epochs=num_epochs,
         patience=patience,
