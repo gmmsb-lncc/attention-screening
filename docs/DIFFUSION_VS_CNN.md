@@ -98,6 +98,48 @@ This is beneficial in high-similarity regimes because the attention mechanism is
 
 ---
 
+## 5) Diagram: CNN vs Diffusion (High-Level)
+
+```
+CNN + Cross-Attention (baseline)
+--------------------------------
+P -> CNN encoder -> (pos enc) -> CrossAttn -> Pool -> Classifier
+L -> CNN encoder -> (pos enc) -> CrossAttn -> Pool -> Classifier
+
+Diffusion + Cross-Attention (this work)
+--------------------------------------
+P -> Proj+Norm+PE -> Noise -> Denoise -> CrossAttn -> Multi-Query Pool -> Classifier
+L -> Proj+Norm+PE -> Noise -> Denoise -> CrossAttn -> Multi-Query Pool -> Classifier
+```
+
+---
+
+## 6) Formal View: Signal Preservation Under Noise
+
+Let $f_\theta$ be the encoder mapping $x \mapsto z$.  
+In CNNs, $f_\theta$ is optimized for discriminative loss only:
+
+$$
+\min_\theta \; \mathbb{E}_{(x,y)}\left[\mathcal{L}_{cls}(g(f_\theta(x)), y)\right]
+$$
+
+In diffusion-based training, the representation must also remain **reconstructible** under noise:
+
+$$
+\min_\theta \; \mathbb{E}_{x,t,\epsilon}\left[\mathcal{L}_{diff}(\epsilon, \epsilon_\theta(x_t,t))\right]
+$$
+
+The added reconstruction constraint effectively regularizes $f_\theta$ to preserve
+low-magnitude components $\delta$ that might otherwise be washed out by convolutional smoothing:
+
+$$
+\|f_\theta(x+\delta) - f_\theta(x)\|_2 \;\;\text{is preserved}
+$$
+
+This yields a more separable embedding space for near-duplicate samples.
+
+---
+
 ## Practical Implication
 
 When the dataset has many near-duplicate or highly similar samples, **CNNs capture the common structure but often miss the marginal signal** that defines the label.  
@@ -108,3 +150,12 @@ Diffusion training makes that marginal signal recoverable, improving class separ
 ## Where to Learn More
 
 - Diffusion pipeline details: `crossattention_split_analysis/DIFFUSION.md`
+
+---
+
+## References
+
+- Ho, J. et al. (2020). Denoising Diffusion Probabilistic Models. NeurIPS.
+- Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS.
+- Su, J. et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding. arXiv.
+- Kendall, A. et al. (2018). Multi-Task Learning Using Uncertainty to Weigh Losses. CVPR.
