@@ -287,9 +287,34 @@ def _compute_metrics(y_true, y_pred, y_proba=None):
     return metrics
 
 
+def _nan_metrics():
+    """Return metric dict filled with NaN for unavailable evaluation splits."""
+    return {
+        'accuracy': float('nan'),
+        'mcc': float('nan'),
+        'f1': float('nan'),
+        'precision': float('nan'),
+        'recall': float('nan'),
+        'auroc': float('nan'),
+    }
+
+
+def _format_metrics_for_print(metrics: dict) -> str:
+    """Format metrics for concise terminal output."""
+    auroc = metrics.get('auroc', float('nan'))
+    auroc_str = f", AUROC={auroc:.4f}" if not np.isnan(auroc) else ""
+    return (
+        f"Acc={metrics.get('accuracy', float('nan')):.4f}, "
+        f"MCC={metrics.get('mcc', float('nan')):.4f}, "
+        f"F1={metrics.get('f1', float('nan')):.4f}"
+        f"{auroc_str}"
+    )
+
+
 def train_and_evaluate(
     df: pd.DataFrame,
     train_idx,
+    val_idx,
     test_idx,
     seed: int = 42,
     fp_cache: dict = None,
@@ -300,7 +325,7 @@ def train_and_evaluate(
     dataset_metadata: dict = None,
     save_knn_features: bool = False,
 ):
-    """Train KNN (FAISS) and MLP and return metrics.
+    """Train KNN (FAISS) and MLP and return validation/test metrics.
 
     NOTE on blind-target condition: When unseen kinases appear in the test set
     (kinase and new_compound_new_kinase scenarios), their one-hot encoding is
@@ -317,22 +342,27 @@ def train_and_evaluate(
     """
 
     train_df = df.iloc[train_idx].reset_index(drop=True)
+    val_df = df.iloc[val_idx].reset_index(drop=True)
     test_df = df.iloc[test_idx].reset_index(drop=True)
 
     # IMPORTANT: one-hot kinase space is defined from TRAIN only.
     # Unseen kinases in test therefore map to all-zero vectors (blind-target).
     train_kinases = list(train_df['target_kinase'].unique())
     X_train, y_train, train_valid = prepare_features(train_df, train_kinases, fp_cache)
+    X_val, y_val, val_valid = prepare_features(val_df, train_kinases, fp_cache)
     X_test, y_test, test_valid = prepare_features(test_df, train_kinases, fp_cache)
 
     if len(X_test) == 0 or len(X_train) == 0:
         return None
+    if len(X_val) == 0:
+        print("    WARNING: validation split has no usable rows after feature preparation.")
     if len(np.unique(y_train)) < 2:
         print("    WARNING: training fold has single class; skipping fold.")
         return None
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train).astype(np.float32)
+    X_val_scaled = scaler.transform(X_val).astype(np.float32) if len(X_val) > 0 else None
     X_test_scaled = scaler.transform(X_test).astype(np.float32)
 
     results = {}
@@ -341,9 +371,21 @@ def train_and_evaluate(
     print("    Training KNN (FAISS)...")
     t0 = time.time()
     knn_k = 5
-    knn_pred, knn_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
+    knn_pred_test, knn_proba_test = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
+    if X_val_scaled is not None and len(y_val) > 0:
+        knn_pred_val, knn_proba_val = faiss_knn_predict(X_train_scaled, y_train, X_val_scaled, k=knn_k)
+        knn_val_metrics = _compute_metrics(y_val, knn_pred_val, knn_proba_val)
+    else:
+        knn_val_metrics = _nan_metrics()
     knn_time = time.time() - t0
-    results['KNN'] = _compute_metrics(y_test, knn_pred, knn_proba)
+    knn_test_metrics = _compute_metrics(y_test, knn_pred_test, knn_proba_test)
+    results['KNN'] = {
+        **knn_test_metrics,  # keep backward compatibility (top-level = test/external test)
+        'test_metrics': dict(knn_test_metrics),
+        'validation_metrics': dict(knn_val_metrics),
+        'n_test_samples': int(len(y_test)),
+        'n_validation_samples': int(len(y_val)),
+    }
     print(f"    KNN done in {format_time(knn_time)}")
 
     # MLP
@@ -363,10 +405,23 @@ def train_and_evaluate(
         random_state=seed
     )
     mlp.fit(X_train_scaled, y_train)
-    mlp_pred = mlp.predict(X_test_scaled)
-    mlp_proba = mlp.predict_proba(X_test_scaled)[:, 1]
+    mlp_pred_test = mlp.predict(X_test_scaled)
+    mlp_proba_test = mlp.predict_proba(X_test_scaled)[:, 1]
+    if X_val_scaled is not None and len(y_val) > 0:
+        mlp_pred_val = mlp.predict(X_val_scaled)
+        mlp_proba_val = mlp.predict_proba(X_val_scaled)[:, 1]
+        mlp_val_metrics = _compute_metrics(y_val, mlp_pred_val, mlp_proba_val)
+    else:
+        mlp_val_metrics = _nan_metrics()
     mlp_time = time.time() - t0
-    results['MLP'] = _compute_metrics(y_test, mlp_pred, mlp_proba)
+    mlp_test_metrics = _compute_metrics(y_test, mlp_pred_test, mlp_proba_test)
+    results['MLP'] = {
+        **mlp_test_metrics,  # keep backward compatibility (top-level = test/external test)
+        'test_metrics': dict(mlp_test_metrics),
+        'validation_metrics': dict(mlp_val_metrics),
+        'n_test_samples': int(len(y_test)),
+        'n_validation_samples': int(len(y_val)),
+    }
     print(f"    MLP done in {format_time(mlp_time)}")
 
     artifact_paths = {}
@@ -391,9 +446,11 @@ def train_and_evaluate(
         np.savez_compressed(
             split_indices_path,
             train_idx_raw=np.asarray(train_idx, dtype=np.int64),
+            val_idx_raw=np.asarray(val_idx, dtype=np.int64),
             test_idx_raw=np.asarray(test_idx, dtype=np.int64),
             dropped_idx_raw=dropped_idx_arr,
             train_valid_pos=np.asarray(train_valid, dtype=np.int64),
+            val_valid_pos=np.asarray(val_valid, dtype=np.int64),
             test_valid_pos=np.asarray(test_valid, dtype=np.int64),
         )
 
@@ -418,9 +475,11 @@ def train_and_evaluate(
             "scenario_id": scenario_id,
             "seed": int(seed),
             "train_rows_raw": int(len(train_idx)),
+            "val_rows_raw": int(len(val_idx)),
             "test_rows_raw": int(len(test_idx)),
             "dropped_rows_raw": int(len(dropped_idx_arr)),
             "train_rows_used": int(len(X_train)),
+            "val_rows_used": int(len(X_val)),
             "test_rows_used": int(len(X_test)),
             "knn_k": int(knn_k),
             "knn_payload_has_features": bool(knn_payload_saved),
@@ -1241,6 +1300,7 @@ def run_comparison(
             results = train_and_evaluate(
                 df_eval,
                 train_idx,
+                val_idx,
                 test_idx,
                 seed=seed,
                 fp_cache=fp_cache,
@@ -1255,10 +1315,15 @@ def run_comparison(
                 fold_results[round_i] = {
                     'metrics': results
                 }
-                knn_auroc = f", AUROC={results['KNN']['auroc']:.4f}" if not np.isnan(results['KNN'].get('auroc', float('nan'))) else ""
-                mlp_auroc = f", AUROC={results['MLP']['auroc']:.4f}" if not np.isnan(results['MLP'].get('auroc', float('nan'))) else ""
-                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auroc}")
-                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auroc}")
+                eval_test_label = "External Test" if (
+                    split_payload is not None
+                    and split_payload.get("source") == "precomputed_scaffold_external_test"
+                ) else "Test"
+                for model in ['KNN', 'MLP']:
+                    val_metrics = results[model].get('validation_metrics', _nan_metrics())
+                    test_metrics = results[model].get('test_metrics', results[model])
+                    print(f"  {model} (Validation): {_format_metrics_for_print(val_metrics)}")
+                    print(f"  {model} ({eval_test_label}): {_format_metrics_for_print(test_metrics)}")
 
         # Aggregate across folds
         if fold_results:
@@ -1294,6 +1359,32 @@ def run_comparison(
                         else:
                             model_agg[metric] = float('nan')
                             model_agg[f'{metric}_std'] = 0.0
+
+                    for split_name in ['validation_metrics', 'test_metrics']:
+                        split_agg = {}
+                        for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                            values = [
+                                r['metrics'][model].get(split_name, {}).get(metric, float('nan'))
+                                for r in fold_results.values()
+                            ]
+                            values = [v for v in values if not np.isnan(v)]
+                            if values:
+                                split_agg[metric] = float(np.mean(values))
+                                split_agg[f'{metric}_std'] = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+                            else:
+                                split_agg[metric] = float('nan')
+                                split_agg[f'{metric}_std'] = 0.0
+                        model_agg[split_name] = split_agg
+
+                    for sample_key in ['n_validation_samples', 'n_test_samples']:
+                        sample_vals = [
+                            r['metrics'][model].get(sample_key)
+                            for r in fold_results.values()
+                            if r['metrics'][model].get(sample_key) is not None
+                        ]
+                        if sample_vals:
+                            model_agg[sample_key] = int(round(float(np.mean(sample_vals))))
+
                     model_agg['fold_results'] = {
                         str(f_idx): {
                             'metrics': f_data['metrics'][model]
@@ -1312,10 +1403,19 @@ def run_comparison(
                 print(f"\n  --- Aggregate ({len(fold_results)} folds) ---")
                 for model in ['KNN', 'MLP']:
                     m = aggregated[model]
-                    auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
-                    print(f"  {model}: Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
+                    test_auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
+                    print(f"  {model} (Test): Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
                           f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}, "
-                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auroc_str}")
+                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{test_auroc_str}")
+                    val = m.get('validation_metrics', {})
+                    val_auroc_str = f", AUROC={val.get('auroc', float('nan')):.4f}" if not np.isnan(val.get('auroc', float('nan'))) else ""
+                    print(
+                        f"  {model} (Validation): "
+                        f"Acc={val.get('accuracy', float('nan')):.4f}+/-{val.get('accuracy_std', 0.0):.4f}, "
+                        f"MCC={val.get('mcc', float('nan')):.4f}+/-{val.get('mcc_std', 0.0):.4f}, "
+                        f"F1={val.get('f1', float('nan')):.4f}+/-{val.get('f1_std', 0.0):.4f}"
+                        f"{val_auroc_str}"
+                    )
 
             if scenario_key not in completed_scenarios:
                 completed_scenarios.append(scenario_key)
@@ -1732,6 +1832,28 @@ def run_single_dataset(
                 val = m.get(metric)
                 if val is not None and not (isinstance(val, float) and np.isnan(val)):
                     scenario_json[model][metric] = val
+
+            for split_name in ['validation_metrics', 'test_metrics']:
+                split_metrics = m.get(split_name)
+                if isinstance(split_metrics, dict):
+                    split_json = {}
+                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                        split_val = split_metrics.get(metric)
+                        if split_val is not None and not (isinstance(split_val, float) and np.isnan(split_val)):
+                            split_json[metric] = split_val
+                    if multi_round:
+                        for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                            split_std = split_metrics.get(f'{metric}_std', 0.0)
+                            if not (isinstance(split_std, float) and np.isnan(split_std)):
+                                split_json[f'{metric}_std'] = split_std
+                    if split_json:
+                        scenario_json[model][split_name] = split_json
+
+            for sample_key in ['n_validation_samples', 'n_test_samples']:
+                sample_val = m.get(sample_key)
+                if sample_val is not None and not (isinstance(sample_val, float) and np.isnan(sample_val)):
+                    scenario_json[model][sample_key] = sample_val
+
             if multi_round:
                 for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
                     std_val = m.get(f'{metric}_std', 0.0)
