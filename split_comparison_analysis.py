@@ -14,11 +14,13 @@ import json
 import os
 import time
 import traceback
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import faiss
 from scipy.stats import wilcoxon
+from joblib import dump
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -46,8 +48,11 @@ from crossattention_split_analysis.visualization.image_readme import (
 
 DEFAULT_SPLIT_SEED = 42
 DEFAULT_N_FOLDS = 10
+DEFAULT_TEST_FRACTION = 0.10
+DEFAULT_S4_RESTARTS = 2048
 MIN_TEST_SAMPLES = 50
-SPLIT_PROTOCOL_VERSION = "kfold_cv_v5"
+DEFAULT_SPLIT_MODE = "single_90_10"
+SPLIT_PROTOCOL_VERSION = "single_split_v1"
 
 # Plot style
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -283,8 +288,19 @@ def _compute_metrics(y_true, y_pred, y_proba=None):
     return metrics
 
 
-def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx,
-                       seed: int = 42, fp_cache: dict = None):
+def train_and_evaluate(
+    df: pd.DataFrame,
+    train_idx,
+    test_idx,
+    seed: int = 42,
+    fp_cache: dict = None,
+    save_models: bool = False,
+    model_output_dir: str = None,
+    scenario_id: str = None,
+    dropped_idx=None,
+    dataset_metadata: dict = None,
+    save_knn_features: bool = False,
+):
     """Train KNN (FAISS) and MLP and return metrics.
 
     NOTE on blind-target condition: When unseen kinases appear in the test set
@@ -325,7 +341,8 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx,
     # KNN via FAISS (cosine similarity with distance-weighted voting)
     print("    Training KNN (FAISS)...")
     t0 = time.time()
-    knn_pred, knn_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=5)
+    knn_k = 5
+    knn_pred, knn_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
     knn_time = time.time() - t0
     results['KNN'] = _compute_metrics(y_test, knn_pred, knn_proba)
     print(f"    KNN done in {format_time(knn_time)}")
@@ -353,6 +370,91 @@ def train_and_evaluate(df: pd.DataFrame, train_idx, test_idx,
     results['MLP'] = _compute_metrics(y_test, mlp_pred, mlp_proba)
     print(f"    MLP done in {format_time(mlp_time)}")
 
+    artifact_paths = {}
+    if save_models and model_output_dir and scenario_id:
+        scenario_dir = Path(model_output_dir) / scenario_id
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+
+        scaler_path = scenario_dir / "scaler.joblib"
+        mlp_path = scenario_dir / "mlp_model.joblib"
+        train_kinases_path = scenario_dir / "train_kinases.json"
+        split_indices_path = scenario_dir / "split_indices.npz"
+        knn_payload_path = scenario_dir / "knn_payload.npz"
+        metadata_path = scenario_dir / "metadata.json"
+
+        dump(scaler, scaler_path)
+        dump(mlp, mlp_path)
+
+        with train_kinases_path.open("w", encoding="utf-8") as f:
+            json.dump(train_kinases, f, indent=2)
+
+        dropped_idx_arr = np.asarray(dropped_idx if dropped_idx is not None else [], dtype=np.int64)
+        np.savez_compressed(
+            split_indices_path,
+            train_idx_raw=np.asarray(train_idx, dtype=np.int64),
+            test_idx_raw=np.asarray(test_idx, dtype=np.int64),
+            dropped_idx_raw=dropped_idx_arr,
+            train_valid_pos=np.asarray(train_valid, dtype=np.int64),
+            test_valid_pos=np.asarray(test_valid, dtype=np.int64),
+        )
+
+        if save_knn_features:
+            np.savez_compressed(
+                knn_payload_path,
+                X_train_scaled=X_train_scaled,
+                y_train=np.asarray(y_train, dtype=np.int8),
+                knn_k=np.asarray([knn_k], dtype=np.int32),
+            )
+            knn_payload_saved = True
+        else:
+            # For KNN, the "model" is the reference training set; indices above are sufficient to rebuild it.
+            np.savez_compressed(
+                knn_payload_path,
+                knn_k=np.asarray([knn_k], dtype=np.int32),
+                y_train=np.asarray(y_train, dtype=np.int8),
+            )
+            knn_payload_saved = False
+
+        metadata = {
+            "scenario_id": scenario_id,
+            "seed": int(seed),
+            "train_rows_raw": int(len(train_idx)),
+            "test_rows_raw": int(len(test_idx)),
+            "dropped_rows_raw": int(len(dropped_idx_arr)),
+            "train_rows_used": int(len(X_train)),
+            "test_rows_used": int(len(X_test)),
+            "knn_k": int(knn_k),
+            "knn_payload_has_features": bool(knn_payload_saved),
+            "models": {
+                "mlp": str(mlp_path),
+                "scaler": str(scaler_path),
+                "train_kinases": str(train_kinases_path),
+                "split_indices": str(split_indices_path),
+                "knn_payload": str(knn_payload_path),
+            },
+            "metrics": {
+                "KNN": results["KNN"],
+                "MLP": results["MLP"],
+            },
+        }
+        if dataset_metadata:
+            metadata["dataset"] = dataset_metadata
+
+        with metadata_path.open("w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        artifact_paths = {
+            "scenario_dir": str(scenario_dir),
+            "mlp_model": str(mlp_path),
+            "scaler": str(scaler_path),
+            "train_kinases": str(train_kinases_path),
+            "split_indices": str(split_indices_path),
+            "knn_payload": str(knn_payload_path),
+            "metadata": str(metadata_path),
+        }
+        print(f"    Model artifacts saved: {scenario_dir}")
+
+    results["_artifacts"] = artifact_paths
     return results
 
 
@@ -428,6 +530,188 @@ def _build_compound_scaffold_map(df: pd.DataFrame) -> dict:
     n_scaffolds = len(set(scaffold_map.values()) - {'UNKNOWN'})
     print(f"  Murcko scaffolds: {n_scaffolds} unique scaffolds from {len(scaffold_map)} compounds")
     return scaffold_map
+
+
+def resolve_dataset_input_path(
+    dataset_type: str,
+    input_path: str = None,
+    use_without_test_input: bool = True,
+    without_test_dir: str = "scaffolds_splits/output",
+) -> str:
+    """Resolve dataset path, preferring scaffold-split non-test inputs when requested."""
+    if input_path:
+        return input_path
+
+    if use_without_test_input and dataset_type in ("human", "non_human"):
+        candidate = os.path.join(without_test_dir, f"{dataset_type}_input_without_test.tsv")
+        if os.path.exists(candidate):
+            return candidate
+        print(f"  WARNING: without-test input not found: {candidate}. Falling back to default dataset path.")
+
+    return DATASET_PATHS.get(dataset_type)
+
+
+def _split_quality_loss(
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    test_fraction_achieved: float,
+    target_test_fraction: float,
+    dropped_fraction: float = 0.0,
+) -> float:
+    """Loss for selecting train/test splits with class support and target ratio."""
+    if len(y_train) == 0 or len(y_test) == 0:
+        return 1e9
+
+    train_classes = set(np.unique(y_train).tolist())
+    test_classes = set(np.unique(y_test).tolist())
+    missing = int(0 not in train_classes) + int(1 not in train_classes) + int(0 not in test_classes) + int(1 not in test_classes)
+
+    train_pos = float((y_train == 1).mean())
+    test_pos = float((y_test == 1).mean())
+    class_rate_gap = abs(train_pos - test_pos)
+
+    return float(
+        abs(test_fraction_achieved - target_test_fraction)
+        + 2.0 * class_rate_gap
+        + 10.0 * missing
+        + 0.5 * dropped_fraction
+    )
+
+
+def _target_s4_probability(test_fraction: float) -> float:
+    """Solve p for strict S4 where test=(p^2), train=((1-p)^2) over used rows."""
+    t = float(np.clip(test_fraction, 1e-6, 1.0 - 1e-6))
+    if abs(t - 0.5) < 1e-12:
+        return 0.5
+    root = np.sqrt(t * (1.0 - t))
+    p1 = (t + root) / (2.0 * t - 1.0)
+    p2 = (t - root) / (2.0 * t - 1.0)
+    candidates = [p for p in (p1, p2) if 0.0 < p < 1.0]
+    if not candidates:
+        return 0.25
+    return min(candidates, key=lambda x: abs(x - 0.25))
+
+
+def _generate_single_split(
+    df: pd.DataFrame,
+    scenario_id: str,
+    seed: int,
+    test_fraction: float,
+    scaffold_map: dict = None,
+    s4_restarts: int = DEFAULT_S4_RESTARTS,
+):
+    """Generate one train/test split (~90/10 by default) for a scenario."""
+    if test_fraction <= 0.0 or test_fraction >= 1.0:
+        raise ValueError("test_fraction must be in (0, 1)")
+
+    n_samples = len(df)
+    labels = df["label"].to_numpy()
+    rng = np.random.default_rng(seed)
+
+    # Scenarios with a single grouping dimension.
+    if scenario_id in ("random", "compound", "kinase", "scaffold"):
+        # Use 10 buckets for 10% test by default; robust for other fractions too.
+        n_buckets = max(2, int(round(1.0 / test_fraction)))
+        if scenario_id == "random":
+            fold_assignments = _assign_stratified_folds(labels, n_buckets, rng)
+        elif scenario_id == "compound":
+            fold_assignments = _assign_group_folds(df["chembl_id"].values, n_buckets, rng)
+        elif scenario_id == "kinase":
+            fold_assignments = _assign_group_folds(df["target_kinase"].values, n_buckets, rng)
+        else:
+            if scaffold_map is None:
+                raise ValueError("scaffold scenario requires scaffold_map")
+            scaffolds = df["chembl_id"].map(scaffold_map).fillna("UNKNOWN").values
+            fold_assignments = _assign_group_folds(scaffolds, n_buckets, rng)
+
+        best = None
+        best_loss = float("inf")
+        for fold_i in range(n_buckets):
+            test_idx = np.where(fold_assignments == fold_i)[0]
+            train_idx = np.where(fold_assignments != fold_i)[0]
+            if len(test_idx) < MIN_TEST_SAMPLES or len(train_idx) == 0:
+                continue
+            loss = _split_quality_loss(
+                y_train=labels[train_idx],
+                y_test=labels[test_idx],
+                test_fraction_achieved=len(test_idx) / n_samples,
+                target_test_fraction=test_fraction,
+            )
+            if loss < best_loss:
+                best_loss = loss
+                best = (train_idx, test_idx)
+
+        if best is None:
+            raise RuntimeError(f"Could not generate a valid single split for scenario={scenario_id}")
+
+        train_idx, test_idx = best
+        return {
+            "train_idx": train_idx,
+            "test_idx": test_idx,
+            "dropped_idx": np.array([], dtype=np.int64),
+            "test_fraction_used": float(len(test_idx) / max(len(train_idx) + len(test_idx), 1)),
+            "test_fraction_total": float(len(test_idx) / n_samples),
+        }
+
+    # Strict S4: test = compounds_in_test AND kinases_in_test
+    if scenario_id != "new_compound_new_kinase":
+        raise ValueError(f"Unknown scenario_id: {scenario_id}")
+
+    comp_codes, comp_uniques = pd.factorize(df["chembl_id"].astype(str), sort=False)
+    kin_codes, kin_uniques = pd.factorize(df["target_kinase"].astype(str), sort=False)
+
+    p0 = _target_s4_probability(test_fraction)
+    best = None
+    best_loss = float("inf")
+
+    for restart in range(max(1, s4_restarts)):
+        rrng = np.random.default_rng(seed + 7919 * restart)
+        p_comp = float(np.clip(p0 * rrng.uniform(0.8, 1.2), 0.05, 0.9))
+        p_kin = float(np.clip(p0 * rrng.uniform(0.8, 1.2), 0.05, 0.9))
+
+        comp_test = rrng.random(len(comp_uniques)) < p_comp
+        kin_test = rrng.random(len(kin_uniques)) < p_kin
+
+        row_comp_test = comp_test[comp_codes]
+        row_kin_test = kin_test[kin_codes]
+
+        test_mask = row_comp_test & row_kin_test
+        train_mask = (~row_comp_test) & (~row_kin_test)
+        dropped_mask = ~(test_mask | train_mask)
+
+        train_idx = np.where(train_mask)[0]
+        test_idx = np.where(test_mask)[0]
+        dropped_idx = np.where(dropped_mask)[0]
+
+        if len(test_idx) < MIN_TEST_SAMPLES or len(train_idx) == 0:
+            continue
+
+        used = len(train_idx) + len(test_idx)
+        test_frac_used = len(test_idx) / max(used, 1)
+        dropped_frac = len(dropped_idx) / n_samples
+        loss = _split_quality_loss(
+            y_train=labels[train_idx],
+            y_test=labels[test_idx],
+            test_fraction_achieved=test_frac_used,
+            target_test_fraction=test_fraction,
+            dropped_fraction=dropped_frac,
+        )
+
+        if loss < best_loss:
+            best_loss = loss
+            best = (train_idx, test_idx, dropped_idx, test_frac_used)
+
+    if best is None:
+        raise RuntimeError("Could not generate a valid strict S4 single split")
+
+    train_idx, test_idx, dropped_idx, test_frac_used = best
+    return {
+        "train_idx": train_idx,
+        "test_idx": test_idx,
+        "dropped_idx": dropped_idx,
+        "test_fraction_used": float(test_frac_used),
+        "test_fraction_total": float(len(test_idx) / n_samples),
+    }
 
 
 # =============================================================================
@@ -604,25 +888,49 @@ def run_comparison(
     n_folds: int = DEFAULT_N_FOLDS,
     scenarios: list = None,
     checkpoint_path: str = None,
-    force: bool = False
+    force: bool = False,
+    split_mode: str = DEFAULT_SPLIT_MODE,
+    test_fraction: float = DEFAULT_TEST_FRACTION,
+    save_models: bool = True,
+    save_knn_features: bool = False,
+    model_output_dir: str = None,
+    dataset_metadata: dict = None,
+    s4_restarts: int = DEFAULT_S4_RESTARTS,
 ):
-    """Run comparison across split scenarios with k-fold cross-validation.
+    """Run comparison across split scenarios.
 
-    Supports checkpoint/resume by scenario. If a checkpoint exists and matches
-    the current config, completed scenarios are skipped.
+    split_mode="single_90_10": one train/test split per scenario.
+    split_mode="kfold_cv": legacy k-fold protocol with train/val/test folds.
     """
 
-    if n_folds < 2:
-        raise ValueError("n_folds must be >= 2")
+    valid_modes = {"single_90_10", "kfold_cv"}
+    if split_mode not in valid_modes:
+        raise ValueError(f"Unknown split_mode={split_mode!r}. Valid options: {sorted(valid_modes)}")
+    if split_mode == "kfold_cv" and n_folds < 2:
+        raise ValueError("n_folds must be >= 2 when split_mode='kfold_cv'")
+    if split_mode == "single_90_10" and not (0.0 < test_fraction < 1.0):
+        raise ValueError("test_fraction must be in (0, 1) when split_mode='single_90_10'")
     if scenarios is None:
         scenarios = DEFAULT_SCENARIOS
+    if save_models and not model_output_dir:
+        model_output_dir = os.path.join(output_dir, "models")
+    if save_models and model_output_dir:
+        os.makedirs(model_output_dir, exist_ok=True)
 
     print("=" * 70)
     print("COMPARISON: RANDOM SPLIT VS CORRECT SPLIT")
     print("=" * 70)
     print(f"Model seed (fixed): {seed}")
-    print(f"k-folds: {n_folds}")
+    print(f"Split mode: {split_mode}")
+    if split_mode == "kfold_cv":
+        print(f"k-folds: {n_folds}")
+    else:
+        print(f"Single-split target: train={1.0-test_fraction:.0%}, test={test_fraction:.0%}")
+        print(f"S4 restarts: {s4_restarts}")
     print(f"Scenarios: {scenarios}")
+    print(f"Save models: {save_models}")
+    if save_models:
+        print(f"Model artifacts dir: {model_output_dir}")
 
     scenarios_config = [
         (s, ALL_SCENARIOS_CONFIG[s][0], ALL_SCENARIOS_CONFIG[s][1])
@@ -641,11 +949,18 @@ def run_comparison(
         checkpoint_data = read_json(checkpoint_path)
         if checkpoint_data and not force:
             cfg = checkpoint_data.get('config', {})
+            cfg_mode = cfg.get('split_mode', 'kfold_cv')
+            cfg_test_fraction = cfg.get('test_fraction', None)
             cfg_matches = (
                 cfg.get('seed') == seed and
-                cfg.get('n_folds') == n_folds and
+                cfg_mode == split_mode and
                 cfg.get('scenarios') == [s for s, _, _ in scenarios_config]
             )
+            if split_mode == "kfold_cv":
+                cfg_matches = cfg_matches and (cfg.get('n_folds') == n_folds)
+            else:
+                cfg_matches = cfg_matches and isinstance(cfg_test_fraction, (int, float)) \
+                    and abs(float(cfg_test_fraction) - float(test_fraction)) < 1e-12
             if cfg_matches:
                 all_results = checkpoint_data.get('all_results', {})
                 split_stats = checkpoint_data.get('split_stats', {})
@@ -685,18 +1000,50 @@ def run_comparison(
             print("  [checkpoint] Scenario already computed. Skipping recalculation.")
             continue
 
-        cv_folds = _generate_cv_folds(df, scenario_id, n_folds, seed, scaffold_map)
-        print(f"  Valid folds: {len(cv_folds)}/{n_folds}")
-
-        if not cv_folds:
-            print(f"  WARNING: No valid folds for scenario {scenario_id}. Skipping.")
-            continue
+        eval_rounds = []
+        if split_mode == "single_90_10":
+            split_payload = _generate_single_split(
+                df=df,
+                scenario_id=scenario_id,
+                seed=seed,
+                test_fraction=test_fraction,
+                scaffold_map=scaffold_map,
+                s4_restarts=s4_restarts,
+            )
+            train_idx = split_payload["train_idx"]
+            test_idx = split_payload["test_idx"]
+            dropped_idx = split_payload["dropped_idx"]
+            eval_rounds = [(
+                0,
+                train_idx,
+                np.array([], dtype=np.int64),
+                test_idx,
+                dropped_idx,
+                split_payload,
+            )]
+            print(
+                "  Single split ready: "
+                f"train={len(train_idx)}, test={len(test_idx)}, dropped={len(dropped_idx)}, "
+                f"test_used={split_payload['test_fraction_used']:.4f}, "
+                f"test_total={split_payload['test_fraction_total']:.4f}"
+            )
+        else:
+            cv_folds = _generate_cv_folds(df, scenario_id, n_folds, seed, scaffold_map)
+            print(f"  Valid folds: {len(cv_folds)}/{n_folds}")
+            eval_rounds = [
+                (fold_i, train_idx, val_idx, test_idx, np.array([], dtype=np.int64), None)
+                for (fold_i, train_idx, val_idx, test_idx) in cv_folds
+            ]
+            if not eval_rounds:
+                print(f"  WARNING: No valid folds for scenario {scenario_id}. Skipping.")
+                continue
 
         fold_results = {}
         fold_split_stats = []
 
-        for fold_pos, (fold_i, train_idx, val_idx, test_idx) in enumerate(cv_folds, 1):
-            print(f"\n  Fold {fold_pos}/{len(cv_folds)} (id={fold_i})")
+        for round_pos, (round_i, train_idx, val_idx, test_idx, dropped_idx, split_payload) in enumerate(eval_rounds, 1):
+            round_label = "Split" if split_mode == "single_90_10" else "Fold"
+            print(f"\n  {round_label} {round_pos}/{len(eval_rounds)} (id={round_i})")
 
             train_compounds = set(df.iloc[train_idx]['chembl_id'])
             test_compounds = set(df.iloc[test_idx]['chembl_id'])
@@ -706,10 +1053,16 @@ def run_comparison(
                 'train_size': len(train_idx),
                 'val_size': len(val_idx),
                 'test_size': len(test_idx),
+                'dropped_size': len(dropped_idx),
                 'test_compounds': len(test_compounds),
                 'leaked_compounds': len(leaked),
                 'leak_pct': 100 * len(leaked) / len(test_compounds) if test_compounds else 0
             }
+            if len(df) > 0:
+                stats['test_fraction_total'] = float(len(test_idx) / len(df))
+                stats['dropped_fraction_total'] = float(len(dropped_idx) / len(df))
+            used_rows = len(train_idx) + len(test_idx)
+            stats['test_fraction_used'] = float(len(test_idx) / used_rows) if used_rows > 0 else 0.0
             if scenario_id in ('kinase', 'new_compound_new_kinase'):
                 train_kinases = set(df.iloc[train_idx]['target_kinase'])
                 test_kinases_set = set(df.iloc[test_idx]['target_kinase'])
@@ -717,14 +1070,41 @@ def run_comparison(
                 stats['leaked_kinases'] = len(train_kinases & test_kinases_set)
             fold_split_stats.append(stats)
 
-            print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
+            print(f"  Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}, Dropped: {len(dropped_idx)}")
             print(f"  Test compounds: {len(test_compounds)}, Leaked: {len(leaked)} ({stats['leak_pct']:.1f}%)")
+            if split_payload is not None:
+                print(f"  Test fraction (used rows): {split_payload['test_fraction_used']:.4f}")
+                print(f"  Test fraction (all rows):  {split_payload['test_fraction_total']:.4f}")
             if 'leaked_kinases' in stats:
                 print(f"  Test kinases: {stats['test_kinases']}, Leaked kinases: {stats['leaked_kinases']}")
 
-            results = train_and_evaluate(df, train_idx, test_idx, seed=seed, fp_cache=fp_cache)
+            per_run_metadata = dict(dataset_metadata or {})
+            per_run_metadata.update({
+                "scenario_id": scenario_id,
+                "scenario_name": scenario_name,
+                "scenario_key": scenario_key,
+                "round_id": int(round_i),
+                "split_mode": split_mode,
+                "test_fraction_target": float(test_fraction),
+                "test_fraction_used": float(stats['test_fraction_used']),
+                "test_fraction_total": float(stats.get('test_fraction_total', 0.0)),
+            })
+            artifact_scenario_id = scenario_id if split_mode == "single_90_10" else f"{scenario_id}/fold_{round_i}"
+            results = train_and_evaluate(
+                df,
+                train_idx,
+                test_idx,
+                seed=seed,
+                fp_cache=fp_cache,
+                save_models=save_models,
+                model_output_dir=model_output_dir,
+                scenario_id=artifact_scenario_id,
+                dropped_idx=dropped_idx,
+                dataset_metadata=per_run_metadata,
+                save_knn_features=save_knn_features,
+            )
             if results is not None:
-                fold_results[fold_i] = {
+                fold_results[round_i] = {
                     'metrics': results
                 }
                 knn_auroc = f", AUROC={results['KNN']['auroc']:.4f}" if not np.isnan(results['KNN'].get('auroc', float('nan'))) else ""
@@ -736,7 +1116,12 @@ def run_comparison(
         if fold_results:
             # Aggregate split stats for plotting/summary
             agg_split = {}
-            for k in ['train_size', 'val_size', 'test_size', 'test_compounds', 'leaked_compounds', 'leak_pct', 'test_kinases', 'leaked_kinases']:
+            for k in [
+                'train_size', 'val_size', 'test_size', 'dropped_size',
+                'test_compounds', 'leaked_compounds', 'leak_pct',
+                'test_kinases', 'leaked_kinases',
+                'test_fraction_used', 'test_fraction_total', 'dropped_fraction_total',
+            ]:
                 vals = [s[k] for s in fold_split_stats if k in s]
                 if vals:
                     agg_split[k] = int(round(np.mean(vals))) if k.endswith('size') or 'compounds' in k or 'kinases' in k else float(np.mean(vals))
@@ -769,6 +1154,10 @@ def run_comparison(
                     }
                     model_agg['n_folds'] = len(fold_results)
                     aggregated[model] = model_agg
+                aggregated['_artifacts_by_round'] = {
+                    str(f_idx): f_data['metrics'].get('_artifacts', {})
+                    for f_idx, f_data in fold_results.items()
+                }
                 all_results[scenario_key] = aggregated
 
                 # Print aggregate summary
@@ -787,6 +1176,8 @@ def run_comparison(
                     'status': 'running',
                     'config': {
                         'seed': seed,
+                        'split_mode': split_mode,
+                        'test_fraction': float(test_fraction),
                         'n_folds': n_folds,
                         'scenarios': [s for s, _, _ in scenarios_config],
                         'split_protocol_version': SPLIT_PROTOCOL_VERSION,
@@ -805,6 +1196,8 @@ def run_comparison(
             'status': 'completed' if len(completed_scenarios) == len(scenarios_config) else 'partial',
             'config': {
                 'seed': seed,
+                'split_mode': split_mode,
+                'test_fraction': float(test_fraction),
                 'n_folds': n_folds,
                 'scenarios': [s for s, _, _ in scenarios_config],
                 'split_protocol_version': SPLIT_PROTOCOL_VERSION,
@@ -944,13 +1337,30 @@ def run_single_dataset(
     n_folds: int = DEFAULT_N_FOLDS,
     scenarios: list = None,
     keep_monotonic: bool = False,
-    filter_monotonic_compounds: bool = False
+    filter_monotonic_compounds: bool = False,
+    split_mode: str = DEFAULT_SPLIT_MODE,
+    test_fraction: float = DEFAULT_TEST_FRACTION,
+    input_path: str = None,
+    use_without_test_input: bool = True,
+    without_test_dir: str = "scaffolds_splits/output",
+    save_models: bool = True,
+    save_knn_features: bool = False,
+    model_output_dir: str = None,
+    s4_restarts: int = DEFAULT_S4_RESTARTS,
 ):
     """Run analysis for a single dataset type."""
-    data_path = DATASET_PATHS.get(dataset_type)
+    data_path = resolve_dataset_input_path(
+        dataset_type=dataset_type,
+        input_path=input_path,
+        use_without_test_input=use_without_test_input,
+        without_test_dir=without_test_dir,
+    )
     if not data_path:
         print(f"Error: Unknown dataset type '{dataset_type}'")
         return None
+
+    if model_output_dir is None:
+        model_output_dir = os.path.join(output_dir, "models")
 
     # Output is already dataset-scoped (e.g. .../non_human, .../human, .../all).
     # Keep filenames canonical without dataset prefix.
@@ -972,6 +1382,14 @@ def run_single_dataset(
     print(f"ANALYSIS: {dataset_type.upper()}")
     print("=" * 70)
     print(f"Output directory: {output_dir}")
+    print(f"Input path: {data_path}")
+    print(f"Split mode: {split_mode}")
+    if split_mode == "single_90_10":
+        print(f"Train/Test target: {1.0-test_fraction:.0%}/{test_fraction:.0%}")
+    else:
+        print(f"k-folds: {n_folds}")
+    print(f"Model artifacts directory: {model_output_dir}")
+    print(f"Save models: {save_models} (save_knn_features={save_knn_features})")
 
     if force:
         for ckpt in [leakage_checkpoint_file, comparison_checkpoint_file]:
@@ -998,14 +1416,25 @@ def run_single_dataset(
     print("GENERATING LEAKAGE DIAGNOSTICS (01-05)")
     print("-" * 50)
     leakage_artifacts = None
+    if split_mode == "single_90_10":
+        leakage_test_fraction = float(test_fraction)
+        leakage_val_fraction = 0.0
+    else:
+        leakage_test_fraction = 1.0 / n_folds
+        leakage_val_fraction = 1.0 / n_folds if n_folds > 2 else 0.0
+
     if not force:
         leakage_ckpt = read_json(leakage_checkpoint_file)
         if leakage_ckpt:
             cfg_matches = (
                 leakage_ckpt.get('dataset') == dataset_type and
                 leakage_ckpt.get('seed') == seed and
-                leakage_ckpt.get('n_folds') == n_folds
+                leakage_ckpt.get('split_mode', 'kfold_cv') == split_mode and
+                abs(float(leakage_ckpt.get('test_fraction', -1.0)) - leakage_test_fraction) < 1e-12 and
+                abs(float(leakage_ckpt.get('val_fraction', -1.0)) - leakage_val_fraction) < 1e-12
             )
+            if split_mode == "kfold_cv":
+                cfg_matches = cfg_matches and leakage_ckpt.get('n_folds') == n_folds
             cached_artifacts = leakage_ckpt.get('artifacts', {})
             missing = [
                 p for p in cached_artifacts.values()
@@ -1020,16 +1449,13 @@ def run_single_dataset(
                 print("[CHECKPOINT] Leakage checkpoint ignored (configuration mismatch).")
 
     if leakage_artifacts is None:
-        # CV protocol uses one fold for val and one for test
-        test_fraction = 1.0 / n_folds
-        val_fraction = 1.0 / n_folds if n_folds > 2 else 0.0
         leakage_artifacts = run_leakage_diagnostics(
             df=df,
             output_dir=output_dir,
             prefix=prefix,
             seed=seed,
-            test_fraction=test_fraction,
-            val_fraction=val_fraction,
+            test_fraction=leakage_test_fraction,
+            val_fraction=leakage_val_fraction,
             knn_k=5,
             similarity_sample_size=500
         )
@@ -1038,6 +1464,9 @@ def run_single_dataset(
             'dataset': dataset_type,
             'seed': seed,
             'n_folds': n_folds,
+            'split_mode': split_mode,
+            'test_fraction': leakage_test_fraction,
+            'val_fraction': leakage_val_fraction,
             'artifacts': leakage_artifacts
         })
         print(f"[CHECKPOINT] Leakage diagnostics saved: {leakage_checkpoint_file}")
@@ -1047,6 +1476,14 @@ def run_single_dataset(
             print(f"  [{artifact_key}] {artifact_path}")
 
     print("\n[3/4] Split comparison (06-07)")
+    dataset_metadata = {
+        "dataset_type": dataset_type,
+        "input_path": data_path,
+        "split_mode": split_mode,
+        "test_fraction_target": float(test_fraction),
+        "monotonic_kinase_filter": not keep_monotonic,
+        "monotonic_compound_filter": filter_monotonic_compounds,
+    }
     all_results, split_stats = run_comparison(
         df,
         output_dir,
@@ -1054,7 +1491,14 @@ def run_single_dataset(
         n_folds=n_folds,
         scenarios=scenarios,
         checkpoint_path=comparison_checkpoint_file,
-        force=force
+        force=force,
+        split_mode=split_mode,
+        test_fraction=test_fraction,
+        save_models=save_models,
+        save_knn_features=save_knn_features,
+        model_output_dir=model_output_dir,
+        dataset_metadata=dataset_metadata,
+        s4_restarts=s4_restarts,
     )
     if not all_results:
         print("  No results generated.")
@@ -1102,15 +1546,25 @@ def run_single_dataset(
                 scenario_json[model]['n_folds'] = m.get('n_folds', 1)
                 if 'fold_results' in m:
                     scenario_json[model]['fold_results'] = m['fold_results']
+        if '_artifacts' in all_results[scenario_key]:
+            scenario_json['_artifacts'] = all_results[scenario_key]['_artifacts']
+        if '_artifacts_by_round' in all_results[scenario_key]:
+            scenario_json['_artifacts_by_round'] = all_results[scenario_key]['_artifacts_by_round']
         json_results[scenario_key.replace('\n', ' ')] = scenario_json
 
     json_file = os.path.join(output_dir, f'{prefix}split_comparison_results.json')
     with open(json_file, 'w') as f:
         json.dump({
             'dataset': dataset_type,
+            'input_path': data_path,
+            'split_mode': split_mode,
+            'test_fraction': float(test_fraction),
             'split_protocol_version': SPLIT_PROTOCOL_VERSION,
             'model_seed': seed,
             'n_folds': n_folds,
+            'model_artifacts_dir': model_output_dir if save_models else None,
+            'save_models': save_models,
+            'save_knn_features': save_knn_features,
             'monotonic_kinase_filter': not keep_monotonic,
             'monotonic_compound_filter': filter_monotonic_compounds,
             'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
@@ -1322,7 +1776,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run single dataset with default scenarios (10-fold CV)
+  # Run single dataset with default scenarios (single 90/10 split per scenario)
   %(prog)s --dataset non_human
 
   # Run all datasets (non_human, human, all)
@@ -1331,8 +1785,11 @@ Examples:
   # Run specific scenarios only
   %(prog)s --dataset non_human --scenarios random,compound
 
-  # 5-fold CV (60/20/20 train/val/test)
+  # Legacy 5-fold CV mode (60/20/20 train/val/test)
   %(prog)s --dataset human --n_folds 5
+
+  # Explicit 90/10 split using without-test inputs and saved model artifacts
+  %(prog)s --dataset non_human --scenarios all --split_mode single_90_10 --test_fraction 0.10
 
   # Debug mode for detailed error traces
   %(prog)s --dataset all --debug
@@ -1369,17 +1826,60 @@ Available scenarios (Pahikkala et al. 2015 framework):
         help='Output directory for results (default: ./results/split_comparison_analysis)'
     )
     parser.add_argument(
+        '--input_path',
+        type=str,
+        default=None,
+        help='Optional explicit dataset TSV path. If provided, it overrides dataset defaults.'
+    )
+    parser.add_argument(
+        '--without_test_dir',
+        type=str,
+        default='scaffolds_splits/output',
+        help='Directory containing *_input_without_test.tsv files (default: scaffolds_splits/output)'
+    )
+    parser.add_argument(
+        '--use_without_test_input',
+        dest='use_without_test_input',
+        action='store_true',
+        default=True,
+        help='Prefer *_input_without_test.tsv for human/non_human datasets when available (default: enabled).'
+    )
+    parser.add_argument(
+        '--no_without_test_input',
+        dest='use_without_test_input',
+        action='store_false',
+        help='Disable automatic use of *_input_without_test.tsv and use default dataset paths.'
+    )
+    parser.add_argument(
         '--seed',
         type=int,
         default=DEFAULT_SPLIT_SEED,
         help=f'Fixed random seed for model + CV fold assignment (default: {DEFAULT_SPLIT_SEED})'
     )
     parser.add_argument(
+        '--split_mode',
+        choices=['single_90_10', 'kfold_cv'],
+        default=DEFAULT_SPLIT_MODE,
+        help=f"Split protocol to use (default: {DEFAULT_SPLIT_MODE})"
+    )
+    parser.add_argument(
+        '--test_fraction',
+        type=float,
+        default=DEFAULT_TEST_FRACTION,
+        help=f'Test fraction for single-split mode (default: {DEFAULT_TEST_FRACTION:.2f})'
+    )
+    parser.add_argument(
         '--n_folds',
         type=int,
         default=DEFAULT_N_FOLDS,
-        help=f'Number of CV folds (default: {DEFAULT_N_FOLDS}). '
+        help=f'Number of CV folds for split_mode=kfold_cv (default: {DEFAULT_N_FOLDS}). '
              'k=10 gives 80/10/10 train/val/test, k=5 gives 60/20/20.'
+    )
+    parser.add_argument(
+        '--s4_restarts',
+        type=int,
+        default=DEFAULT_S4_RESTARTS,
+        help=f'Number of random restarts used to optimize strict S4 single-split quality (default: {DEFAULT_S4_RESTARTS}).'
     )
     parser.add_argument(
         '--keep_monotonic',
@@ -1399,6 +1899,30 @@ Available scenarios (Pahikkala et al. 2015 framework):
         help='Force recalculation even if results exist'
     )
     parser.add_argument(
+        '--save_models',
+        dest='save_models',
+        action='store_true',
+        default=True,
+        help='Persist model/scaler/split artifacts for each scenario (default: enabled).'
+    )
+    parser.add_argument(
+        '--no_save_models',
+        dest='save_models',
+        action='store_false',
+        help='Disable model artifact persistence.'
+    )
+    parser.add_argument(
+        '--model_output_dir',
+        type=str,
+        default=None,
+        help='Base directory for model artifacts. Default: <output_dir>/<dataset>/models'
+    )
+    parser.add_argument(
+        '--save_knn_features',
+        action='store_true',
+        help='Also save scaled KNN training feature matrices (larger artifacts).'
+    )
+    parser.add_argument(
         '--debug',
         action='store_true',
         help='Enable debug mode with full error tracebacks'
@@ -1408,8 +1932,14 @@ Available scenarios (Pahikkala et al. 2015 framework):
 
     if not args.run_all and args.dataset is None:
         parser.error("--dataset is required unless --run_all is specified")
-    if args.n_folds < 2:
-        parser.error("--n_folds must be >= 2")
+    if args.run_all and args.input_path:
+        parser.error("--input_path cannot be used with --run_all (it applies to a single dataset only)")
+    if args.split_mode == 'kfold_cv' and args.n_folds < 2:
+        parser.error("--n_folds must be >= 2 when --split_mode kfold_cv")
+    if args.split_mode == 'single_90_10' and not (0.0 < args.test_fraction < 1.0):
+        parser.error("--test_fraction must be in (0, 1) when --split_mode single_90_10")
+    if args.s4_restarts < 1:
+        parser.error("--s4_restarts must be >= 1")
 
     if args.scenarios:
         if args.scenarios.strip().lower() == 'all':
@@ -1432,17 +1962,30 @@ Available scenarios (Pahikkala et al. 2015 framework):
     print("=" * 70)
     print("SPLIT COMPARISON ANALYSIS (KNN/MLP)")
     print("=" * 70)
-    # With k folds: train = (k-2)/k, val = 1/k, test = 1/k
-    train_pct = (args.n_folds - 2) / args.n_folds
-    val_pct = 1.0 / args.n_folds
-    test_pct = 1.0 / args.n_folds
     print(f"Datasets:         {datasets_to_run}")
     print(f"Scenarios:        {scenarios}")
     print(f"Output root dir:  {args.output_dir}")
     print(f"Split protocol:   {SPLIT_PROTOCOL_VERSION}")
+    print(f"Split mode:       {args.split_mode}")
     print(f"Model seed:       {args.seed} (fixed)")
-    print(f"k-folds:          {args.n_folds}")
-    print(f"Split ratio:      {train_pct:.0%}/{val_pct:.0%}/{test_pct:.0%} (train/val/test)")
+    if args.split_mode == "kfold_cv":
+        train_pct = (args.n_folds - 2) / args.n_folds
+        val_pct = 1.0 / args.n_folds
+        test_pct = 1.0 / args.n_folds
+        print(f"k-folds:          {args.n_folds}")
+        print(f"Split ratio:      {train_pct:.0%}/{val_pct:.0%}/{test_pct:.0%} (train/val/test)")
+    else:
+        train_pct = 1.0 - args.test_fraction
+        print(f"Split ratio:      {train_pct:.0%}/{args.test_fraction:.0%} (train/test)")
+        print(f"S4 restarts:      {args.s4_restarts}")
+    print(f"Without-test input: {args.use_without_test_input} (dir={args.without_test_dir})")
+    if args.input_path:
+        print(f"Input override:   {args.input_path}")
+    print(f"Save models:      {args.save_models}")
+    if args.save_models:
+        model_root = args.model_output_dir if args.model_output_dir else "<dataset_output_dir>/models"
+        print(f"Model output dir: {model_root}")
+    print(f"Save KNN feats:   {args.save_knn_features}")
     mono_kin_status = 'OFF (keeping all)' if args.keep_monotonic else 'ON (removing 100% single-class kinases)'
     mono_cmp_status = 'ON (removing pan-active/pan-inactive)' if args.filter_monotonic_compounds else 'OFF (keeping all)'
     print(f"Monotonic kinase filter:   {mono_kin_status}")
@@ -1462,7 +2005,12 @@ Available scenarios (Pahikkala et al. 2015 framework):
         print(f"{'#' * 70}")
         dataset_output_dir = os.path.join(args.output_dir, dataset_type)
         dataset_output_dirs[dataset_type] = dataset_output_dir
+        if args.model_output_dir:
+            dataset_model_output_dir = os.path.join(args.model_output_dir, dataset_type)
+        else:
+            dataset_model_output_dir = os.path.join(dataset_output_dir, "models")
         print(f"# Output: {dataset_output_dir}")
+        print(f"# Model artifacts: {dataset_model_output_dir}")
 
         dataset_start_time = time.time()
         try:
@@ -1472,7 +2020,16 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 n_folds=args.n_folds,
                 scenarios=scenarios,
                 keep_monotonic=args.keep_monotonic,
-                filter_monotonic_compounds=args.filter_monotonic_compounds
+                filter_monotonic_compounds=args.filter_monotonic_compounds,
+                split_mode=args.split_mode,
+                test_fraction=args.test_fraction,
+                input_path=args.input_path if not args.run_all else None,
+                use_without_test_input=args.use_without_test_input,
+                without_test_dir=args.without_test_dir,
+                save_models=args.save_models,
+                save_knn_features=args.save_knn_features,
+                model_output_dir=dataset_model_output_dir,
+                s4_restarts=args.s4_restarts,
             )
             dataset_time = time.time() - dataset_start_time
             all_dataset_times[dataset_type] = dataset_time
