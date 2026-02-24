@@ -249,6 +249,7 @@ python crossattention_split_analysis_main.py \
 - If MCC stalls, increase `--diffusion_pool_queries` (e.g., 8) or `--diffusion_cross_attn_layers`.
 - Increasing `--diffusion_steps` improves denoising but adds computation.
 - Use `--molformer_ligand` if only MoLFormer matrices are available.
+- For a deeper theoretical comparison of diffusion vs CNN cross-attention in highly similar datasets, see `docs/DIFFUSION_VS_CNN.md`.
 
 ## Limitations (Current)
 
