@@ -105,6 +105,62 @@ This allows the model to learn **which tokens matter most** without discarding t
 Key file:
 - `src/classifier/models/diffusion_model.py`
 
+## Why ~3.9M Parameters? (Didactic Breakdown)
+
+The diffusion model includes a **Transformer denoiser**, which dominates the parameter count. A rough breakdown for the default config is:
+
+- **Hidden dim**: `d = 256`
+- **FF dim**: `ff = 1024`
+- **Layers**: `L = 4`
+
+### 1) Transformer Encoder (per layer)
+
+Each layer has:
+
+**Multi-Head Attention**
+
+- Q/K/V projections: `3 * d * d`
+- Output projection: `1 * d * d`
+
+Total: `4 * d^2 = 4 * 256^2 = 262,144`
+
+**Feed-Forward (MLP)**
+
+- First linear: `d * ff = 256 * 1024 = 262,144`
+- Second linear: `ff * d = 1024 * 256 = 262,144`
+
+Total: `2 * d * ff = 524,288`
+
+**LayerNorm + biases** are small compared to the above.
+
+**Per-layer total (approx):**  
+`262,144 + 524,288 = 786,432` params
+
+**All layers (L=4):**  
+`~ 3.15M` params
+
+### 2) Projections (protein + ligand)
+
+- Protein projection: `320 -> 256` → `320 * 256 + 256 ≈ 82k`
+- Ligand projection: `768 -> 256` → `768 * 256 + 256 ≈ 197k`
+
+**Total:** `~279k`
+
+### 3) Attention Pooling + Multi-Task Head
+
+- Attention pool (per modality): ~`256 * 256` each
+- Multi-task head (two-layer MLPs): ~`200k+`
+
+### Total (expected)
+
+Summing these pieces gives **~3.5M–4.0M**, which matches the observed log value:
+
+```
+Model parameters: 3,885,570
+```
+
+So the parameter count is expected and mainly comes from the diffusion denoiser.
+
 ## CLI Usage
 
 ### Example: Non-human dataset with 8M ESM-2 and MoLFormer ligand matrices
