@@ -15,6 +15,33 @@ This is especially useful when you suspect important signal is distributed acros
 
 We treat each embedding matrix as a sequence of tokens and apply a **denoising diffusion model (DDPM-style)** to it. During training, we add noise at a random timestep and train a denoiser to predict the noise. The denoised matrix is then used for classification. The current implementation adds **lightweight cross-attention** after denoising to explicitly model protein–ligand interaction.
 
+## Didactic Flow (What Happens First, Step by Step)
+
+The protein and ligand matrices are **not concatenated at the input**. They are processed **separately** through diffusion, then **interacted** via cross-attention, and **only at the very end** their pooled vectors are concatenated for classification.
+
+```
+Protein matrix P (Lp x Dp)                     Ligand matrix L (Ll x Dl)
+         |                                            |
+  Linear + LayerNorm                           Linear + LayerNorm
+         |                                            |
+ + Positional Encoding (scaled)              + Positional Encoding (scaled)
+         |                                            |
+   Add noise (diffusion step)                Add noise (diffusion step)
+         |                                            |
+  Denoiser (Transformer)                    Denoiser (Transformer)
+         |                                            |
+  Reconstruct x0_hat                         Reconstruct x0_hat
+         |                                            |
+         +----------- Cross-Attention --------------+
+                     (protein ↔ ligand)
+         |                                            |
+  Multi‑Query Pooling                         Multi‑Query Pooling
+         |                                            |
+          \_________________ concat __________________/
+                            |
+                    Classification head
+```
+
 ### Data Flow (Visual)
 
 ```
