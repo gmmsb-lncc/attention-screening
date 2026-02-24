@@ -344,6 +344,8 @@ def create_matrix_dataloader(
     shuffle: bool = True,
     num_workers: int = 0,
     pin_memory: bool = True,
+    prefetch_factor: int = 2,
+    persistent_workers: bool = False,
     **dataset_kwargs
 ) -> DataLoader:
     """
@@ -369,14 +371,18 @@ def create_matrix_dataloader(
         **dataset_kwargs
     )
     
-    return DataLoader(
-        dataset,
+    dataloader_kwargs = dict(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=pin_memory,
         collate_fn=collate_matrix_batch
     )
+    if num_workers > 0:
+        dataloader_kwargs["prefetch_factor"] = prefetch_factor
+        dataloader_kwargs["persistent_workers"] = persistent_workers
+
+    return DataLoader(dataset, **dataloader_kwargs)
 
 
 class VectorEmbeddingDataset(Dataset):
