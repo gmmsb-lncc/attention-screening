@@ -272,10 +272,24 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--diffusion_cross_attn_layers',
+        type=int,
+        default=1,
+        help='Number of cross-attention blocks after diffusion (default: 1)'
+    )
+
+    parser.add_argument(
         '--diffusion_loss_weight',
         type=float,
         default=0.1,
         help='Weight for diffusion auxiliary loss (default: 0.1)'
+    )
+
+    parser.add_argument(
+        '--diffusion_loss_anneal',
+        choices=['none', 'linear'],
+        default='none',
+        help='Anneal diffusion loss weight over epochs (default: none)'
     )
 
     parser.add_argument(
@@ -304,6 +318,12 @@ Available scenarios:
         type=float,
         default=0.5,
         help='Regression loss weight beta (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--classification_only',
+        action='store_true',
+        help='Train only classification loss (sets regression_weight=0)'
     )
 
     parser.add_argument(
@@ -375,6 +395,9 @@ Available scenarios:
 
     args = parser.parse_args()
 
+    if args.classification_only:
+        args.regression_weight = 0.0
+
     # Validate arguments
     if not args.run_all and args.embedding is None:
         parser.error("--embedding is required unless --run_all is specified")
@@ -437,7 +460,9 @@ Available scenarios:
         print(f"  Diffusion steps:{args.diffusion_steps}")
         print(f"  Diff beta:      {args.diffusion_beta_start} -> {args.diffusion_beta_end}")
         print(f"  Diff layers:    {args.diffusion_layers}")
+        print(f"  Diff XAttn:     {args.diffusion_cross_attn_layers}")
         print(f"  Diff loss wt:   {args.diffusion_loss_weight}")
+        print(f"  Diff anneal:    {args.diffusion_loss_anneal}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
@@ -491,7 +516,9 @@ Available scenarios:
                 diffusion_beta_start=args.diffusion_beta_start,
                 diffusion_beta_end=args.diffusion_beta_end,
                 diffusion_layers=args.diffusion_layers,
+                diffusion_cross_attn_layers=args.diffusion_cross_attn_layers,
                 diffusion_loss_weight=args.diffusion_loss_weight,
+                diffusion_loss_anneal=args.diffusion_loss_anneal,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,

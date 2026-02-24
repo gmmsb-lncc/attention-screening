@@ -279,6 +279,7 @@ def run_scenario(
             ligand_dim=config.ligand_dim,
             hidden_dim=config.hidden_dim,
             num_diffusion_layers=config.diffusion_layers,
+            num_cross_attn_layers=config.diffusion_cross_attn_layers,
             num_heads=config.num_heads,
             ff_dim=config.ff_dim,
             dropout=config.dropout,
@@ -673,7 +674,9 @@ def run_single_analysis(
     diffusion_beta_start: float = 1e-4,
     diffusion_beta_end: float = 0.02,
     diffusion_layers: int = 4,
+    diffusion_cross_attn_layers: int = 1,
     diffusion_loss_weight: float = 0.1,
+    diffusion_loss_anneal: str = "none",
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
     regression_weight: float = 0.5,
@@ -711,7 +714,9 @@ def run_single_analysis(
         diffusion_beta_start: Diffusion beta start value
         diffusion_beta_end: Diffusion beta end value
         diffusion_layers: Number of diffusion denoiser layers
+        diffusion_cross_attn_layers: Number of cross-attention blocks after diffusion
         diffusion_loss_weight: Weight for diffusion auxiliary loss
+        diffusion_loss_anneal: Anneal schedule for diffusion loss weight
         max_grad_norm: Gradient clipping max norm
         classification_weight: Weight for classification loss term
         regression_weight: Weight for regression loss term
@@ -814,7 +819,9 @@ def run_single_analysis(
         diffusion_beta_start=diffusion_beta_start,
         diffusion_beta_end=diffusion_beta_end,
         diffusion_layers=diffusion_layers,
+        diffusion_cross_attn_layers=diffusion_cross_attn_layers,
         diffusion_loss_weight=diffusion_loss_weight,
+        diffusion_loss_anneal=diffusion_loss_anneal,
         model_variant=model_variant,
         num_epochs=num_epochs,
         patience=patience,
