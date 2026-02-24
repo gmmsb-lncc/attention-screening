@@ -177,6 +177,7 @@ class DiffusionAffinityModel(BaseClassifier):
         diffusion_loss_weight: float = 0.1,
         snr_sampling_gamma: float = 0.5,
         snr_sampling_mix: float = 0.2,
+        joint_denoise: bool = False,
         classification_only: bool = False,
     ):
         super().__init__(input_dim=hidden_dim * 2)
@@ -186,6 +187,7 @@ class DiffusionAffinityModel(BaseClassifier):
         self.classification_only = classification_only
         self.snr_sampling_gamma = snr_sampling_gamma
         self.snr_sampling_mix = snr_sampling_mix
+        self.joint_denoise = joint_denoise
 
         self.protein_proj = nn.Linear(protein_dim, hidden_dim)
         self.ligand_proj = nn.Linear(ligand_dim, hidden_dim)
@@ -194,22 +196,35 @@ class DiffusionAffinityModel(BaseClassifier):
         self.pos_scale_protein = nn.Parameter(torch.tensor(1.0))
         self.pos_scale_ligand = nn.Parameter(torch.tensor(1.0))
 
-        self.protein_denoiser = DiffusionDenoiser(
-            hidden_dim=hidden_dim,
-            num_layers=num_diffusion_layers,
-            num_heads=num_heads,
-            ff_dim=ff_dim,
-            dropout=dropout,
-            num_timesteps=diffusion_steps,
-        )
-        self.ligand_denoiser = DiffusionDenoiser(
-            hidden_dim=hidden_dim,
-            num_layers=num_diffusion_layers,
-            num_heads=num_heads,
-            ff_dim=ff_dim,
-            dropout=dropout,
-            num_timesteps=diffusion_steps,
-        )
+        if joint_denoise:
+            self.joint_denoiser = DiffusionDenoiser(
+                hidden_dim=hidden_dim,
+                num_layers=num_diffusion_layers,
+                num_heads=num_heads,
+                ff_dim=ff_dim,
+                dropout=dropout,
+                num_timesteps=diffusion_steps,
+            )
+            self.protein_denoiser = None
+            self.ligand_denoiser = None
+        else:
+            self.protein_denoiser = DiffusionDenoiser(
+                hidden_dim=hidden_dim,
+                num_layers=num_diffusion_layers,
+                num_heads=num_heads,
+                ff_dim=ff_dim,
+                dropout=dropout,
+                num_timesteps=diffusion_steps,
+            )
+            self.ligand_denoiser = DiffusionDenoiser(
+                hidden_dim=hidden_dim,
+                num_layers=num_diffusion_layers,
+                num_heads=num_heads,
+                ff_dim=ff_dim,
+                dropout=dropout,
+                num_timesteps=diffusion_steps,
+            )
+            self.joint_denoiser = None
 
         self.protein_pool = AttentionPool(hidden_dim, num_queries=pool_num_queries)
         self.ligand_pool = AttentionPool(hidden_dim, num_queries=pool_num_queries)
@@ -263,6 +278,17 @@ class DiffusionAffinityModel(BaseClassifier):
         return torch.log1p(snr).clamp(max=10.0)
 
     @staticmethod
+    def _ensure_mask(
+        mask: Optional[torch.Tensor],
+        batch_size: int,
+        length: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if mask is None:
+            return torch.ones(batch_size, length, device=device, dtype=torch.bool)
+        return mask.bool()
+
+    @staticmethod
     def _masked_mse(
         pred: torch.Tensor,
         target: torch.Tensor,
@@ -308,26 +334,59 @@ class DiffusionAffinityModel(BaseClassifier):
                 num_samples=batch_size,
                 replacement=True,
             ).to(device)
-            noise_p = torch.randn_like(protein)
-            noise_l = torch.randn_like(ligand)
-            protein_t = self._q_sample(protein, timesteps, noise_p)
-            ligand_t = self._q_sample(ligand, timesteps, noise_l)
-
-            eps_p = self.protein_denoiser(protein_t, protein_mask, timesteps)
-            eps_l = self.ligand_denoiser(ligand_t, ligand_mask, timesteps)
-
             snr_weight = self._snr_weight(timesteps)
-            diffusion_loss = self._masked_mse(eps_p, noise_p, protein_mask, snr_weight)
-            diffusion_loss = diffusion_loss + self._masked_mse(eps_l, noise_l, ligand_mask, snr_weight)
+            if self.joint_denoise:
+                concat = torch.cat([protein, ligand], dim=1)
+                protein_len = protein.size(1)
+                ligand_len = ligand.size(1)
+                mask_p = self._ensure_mask(protein_mask, batch_size, protein_len, device)
+                mask_l = self._ensure_mask(ligand_mask, batch_size, ligand_len, device)
+                concat_mask = torch.cat([mask_p, mask_l], dim=1)
 
-            protein_hat = self._predict_x0(protein_t, timesteps, eps_p)
-            ligand_hat = self._predict_x0(ligand_t, timesteps, eps_l)
+                noise = torch.randn_like(concat)
+                concat_t = self._q_sample(concat, timesteps, noise)
+                eps = self.joint_denoiser(concat_t, concat_mask, timesteps)
+                diffusion_loss = self._masked_mse(eps, noise, concat_mask, snr_weight)
+
+                protein_t = concat_t[:, :protein_len]
+                ligand_t = concat_t[:, protein_len:]
+                eps_p = eps[:, :protein_len]
+                eps_l = eps[:, protein_len:]
+                protein_hat = self._predict_x0(protein_t, timesteps, eps_p)
+                ligand_hat = self._predict_x0(ligand_t, timesteps, eps_l)
+            else:
+                noise_p = torch.randn_like(protein)
+                noise_l = torch.randn_like(ligand)
+                protein_t = self._q_sample(protein, timesteps, noise_p)
+                ligand_t = self._q_sample(ligand, timesteps, noise_l)
+
+                eps_p = self.protein_denoiser(protein_t, protein_mask, timesteps)
+                eps_l = self.ligand_denoiser(ligand_t, ligand_mask, timesteps)
+
+                diffusion_loss = self._masked_mse(eps_p, noise_p, protein_mask, snr_weight)
+                diffusion_loss = diffusion_loss + self._masked_mse(eps_l, noise_l, ligand_mask, snr_weight)
+
+                protein_hat = self._predict_x0(protein_t, timesteps, eps_p)
+                ligand_hat = self._predict_x0(ligand_t, timesteps, eps_l)
         else:
             timesteps = torch.zeros(batch_size, dtype=torch.long, device=device)
-            eps_p = self.protein_denoiser(protein, protein_mask, timesteps)
-            eps_l = self.ligand_denoiser(ligand, ligand_mask, timesteps)
-            protein_hat = self._predict_x0(protein, timesteps, eps_p)
-            ligand_hat = self._predict_x0(ligand, timesteps, eps_l)
+            if self.joint_denoise:
+                concat = torch.cat([protein, ligand], dim=1)
+                protein_len = protein.size(1)
+                ligand_len = ligand.size(1)
+                mask_p = self._ensure_mask(protein_mask, batch_size, protein_len, device)
+                mask_l = self._ensure_mask(ligand_mask, batch_size, ligand_len, device)
+                concat_mask = torch.cat([mask_p, mask_l], dim=1)
+                eps = self.joint_denoiser(concat, concat_mask, timesteps)
+                eps_p = eps[:, :protein_len]
+                eps_l = eps[:, protein_len:]
+                protein_hat = self._predict_x0(protein, timesteps, eps_p)
+                ligand_hat = self._predict_x0(ligand, timesteps, eps_l)
+            else:
+                eps_p = self.protein_denoiser(protein, protein_mask, timesteps)
+                eps_l = self.ligand_denoiser(ligand, ligand_mask, timesteps)
+                protein_hat = self._predict_x0(protein, timesteps, eps_p)
+                ligand_hat = self._predict_x0(ligand, timesteps, eps_l)
             diffusion_loss = None
 
         for block in self.cross_attn_blocks:
@@ -371,9 +430,10 @@ class DiffusionAffinityModel(BaseClassifier):
             "diffusion_steps": self.diffusion_steps,
             "diffusion_loss_weight": self.diffusion_loss_weight,
             "diffusion_cross_attn_layers": len(self.cross_attn_blocks),
-            "separate_denoisers": True,
+            "separate_denoisers": not self.joint_denoise,
             "positional_encoding": "sinusoidal",
             "classification_only": self.classification_only,
             "snr_sampling_gamma": self.snr_sampling_gamma,
             "snr_sampling_mix": self.snr_sampling_mix,
+            "joint_denoise": self.joint_denoise,
         }

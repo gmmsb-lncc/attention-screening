@@ -308,6 +308,7 @@ def run_scenario(
             diffusion_loss_weight=config.diffusion_loss_weight,
             snr_sampling_gamma=config.diffusion_snr_sampling_gamma,
             snr_sampling_mix=config.diffusion_snr_sampling_mix,
+            joint_denoise=config.diffusion_joint_denoise,
             classification_only=config.classification_only,
         )
     else:
@@ -703,6 +704,7 @@ def run_single_analysis(
     diffusion_pool_queries: int = 4,
     diffusion_snr_sampling_gamma: float = 0.5,
     diffusion_snr_sampling_mix: float = 0.2,
+    diffusion_joint_denoise: bool = False,
     dataloader_num_workers: int = 0,
     dataloader_cache_in_memory: bool = False,
     dataloader_pin_memory: bool = True,
@@ -752,6 +754,7 @@ def run_single_analysis(
         diffusion_pool_queries: Number of attention pooling queries per modality
         diffusion_snr_sampling_gamma: Exponent for SNR-based timestep sampling
         diffusion_snr_sampling_mix: Mix ratio with uniform sampling (0-1)
+        diffusion_joint_denoise: Joint denoising over concatenated protein+ligand tokens
         dataloader_num_workers: DataLoader worker processes
         dataloader_cache_in_memory: Cache matrices in RAM
         dataloader_pin_memory: Enable pinned memory
@@ -874,6 +877,7 @@ def run_single_analysis(
         diffusion_pool_queries=diffusion_pool_queries,
         diffusion_snr_sampling_gamma=diffusion_snr_sampling_gamma,
         diffusion_snr_sampling_mix=diffusion_snr_sampling_mix,
+        diffusion_joint_denoise=diffusion_joint_denoise,
         dataloader_num_workers=dataloader_num_workers,
         dataloader_cache_in_memory=dataloader_cache_in_memory,
         dataloader_pin_memory=dataloader_pin_memory,

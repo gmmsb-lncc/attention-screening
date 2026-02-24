@@ -164,6 +164,7 @@ This allows the model to learn **multiple token‑level focuses** without discar
 - **Auxiliary loss**: SNR‑weighted diffusion MSE loss, added only during training. The sampling bias and weight strength can be tuned with `--diffusion_snr_sampling_gamma` and `--diffusion_snr_sampling_mix`.
 - **Cross‑attention**: lightweight protein↔ligand block(s) after denoising (`--diffusion_cross_attn_layers`).
 - **Classification-only mode**: optional regressor removal for pure classification (`--classification_only`).
+- **Joint denoising (optional)**: denoise concatenated protein+ligand tokens with a shared denoiser (`--diffusion_joint_denoise`). Default remains separate denoisers.
 - **Compatible with existing split analysis pipeline.**
 
 Key file:
@@ -252,6 +253,7 @@ python crossattention_split_analysis_main.py \
   --diffusion_pool_queries 4 \
   --diffusion_snr_sampling_gamma 0.5 \
   --diffusion_snr_sampling_mix 0.2 \
+  --diffusion_joint_denoise \
   --diffusion_loss_weight 0.05 \
   --diffusion_loss_anneal linear \
   --classification_only \
