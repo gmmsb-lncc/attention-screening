@@ -580,6 +580,10 @@ class CrossAttentionAffinityModel(BaseClassifier):
                 hidden_dim=hidden_dim,
                 dropout=dropout
             )
+
+        # Post-encoder normalization for consistent scaling across model variants
+        self.protein_norm = nn.LayerNorm(hidden_dim)
+        self.ligand_norm = nn.LayerNorm(hidden_dim)
         
         # Cross-attention blocks
         self.cross_attn_blocks = nn.ModuleList([
@@ -621,6 +625,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
             [batch, protein_len, hidden_dim]
         """
         x = self.protein_encoder(protein_matrix, protein_mask)
+        x = self.protein_norm(x)
         if self.use_positional_encoding:
             x = self.protein_pos_enc(x)
         return x
@@ -640,6 +645,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
             [batch, ligand_len, hidden_dim]
         """
         x = self.ligand_encoder(ligand_matrix, ligand_mask)
+        x = self.ligand_norm(x)
         if self.use_positional_encoding:
             x = self.ligand_pos_enc(x)
         return x
