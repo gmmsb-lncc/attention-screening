@@ -293,6 +293,13 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--diffusion_pool_queries',
+        type=int,
+        default=4,
+        help='Number of attention pooling queries per modality (default: 4)'
+    )
+
+    parser.add_argument(
         '--dropout',
         type=float,
         default=0.1,
@@ -463,6 +470,7 @@ Available scenarios:
         print(f"  Diff XAttn:     {args.diffusion_cross_attn_layers}")
         print(f"  Diff loss wt:   {args.diffusion_loss_weight}")
         print(f"  Diff anneal:    {args.diffusion_loss_anneal}")
+        print(f"  Diff pool q:    {args.diffusion_pool_queries}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
@@ -519,6 +527,7 @@ Available scenarios:
                 diffusion_cross_attn_layers=args.diffusion_cross_attn_layers,
                 diffusion_loss_weight=args.diffusion_loss_weight,
                 diffusion_loss_anneal=args.diffusion_loss_anneal,
+                diffusion_pool_queries=args.diffusion_pool_queries,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
