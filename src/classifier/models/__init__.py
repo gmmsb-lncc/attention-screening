@@ -4,9 +4,12 @@
 from .mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
 from .cross_attention_model import (
     CrossAttentionAffinityModel,
+    CrossAttentionLiteAffinityModel,
     MultiTaskLoss,
     create_cross_attention_model,
+    create_cross_attention_lite_model,
     CNNEncoder,
+    LinearEncoder,
     CrossAttention,
     CrossAttentionBlock
 )
@@ -43,9 +46,12 @@ __all__ = [
     "create_mlp_model",
     # Cross-Attention models
     "CrossAttentionAffinityModel",
+    "CrossAttentionLiteAffinityModel",
     "MultiTaskLoss",
     "create_cross_attention_model",
+    "create_cross_attention_lite_model",
     "CNNEncoder",
+    "LinearEncoder",
     "CrossAttention",
     "CrossAttentionBlock",
     # CNN building blocks (modular)
