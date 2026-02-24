@@ -202,6 +202,7 @@ def run_scenario(
     checkpoint_path: Optional[str] = None,
     use_attention: bool = False,
     use_ligand_vectors: bool = False,
+    external_test_df: Optional[pd.DataFrame] = None,
     evaluation_split: str = "test",
 ) -> Dict:
     """
@@ -219,6 +220,7 @@ def run_scenario(
         checkpoint_path: Path for checkpointing
         use_attention: Use attention matrices instead of embeddings
         use_ligand_vectors: Use ligand vectors instead of per-token matrices
+        external_test_df: Optional external test DataFrame (never used for training)
         evaluation_split: Which split to evaluate after training ("test" or "val")
 
     Returns:
@@ -419,6 +421,55 @@ def run_scenario(
         f"Threshold={test_metrics['decision_threshold']:.4f}"
     )
 
+    # Optional external test evaluation (never used for threshold calibration)
+    if external_test_df is not None and len(external_test_df) > 0:
+        print("  Evaluating on external test set...")
+        if use_attention:
+            external_loader = create_attention_dataloader(
+                external_test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
+        else:
+            external_loader = create_matrix_dataloader(
+                external_test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                ligand_vector_dir=ligand_vector_dirs if use_ligand_vectors else None,
+                batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                pin_memory=config.dataloader_pin_memory,
+                prefetch_factor=config.dataloader_prefetch_factor,
+                persistent_workers=config.dataloader_persistent_workers,
+                cache_in_memory=config.dataloader_cache_in_memory,
+                use_ligand_matrices=not use_ligand_vectors,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
+
+        external_result = evaluate(
+            model,
+            external_loader,
+            device,
+            raise_on_invalid=False,
+            decision_threshold=decision_threshold,
+        )
+
+        if not external_result.is_valid:
+            raise EvaluationError(
+                f"External test evaluation failed: {external_result.failure_reason}"
+            )
+
+        ext_metrics = external_result.metrics
+        test_metrics['external_accuracy'] = ext_metrics['accuracy']
+        test_metrics['external_mcc'] = ext_metrics['mcc']
+        test_metrics['external_auc'] = ext_metrics['auc']
+        test_metrics['external_loss'] = ext_metrics['loss']
+        test_metrics['external_evaluation_split'] = "external_test"
+        print(
+            f"  Results (external): Acc={ext_metrics['accuracy']:.4f}, "
+            f"MCC={ext_metrics['mcc']:.4f}, AUC={ext_metrics['auc']:.4f}, "
+            f"Loss={ext_metrics['loss']:.4f}"
+        )
+
     return test_metrics
 
 
@@ -554,6 +605,25 @@ def run_crossattention_analysis(
         print(f"ERROR: {exc}")
         return None, None
 
+    external_test_df = None
+    if external_test_mode:
+        test_path = os.path.join(scaffold_split_dir, f"{dataset_type}_test.tsv.gz")
+        if dataset_type == "all":
+            h_path = os.path.join(scaffold_split_dir, "human_test.tsv.gz")
+            n_path = os.path.join(scaffold_split_dir, "non_human_test.tsv.gz")
+            frames = []
+            for path, source in ((h_path, "human"), (n_path, "non_human")):
+                if os.path.exists(path):
+                    df = pd.read_csv(path, sep="\t")
+                    df["dataset_source"] = source
+                    frames.append(df)
+            if frames:
+                external_test_df = pd.concat(frames, axis=0, ignore_index=True)
+        elif os.path.exists(test_path):
+            external_test_df = pd.read_csv(test_path, sep="\t")
+        if external_test_df is None or len(external_test_df) == 0:
+            print("WARNING: External test mode enabled but no external test file found.")
+
     if external_test_mode:
         test_df = None
         split_source_metadata = {
@@ -664,6 +734,7 @@ def run_crossattention_analysis(
                 checkpoint_path=checkpoint_path,
                 use_attention=use_attention,
                 use_ligand_vectors=use_ligand_vectors,
+                external_test_df=external_test_df,
                 evaluation_split="val" if external_test_mode else "test",
             )
             scenario_seed_results[seed] = metrics

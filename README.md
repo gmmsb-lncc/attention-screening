@@ -47,6 +47,7 @@ For detailed information:
 - **[Diffusion vs CNN Cross‑Attention](docs/DIFFUSION_VS_CNN.md)** - Why diffusion can outperform CNNs in highly similar datasets (with mathematical rationale).
 - **[Suggested Command Presets](crossattention_split_analysis_main.py)** - Run `--print_suggested_commands` to print common training commands.
 - **Ligand input modes**: MoLFormer matrices are default; use `--smited_ligand` or `--ligand_vectors` to override.
+- **External test protocol**: Use `--external_test_mode` to train on train/val only and automatically evaluate on `scaffolds_splits/output/{dataset}_test.tsv.gz` after training.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Three split modes: Random, Compound-Only, Compound+Protein.
 
 ---
