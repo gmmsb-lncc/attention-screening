@@ -231,8 +231,8 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Print progress every 2 epochs
-        if (epoch + 1) % 2 == 0 or epoch == 0:
+        # Print progress every epoch
+        if True:
             print(f"    Epoch {epoch+1}: loss={train_metrics['total']:.4f}, "
                   f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}")
 
