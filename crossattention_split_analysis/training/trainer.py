@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from ..config import TrainingConfig
-from .evaluator import evaluate, EvaluationError
+from .evaluator import evaluate, optimize_decision_threshold, EvaluationError
 from ..utils.checkpoints import save_checkpoint, load_checkpoint
 
 
@@ -205,12 +205,44 @@ def train_model(
 
         # Validate
         try:
-            val_result = evaluate(model, val_loader, device, raise_on_invalid=False)
-            if not val_result.is_valid:
-                warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
-                val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+            if config.optimize_threshold:
+                threshold_result = optimize_decision_threshold(
+                    model,
+                    val_loader,
+                    device,
+                    metric=config.threshold_metric,
+                    raise_on_invalid=False,
+                )
+                if not threshold_result.is_valid:
+                    warnings.warn(f"Invalid threshold optimization at epoch {epoch+1}")
+                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                else:
+                    decision_threshold = float(threshold_result.metrics["decision_threshold"])
+                    val_result = evaluate(
+                        model,
+                        val_loader,
+                        device,
+                        raise_on_invalid=False,
+                        decision_threshold=decision_threshold,
+                    )
+                    if not val_result.is_valid:
+                        warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
+                        val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                    else:
+                        val_metrics = val_result.metrics
             else:
-                val_metrics = val_result.metrics
+                val_result = evaluate(
+                    model,
+                    val_loader,
+                    device,
+                    raise_on_invalid=False,
+                    decision_threshold=config.fixed_threshold,
+                )
+                if not val_result.is_valid:
+                    warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
+                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                else:
+                    val_metrics = val_result.metrics
         except EvaluationError as e:
             warnings.warn(f"Evaluation failed at epoch {epoch+1}: {e}")
             val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
@@ -231,10 +263,11 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Print progress every epoch
-        if True:
-            print(f"    Epoch {epoch+1}: loss={train_metrics['total']:.4f}, "
-                  f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}")
+        # Print progress every epoch (AUC instead of loss)
+        print(
+            f"    Epoch {epoch+1}: val_auc={val_metrics['auc']:.4f}, "
+            f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}"
+        )
 
         # Save checkpoint
         if checkpoint_path is not None:
