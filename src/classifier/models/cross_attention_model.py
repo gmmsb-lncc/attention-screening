@@ -349,7 +349,13 @@ class CrossAttentionBlock(nn.Module):
         ligand_attn = self.ligand_cross_attn(ligand, protein, protein, protein_mask)
         ligand = self.ligand_norm1(ligand + ligand_attn)
         ligand = self.ligand_norm2(ligand + self.ligand_ff(ligand))
-        
+
+        # Keep padded positions neutral to avoid representation leakage into pooling.
+        if protein_mask is not None:
+            protein = protein * protein_mask.unsqueeze(-1).to(protein.dtype)
+        if ligand_mask is not None:
+            ligand = ligand * ligand_mask.unsqueeze(-1).to(ligand.dtype)
+
         return protein, ligand
 
 
@@ -525,10 +531,6 @@ class CrossAttentionAffinityModel(BaseClassifier):
             for _ in range(num_cross_attn_layers)
         ])
         
-        # Pooling
-        self.protein_pool = nn.AdaptiveAvgPool1d(1)
-        self.ligand_pool = nn.AdaptiveAvgPool1d(1)
-        
         # Multi-task head
         self.task_head = MultiTaskHead(hidden_dim * 2, hidden_dim, dropout)
         
@@ -584,6 +586,25 @@ class CrossAttentionAffinityModel(BaseClassifier):
         if self.use_positional_encoding:
             x = self.ligand_pos_enc(x)
         return x
+
+    @staticmethod
+    def _masked_mean_pool(x: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
+        """
+        Mean pool over sequence length while ignoring padded tokens.
+
+        Args:
+            x: [batch, seq_len, hidden_dim]
+            mask: [batch, seq_len] with 1 for valid tokens and 0 for padding
+        Returns:
+            [batch, hidden_dim]
+        """
+        if mask is None:
+            return x.mean(dim=1)
+
+        mask = mask.to(dtype=x.dtype).unsqueeze(-1)  # [batch, seq_len, 1]
+        x_masked = x * mask
+        lengths = mask.sum(dim=1).clamp_min(1.0)  # [batch, 1]
+        return x_masked.sum(dim=1) / lengths
     
     def forward(
         self,
@@ -618,9 +639,9 @@ class CrossAttentionAffinityModel(BaseClassifier):
         for block in self.cross_attn_blocks:
             protein, ligand = block(protein, ligand, protein_mask, ligand_mask)
         
-        # Pool: [batch, seq_len, hidden_dim] -> [batch, hidden_dim]
-        protein_pooled = self.protein_pool(protein.transpose(1, 2)).squeeze(-1)
-        ligand_pooled = self.ligand_pool(ligand.transpose(1, 2)).squeeze(-1)
+        # Mask-aware pooling prevents padded tokens from biasing the representation.
+        protein_pooled = self._masked_mean_pool(protein, protein_mask)
+        ligand_pooled = self._masked_mean_pool(ligand, ligand_mask)
         
         # Concatenate
         combined = torch.cat([protein_pooled, ligand_pooled], dim=-1)
@@ -692,19 +713,27 @@ class MultiTaskLoss(nn.Module):
         self,
         classification_weight: float = 1.0,
         regression_weight: float = 1.0,
+        classification_pos_weight: Optional[float] = None,
         use_uncertainty_weighting: bool = False
     ):
         super().__init__()
         self.classification_weight = classification_weight
         self.regression_weight = regression_weight
         self.use_uncertainty_weighting = use_uncertainty_weighting
+        self.classification_pos_weight = classification_pos_weight
         
         if use_uncertainty_weighting:
             # Learnable log variance parameters
             self.log_var_cls = nn.Parameter(torch.zeros(1))
             self.log_var_reg = nn.Parameter(torch.zeros(1))
-        
-        self.bce_loss = nn.BCEWithLogitsLoss()
+
+        if classification_pos_weight is not None and classification_pos_weight > 0:
+            self.register_buffer(
+                "pos_weight_tensor",
+                torch.tensor([float(classification_pos_weight)], dtype=torch.float32)
+            )
+        else:
+            self.pos_weight_tensor = None
         self.mse_loss = nn.MSELoss()
     
     def forward(
@@ -729,7 +758,15 @@ class MultiTaskLoss(nn.Module):
             Dict with 'total', 'classification', 'regression' losses
         """
         # Classification loss
-        cls_loss = self.bce_loss(cls_logits, cls_target.float())
+        if self.pos_weight_tensor is not None:
+            pos_weight = self.pos_weight_tensor.to(device=cls_logits.device, dtype=cls_logits.dtype)
+        else:
+            pos_weight = None
+        cls_loss = F.binary_cross_entropy_with_logits(
+            cls_logits,
+            cls_target.float(),
+            pos_weight=pos_weight
+        )
         
         # Regression loss (only for samples with labels)
         if reg_mask is not None and reg_mask.sum() > 0:

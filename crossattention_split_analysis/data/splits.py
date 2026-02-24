@@ -10,6 +10,43 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 
+def split_by_scaffold(
+    df: pd.DataFrame,
+    seed: int = 42
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Split by scaffold 80/10/10 (no scaffold overlap across train/val/test).
+
+    Requires a precomputed 'scaffold' column (as produced by scaffold_split.py).
+    This function is kept primarily for compatibility/debug; the main pipeline
+    consumes precomputed Sc train/val/test files directly.
+    """
+    if 'scaffold' not in df.columns:
+        raise ValueError("split_by_scaffold requires a precomputed 'scaffold' column")
+
+    rng = np.random.default_rng(seed)
+    scaffolds = np.array(df['scaffold'].fillna('UNKNOWN').astype(str).unique())
+    rng.shuffle(scaffolds)
+
+    n = len(scaffolds)
+    train_end = int(0.8 * n)
+    val_end = int(0.9 * n)
+
+    train_scaffolds = set(scaffolds[:train_end])
+    val_scaffolds = set(scaffolds[train_end:val_end])
+    test_scaffolds = set(scaffolds[val_end:])
+
+    train_mask = df['scaffold'].isin(train_scaffolds).values
+    val_mask = df['scaffold'].isin(val_scaffolds).values
+    test_mask = df['scaffold'].isin(test_scaffolds).values
+
+    train_idx = np.where(train_mask)[0]
+    val_idx = np.where(val_mask)[0]
+    test_idx = np.where(test_mask)[0]
+
+    return train_idx, val_idx, test_idx
+
+
 def split_random(
     df: pd.DataFrame,
     seed: int = 42
@@ -159,13 +196,11 @@ def split_new_compound_new_kinase(
 
 def get_scenarios() -> List[Tuple[str, Callable]]:
     """
-    Get all evaluation scenarios ordered from hardest to easiest.
+    Get all supported evaluation scenarios.
 
     Returns:
         List of (scenario_name, split_function) tuples
     """
     return [
-        ('New Compound + New Kinase', split_new_compound_new_kinase),
-        ('Split by Compound', split_by_compound),
-        ('Random Split', split_random)
+        ('Split by Scaffold', split_by_scaffold)
     ]
