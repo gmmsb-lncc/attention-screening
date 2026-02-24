@@ -142,6 +142,23 @@ Causal transformer trained with Next Token Prediction (NTP). Better for capturin
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Architecture Diagram (Mermaid)
+
+```mermaid
+flowchart LR
+  P["Protein embeddings"] --> PE["CNN Encoder"]
+  L["Ligand embeddings"] --> LE["CNN Encoder"]
+  PE --> PN["LayerNorm"]
+  LE --> LN["LayerNorm"]
+  PN --> CA["Cross-Attention"]
+  LN --> CA
+  CA --> Ppool["Pooling (protein)"]
+  CA --> Lpool["Pooling (ligand)"]
+  Ppool --> Cat["Concat"]
+  Lpool --> Cat
+  Cat --> Head["Multi-Task Head"]
+```
+
 ### Key Design Principles
 
 - **Primacy of Sequence**: No 3D coordinates required—information is encoded in primary sequence via PLM embeddings
