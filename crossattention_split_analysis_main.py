@@ -315,6 +315,12 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--diffusion_joint_denoise',
+        action='store_true',
+        help='Jointly denoise protein+ligand tokens (default: separate)'
+    )
+
+    parser.add_argument(
         '--dropout',
         type=float,
         default=0.1,
@@ -572,6 +578,7 @@ Available scenarios:
         print(f"  Diff pool q:    {args.diffusion_pool_queries}")
         print(f"  Diff SNR gamma: {args.diffusion_snr_sampling_gamma}")
         print(f"  Diff SNR mix:   {args.diffusion_snr_sampling_mix}")
+        print(f"  Diff joint:     {args.diffusion_joint_denoise}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
@@ -634,6 +641,7 @@ Available scenarios:
                 diffusion_pool_queries=args.diffusion_pool_queries,
                 diffusion_snr_sampling_gamma=args.diffusion_snr_sampling_gamma,
                 diffusion_snr_sampling_mix=args.diffusion_snr_sampling_mix,
+                diffusion_joint_denoise=args.diffusion_joint_denoise,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
