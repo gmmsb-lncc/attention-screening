@@ -23,8 +23,11 @@ flowchart LR
     P[Protein token embeddings\nB x Lp x Dp] --> LP[Linear token encoder]
     L[Ligand token embeddings\nB x Ll x Dl] --> LL[Linear token encoder]
 
-    LP --> CAB[Bidirectional CrossAttention Block x N]
-    LL --> CAB
+    LP --> LNP[LayerNorm (protein)]
+    LL --> LNL[LayerNorm (ligand)]
+
+    LNP --> CAB[Bidirectional CrossAttention Block x N]
+    LNL --> CAB
 
     CAB --> PP[Masked mean pool protein]
     CAB --> PL[Masked mean pool ligand]
