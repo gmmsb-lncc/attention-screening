@@ -28,6 +28,7 @@ LIGAND_MATRIX_DIRS = {
     'smited': 'ligand_matrices',      # Original SMI-TED matrices
     'molformer': 'molformer_matrix',  # MoLFormer matrices
 }
+LIGAND_VECTOR_DIR = 'ligand_embeddings'
 
 # Max sequence length for attention matrices
 MAX_SEQ_LEN = 1024
