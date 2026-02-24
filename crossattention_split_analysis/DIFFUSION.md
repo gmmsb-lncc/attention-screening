@@ -271,7 +271,7 @@ python crossattention_split_analysis_main.py \
 - Increasing `--diffusion_steps` improves denoising but adds computation.
 - MoLFormer ligand matrices are the default; use `--smited_ligand` or `--ligand_vectors` to override.
 - For a deeper theoretical comparison of diffusion vs CNN cross-attention in highly similar datasets, see `docs/DIFFUSION_VS_CNN.md`.
-- For external test protocol, enable `--external_test_mode` (evaluates on `scaffolds_splits/output/{dataset}_test.tsv.gz` after training).
+- For external test protocol, enable `--external_test_mode` (evaluates on `scaffolds_splits/output/{dataset}_test.tsv` or `.tsv.gz` after training).
 
 ## Limitations (Current)
 

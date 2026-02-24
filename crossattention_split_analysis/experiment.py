@@ -102,9 +102,9 @@ def _load_precomputed_scaffold_splits(
     Load fixed scaffold splits produced by scaffold_split.py.
 
     Expected files:
-      - {dir}/scenarios/Sc/{dataset}_train.tsv
-      - {dir}/scenarios/Sc/{dataset}_val.tsv
-      - {dir}/{dataset}_test.tsv
+      - {dir}/scenarios/Sc/{dataset}_train.tsv (or .tsv.gz)
+      - {dir}/scenarios/Sc/{dataset}_val.tsv (or .tsv.gz)
+      - {dir}/{dataset}_test.tsv (or .tsv.gz)
     where dataset is human/non_human, or both concatenated when dataset_type=all.
     """
     base = Path(scaffold_split_dir)
@@ -165,6 +165,48 @@ def _load_precomputed_scaffold_splits(
             "paths": {"human": h_paths, "non_human": n_paths},
         }
         return train_df, val_df, test_df, metadata
+
+    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+
+
+def _load_external_test_dataframe(
+    dataset_type: str,
+    scaffold_split_dir: str,
+    threshold: float,
+) -> Tuple[Optional[pd.DataFrame], Dict[str, str]]:
+    """Load external test split(s) from scaffold output, accepting .tsv or .tsv.gz."""
+    base = Path(scaffold_split_dir)
+
+    def _load_one(ds: str) -> Tuple[pd.DataFrame, Path]:
+        raw_df, used_path = _read_split_tsv(base / f"{ds}_test.tsv", f"{ds} external test")
+        test_df = _ensure_label_column(raw_df, threshold, f"{ds} external test")
+        _ensure_required_columns(test_df, f"{ds} external test")
+        return test_df, used_path
+
+    loaded_paths: Dict[str, str] = {}
+
+    if dataset_type in {"human", "non_human"}:
+        try:
+            df, used = _load_one(dataset_type)
+        except FileNotFoundError:
+            return None, loaded_paths
+        loaded_paths[dataset_type] = str(used)
+        return df, loaded_paths
+
+    if dataset_type == "all":
+        frames: List[pd.DataFrame] = []
+        for ds in ("human", "non_human"):
+            try:
+                frame, used = _load_one(ds)
+            except FileNotFoundError:
+                continue
+            if "dataset_source" not in frame.columns:
+                frame["dataset_source"] = ds
+            frames.append(frame)
+            loaded_paths[ds] = str(used)
+        if not frames:
+            return None, loaded_paths
+        return pd.concat(frames, axis=0, ignore_index=True), loaded_paths
 
     raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
 
@@ -606,23 +648,32 @@ def run_crossattention_analysis(
         return None, None
 
     external_test_df = None
+    external_test_paths: Dict[str, str] = {}
     if external_test_mode:
-        test_path = os.path.join(scaffold_split_dir, f"{dataset_type}_test.tsv.gz")
-        if dataset_type == "all":
-            h_path = os.path.join(scaffold_split_dir, "human_test.tsv.gz")
-            n_path = os.path.join(scaffold_split_dir, "non_human_test.tsv.gz")
-            frames = []
-            for path, source in ((h_path, "human"), (n_path, "non_human")):
-                if os.path.exists(path):
-                    df = pd.read_csv(path, sep="\t")
-                    df["dataset_source"] = source
-                    frames.append(df)
-            if frames:
-                external_test_df = pd.concat(frames, axis=0, ignore_index=True)
-        elif os.path.exists(test_path):
-            external_test_df = pd.read_csv(test_path, sep="\t")
+        try:
+            external_test_df, external_test_paths = _load_external_test_dataframe(
+                dataset_type=dataset_type,
+                scaffold_split_dir=scaffold_split_dir,
+                threshold=threshold,
+            )
+        except (RuntimeError, ValueError) as exc:
+            print(f"ERROR: {exc}")
+            return None, None
         if external_test_df is None or len(external_test_df) == 0:
-            print("WARNING: External test mode enabled but no external test file found.")
+            expected = (
+                [f"{dataset_type}_test.tsv(.gz)"]
+                if dataset_type in {"human", "non_human"}
+                else ["human_test.tsv(.gz)", "non_human_test.tsv(.gz)"]
+            )
+            print(
+                "WARNING: External test mode enabled but no external test file found. "
+                f"Checked in {scaffold_split_dir}: {', '.join(expected)}"
+            )
+        else:
+            print(
+                f"  Loaded external test set: rows={len(external_test_df)} "
+                f"from {external_test_paths}"
+            )
 
     if external_test_mode:
         test_df = None
@@ -630,6 +681,7 @@ def run_crossattention_analysis(
             **split_source_metadata,
             "external_test_mode": True,
             "train_val_protocol": "precomputed_scaffold_split",
+            "external_test_paths": external_test_paths,
         }
     else:
         split_source_metadata = {
