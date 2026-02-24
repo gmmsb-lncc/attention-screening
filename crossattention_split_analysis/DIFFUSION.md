@@ -269,7 +269,7 @@ python crossattention_split_analysis_main.py \
 - If training is unstable, try lowering `--diffusion_loss_weight` or enabling `--diffusion_loss_anneal linear`.
 - If MCC stalls, increase `--diffusion_pool_queries` (e.g., 8) or `--diffusion_cross_attn_layers`.
 - Increasing `--diffusion_steps` improves denoising but adds computation.
-- Use `--molformer_ligand` if only MoLFormer matrices are available.
+- MoLFormer ligand matrices are the default; use `--smited_ligand` or `--ligand_vectors` to override.
 - For a deeper theoretical comparison of diffusion vs CNN cross-attention in highly similar datasets, see `docs/DIFFUSION_VS_CNN.md`.
 
 ## Limitations (Current)
