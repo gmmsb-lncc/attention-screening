@@ -301,6 +301,20 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--diffusion_snr_sampling_gamma',
+        type=float,
+        default=0.5,
+        help='Exponent for SNR-based timestep sampling (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--diffusion_snr_sampling_mix',
+        type=float,
+        default=0.2,
+        help='Mix ratio with uniform timestep sampling (default: 0.2)'
+    )
+
+    parser.add_argument(
         '--dropout',
         type=float,
         default=0.1,
@@ -556,6 +570,8 @@ Available scenarios:
         print(f"  Diff loss wt:   {args.diffusion_loss_weight}")
         print(f"  Diff anneal:    {args.diffusion_loss_anneal}")
         print(f"  Diff pool q:    {args.diffusion_pool_queries}")
+        print(f"  Diff SNR gamma: {args.diffusion_snr_sampling_gamma}")
+        print(f"  Diff SNR mix:   {args.diffusion_snr_sampling_mix}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
@@ -616,6 +632,8 @@ Available scenarios:
                 diffusion_loss_weight=args.diffusion_loss_weight,
                 diffusion_loss_anneal=args.diffusion_loss_anneal,
                 diffusion_pool_queries=args.diffusion_pool_queries,
+                diffusion_snr_sampling_gamma=args.diffusion_snr_sampling_gamma,
+                diffusion_snr_sampling_mix=args.diffusion_snr_sampling_mix,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
