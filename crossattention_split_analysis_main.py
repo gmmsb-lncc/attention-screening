@@ -600,6 +600,7 @@ Available scenarios:
             "  --diffusion_snr_sampling_mix 0.2 \\\n"
             "  --diffusion_loss_weight 0.05 \\\n"
             "  --diffusion_loss_anneal linear \\\n"
+            "  --diffusion_joint_denoise \\\n"
             "  --classification_only \\\n"
             "  --scaffold_split_dir scaffolds_splits/output \\\n"
             "  --output_dir results/non_human_crossattention_analysis_diffusion_v3_24_02_2026 \\\n"
