@@ -140,6 +140,7 @@ This allows the model to learn **multiple token‑level focuses** without discar
 - **Denoiser**: separate `TransformerEncoder` for protein and ligand, with time embeddings.
 - **Positional encoding**: **sinusoidal** PE added after projection, with learnable scale.
 - **Normalization**: `LayerNorm` applied after projection per modality.
+- **Pipeline consistency**: the same post-encoder normalization is applied across CNN, Lite, and Diffusion variants for stable feature scaling.
 - **Pooling**: multi‑query attention pooling per modality (`--diffusion_pool_queries`).
 - **Auxiliary loss**: SNR‑weighted diffusion MSE loss, added only during training. The sampling bias and weight strength can be tuned with `--diffusion_snr_sampling_gamma` and `--diffusion_snr_sampling_mix`.
 - **Cross‑attention**: lightweight protein↔ligand block(s) after denoising (`--diffusion_cross_attn_layers`).
