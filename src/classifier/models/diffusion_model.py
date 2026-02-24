@@ -175,6 +175,8 @@ class DiffusionAffinityModel(BaseClassifier):
         diffusion_beta_start: float = 1e-4,
         diffusion_beta_end: float = 0.02,
         diffusion_loss_weight: float = 0.1,
+        snr_sampling_gamma: float = 0.5,
+        snr_sampling_mix: float = 0.2,
         classification_only: bool = False,
     ):
         super().__init__(input_dim=hidden_dim * 2)
@@ -182,12 +184,15 @@ class DiffusionAffinityModel(BaseClassifier):
         self.diffusion_steps = diffusion_steps
         self.diffusion_loss_weight = diffusion_loss_weight
         self.classification_only = classification_only
+        self.snr_sampling_gamma = snr_sampling_gamma
+        self.snr_sampling_mix = snr_sampling_mix
 
         self.protein_proj = nn.Linear(protein_dim, hidden_dim)
         self.ligand_proj = nn.Linear(ligand_dim, hidden_dim)
         self.protein_norm = nn.LayerNorm(hidden_dim)
         self.ligand_norm = nn.LayerNorm(hidden_dim)
-        self.pos_scale = nn.Parameter(torch.tensor(1.0))
+        self.pos_scale_protein = nn.Parameter(torch.tensor(1.0))
+        self.pos_scale_ligand = nn.Parameter(torch.tensor(1.0))
 
         self.protein_denoiser = DiffusionDenoiser(
             hidden_dim=hidden_dim,
@@ -234,10 +239,11 @@ class DiffusionAffinityModel(BaseClassifier):
     def _build_snr_sampling_probs(self) -> torch.Tensor:
         """Precompute SNR-biased timestep sampling probabilities."""
         snr = self.alpha_bars / (1.0 - self.alpha_bars).clamp_min(1e-6)
-        probs = snr.sqrt()
+        probs = snr.pow(self.snr_sampling_gamma)
         probs = probs / probs.sum()
         uniform = torch.ones_like(probs) / probs.numel()
-        probs = 0.8 * probs + 0.2 * uniform
+        mix = float(self.snr_sampling_mix)
+        probs = (1.0 - mix) * probs + mix * uniform
         return probs
 
     def _q_sample(self, x0: torch.Tensor, t: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
@@ -289,10 +295,10 @@ class DiffusionAffinityModel(BaseClassifier):
 
         protein = self.protein_norm(self.protein_proj(protein_matrix))
         ligand = self.ligand_norm(self.ligand_proj(ligand_matrix))
-        protein = protein + self.pos_scale * _sinusoidal_position_encoding(
+        protein = protein + self.pos_scale_protein * _sinusoidal_position_encoding(
             protein.size(1), self.hidden_dim, protein.device, protein.dtype
         )
-        ligand = ligand + self.pos_scale * _sinusoidal_position_encoding(
+        ligand = ligand + self.pos_scale_ligand * _sinusoidal_position_encoding(
             ligand.size(1), self.hidden_dim, ligand.device, ligand.dtype
         )
 
@@ -368,4 +374,6 @@ class DiffusionAffinityModel(BaseClassifier):
             "separate_denoisers": True,
             "positional_encoding": "sinusoidal",
             "classification_only": self.classification_only,
+            "snr_sampling_gamma": self.snr_sampling_gamma,
+            "snr_sampling_mix": self.snr_sampling_mix,
         }

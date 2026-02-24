@@ -142,6 +142,8 @@ class TrainingConfig:
     diffusion_loss_anneal: Literal['none', 'linear'] = 'none'
     classification_only: bool = False
     diffusion_pool_queries: int = 4
+    diffusion_snr_sampling_gamma: float = 0.5
+    diffusion_snr_sampling_mix: float = 0.2
     dataloader_num_workers: int = 0
     dataloader_cache_in_memory: bool = False
     dataloader_pin_memory: bool = True
@@ -187,6 +189,8 @@ class TrainingConfig:
             'diffusion_loss_anneal': self.diffusion_loss_anneal,
             'classification_only': self.classification_only,
             'diffusion_pool_queries': self.diffusion_pool_queries,
+            'diffusion_snr_sampling_gamma': self.diffusion_snr_sampling_gamma,
+            'diffusion_snr_sampling_mix': self.diffusion_snr_sampling_mix,
             'dataloader_num_workers': self.dataloader_num_workers,
             'dataloader_cache_in_memory': self.dataloader_cache_in_memory,
             'dataloader_pin_memory': self.dataloader_pin_memory,

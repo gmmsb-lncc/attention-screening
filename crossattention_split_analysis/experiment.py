@@ -306,6 +306,8 @@ def run_scenario(
             diffusion_beta_start=config.diffusion_beta_start,
             diffusion_beta_end=config.diffusion_beta_end,
             diffusion_loss_weight=config.diffusion_loss_weight,
+            snr_sampling_gamma=config.diffusion_snr_sampling_gamma,
+            snr_sampling_mix=config.diffusion_snr_sampling_mix,
             classification_only=config.classification_only,
         )
     else:
@@ -699,11 +701,12 @@ def run_single_analysis(
     diffusion_loss_anneal: str = "none",
     classification_only: bool = False,
     diffusion_pool_queries: int = 4,
+    diffusion_snr_sampling_gamma: float = 0.5,
+    diffusion_snr_sampling_mix: float = 0.2,
     dataloader_num_workers: int = 0,
     dataloader_cache_in_memory: bool = False,
     dataloader_pin_memory: bool = True,
     dataloader_prefetch_factor: int = 2,
-    dataloader_persistent_workers: bool = True,
     dataloader_persistent_workers: bool = True,
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
@@ -747,6 +750,8 @@ def run_single_analysis(
         diffusion_loss_anneal: Anneal schedule for diffusion loss weight
         classification_only: If True, optimize classification head only
         diffusion_pool_queries: Number of attention pooling queries per modality
+        diffusion_snr_sampling_gamma: Exponent for SNR-based timestep sampling
+        diffusion_snr_sampling_mix: Mix ratio with uniform sampling (0-1)
         dataloader_num_workers: DataLoader worker processes
         dataloader_cache_in_memory: Cache matrices in RAM
         dataloader_pin_memory: Enable pinned memory
@@ -859,6 +864,8 @@ def run_single_analysis(
         diffusion_loss_anneal=diffusion_loss_anneal,
         classification_only=classification_only,
         diffusion_pool_queries=diffusion_pool_queries,
+        diffusion_snr_sampling_gamma=diffusion_snr_sampling_gamma,
+        diffusion_snr_sampling_mix=diffusion_snr_sampling_mix,
         dataloader_num_workers=dataloader_num_workers,
         dataloader_cache_in_memory=dataloader_cache_in_memory,
         dataloader_pin_memory=dataloader_pin_memory,
