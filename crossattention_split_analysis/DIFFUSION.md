@@ -72,66 +72,66 @@ Protein matrix P (Lp x Dp)     Ligand matrix L (Ll x Dl)
 
 ### Forward Diffusion (Noise Injection)
 
-For a clean matrix \(x_0\) (protein or ligand), we sample a timestep \(t\) and apply:
+For a clean matrix $x_0$ (protein or ligand), we sample a timestep $t$ and apply:
 
-\[
+$$
 q(x_t | x_0) = \sqrt{\bar{\alpha}_t}\, x_0 + \sqrt{1 - \bar{\alpha}_t}\, \epsilon
-\]
+$$
 
-- \(\epsilon \sim \mathcal{N}(0, I)\)
-- \(\bar{\alpha}_t = \prod_{i=1}^t (1 - \beta_i)\)
+- $\epsilon \sim \mathcal{N}(0, I)$
+- $\bar{\alpha}_t = \prod_{i=1}^t (1 - \beta_i)$
 
 ### Denoising Objective
 
-The denoiser \(\epsilon_\theta(x_t, t)\) predicts the injected noise:
+The denoiser $\epsilon_\theta(x_t, t)$ predicts the injected noise:
 
-\[
+$$
 \mathcal{L}_{diff} = \mathbb{E}_{t,\epsilon}\left[\|\epsilon - \epsilon_\theta(x_t, t)\|_2^2\right]
-\]
+$$
 
 We apply this loss **separately** to protein and ligand matrices, then sum them.
 
 To improve classification stability and avoid over-emphasizing highly noisy timesteps, the loss is **SNR‑weighted**:
 
-\[
+$$
 w(t) = \log(1 + \text{SNR}_t)
-\]
-\[
+$$
+$$
 \mathcal{L}_{diff} = \mathbb{E}_{t,\epsilon}\left[w(t)\|\epsilon - \epsilon_\theta(x_t, t)\|_2^2\right]
-\]
+$$
 
 ### Reconstruction (Used for Classifier Input)
 
-We recover an estimate of \(x_0\):
+We recover an estimate of $x_0$:
 
-\[
+$$
 \hat{x}_0 = \frac{x_t - \sqrt{1-\bar{\alpha}_t}\,\epsilon_\theta(x_t,t)}{\sqrt{\bar{\alpha}_t}}
-\]
+$$
 
 ### Final Objective
 
 The final training objective combines classification/regression loss and diffusion loss:
 
-\[
+$$
 \mathcal{L} = \alpha\,\mathcal{L}_{cls} + \beta\,\mathcal{L}_{reg} + \lambda\,\mathcal{L}_{diff}
-\]
+$$
 
-Where \(\lambda\) is controlled by `--diffusion_loss_weight`.
-Optionally, \(\lambda\) can be **annealed** linearly during training (`--diffusion_loss_anneal linear`), starting high and decaying to zero.
+Where $\lambda$ is controlled by `--diffusion_loss_weight`.
+Optionally, $\lambda$ can be **annealed** linearly during training (`--diffusion_loss_anneal linear`), starting high and decaying to zero.
 
 ## Pooling Strategy (Why Information Is Preserved)
 
 Instead of mean pooling, we use **multi‑query attention pooling** to capture multiple salient regions:
 
-\[
+$$
 \text{score}_{i,k} = q_k^\top W x_i
-\]
-\[
+$$
+$$
 \text{attn}_{i,k} = \text{softmax}(\text{score}_{i,k})
-\]
-\[
+$$
+$$
 \text{pool}(x) = \frac{1}{K}\sum_k \sum_i \text{attn}_{i,k} x_i
-\]
+$$
 
 This allows the model to learn **multiple token‑level focuses** without discarding information early.
 
