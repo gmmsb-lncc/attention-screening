@@ -86,11 +86,38 @@ class DiffusionDenoiser(nn.Module):
         return out
 
 
+def _sinusoidal_position_encoding(
+    seq_len: int,
+    hidden_dim: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Create sinusoidal positional encodings [1, seq_len, hidden_dim]."""
+    if seq_len <= 0:
+        return torch.zeros(1, 0, hidden_dim, device=device, dtype=dtype)
+    position = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(1)
+    div_term = torch.exp(
+        torch.arange(0, hidden_dim, 2, device=device, dtype=dtype)
+        * (-torch.log(torch.tensor(10000.0, device=device, dtype=dtype)) / hidden_dim)
+    )
+    pe = torch.zeros(seq_len, hidden_dim, device=device, dtype=dtype)
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    return pe.unsqueeze(0)
+
+
 class MultiTaskHead(nn.Module):
     """Shared head for classification and regression."""
 
-    def __init__(self, input_dim: int, hidden_dim: int = 256, dropout: float = 0.1):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 256,
+        dropout: float = 0.1,
+        classification_only: bool = False,
+    ):
         super().__init__()
+        self.classification_only = classification_only
         self.shared = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -103,16 +130,24 @@ class MultiTaskHead(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1),
         )
-        self.regressor = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 1),
-        )
+        if not classification_only:
+            self.regressor = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim // 2, 1),
+            )
+        else:
+            self.regressor = None
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         shared = self.shared(x)
-        return self.classifier(shared), self.regressor(shared)
+        cls = self.classifier(shared)
+        if self.regressor is None:
+            reg = torch.zeros_like(cls)
+        else:
+            reg = self.regressor(shared)
+        return cls, reg
 
 
 class DiffusionAffinityModel(BaseClassifier):
@@ -137,16 +172,27 @@ class DiffusionAffinityModel(BaseClassifier):
         diffusion_beta_start: float = 1e-4,
         diffusion_beta_end: float = 0.02,
         diffusion_loss_weight: float = 0.1,
+        classification_only: bool = False,
     ):
         super().__init__(input_dim=hidden_dim * 2)
         self.hidden_dim = hidden_dim
         self.diffusion_steps = diffusion_steps
         self.diffusion_loss_weight = diffusion_loss_weight
+        self.classification_only = classification_only
 
         self.protein_proj = nn.Linear(protein_dim, hidden_dim)
         self.ligand_proj = nn.Linear(ligand_dim, hidden_dim)
+        self.pos_scale = nn.Parameter(torch.tensor(1.0))
 
-        self.denoiser = DiffusionDenoiser(
+        self.protein_denoiser = DiffusionDenoiser(
+            hidden_dim=hidden_dim,
+            num_layers=num_diffusion_layers,
+            num_heads=num_heads,
+            ff_dim=ff_dim,
+            dropout=dropout,
+            num_timesteps=diffusion_steps,
+        )
+        self.ligand_denoiser = DiffusionDenoiser(
             hidden_dim=hidden_dim,
             num_layers=num_diffusion_layers,
             num_heads=num_heads,
@@ -157,7 +203,12 @@ class DiffusionAffinityModel(BaseClassifier):
 
         self.protein_pool = AttentionPool(hidden_dim)
         self.ligand_pool = AttentionPool(hidden_dim)
-        self.task_head = MultiTaskHead(hidden_dim * 2, hidden_dim, dropout)
+        self.task_head = MultiTaskHead(
+            hidden_dim * 2,
+            hidden_dim,
+            dropout,
+            classification_only=classification_only,
+        )
         self.cross_attn_blocks = nn.ModuleList(
             [
                 CrossAttentionBlock(hidden_dim, num_heads, ff_dim, dropout)
@@ -173,6 +224,16 @@ class DiffusionAffinityModel(BaseClassifier):
         self.register_buffer("alpha_bars", alpha_bars)
         self.register_buffer("sqrt_alpha_bars", torch.sqrt(alpha_bars))
         self.register_buffer("sqrt_one_minus_alpha_bars", torch.sqrt(1.0 - alpha_bars))
+        self.register_buffer("snr_sampling_probs", self._build_snr_sampling_probs())
+
+    def _build_snr_sampling_probs(self) -> torch.Tensor:
+        """Precompute SNR-biased timestep sampling probabilities."""
+        snr = self.alpha_bars / (1.0 - self.alpha_bars).clamp_min(1e-6)
+        probs = snr.sqrt()
+        probs = probs / probs.sum()
+        uniform = torch.ones_like(probs) / probs.numel()
+        probs = 0.8 * probs + 0.2 * uniform
+        return probs
 
     def _q_sample(self, x0: torch.Tensor, t: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
         sqrt_ab = self.sqrt_alpha_bars[t].view(-1, 1, 1)
@@ -184,12 +245,29 @@ class DiffusionAffinityModel(BaseClassifier):
         sqrt_omb = self.sqrt_one_minus_alpha_bars[t].view(-1, 1, 1)
         return (xt - sqrt_omb * eps) / sqrt_ab.clamp_min(1e-6)
 
+    def _snr_weight(self, t: torch.Tensor) -> torch.Tensor:
+        """Compute per-sample SNR weight for diffusion loss."""
+        alpha_bar = self.alpha_bars[t].view(-1, 1, 1)
+        snr = alpha_bar / (1.0 - alpha_bar).clamp_min(1e-6)
+        return torch.log1p(snr).clamp(max=10.0)
+
     @staticmethod
-    def _masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
+    def _masked_mse(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        mask: Optional[torch.Tensor],
+        weights: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         if mask is None:
-            return F.mse_loss(pred, target)
+            if weights is None:
+                return F.mse_loss(pred, target)
+            diff = (pred - target).pow(2)
+            return (diff * weights).mean()
         mask = mask.unsqueeze(-1).to(pred.dtype)
-        diff = (pred - target).pow(2) * mask
+        diff = (pred - target).pow(2)
+        if weights is not None:
+            diff = diff * weights
+        diff = diff * mask
         denom = mask.sum().clamp_min(1.0)
         return diff.sum() / denom
 
@@ -206,26 +284,37 @@ class DiffusionAffinityModel(BaseClassifier):
 
         protein = self.protein_proj(protein_matrix)
         ligand = self.ligand_proj(ligand_matrix)
+        protein = protein + self.pos_scale * _sinusoidal_position_encoding(
+            protein.size(1), self.hidden_dim, protein.device, protein.dtype
+        )
+        ligand = ligand + self.pos_scale * _sinusoidal_position_encoding(
+            ligand.size(1), self.hidden_dim, ligand.device, ligand.dtype
+        )
 
         if self.training:
-            timesteps = torch.randint(0, self.diffusion_steps, (batch_size,), device=device)
+            timesteps = torch.multinomial(
+                self.snr_sampling_probs,
+                num_samples=batch_size,
+                replacement=True,
+            ).to(device)
             noise_p = torch.randn_like(protein)
             noise_l = torch.randn_like(ligand)
             protein_t = self._q_sample(protein, timesteps, noise_p)
             ligand_t = self._q_sample(ligand, timesteps, noise_l)
 
-            eps_p = self.denoiser(protein_t, protein_mask, timesteps)
-            eps_l = self.denoiser(ligand_t, ligand_mask, timesteps)
+            eps_p = self.protein_denoiser(protein_t, protein_mask, timesteps)
+            eps_l = self.ligand_denoiser(ligand_t, ligand_mask, timesteps)
 
-            diffusion_loss = self._masked_mse(eps_p, noise_p, protein_mask)
-            diffusion_loss = diffusion_loss + self._masked_mse(eps_l, noise_l, ligand_mask)
+            snr_weight = self._snr_weight(timesteps)
+            diffusion_loss = self._masked_mse(eps_p, noise_p, protein_mask, snr_weight)
+            diffusion_loss = diffusion_loss + self._masked_mse(eps_l, noise_l, ligand_mask, snr_weight)
 
             protein_hat = self._predict_x0(protein_t, timesteps, eps_p)
             ligand_hat = self._predict_x0(ligand_t, timesteps, eps_l)
         else:
             timesteps = torch.zeros(batch_size, dtype=torch.long, device=device)
-            eps_p = self.denoiser(protein, protein_mask, timesteps)
-            eps_l = self.denoiser(ligand, ligand_mask, timesteps)
+            eps_p = self.protein_denoiser(protein, protein_mask, timesteps)
+            eps_l = self.ligand_denoiser(ligand, ligand_mask, timesteps)
             protein_hat = self._predict_x0(protein, timesteps, eps_p)
             ligand_hat = self._predict_x0(ligand, timesteps, eps_l)
             diffusion_loss = None
@@ -271,4 +360,7 @@ class DiffusionAffinityModel(BaseClassifier):
             "diffusion_steps": self.diffusion_steps,
             "diffusion_loss_weight": self.diffusion_loss_weight,
             "diffusion_cross_attn_layers": len(self.cross_attn_blocks),
+            "separate_denoisers": True,
+            "positional_encoding": "sinusoidal",
+            "classification_only": self.classification_only,
         }
