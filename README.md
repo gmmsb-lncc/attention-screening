@@ -45,6 +45,7 @@ For detailed information:
 - **[CrossAttention Lite (Detailed Visual Guide)](crossattention_split_analysis/CROSS_ATTENTION_LITE.md)** - Detailed explanation of the lightweight bidirectional token-to-token cross-attention variant.
 - **[Diffusion Variant (Detailed Guide)](crossattention_split_analysis/DIFFUSION.md)** - Diffusion-based classifier with SNR‑weighted loss, cross‑attention after denoising, multi‑query pooling, classification‑only mode, and a didactic flow diagram.
 - **[Diffusion vs CNN Cross‑Attention](docs/DIFFUSION_VS_CNN.md)** - Why diffusion can outperform CNNs in highly similar datasets (with mathematical rationale).
+- **[Suggested Command Presets](crossattention_split_analysis_main.py)** - Run `--print_suggested_commands` to print common training commands.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Three split modes: Random, Compound-Only, Compound+Protein.
 
 ---

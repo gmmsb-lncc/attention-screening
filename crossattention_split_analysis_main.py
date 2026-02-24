@@ -469,6 +469,12 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--print_suggested_commands',
+        action='store_true',
+        help='Print suggested command presets and exit'
+    )
+
+    parser.add_argument(
         '--debug',
         action='store_true',
         help='Enable debug mode with full error tracebacks'
@@ -709,3 +715,84 @@ Available scenarios:
 
 if __name__ == "__main__":
     main()
+    if args.print_suggested_commands:
+        print("Suggested command presets (classification-only):\n")
+        print("# cnn-ca default")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant cnn_crossattn \\\n"
+            "  --molformer_ligand \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_cnn_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --num_cnn_layers 3 \\\n"
+            "  --num_cross_attn_layers 2 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --classification_only \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --no-early-stopping \\\n"
+            "  --force\n"
+        )
+        print("# cnn-ca-lite")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant cross_attention_lite \\\n"
+            "  --molformer_ligand \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_lite_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --classification_only \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --no-early-stopping \\\n"
+            "  --force\n"
+        )
+        print("# diffusion")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant diffusion \\\n"
+            "  --diffusion_steps 200 \\\n"
+            "  --diffusion_layers 4 \\\n"
+            "  --diffusion_cross_attn_layers 1 \\\n"
+            "  --diffusion_pool_queries 4 \\\n"
+            "  --diffusion_snr_sampling_gamma 0.5 \\\n"
+            "  --diffusion_snr_sampling_mix 0.2 \\\n"
+            "  --diffusion_loss_weight 0.05 \\\n"
+            "  --diffusion_loss_anneal linear \\\n"
+            "  --classification_only \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_diffusion_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --molformer_ligand \\\n"
+            "  --force\n"
+        )
+        return
