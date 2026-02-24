@@ -78,8 +78,10 @@ $$
 q(x_t | x_0) = \sqrt{\bar{\alpha}_t}\, x_0 + \sqrt{1 - \bar{\alpha}_t}\, \epsilon
 $$
 
-- $$\epsilon \sim \mathcal{N}(0, I)$$
-- $$\bar{\alpha}_t = \prod_{i=1}^t (1 - \beta_i)$$
+- $\epsilon \sim \mathcal{N}(0, I)$
+$$
+\bar{\alpha}_t = \prod_{i=1}^t (1 - \beta_i)
+$$
 
 ### Denoising Objective
 
