@@ -787,6 +787,14 @@ def run_single_analysis(
         )
     if not (0.0 <= fixed_threshold <= 1.0):
         raise ValueError(f"fixed_threshold must be in [0, 1], got {fixed_threshold}")
+    if diffusion_snr_sampling_gamma <= 0:
+        raise ValueError(
+            f"diffusion_snr_sampling_gamma must be > 0, got {diffusion_snr_sampling_gamma}"
+        )
+    if not (0.0 <= diffusion_snr_sampling_mix <= 1.0):
+        raise ValueError(
+            f"diffusion_snr_sampling_mix must be in [0, 1], got {diffusion_snr_sampling_mix}"
+        )
 
     # Resolve embedding name
     if embedding_name in SUPPORTED_EMBEDDINGS:
