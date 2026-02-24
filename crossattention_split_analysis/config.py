@@ -144,6 +144,7 @@ class TrainingConfig:
     diffusion_pool_queries: int = 4
     diffusion_snr_sampling_gamma: float = 0.5
     diffusion_snr_sampling_mix: float = 0.2
+    diffusion_joint_denoise: bool = False
     dataloader_num_workers: int = 0
     dataloader_cache_in_memory: bool = False
     dataloader_pin_memory: bool = True
@@ -191,6 +192,7 @@ class TrainingConfig:
             'diffusion_pool_queries': self.diffusion_pool_queries,
             'diffusion_snr_sampling_gamma': self.diffusion_snr_sampling_gamma,
             'diffusion_snr_sampling_mix': self.diffusion_snr_sampling_mix,
+            'diffusion_joint_denoise': self.diffusion_joint_denoise,
             'dataloader_num_workers': self.dataloader_num_workers,
             'dataloader_cache_in_memory': self.dataloader_cache_in_memory,
             'dataloader_pin_memory': self.dataloader_pin_memory,
