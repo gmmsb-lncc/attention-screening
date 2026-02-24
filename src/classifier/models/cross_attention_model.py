@@ -194,6 +194,40 @@ class CNNEncoder(nn.Module):
         return self.layer_norm(x)
 
 
+class LinearEncoder(nn.Module):
+    """
+    Lightweight token-wise encoder with linear projections only.
+
+    Keeps sequence length unchanged while projecting inputs to hidden_dim.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 256,
+        dropout: float = 0.1
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        self.proj = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        out = self.proj(x)
+        if mask is not None:
+            out = out * mask.unsqueeze(-1).to(out.dtype)
+        return out
+
+
 class CrossAttention(nn.Module):
     """
     Cross-attention mechanism for protein-ligand interaction modeling.
@@ -340,14 +374,17 @@ class CrossAttentionBlock(nn.Module):
         Returns:
             Updated (protein, ligand) representations
         """
-        # Protein attends to ligand
-        protein_attn = self.protein_cross_attn(protein, ligand, ligand, ligand_mask)
-        protein = self.protein_norm1(protein + protein_attn)
+        # Bidirectional cross-attention in parallel from the same input states.
+        protein_in = protein
+        ligand_in = ligand
+
+        protein_attn = self.protein_cross_attn(protein_in, ligand_in, ligand_in, ligand_mask)
+        ligand_attn = self.ligand_cross_attn(ligand_in, protein_in, protein_in, protein_mask)
+
+        protein = self.protein_norm1(protein_in + protein_attn)
+        ligand = self.ligand_norm1(ligand_in + ligand_attn)
+
         protein = self.protein_norm2(protein + self.protein_ff(protein))
-        
-        # Ligand attends to protein
-        ligand_attn = self.ligand_cross_attn(ligand, protein, protein, protein_mask)
-        ligand = self.ligand_norm1(ligand + ligand_attn)
         ligand = self.ligand_norm2(ligand + self.ligand_ff(ligand))
 
         # Keep padded positions neutral to avoid representation leakage into pooling.
@@ -418,10 +455,11 @@ class MultiTaskHead(nn.Module):
 
 class CrossAttentionAffinityModel(BaseClassifier):
     """
-    CNN + Cross-Attention model for protein-ligand affinity prediction.
+    Cross-Attention model for protein-ligand affinity prediction.
     
     Architecture:
-        1. CNN encoders process protein/ligand embedding matrices
+        1. Token encoders process protein/ligand embedding matrices
+           (CNN or linear projection)
         2. Cross-attention blocks model interactions
         3. Multi-task heads output classification + regression
     
@@ -448,6 +486,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
         protein_dim: int = 2560,      # ESM-2 3B dimension
         ligand_dim: int = 768,        # SMI-TED dimension
         hidden_dim: int = 256,        # Internal hidden dimension
+        encoder_type: Literal['cnn', 'linear'] = 'cnn',
         num_cnn_layers: int = 3,      # CNN encoder layers
         num_cross_attn_layers: int = 2,  # Cross-attention blocks
         num_heads: int = 8,           # Attention heads
@@ -465,6 +504,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
             protein_dim: Input dimension for protein embeddings (e.g., 2560 for ESM-2 3B)
             ligand_dim: Input dimension for ligand embeddings (e.g., 768 for SMI-TED)
             hidden_dim: Internal hidden dimension for all layers
+            encoder_type: Token encoder type ('cnn' or 'linear')
             num_cnn_layers: Number of CNN encoder layers
             num_cross_attn_layers: Number of cross-attention blocks
             num_heads: Number of attention heads
@@ -487,8 +527,12 @@ class CrossAttentionAffinityModel(BaseClassifier):
         self.protein_dim = protein_dim
         self.ligand_dim = ligand_dim
         self.hidden_dim = hidden_dim
+        self.encoder_type = encoder_type
         self.num_cross_attn_layers = num_cross_attn_layers
         self.positional_encoding_type = positional_encoding_type
+
+        if self.encoder_type not in {'cnn', 'linear'}:
+            raise ValueError(f"Unknown encoder_type={self.encoder_type!r}. Use 'cnn' or 'linear'.")
         
         # Positional encoding
         self.use_positional_encoding = use_positional_encoding
@@ -511,19 +555,31 @@ class CrossAttentionAffinityModel(BaseClassifier):
                 self.ligand_pos_enc = PositionalEncoding(hidden_dim, max_ligand_len, dropout)
                 logger.info(f"Using Sinusoidal positional encoding (max_len: protein={max_protein_len}, ligand={max_ligand_len})")
         
-        # CNN encoders
-        self.protein_encoder = CNNEncoder(
-            input_dim=protein_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_cnn_layers,
-            dropout=dropout
-        )
-        self.ligand_encoder = CNNEncoder(
-            input_dim=ligand_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_cnn_layers,
-            dropout=dropout
-        )
+        # Token encoders
+        if self.encoder_type == 'cnn':
+            self.protein_encoder = CNNEncoder(
+                input_dim=protein_dim,
+                hidden_dim=hidden_dim,
+                num_layers=num_cnn_layers,
+                dropout=dropout
+            )
+            self.ligand_encoder = CNNEncoder(
+                input_dim=ligand_dim,
+                hidden_dim=hidden_dim,
+                num_layers=num_cnn_layers,
+                dropout=dropout
+            )
+        else:
+            self.protein_encoder = LinearEncoder(
+                input_dim=protein_dim,
+                hidden_dim=hidden_dim,
+                dropout=dropout
+            )
+            self.ligand_encoder = LinearEncoder(
+                input_dim=ligand_dim,
+                hidden_dim=hidden_dim,
+                dropout=dropout
+            )
         
         # Cross-attention blocks
         self.cross_attn_blocks = nn.ModuleList([
@@ -539,6 +595,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
             'protein_dim': protein_dim,
             'ligand_dim': ligand_dim,
             'hidden_dim': hidden_dim,
+            'encoder_type': encoder_type,
             'num_cnn_layers': num_cnn_layers,
             'num_cross_attn_layers': num_cross_attn_layers,
             'num_heads': num_heads,
@@ -679,7 +736,7 @@ class CrossAttentionAffinityModel(BaseClassifier):
     def get_architecture_info(self) -> Dict[str, Any]:
         """Return architecture information."""
         return {
-            'model_type': 'CrossAttentionAffinityModel',
+            'model_type': f'CrossAttentionAffinityModel[{self.encoder_type}]',
             'config': self._config,
             'total_parameters': self.count_parameters(),
             'trainable_parameters': sum(p.numel() for p in self.parameters() if p.requires_grad),
@@ -803,7 +860,8 @@ class MultiTaskLoss(nn.Module):
 def create_cross_attention_model(
     protein_model: str = 'esm2_t36_3B_UR50D',
     ligand_model: str = 'SMI-TED',
-    size: str = 'base'
+    size: str = 'base',
+    encoder_type: Literal['cnn', 'linear'] = 'cnn',
 ) -> CrossAttentionAffinityModel:
     """
     Factory function for creating CrossAttentionAffinityModel.
@@ -812,6 +870,7 @@ def create_cross_attention_model(
         protein_model: Protein embedding model name
         ligand_model: Ligand embedding model name
         size: Model size ('small', 'base', 'large')
+        encoder_type: Token encoder type ('cnn' or 'linear')
     
     Returns:
         Configured CrossAttentionAffinityModel
@@ -870,7 +929,58 @@ def create_cross_attention_model(
     return CrossAttentionAffinityModel(
         protein_dim=protein_dim,
         ligand_dim=ligand_dim,
+        encoder_type=encoder_type,
         **config
+    )
+
+
+class CrossAttentionLiteAffinityModel(CrossAttentionAffinityModel):
+    """
+    Lightweight wrapper: linear token encoders + bidirectional cross-attention.
+    """
+
+    def __init__(
+        self,
+        protein_dim: int = 2560,
+        ligand_dim: int = 768,
+        hidden_dim: int = 256,
+        num_cross_attn_layers: int = 1,
+        num_heads: int = 8,
+        ff_dim: int = 1024,
+        dropout: float = 0.1,
+        max_protein_len: int = 2048,
+        max_ligand_len: int = 512,
+        use_positional_encoding: bool = True,
+        positional_encoding_type: Literal['sinusoidal', 'rope'] = 'sinusoidal',
+    ):
+        super().__init__(
+            protein_dim=protein_dim,
+            ligand_dim=ligand_dim,
+            hidden_dim=hidden_dim,
+            encoder_type='linear',
+            num_cnn_layers=1,  # Unused in linear mode; kept for compatibility.
+            num_cross_attn_layers=num_cross_attn_layers,
+            num_heads=num_heads,
+            ff_dim=ff_dim,
+            dropout=dropout,
+            max_protein_len=max_protein_len,
+            max_ligand_len=max_ligand_len,
+            use_positional_encoding=use_positional_encoding,
+            positional_encoding_type=positional_encoding_type,
+        )
+
+
+def create_cross_attention_lite_model(
+    protein_model: str = 'esm2_t36_3B_UR50D',
+    ligand_model: str = 'SMI-TED',
+    size: str = 'base',
+) -> CrossAttentionAffinityModel:
+    """Factory helper for lite model presets."""
+    return create_cross_attention_model(
+        protein_model=protein_model,
+        ligand_model=ligand_model,
+        size=size,
+        encoder_type='linear',
     )
 
 

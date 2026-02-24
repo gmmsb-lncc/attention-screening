@@ -47,6 +47,22 @@ class TestCrossAttentionModel:
         assert model.protein_dim == 320
         assert model.ligand_dim == 768
         assert model.hidden_dim == 64
+
+    def test_model_creation_lite_variant(self):
+        """Test lightweight linear-encoder variant creation"""
+        from src.classifier.models.cross_attention_model import CrossAttentionAffinityModel
+
+        model = CrossAttentionAffinityModel(
+            protein_dim=320,
+            ligand_dim=768,
+            hidden_dim=64,
+            encoder_type='linear',
+            num_cross_attn_layers=1,
+            num_heads=4,
+        )
+
+        assert model is not None
+        assert model.encoder_type == 'linear'
     
     def test_forward_pass(self):
         """Test forward pass with random data"""
@@ -122,6 +138,13 @@ class TestCrossAttentionModel:
         # Larger models should have more parameters
         assert model_small.count_parameters() < model_base.count_parameters()
         assert model_base.count_parameters() < model_large.count_parameters()
+
+    def test_factory_function_lite(self):
+        """Test lite factory helper"""
+        from src.classifier.models.cross_attention_model import create_cross_attention_lite_model
+
+        model_lite = create_cross_attention_lite_model(size='small')
+        assert model_lite.encoder_type == 'linear'
     
     def test_factory_with_model_names(self):
         """Test factory with different model names"""
@@ -144,7 +167,7 @@ class TestCrossAttentionModel:
         info = model.get_architecture_info()
         
         assert 'model_type' in info
-        assert info['model_type'] == 'CrossAttentionAffinityModel'
+        assert info['model_type'].startswith('CrossAttentionAffinityModel[')
         assert 'config' in info
         assert 'total_parameters' in info
         assert 'encoder_params' in info
@@ -270,6 +293,32 @@ class TestCNNEncoder:
         output = encoder(x, mask)
         
         # Check masked positions are zeroed
+        assert output.shape == (2, 50, 64)
+        assert torch.allclose(output[0, 30:], torch.zeros(20, 64), atol=1e-5)
+
+
+class TestLinearEncoder:
+    """Tests for LinearEncoder"""
+
+    def test_linear_encoder_forward(self):
+        """Test linear encoder forward pass"""
+        from src.classifier.models.cross_attention_model import LinearEncoder
+
+        encoder = LinearEncoder(input_dim=320, hidden_dim=64)
+        x = torch.randn(2, 50, 320)
+        output = encoder(x)
+        assert output.shape == (2, 50, 64)
+
+    def test_linear_encoder_with_mask(self):
+        """Test linear encoder with mask"""
+        from src.classifier.models.cross_attention_model import LinearEncoder
+
+        encoder = LinearEncoder(input_dim=320, hidden_dim=64)
+        x = torch.randn(2, 50, 320)
+        mask = torch.ones(2, 50)
+        mask[0, 30:] = 0
+        output = encoder(x, mask)
+
         assert output.shape == (2, 50, 64)
         assert torch.allclose(output[0, 30:], torch.zeros(20, 64), atol=1e-5)
 
