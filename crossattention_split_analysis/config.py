@@ -103,7 +103,7 @@ class TrainingConfig:
         protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
         ligand_dim: Ligand embedding dimension (768 for SMI-TED)
         hidden_dim: Hidden dimension for all layers
-        model_variant: Model variant ('cnn_crossattn' or 'cross_attention_lite')
+        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', or 'diffusion')
         num_cnn_layers: Number of CNN encoder layers
         num_cross_attn_layers: Number of cross-attention layers
         num_heads: Number of attention heads
@@ -125,12 +125,19 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
-    model_variant: Literal['cnn_crossattn', 'cross_attention_lite'] = 'cnn_crossattn'
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
     dropout: float = 0.1
+
+    # Diffusion-specific (used only when model_variant='diffusion')
+    diffusion_steps: int = 200
+    diffusion_beta_start: float = 1e-4
+    diffusion_beta_end: float = 0.02
+    diffusion_layers: int = 4
+    diffusion_loss_weight: float = 0.1
 
     # Training
     batch_size: int = 32
@@ -162,6 +169,11 @@ class TrainingConfig:
             'num_heads': self.num_heads,
             'ff_dim': self.ff_dim,
             'dropout': self.dropout,
+            'diffusion_steps': self.diffusion_steps,
+            'diffusion_beta_start': self.diffusion_beta_start,
+            'diffusion_beta_end': self.diffusion_beta_end,
+            'diffusion_layers': self.diffusion_layers,
+            'diffusion_loss_weight': self.diffusion_loss_weight,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,
