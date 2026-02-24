@@ -68,6 +68,25 @@ Protein matrix P (Lp x Dp)     Ligand matrix L (Ll x Dl)
               (classification + regression)
 ```
 
+### Data Flow (Mermaid)
+
+```mermaid
+flowchart LR
+  P["Protein matrix P"] --> Pproj["Linear+LayerNorm+PE"]
+  L["Ligand matrix L"] --> Lproj["Linear+LayerNorm+PE"]
+  Pproj --> Pnoise["Noise"]
+  Lproj --> Lnoise["Noise"]
+  Pnoise --> Pden["Denoiser (Transformer)"]
+  Lnoise --> Lden["Denoiser (Transformer)"]
+  Pden --> CA["Cross-Attention"]
+  Lden --> CA
+  CA --> Ppool["Multi-Query Pooling (P)"]
+  CA --> Lpool["Multi-Query Pooling (L)"]
+  Ppool --> Cat["Concat"]
+  Lpool --> Cat
+  Cat --> Head["Classification Head"]
+```
+
 ## Mathematical Formulation
 
 ### Forward Diffusion (Noise Injection)
