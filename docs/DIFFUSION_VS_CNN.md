@@ -112,6 +112,33 @@ P -> Proj+Norm+PE -> Noise -> Denoise -> CrossAttn -> Multi-Query Pool -> Classi
 L -> Proj+Norm+PE -> Noise -> Denoise -> CrossAttn -> Multi-Query Pool -> Classifier
 ```
 
+### Mermaid Diagram
+
+```mermaid
+flowchart LR
+  subgraph CNN["CNN + Cross-Attention"]
+    P1["Protein P"] --> PE1["CNN Encoder"]
+    L1["Ligand L"] --> LE1["CNN Encoder"]
+    PE1 --> CA1["Cross-Attn"]
+    LE1 --> CA1
+    CA1 --> POOL1["Pooling"]
+    POOL1 --> CLS1["Classifier"]
+  end
+
+  subgraph DIFF["Diffusion + Cross-Attention"]
+    P2["Protein P"] --> PR2["Proj+Norm+PE"]
+    L2["Ligand L"] --> LR2["Proj+Norm+PE"]
+    PR2 --> NOISE1["Noise"]
+    LR2 --> NOISE2["Noise"]
+    NOISE1 --> DEN1["Denoiser"]
+    NOISE2 --> DEN2["Denoiser"]
+    DEN1 --> CA2["Cross-Attn"]
+    DEN2 --> CA2
+    CA2 --> POOL2["Multi-Query Pool"]
+    POOL2 --> CLS2["Classifier"]
+  end
+```
+
 ---
 
 ## 6) Formal View: Signal Preservation Under Noise
