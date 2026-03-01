@@ -1,7 +1,7 @@
 # 📘 semantic-screening: DT-Kinase Methodology Review
 
-**Versão**: 2.0  
-**Data**: Janeiro 2026  
+**Versão**: 3.0
+**Data**: Fevereiro 2026  
 **Status**: ✅ Production-Ready  
 **Foco**: Platform para semantic screening de interações proteína-ligante
 
@@ -106,34 +106,25 @@ Total: 15,616 moléculas
 ### Visão Geral
 
 ```
-INPUT: kinase_non_human_compounds.tsv (15,616 amostras)
+INPUT: kinase_{human|non_human}_compounds.tsv
    ↓
-[FASE 1] Embeddings Generation
-   Protein: ESM-2/ESM-C (320-2560 dim)
-   Ligand: FM4M SMI-TED (768 dim)
+[STEP 0] Scaffold Split
+   Murcko scaffold decomposition → fixed test set
+   Scaffold-disjoint train/val/test (~80/10/10)
    ↓
-[FASE 2] Matrix Construction
-   Concatenação + validação de integridade
+[STEP 1] Level 1 — Fingerprint Baseline
+   ECFP fingerprints + KNN/MLP
    ↓
-[FASE 3] Label Generation
-   Binary (pChEMBL > 6.0) + Regression targets
+[STEP 2] Level 2 — Embedding Vectors
+   ESM-2 (protein) + MoLFormer (ligand) mean-pooled + KNN/MLP
    ↓
-[FASE 4] Intelligent Stratification
-   Cosine similarity → Agglomerative clustering → 80/10/10 split
-   ├─ Train: 12,493 (80%) - Same chemical families
-   ├─ Val:    1,558 (10%) - Intermediate validation
-   └─ Test:   1,565 (10%) - Structurally DIFFERENT
+[STEP 3] Level 3 — DT-Kinase Deep Learning
+   Per-token matrices + CNN + CrossAttention (multi-seed)
    ↓
-[FASE 5] Classification (Binary)
-   12 ML models + MLP → Predict active/inactive
+[STEP 4] Comparative Report
+   Aggregate metrics + visualizations (5 plots)
    ↓
-[FASE 6] Regression (Quantitative)
-   12 ML models → Predict pChEMBL affinity
-   ↓
-[FASE 7] Deep Learning (Optional)
-   CNN + Cross-Attention → Interpretable predictions
-   ↓
-OUTPUT: Predictions + metrics + visualizations
+OUTPUT: benchmark_comparison.json + plots
 ```
 
 ---
@@ -246,140 +237,96 @@ Interpretação:
 
 ---
 
-### FASE 4: Estratificação Inteligente (⭐ CRÍTICA)
+### FASE 4: Scaffold Split (Divisão por Scaffolds Murcko)
 
-#### ⚠️ O Problema de Data Leakage
+#### O Problema de Data Leakage
 
 **Cenário Ingênuo (ERRADO)**:
 ```
-Dataset: 100 moléculas similares (distância < 0.15)
+Dataset: 100 moléculas de mesma série química (mesmo scaffold)
 
 Random split 80/20:
-├─ Train: Moléculas A, B, C, D (muito similares)
-├─ Test: Moléculas E, F, G, H (muito similares entre si)
-└─ Problema: Train e Test contêm FAMÍLIAS DIFERENTES
-            de moléculas, mas SIMILARES dentro de cada split!
+├─ Train: Composto A (scaffold X), Composto C (scaffold X)
+├─ Test: Composto B (scaffold X), Composto D (scaffold X)
+└─ Problema: Train e Test compartilham compostos da MESMA série!
 
-Resultado: Modelo "memoriza" padrão de cada família
+Resultado: Modelo "memoriza" scaffold X
           → Avalia bem no test (mas não generaliza)
-          → Performance real em compostos NOVOS será pior
+          → Performance real em scaffolds NOVOS será pior
 ```
 
-**Solução: Cluster-Based Stratification (CORRETO)**:
+**Solução: Scaffold-Based Split (CORRETO)**:
 ```
-Agglomerative Clustering encontra ~100 famílias químicas
+Decomposição de scaffolds Murcko identifica séries químicas
 
-├─ Cluster 1: [Moléculas A, B, C] - Família de piridinas
-├─ Cluster 2: [Moléculas D, E, F] - Família de benzoxazóis
-├─ Cluster 3: [Moléculas G, H, I] - Família de imidazóis
-└─ ...100 clusters...
+├─ Scaffold 1: [Compostos A, B, C] - Piridinas substituídas
+├─ Scaffold 2: [Compostos D, E, F] - Benzoxazóis
+├─ Scaffold 3: [Compostos G, H, I] - Imidazóis
+└─ ...N scaffolds...
 
-Assignment inteligente:
-├─ Train: 80 clusters inteiros (80% total)
-├─ Val:    10 clusters inteiros (10% total)
-└─ Test:   10 clusters inteiros (10% total)
+Seleção de scaffolds de teste via otimização:
+├─ Test:  Scaffolds selecionados (~10% compostos únicos)
+├─ Train: Scaffolds restantes (~80%)
+└─ Val:   Scaffolds restantes (~10%), scaffold-disjoint do train
 
-Garantia: ✅ Moléculas similares NUNCA divididas
-         ✅ Test contém FAMÍLIAS COMPLETAMENTE DIFERENTES
-         ✅ Validação realista em compostos novos
+Garantia: ✅ Compostos da mesma série NUNCA divididos
+         ✅ Test contém SCAFFOLDS COMPLETAMENTE DIFERENTES
+         ✅ Conjunto de teste FIXO e compartilhado entre datasets
 ```
 
-#### Algoritmo: Adaptive Clustering com Cosine Similarity
+#### Algoritmo: Scaffold Split
 
-**Step 1: Análise de Similaridade**
+**Implementação**: `scaffold_split.py` + `scaffolds_splits/scenario_splitter.py`
+
+**Step 1: Scaffold Decomposition**
 
 ```python
-# Calcular cosine similarity entre todos os pares
-sim_matrix = cosine_similarity(embeddings)  # Range [0, 1]
+from rdkit.Chem.Scaffolds import MurckoScaffold
 
-# Estatísticas
-stats = {
-    'min': 0.65,     # Pior similaridade
-    'p25': 0.88,     # 25º percentil
-    'p50': 0.92,     # Mediana
-    'p75': 0.95,     # 75º percentil
-    'p90': 0.97,     # 90º percentil
-    'max': 0.99      # Melhor similaridade
-}
+# Extrair scaffold Murcko de cada composto
+for compound in dataset:
+    scaffold = MurckoScaffold.MurckoScaffoldSmiles(compound.smiles)
+    # Agrupa compostos por scaffold
 ```
 
-**Interpretação Biológica**:
-- sim = 0.99 → Praticamente idênticas (mesma sequência/SMILES)
-- sim = 0.95 → Muito similares (pequenas variações)
-- sim = 0.70 → Moderadamente similares (diferentes famílias)
-- sim = 0.40 → Bem diferentes (estruturas distintas)
-
-**Step 2: Otimização Adaptativa de Threshold**
-
-Encontrar threshold ótimo **θ*** que produz número adequado de clusters.
-
-**Método: Target (Default)**
+**Step 2: Test Scaffold Selection (Otimização)**
 
 ```python
-# Alvo: ~1% do dataset como número de clusters
-target_clusters = max(3, min(int(n_samples * 0.01), 100))
-
-# Para 15,616 amostras:
-k* = max(3, min(156, 100)) = 100 clusters
-
-# Binary search para encontrar θ* que dá ~100 clusters
-threshold_optimal = binary_search(
-    low=0.65,
-    high=0.99,
-    target=100
-)
-# Resultado: θ* ≈ 0.865
+# Selecionar scaffolds de teste via random restarts
+# Otimizar: fração alvo (~10%), balanço de classes, proporcionalidade
+# O conjunto de teste é COMPARTILHADO entre human e non_human
 ```
 
-**Step 3: Agglomerative Clustering (UPGMA)**
+**Step 3: Train/Val Split (Scaffold-Disjoint)**
 
 ```python
-# Converter similarity a distance
-distance = 1 - similarity
-
-# Hierarchical clustering
-clustering = AgglomerativeClustering(
-    n_clusters=None,
-    distance_threshold=1 - theta_optimal,  # = 0.135
-    linkage='average',                      # UPGMA
-    metric='precomputed'
-)
-
-labels = clustering.fit_predict(distance_matrix)
-# Output: ~100 clusters
+# Do pool restante (sem scaffolds de teste):
+# Dividir scaffolds em train/val sem sobreposição
+# Resultado:
+# Train: ~80% (scaffolds exclusivos)
+# Val:   ~10% (scaffolds exclusivos, disjuntos do train)
+# Test:  ~10% (scaffolds exclusivos, fixo)
 ```
 
-**Step 4: Splitting com Integridade de Clusters**
+**Step 4: Validação de Integridade**
 
 ```python
-# Nunca dividir clusters!
-clusters_sorted_by_size = sort_descending(clusters)
-
-train, val, test = [], [], []
-
-for cluster in clusters_sorted_by_size:
-    if len(test) < target_test and len(test) + size ≤ target_test * 1.2:
-        test.append(cluster)
-    elif len(val) < target_val and len(val) + size ≤ target_val * 1.2:
-        val.append(cluster)
-    else:
-        train.append(cluster)
-
-# Resultado
-Train: 12,493 (80.0%)
-Val:    1,558 (10.0%)
-Test:   1,565 (10.1%)
+# Verificar disjuntividade automática
+assert scaffolds_train & scaffolds_val == set()
+assert scaffolds_train & scaffolds_test == set()
+assert scaffolds_val & scaffolds_test == set()
+# ✅ Nenhum scaffold aparece em mais de um split
 ```
 
-**Métodos Alternativos Implementados**:
+#### Cenários Disponíveis
 
-| Método | Velocidade | Qualidade | Quando Usar |
-|--------|-----------|-----------|------------|
-| **target** (default) | ⚡⚡⚡ 10-15 iter | ★★★☆☆ | Produção, datasets > 1K |
-| silhouette | 🐌 50×O(n²) | ★★★★★ | Pesquisa, datasets < 5K |
-| leakage_aware | 🐌🐌 muito lento | ★★★★☆ | Crítico, datasets pequenos |
-| percentile | ⚡⚡⚡ O(n²/2) | ★★☆☆☆ | Exploração rápida |
-| elbow | 🐌 50 evaluations | ★★★☆☆ | k automático |
+| Cenário | Código | Unidade de Split | Uso |
+|---------|--------|------------------|-----|
+| **Scaffold** | **Sc** | **Scaffold Murcko** | **Padrão para benchmarks** |
+| Random | S1 | Linhas individuais | Baseline (com leakage) |
+| Compound | S2 | Compostos únicos | Sem leakage de compostos |
+| Kinase | S3 | Quinases únicas | Sem leakage de proteínas |
+| New Comp. + New Kinase | S4 | Ambos | Dupla disjuntividade |
 
 ---
 
@@ -996,11 +943,12 @@ PROTEIN_MODELS = [
 
 ### P3: Data Leakage Risk em Random Split
 
-**Problema**: Random split 80/20 permite moléculas similares em train/test
+**Problema**: Random split 80/20 permite compostos da mesma série química em train/test
 
-**Solução**: ✅ **Agglomerative clustering implementado**
-- Cluster-based assignment garante integridade
-- Similar molecules NUNCA divididas
+**Solução**: ✅ **Scaffold split implementado** (`scaffold_split.py`)
+- Decomposição de scaffolds Murcko identifica séries químicas
+- Scaffolds NUNCA divididos entre splits
+- Conjunto de teste fixo e compartilhado entre datasets
 
 ---
 
@@ -1106,10 +1054,10 @@ visualization/
 
 ## 📞 Contato e Suporte
 
-**Manutentor**: DockTKinase Team  
-**Status**: ✅ Production-Ready  
-**Última Atualização**: Dezembro 2025  
-**Versão**: 2.0
+**Manutentor**: GMMSB-LNCC
+**Status**: ✅ Production-Ready
+**Última Atualização**: Fevereiro 2026
+**Versão**: 3.0
 
 ---
 

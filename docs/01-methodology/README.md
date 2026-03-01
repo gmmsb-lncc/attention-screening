@@ -61,13 +61,13 @@ Revisão completa e especializada da metodologia do DockTKinase.
 
 ## 🔑 Key Takeaways
 
-### ✅ What Makes DockTKinase Unique
+### What Makes semantic-screening Unique
 
-1. **Intelligent Stratification**: Usa cosine similarity + agglomerative clustering para garantir train/test separation
-2. **Multiple ML Algorithms**: 12 algoritmos por problema (classification + regression)
-3. **Rigorous Validation**: 5-fold CV + multiple metrics + overfitting detection
-4. **Production-Ready**: Modular architecture (SOLID), type hints, logging, error handling
-5. **Interpretable Deep Learning**: CNN + Cross-Attention com attention maps
+1. **Scaffold-Based Splitting**: Murcko scaffold decomposition prevents chemical series leakage
+2. **3-Level Benchmark**: Fingerprints → PLM vectors → DT-Kinase (CNN+CrossAttention)
+3. **Multi-Seed Evaluation**: 5 seeds for statistical significance
+4. **Unified Orchestration**: Single script (`semantic_screening_models_beta.py`) coordinates all levels
+5. **Interpretable Deep Learning**: CNN + Cross-Attention with attention maps
 
 ### 📈 Performance Summary
 
@@ -118,11 +118,12 @@ Revisão completa e especializada da metodologia do DockTKinase.
 
 ## 📌 Revisões e Updates
 
+- **v3.0** (Fevereiro 2026): Scaffold splits + Benchmark unificado de 3 níveis
 - **v2.0** (Dezembro 2025): Revisão completa com foco em super-resistência bacteriana
 - **v1.0**: Documentação inicial
 
 ---
 
-**Status**: ✅ Production-Ready  
-**Último update**: Dezembro 2025  
-**Manutentor**: DockTKinase Team
+**Status**: Production-Ready
+**Último update**: Fevereiro 2026
+**Manutentor**: GMMSB-LNCC

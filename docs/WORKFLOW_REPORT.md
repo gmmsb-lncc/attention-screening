@@ -1,8 +1,8 @@
 # DockTKinase (semantic-screening) — Relatório Completo de Fluxo de Trabalho
 
-**Autor**: Claude/Copilot  
-**Data**: Janeiro 2025  
-**Versão**: 2.1  
+**Autor**: GMMSB-LNCC
+**Data**: Fevereiro 2026
+**Versão**: 3.0 (Scaffold splits + Benchmark unificado)
 **Destinatário**: Leitor leigo em bioinformática e aprendizado de máquina
 
 ---
@@ -42,38 +42,55 @@ Proteínas similares terão vetores próximos; moléculas similares terão vetor
 
 ---
 
-## 2. Pipeline Completo — Três Fases Principais
+## 2. Pipeline Completo — Benchmark Unificado
 
-O sistema executa três fases sequenciais, orquestradas pelo arquivo `run_complete_pipeline.py`:
+O sistema executa um pipeline de benchmark em 5 passos, orquestrado pelo script `semantic_screening_models_beta.py`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          PIPELINE COMPLETO                               │
+│                    BENCHMARK UNIFICADO (3 NÍVEIS)                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  [FASE 1: BUILD]                                                        │
-│  ├── 1.1 Carregar dados TSV (proteínas + moléculas + atividade)        │
-│  ├── 1.2 Gerar embeddings de proteínas (ESM-2/ESM-C)                   │
-│  ├── 1.3 Gerar embeddings de moléculas (SMI-TED)                       │
-│  ├── 1.4 Concatenar embeddings [proteína | molécula]                   │
-│  ├── 1.5 Estratificação inteligente (evitar data leakage)              │
-│  └── 1.6 Dividir em treino/validação/teste                             │
+│  [STEP 0: SCAFFOLD SPLIT]                                               │
+│  ├── Decompor moléculas em scaffolds Murcko                            │
+│  ├── Selecionar scaffolds de teste (fixo, compartilhado)               │
+│  └── Gerar train/val/test sem sobreposição de scaffolds                │
 │                           │                                             │
 │                           ▼                                             │
-│  [FASE 2: CLASSIFICAÇÃO]                                                │
-│  ├── 2.1 Treinar 10-12 modelos de classificação                        │
-│  ├── 2.2 Avaliar métricas (ROC-AUC, F1, Precisão, Recall)             │
-│  └── 2.3 Selecionar melhor modelo                                      │
+│  [STEP 1: LEVEL 1 — Fingerprint Baseline]                               │
+│  ├── Extrair fingerprints moleculares (ECFP)                           │
+│  ├── Treinar KNN + MLP no scaffold split                               │
+│  └── Avaliar métricas (Accuracy, MCC, F1, AUC, ...)                   │
 │                           │                                             │
 │                           ▼                                             │
-│  [FASE 3: REGRESSÃO]                                                    │
-│  ├── 3.1 Converter valores para escala pChEMBL (log-transformação)     │
-│  ├── 3.2 Treinar 10-12 modelos de regressão                            │
-│  ├── 3.3 Avaliar métricas (MAE, R², RMSE)                              │
-│  └── 3.4 Selecionar melhor modelo                                      │
+│  [STEP 2: LEVEL 2 — Embedding Vectors]                                  │
+│  ├── Usar vetores ESM-2 (proteína) + MoLFormer (ligante) mean-pooled  │
+│  ├── Treinar KNN + MLP no mesmo scaffold split                         │
+│  └── Avaliar métricas (mesmo protocolo)                                │
+│                           │                                             │
+│                           ▼                                             │
+│  [STEP 3: LEVEL 3 — DT-Kinase Deep Learning]                           │
+│  ├── Usar matrizes per-token (ESM-2 + MoLFormer)                      │
+│  ├── Treinar CNN + CrossAttention (multi-seed: 5 seeds)                │
+│  └── Avaliar métricas com threshold otimizado no val                   │
+│                           │                                             │
+│                           ▼                                             │
+│  [STEP 4: RELATÓRIO COMPARATIVO]                                        │
+│  ├── Agregar métricas dos 3 níveis                                     │
+│  ├── Gerar visualizações comparativas (5 gráficos)                     │
+│  └── Salvar benchmark_comparison.json                                  │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### 2.1 Objetivo do Benchmark
+
+O benchmark responde duas perguntas científicas fundamentais:
+
+1. **Level 1 vs Level 2**: Qual o ganho de usar embeddings de PLMs no lugar de fingerprints clássicos?
+2. **Level 2 vs Level 3**: Qual o ganho de preservar contexto por-resíduo/por-átomo (matrizes) ao invés de vetores agregados?
+
+Todos os 3 níveis usam **exatamente o mesmo scaffold split**, garantindo comparação justa.
 
 ---
 
@@ -141,108 +158,94 @@ embedding_final = [embedding_proteína | embedding_molécula]
 
 Este vetor representa o "contexto de interação" e será usado pelos classificadores/regressores.
 
-### 3.5 Estratificação Inteligente
+### 3.5 Scaffold Split (Divisão por Scaffolds Murcko)
 
-**Arquivo**: `src/build/stratification/stratifier.py`
+**Arquivo**: `scaffold_split.py` + `scaffolds_splits/scenario_splitter.py`
 
-**Problema**: Se proteínas/moléculas similares aparecem em treino e teste, o modelo pode "memorizar" em vez de generalizar (data leakage).
+**Problema**: Se compostos da mesma série química aparecem em treino e teste, o modelo pode "memorizar" padrões de scaffolds em vez de generalizar (data leakage).
 
-**Solução**: Agrupamento por similaridade antes da divisão:
+**Solução**: Divisão baseada em **scaffolds Murcko** — o esqueleto central (sistema de anéis) de cada molécula:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   ESTRATIFICAÇÃO                            │
+│                  SCAFFOLD SPLIT                              │
 ├─────────────────────────────────────────────────────────────┤
-│ 1. Calcular similaridade de cosseno entre embeddings       │
-│ 2. Agrupar amostras similares em clusters (K-means++)      │
-│ 3. Dividir CLUSTERS (não amostras) em treino/val/teste     │
-│ 4. Garantir que proteínas similares não "vazem"            │
+│ 1. Extrair scaffold Murcko de cada composto                 │
+│ 2. Selecionar scaffolds de teste via otimização             │
+│    (balanceando fração e distribuição de classes)            │
+│ 3. Dividir scaffolds restantes em treino/validação          │
+│ 4. Garantir: NENHUM scaffold aparece em >1 split            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Métodos de threshold disponíveis**:
-
-| Método | Descrição |
-|--------|-----------|
-| `target` | Otimiza para número alvo de clusters |
-| `silhouette` | Maximiza coesão intra-cluster |
-| `elbow` | Ponto de inflexão na curva de distorção |
-| `leakage_aware` | Minimiza vazamento entre splits |
-
-### 3.6 Divisão dos Dados
+**Garantias**:
+- Compostos da mesma série química NUNCA divididos entre splits
+- Conjunto de teste fixo e compartilhado entre datasets (human/non_human)
+- Distribuição de classes monitorada e otimizada
 
 **Proporções padrão**:
-- Treino: 80%
-- Validação: 10%
-- Teste: 10%
+- Treino: ~80%
+- Validação: ~10%
+- Teste: ~10%
 
-**Saídas da Fase Build**:
+**Saídas do Scaffold Split**:
 
 ```
-build/
-├── embedding_matrix.npy      # Matriz [N_amostras × 3328]
-├── binary_labels.npy         # Rótulos 0/1 (ativo/inativo)
-├── interaction_labels.npy    # Valores contínuos (nM ou pChEMBL)
-└── splits/
-    ├── train_indices.npy     # Índices do conjunto de treino
-    ├── val_indices.npy       # Índices do conjunto de validação
-    └── test_indices.npy      # Índices do conjunto de teste
+scaffolds_splits/output/
+├── manifest.json                    # Metadados do split
+├── {dataset}_test.tsv               # Conjunto de teste fixo
+├── {dataset}_train.tsv              # Treino (cenário padrão Sc)
+├── {dataset}_val.tsv                # Validação (cenário padrão Sc)
+├── scenarios/Sc/                    # Scaffold-disjoint train/val
+│   ├── {dataset}_train.tsv
+│   └── {dataset}_val.tsv
+└── split_class_distribution_summary.csv
 ```
 
 ---
 
-## 4. FASE 2: CLASSIFICAÇÃO
+## 4. Os Três Níveis de Modelos
 
-### 4.1 Objetivo
+O benchmark unificado avalia modelos em três níveis de complexidade crescente:
 
-Prever se um composto é **ativo** ou **inativo** contra a proteína alvo.
+### 4.1 Level 1 — Fingerprint Baseline
 
-**Threshold padrão**: IC50 < 1000 nM → Ativo (label = 1)
+**Entrada**: Fingerprints moleculares (ECFP — Extended-Connectivity Fingerprints)
+**Modelos**: KNN + MLP
+**Arquivo**: `split_comparison_analysis.py` com `feature_type="fingerprint"`
 
-### 4.2 Modelos Treinados
+Fingerprints são representações binárias clássicas que codificam subestruturas presentes na molécula. Servem como **baseline** para avaliar o ganho de usar embeddings de PLMs.
 
-**Arquivo**: `src/classifier/multi_model_pipeline.py`
+### 4.2 Level 2 — Embedding Vectors
 
-O sistema treina automaticamente 10-12 modelos diferentes:
+**Entrada**: Vetores mean-pooled de ESM-2 (proteína) + MoLFormer (ligante)
+**Modelos**: KNN + MLP
+**Arquivo**: `split_comparison_analysis.py` com `feature_type="embedding"`
 
-| Modelo | Tipo | Tempo Aprox. | Características |
-|--------|------|--------------|-----------------|
-| NaiveBayes | Probabilístico | ~2s | Baseline rápido |
-| DecisionTree | Árvore | ~5s | Interpretável |
-| LogisticRegression | Linear | ~10s | Baseline linear |
-| LinearSVC | SVM linear | ~15s | Escalável |
-| **LightGBM** | Gradient Boosting | ~20s | **Rápido e preciso** |
-| **XGBoost** | Gradient Boosting | ~25s | **Estado da arte** |
-| ExtraTrees | Ensemble | ~40s | Robusto |
-| RandomForest | Ensemble | ~60s | Clássico |
-| AdaBoost | Boosting | ~80s | Adaptativo |
-| KNN | Instância | ~120s | Não-paramétrico |
-| GradientBoosting | Sklearn | ~180s | Implementação sklearn |
-| MLP | Rede Neural | ~300s | Deep Learning |
+Usa vetores fixos gerados por modelos de linguagem pré-treinados. A comparação Level 1 vs Level 2 mede o **valor dos embeddings de PLMs** sobre fingerprints tradicionais.
 
-### 4.3 Métricas de Avaliação
+### 4.3 Level 3 — DT-Kinase (CNN + CrossAttention)
 
-| Métrica | Descrição | Fórmula |
-|---------|-----------|---------|
-| **ROC-AUC** | Área sob curva ROC | Principal métrica |
-| F1 | Média harmônica de precisão e recall | 2×(P×R)/(P+R) |
-| Accuracy | Taxa de acertos | (TP+TN)/Total |
-| Precision | Proporção de positivos corretos | TP/(TP+FP) |
-| Recall | Proporção de positivos encontrados | TP/(TP+FN) |
+**Entrada**: Matrizes per-token de ESM-2 (por resíduo) + MoLFormer (por átomo)
+**Modelo**: CNN multi-escala + Cross-Attention bidirecional
+**Arquivo**: `crossattention_split_analysis/experiment.py`
 
-### 4.4 Seleção do Melhor Modelo
+Preserva o contexto de cada resíduo e cada átomo, permitindo ao modelo aprender quais regiões da proteína interagem com quais partes do ligante. A comparação Level 2 vs Level 3 mede o **valor do contexto posicional**.
 
-O modelo com maior **ROC-AUC no conjunto de teste** é selecionado como vencedor.
+### 4.4 Métricas de Avaliação (todos os níveis)
 
----
+| Métrica | Descrição | Uso |
+|---------|-----------|-----|
+| **MCC** | Matthews Correlation Coefficient | **Métrica primária de seleção** |
+| AUC | Área sob curva ROC | Qualidade de ranking |
+| F1 | Média harmônica de precisão e recall | Balanço P/R |
+| Accuracy | Taxa de acertos | Visão geral |
+| Precision | Proporção de positivos corretos | Controle de falsos positivos |
+| Recall | Proporção de positivos encontrados | Controle de falsos negativos |
 
-## 5. FASE 3: REGRESSÃO
+**Threshold de atividade**: pChEMBL >= 6.0 (IC50 <= 1000 nM) → Ativo
 
-### 5.1 Objetivo
-
-Prever o **valor exato de afinidade** (IC50/Ki em nM ou pChEMBL).
-
-### 5.2 Transformação de Escala
+## 5. Escala pChEMBL
 
 **Problema**: Valores de IC50 variam de 0.1 nM a 100.000 nM (5 ordens de magnitude).
 
@@ -255,38 +258,12 @@ pChEMBL = -log₁₀(IC50 em Molar)
 ```
 
 **Exemplo**:
-- IC50 = 100 nM → pChEMBL = 9 - 2 = 7.0
-- IC50 = 10 nM → pChEMBL = 9 - 1 = 8.0
-- IC50 = 1 nM → pChEMBL = 9 - 0 = 9.0
+- IC50 = 1000 nM → pChEMBL = 6.0 (threshold ativo/inativo)
+- IC50 = 100 nM → pChEMBL = 7.0
+- IC50 = 10 nM → pChEMBL = 8.0
+- IC50 = 1 nM → pChEMBL = 9.0
 
 Valores maiores de pChEMBL = maior afinidade = melhor fármaco.
-
-### 5.3 Modelos Treinados
-
-**Arquivo**: `src/regression/modular_pipeline.py`
-
-| Modelo | Tipo | Uso |
-|--------|------|-----|
-| Ridge | Regularização L2 | Baseline rápido |
-| Lasso | Regularização L1 | Seleção de features |
-| ElasticNet | L1 + L2 | Híbrido |
-| DecisionTree | Árvore | Interpretável |
-| LinearSVR | SVM linear | Escalável |
-| **LightGBM** | Gradient Boosting | **Recomendado** |
-| **XGBoost** | Gradient Boosting | **Estado da arte** |
-| ExtraTrees | Ensemble | Robusto |
-| RandomForest | Ensemble | Clássico |
-| KNN | Instância | Não-paramétrico |
-| GradientBoosting | Sklearn | Implementação base |
-| MLP | Rede Neural | Deep Learning |
-
-### 5.4 Métricas de Avaliação
-
-| Métrica | Descrição | Objetivo |
-|---------|-----------|----------|
-| **MAE** | Erro Médio Absoluto | **Minimizar** |
-| **R²** | Coeficiente de Determinação | **Maximizar** (até 1.0) |
-| RMSE | Raiz do Erro Quadrático Médio | Minimizar |
 
 ---
 
@@ -365,58 +342,62 @@ x_rotated = x · cos(mθ) + rotate_half(x) · sin(mθ)
 
 ---
 
-## 7. Execução do Pipeline
+## 7. Execução do Benchmark
 
-### 7.1 Comando Completo
+### 7.1 Comando Principal (Benchmark Unificado)
 
 ```bash
-python run_complete_pipeline.py \
-    --input data/kinase_data.tsv \
-    --output results/experiment_1 \
-    --protein-model esm2_t36_3B_UR50D \
-    --device auto \
-    --seed 42
+# Benchmark completo (3 níveis)
+python semantic_screening_models_beta.py \
+    --dataset non_human \
+    --embedding 8M
+
+# Apenas Level 1 e 2 (baseline rápido)
+python semantic_screening_models_beta.py \
+    --dataset non_human \
+    --embedding 8M \
+    --levels 1,2
+
+# Apenas Level 3 com hiperparâmetros customizados
+python semantic_screening_models_beta.py \
+    --dataset non_human \
+    --embedding 8M \
+    --levels 3 \
+    --epochs 100 \
+    --batch_size 32
 ```
 
 ### 7.2 Parâmetros Principais
 
 | Argumento | Descrição | Padrão |
 |-----------|-----------|--------|
-| `--input` | Arquivo TSV de entrada | **Obrigatório** |
-| `--output` | Diretório de saída | **Obrigatório** |
-| `--protein-model` | Modelo ESM-2/ESM-C | esm2_t6_8M_UR50D |
-| `--ligand-model` | Modelo de molécula | SMI-TED |
-| `--device` | CPU/CUDA/MPS/auto | auto |
-| `--seed` | Semente aleatória | 42 |
-| `--test-size` | Proporção teste | 0.1 |
-| `--val-size` | Proporção validação | 0.1 |
-| `--stratifier-method` | Método de estratificação | target |
-| `--no-classification` | Pular classificação | False |
-| `--no-regression` | Pular regressão | False |
+| `--dataset` | Dataset (human, non_human) | **Obrigatório** |
+| `--embedding` | Modelo ESM-2 (8M, 150M, 650M) | 8M |
+| `--levels` | Níveis a executar (1,2,3) | 1,2,3 |
+| `--output_dir` | Diretório de saída | auto |
+| `--seeds` | Seeds para reprodutibilidade | [42,123,456,789,1024] |
+| `--force` | Forçar recálculo | False |
+| `--force_split` | Regenerar scaffold splits | False |
+| `--epochs` | Épocas Level 3 | 500 |
+| `--batch_size` | Batch size Level 3 | 32 |
+| `--patience` | Early stopping (0=desabilitado) | 30 |
 
-### 7.3 Saída do Pipeline
+### 7.3 Saída do Benchmark
 
 ```
-results/experiment_1/
-├── build/
-│   ├── proteins/                # Embeddings de proteínas
-│   ├── ligands/                 # Embeddings de moléculas
-│   ├── embedding_matrix.npy     # Matriz concatenada
-│   ├── binary_labels.npy        # Rótulos binários
-│   ├── interaction_labels.npy   # Valores de afinidade
-│   └── splits/                  # Índices de divisão
-│
-├── classifier/
-│   ├── models/                  # Modelos salvos (.joblib)
-│   ├── metrics/                 # Métricas JSON
-│   └── predictions/             # Predições
-│
-├── regression/
-│   ├── models/                  # Modelos salvos (.joblib)
-│   ├── metrics/                 # Métricas JSON
-│   └── predictions/             # Predições
-│
-└── checkpoints/                 # Estado intermediário
+results/benchmark_non_human_8M/
+├── level1_fingerprint/non_human/      # Resultados Level 1
+│   └── split_comparison_results.json
+├── level2_embedding_8M/non_human/     # Resultados Level 2
+│   └── split_comparison_results.json
+├── level3_cnn_crossattn_8M/           # Resultados Level 3
+│   └── *_crossattention_analysis_results.json
+├── benchmark_comparison.json          # Tabela unificada
+├── benchmark_grouped_bar.png          # Comparativo barras
+├── benchmark_radar.png                # Gráfico radar
+├── benchmark_heatmap.png              # Mapa de calor
+├── benchmark_mcc_ranking.png          # Ranking por MCC
+└── benchmark_per_metric.png           # Comparativo por métrica
 ```
 
 ---
@@ -498,15 +479,15 @@ WHERE
 
 ---
 
-## 12. Próximos Passos para Adaptações
+## 12. Próximos Passos
 
-Com base neste relatório, scripts de adaptação podem:
+Com base neste pipeline, os próximos passos incluem:
 
-1. **Trocar Modelo de Proteína**: Usar Boltz-2 ou ESM-C via `--protein-model`
-2. **Reutilizar Embeddings**: Via `--protein-embeddings-dir` e `--ligand-embeddings-dir`
-3. **Customizar Estratificação**: Via `--stratifier-method` e `--stratifier-threshold`
-4. **Treinar Apenas Subconjunto de Modelos**: Via `--classification-models` e `--regression-models`
-5. **Modo Cross-Attention**: Usar `attention_matrix.py` para modelo de Deep Learning
+1. **Expandir embeddings**: Testar novos modelos de proteína (ESM-C 600M, ESM-2 3B)
+2. **Benchmark multi-embedding**: Rodar benchmark unificado com diferentes embeddings para comparar
+3. **Análise de leakage**: Usar `scripts/data_leakage_analysis.py` para validar splits
+4. **Multi-seed statistics**: Garantir significância estatística com 5+ seeds
+5. **Cross-dataset**: Comparar performance human vs non_human no mesmo benchmark
 
 ---
 
@@ -533,17 +514,16 @@ Com base neste relatório, scripts de adaptação podem:
 
 | Arquivo | Responsabilidade |
 |---------|------------------|
-| `run_complete_pipeline.py` | CLI principal e orquestração |
-| `src/integrated_pipeline.py` | Coordenação das 3 fases |
-| `src/build/pipeline/build_pipeline.py` | Pipeline de embeddings |
-| `src/build/embeddings/protein_embedding.py` | Wrapper ESM-2 |
-| `src/build/embeddings/ligand_embedding.py` | Wrapper SMI-TED |
-| `src/build/stratification/stratifier.py` | Estratificação por clusters |
-| `src/classifier/multi_model_pipeline.py` | Pipeline de classificação |
-| `src/regression/modular_pipeline.py` | Pipeline de regressão |
+| `semantic_screening_models_beta.py` | **Benchmark unificado (3 níveis)** |
+| `scaffold_split.py` | Geração de scaffold splits |
+| `scaffolds_splits/scenario_splitter.py` | Splitting por cenário (Sc, S1-S4) |
+| `split_comparison_analysis.py` | Level 1 e 2 (KNN/MLP) |
+| `crossattention_split_analysis/experiment.py` | Level 3 (CNN+CrossAttention) |
+| `crossattention_split_analysis/config.py` | Configuração e constantes |
+| `scripts/extract_ligand_vectors.py` | Mean-pool MoLFormer → vetores |
 | `src/classifier/models/cross_attention_model.py` | Arquitetura DT-Kinase |
-| `attention_matrix.py` | CLI para Cross-Attention |
+| `src/build/embeddings/strategies/` | Estratégias de embedding (ESM-2, ESM-C, MoLFormer) |
 
 ---
 
-*Este relatório foi gerado com base na análise completa do código-fonte do repositório semantic-screening/docktkinase em Janeiro de 2025.*
+*Atualizado em Fevereiro de 2026. Reflete a metodologia de scaffold splits e benchmark unificado de 3 níveis.*
