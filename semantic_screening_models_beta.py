@@ -55,6 +55,7 @@ LEVEL_LABELS = {
     "level1_fp_mlp": "Level 1 (FP+MLP)",
     "level2_emb_knn": "Level 2 (Emb+KNN)",
     "level2_emb_mlp": "Level 2 (Emb+MLP)",
+    "level3_cnn": "Level 3 (CNN)",
     "level3_cnn_ca": "Level 3 (CNN+CA)",
 }
 
@@ -66,7 +67,8 @@ LEVEL_COLORS = {
     "level1_fp_mlp": "#66c2a5",
     "level2_emb_knn": "#7570b3",
     "level2_emb_mlp": "#a6a3d9",
-    "level3_cnn_ca": "#d95f02",
+    "level3_cnn": "#d95f02",
+    "level3_cnn_ca": "#e7298a",
 }
 
 
@@ -77,7 +79,8 @@ LEVEL_COLORS = {
 class BenchmarkProgress:
     """Global progress tracker with nested step/substep display."""
 
-    def __init__(self, levels: List[int], dataset: str, embedding: str):
+    def __init__(self, levels: List[int], dataset: str, embedding: str,
+                 use_cross_attention: bool = False):
         self.dataset = dataset
         self.embedding = embedding
         self.step_timings: Dict[str, float] = {}
@@ -92,7 +95,8 @@ class BenchmarkProgress:
         if 2 in levels:
             self.steps.append("Step 2: Level 2 (Emb+KNN/MLP)")
         if 3 in levels:
-            self.steps.append("Step 3: Level 3 (CNN+CrossAttn)")
+            l3_label = "CNN+CA" if use_cross_attention else "CNN"
+            self.steps.append(f"Step 3: Level 3 ({l3_label})")
         self.steps.append("Step 4: Report + Visualizations")
 
         self.total = len(self.steps)
@@ -196,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Early stopping patience (default: 5, 0 to disable)")
     p.add_argument("--learning_rate", type=float, default=1e-4,
                     help="Learning rate for Level 3 (default: 1e-4)")
+    p.add_argument("--cross_attention", action="store_true",
+                    help="Add cross-attention on top of CNN in Level 3 "
+                         "(default: CNN-only; use this flag to enable CNN+CA)")
 
     # Debug
     p.add_argument("--debug", action="store_true",
@@ -455,7 +462,7 @@ def _load_split_comparison_results(level_dir: str) -> Optional[Dict]:
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Level 3 — CNN + CrossAttention
+# Step 3: Level 3 — CNN (optionally + CrossAttention)
 # ---------------------------------------------------------------------------
 
 def run_level3(
@@ -470,12 +477,20 @@ def run_level3(
     batch_size: int,
     patience: Optional[int],
     learning_rate: float,
+    num_cross_attn_layers: int = 0,
 ) -> Optional[Dict]:
-    """Run Level 3: CNN+CrossAttention. Returns results dict or None."""
+    """Run Level 3: CNN on embedding matrices (optionally + CrossAttention).
+
+    Args:
+        num_cross_attn_layers: 0 = CNN-only (default), >=1 = add cross-attention.
+    """
     from crossattention_split_analysis.experiment import run_single_analysis
 
-    level_dir = os.path.join(output_dir, f"level3_cnn_crossattn_{embedding_short}")
+    tag = "cnn_ca" if num_cross_attn_layers > 0 else "cnn"
+    level_dir = os.path.join(output_dir, f"level3_{tag}_{embedding_short}")
     print(f"  Output: {level_dir}")
+    print(f"  Cross-attention layers: {num_cross_attn_layers}"
+          f" ({'CNN+CA' if num_cross_attn_layers > 0 else 'CNN-only'})")
 
     results = run_single_analysis(
         embedding_name=embedding_name,
@@ -488,6 +503,7 @@ def run_level3(
         patience=patience,
         batch_size=batch_size,
         learning_rate=learning_rate,
+        num_cross_attn_layers=num_cross_attn_layers,
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
@@ -576,8 +592,12 @@ def aggregate_benchmark_metrics(
     level1_results: Optional[Dict],
     level2_results: Optional[Dict],
     level3_results: Optional[Dict],
+    level3_key: str = "level3_cnn",
 ) -> Dict[str, Dict[str, Optional[float]]]:
     """Aggregate metrics from all levels into a unified dict.
+
+    Args:
+        level3_key: "level3_cnn" (CNN-only) or "level3_cnn_ca" (CNN+CrossAttention).
 
     Returns:
         {model_key: {metric: value, metric_std: value, ...}}
@@ -608,7 +628,7 @@ def aggregate_benchmark_metrics(
                     row[f"{m}_std"] = _extract_metric_std(sc, model_key, m)
                 aggregated[label_key] = row
 
-    # Level 3 — CNN+CrossAttention
+    # Level 3 — CNN (or CNN+CA)
     if level3_results:
         sc_key = _find_scaffold_scenario_key(level3_results)
         if sc_key:
@@ -640,7 +660,7 @@ def aggregate_benchmark_metrics(
                         row[f"{m}_std"] = float(std_val) if not np.isnan(std_val) else None
                     else:
                         row[f"{m}_std"] = None
-                aggregated["level3_cnn_ca"] = row
+                aggregated[level3_key] = row
 
     return aggregated
 
@@ -669,7 +689,7 @@ def print_comparison_table(
     for model_key in [
         "level1_fp_knn", "level1_fp_mlp",
         "level2_emb_knn", "level2_emb_mlp",
-        "level3_cnn_ca",
+        "level3_cnn", "level3_cnn_ca",
     ]:
         if model_key not in aggregated:
             continue
@@ -744,7 +764,8 @@ def save_benchmark_json(
 
 def _available_models(aggregated: Dict) -> List[str]:
     """Return model keys that have at least one non-None metric."""
-    order = ["level1_fp_knn", "level1_fp_mlp", "level2_emb_knn", "level2_emb_mlp", "level3_cnn_ca"]
+    order = ["level1_fp_knn", "level1_fp_mlp", "level2_emb_knn", "level2_emb_mlp",
+             "level3_cnn", "level3_cnn_ca"]
     available = []
     for k in order:
         if k in aggregated:
@@ -1142,7 +1163,13 @@ def main():
     print(f"  Output dir:       {output_dir}")
     print(f"  Scaffold splits:  {scaffold_split_dir}")
     print(f"  Force:            {force}")
+    # Resolve cross-attention config
+    use_cross_attention = args.cross_attention
+    num_cross_attn_layers = 2 if use_cross_attention else 0
+    level3_key = "level3_cnn_ca" if use_cross_attention else "level3_cnn"
+
     if 3 in levels:
+        print(f"  L3 model:         {'CNN + CrossAttention' if use_cross_attention else 'CNN-only'}")
         print(f"  L3 epochs:        {args.epochs}")
         print(f"  L3 batch_size:    {args.batch_size}")
         print(f"  L3 patience:      {patience}")
@@ -1153,7 +1180,7 @@ def main():
     t_start = time.time()
 
     # Initialize global progress tracker
-    progress = BenchmarkProgress(levels, dataset, embedding_short)
+    progress = BenchmarkProgress(levels, dataset, embedding_short, use_cross_attention)
 
     # -----------------------------------------------------------------------
     # Step 0: Scaffold splits
@@ -1222,7 +1249,8 @@ def main():
     # -----------------------------------------------------------------------
     level3_results = None
     if 3 in levels:
-        step_name = "Step 3: Level 3 (CNN+CrossAttn)"
+        l3_label = "CNN+CA" if use_cross_attention else "CNN"
+        step_name = f"Step 3: Level 3 ({l3_label})"
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
@@ -1238,6 +1266,7 @@ def main():
             batch_size=args.batch_size,
             patience=patience,
             learning_rate=args.learning_rate,
+            num_cross_attn_layers=num_cross_attn_layers,
         )
         if level3_results:
             tqdm.write("  Level 3 completed successfully.")
@@ -1251,7 +1280,9 @@ def main():
     step_name = "Step 4: Report + Visualizations"
     progress.begin_step(step_name)
 
-    aggregated = aggregate_benchmark_metrics(level1_results, level2_results, level3_results)
+    aggregated = aggregate_benchmark_metrics(
+        level1_results, level2_results, level3_results, level3_key=level3_key,
+    )
 
     if not aggregated:
         tqdm.write("  No results to compare. At least one level must produce results.")
