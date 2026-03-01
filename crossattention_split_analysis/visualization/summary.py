@@ -110,6 +110,8 @@ def calculate_statistics(seed_results: Dict) -> Dict:
         'mcc': [],
         'auc': [],
         'f1': [],
+        'precision': [],
+        'recall': [],
         'loss': []
     }
 

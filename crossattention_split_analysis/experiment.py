@@ -805,6 +805,8 @@ def run_crossattention_analysis(
                 'mcc',
                 'auc',
                 'f1',
+                'precision',
+                'recall',
                 'loss',
                 'decision_threshold',
                 'threshold_optimized_score',

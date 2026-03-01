@@ -119,10 +119,11 @@ def select_validation_scaffolds(
             val_neg += float(n_neg[idx])
 
         # Enforce class coverage on validation set.
+        # Use SMALLEST scaffold with the needed class to minimize target overshoot.
         if val_pos <= 0:
             cand = np.where((~selected) & (n_pos > 0))[0]
             if cand.size > 0:
-                idx = int(cand[np.argmax(n_pos[cand])])
+                idx = int(cand[np.argmin(n_comp[cand])])
                 selected[idx] = True
                 val_comp += float(n_comp[idx])
                 val_pos += float(n_pos[idx])
@@ -131,7 +132,7 @@ def select_validation_scaffolds(
         if val_neg <= 0:
             cand = np.where((~selected) & (n_neg > 0))[0]
             if cand.size > 0:
-                idx = int(cand[np.argmax(n_neg[cand])])
+                idx = int(cand[np.argmin(n_comp[cand])])
                 selected[idx] = True
                 val_comp += float(n_comp[idx])
                 val_pos += float(n_pos[idx])

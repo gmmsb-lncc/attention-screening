@@ -78,8 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Required
-    p.add_argument("--dataset", required=True, choices=["human", "non_human"],
-                    help="Dataset to benchmark")
+    p.add_argument("--dataset", required=True, choices=["human", "non_human", "all"],
+                    help="Dataset to benchmark (all = human + non_human combined)")
     p.add_argument("--embedding", default="8M", choices=["8M", "150M", "650M"],
                     help="ESM-2 model shorthand (default: 8M)")
 
@@ -137,28 +137,47 @@ def parse_levels(levels_str: str) -> List[int]:
 # Step 0: Scaffold splits
 # ---------------------------------------------------------------------------
 
+def _exists_tsv_or_gz(path: str) -> str:
+    """Check if a .tsv file exists, also checking .tsv.gz variant.
+
+    Returns the path that exists (preferring uncompressed), or empty string.
+    """
+    if os.path.exists(path):
+        return path
+    gz = path + ".gz" if not path.endswith(".gz") else path
+    if os.path.exists(gz):
+        return gz
+    return ""
+
+
 def ensure_scaffold_splits(
     dataset: str,
     scaffold_split_dir: str,
     force_split: bool,
 ) -> bool:
     """Verify or generate scaffold splits. Returns True on success."""
+    # For "all", we need both human and non_human splits
+    datasets_to_check = ["human", "non_human"] if dataset == "all" else [dataset]
+
     scenario_dir = os.path.join(scaffold_split_dir, "scenarios", "Sc")
-    train_file = os.path.join(scenario_dir, f"{dataset}_train.tsv")
-    val_file = os.path.join(scenario_dir, f"{dataset}_val.tsv")
-    test_file = os.path.join(scaffold_split_dir, f"{dataset}_test.tsv")
+    all_found = True
+    found_paths = []
 
-    files_exist = (
-        os.path.exists(train_file)
-        and os.path.exists(val_file)
-        and os.path.exists(test_file)
-    )
+    for ds in datasets_to_check:
+        train = _exists_tsv_or_gz(os.path.join(scenario_dir, f"{ds}_train.tsv"))
+        val = _exists_tsv_or_gz(os.path.join(scenario_dir, f"{ds}_val.tsv"))
+        test = _exists_tsv_or_gz(os.path.join(scaffold_split_dir, f"{ds}_test.tsv"))
+        if train and val and test:
+            found_paths.extend([
+                ("train", ds, train), ("val", ds, val), ("test", ds, test),
+            ])
+        else:
+            all_found = False
 
-    if files_exist and not force_split:
+    if all_found and not force_split:
         print(f"  [OK] Scaffold splits found:")
-        print(f"       train: {train_file}")
-        print(f"       val:   {val_file}")
-        print(f"       test:  {test_file}")
+        for label, ds, path in found_paths:
+            print(f"       {ds} {label}: {path}")
         return True
 
     reason = "--force_split requested" if force_split else "missing split files"
@@ -192,34 +211,43 @@ def ensure_ligand_vectors(
     force: bool,
 ) -> bool:
     """Verify or extract ligand vectors. Returns True on success."""
-    build_dir = Path(
-        EMBEDDING_BASE_PATH.format(dataset_type=dataset),
-        embedding_name,
-        "build",
-    )
-    molformer_dir = build_dir / "molformer_matrix"
-    vector_dir = build_dir / "ligand_embeddings"
+    # For "all", process both human and non_human
+    datasets_to_process = ["human", "non_human"] if dataset == "all" else [dataset]
+    all_ok = True
 
-    if vector_dir.exists() and any(vector_dir.glob("*_embedding.npy")) and not force:
-        n_files = len(list(vector_dir.glob("*_embedding.npy")))
-        print(f"  [OK] Ligand vectors found: {vector_dir} ({n_files} files)")
-        return True
+    for ds in datasets_to_process:
+        build_dir = Path(
+            EMBEDDING_BASE_PATH.format(dataset_type=ds),
+            embedding_name,
+            "build",
+        )
+        molformer_dir = build_dir / "molformer_matrix"
+        vector_dir = build_dir / "ligand_embeddings"
 
-    if not molformer_dir.exists():
-        print(f"  WARNING: MoLFormer matrix dir not found: {molformer_dir}")
-        print(f"           Level 2 embedding features will not include ligand vectors.")
-        return False
+        if vector_dir.exists() and any(vector_dir.glob("*_embedding.npy")) and not force:
+            n_files = len(list(vector_dir.glob("*_embedding.npy")))
+            print(f"  [OK] Ligand vectors ({ds}): {vector_dir} ({n_files} files)")
+            continue
 
-    print(f"  Extracting ligand vectors from {molformer_dir}...")
+        if not molformer_dir.exists():
+            print(f"  WARNING: MoLFormer matrix dir not found ({ds}): {molformer_dir}")
+            print(f"           Level 2 embedding features will not include ligand vectors.")
+            all_ok = False
+            continue
 
-    from scripts.extract_ligand_vectors import extract_vectors
+        print(f"  Extracting ligand vectors ({ds}) from {molformer_dir}...")
 
-    stats = extract_vectors(molformer_dir, vector_dir, force=force)
-    print(
-        f"  Done: {stats['processed']} extracted, "
-        f"{stats['skipped']} skipped, {stats['errors']} errors"
-    )
-    return stats["processed"] + stats["skipped"] > 0
+        from scripts.extract_ligand_vectors import extract_vectors
+
+        stats = extract_vectors(molformer_dir, vector_dir, force=force)
+        print(
+            f"  Done ({ds}): {stats['processed']} extracted, "
+            f"{stats['skipped']} skipped, {stats['errors']} errors"
+        )
+        if stats["processed"] + stats["skipped"] == 0:
+            all_ok = False
+
+    return all_ok
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ class UniversalSelectionConfig:
     weight_non_human: float = 1.0
     weight_ratio: float = 0.1
     class_penalty: float = 5.0
+    class_rate_weight: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,8 @@ def _loss(
     target: float,
     ratio_target: float,
     cfg: UniversalSelectionConfig,
+    pool_rate_h: float = 0.5,
+    pool_rate_n: float = 0.5,
 ) -> np.ndarray:
     eps = 1e-12
     sum_h = np.asarray(sum_h, dtype=float)
@@ -62,11 +65,20 @@ def _loss(
 
     missing = (pos_h <= 0).astype(float) + (neg_h <= 0).astype(float) + (pos_n <= 0).astype(float) + (neg_n <= 0).astype(float)
 
+    # Class rate preservation: penalize test sets whose positive rate
+    # diverges from the overall pool rate.
+    rows_h = pos_h + neg_h
+    rows_n = pos_n + neg_n
+    rate_h = np.where(rows_h > 0, pos_h / rows_h, 0.5)
+    rate_n = np.where(rows_n > 0, pos_n / rows_n, 0.5)
+    err_rate = np.abs(rate_h - pool_rate_h) + np.abs(rate_n - pool_rate_n)
+
     return (
         cfg.weight_human * err_h
         + cfg.weight_non_human * err_n
         + cfg.weight_ratio * err_ratio
         + cfg.class_penalty * missing
+        + cfg.class_rate_weight * err_rate
     )
 
 
@@ -83,6 +95,8 @@ def _run_single_restart(
     ratio_target: float,
     cfg: UniversalSelectionConfig,
     rng: np.random.Generator,
+    pool_rate_h: float = 0.5,
+    pool_rate_n: float = 0.5,
 ) -> Tuple[np.ndarray, Dict[str, float], float]:
     m = len(n_h)
     selected = np.zeros(m, dtype=bool)
@@ -95,7 +109,7 @@ def _run_single_restart(
     sum_neg_n = 0.0
 
     current_loss = float(
-        _loss(sum_h, sum_n, sum_pos_h, sum_neg_h, sum_pos_n, sum_neg_n, total_h, total_n, target, ratio_target, cfg)
+        _loss(sum_h, sum_n, sum_pos_h, sum_neg_h, sum_pos_n, sum_neg_n, total_h, total_n, target, ratio_target, cfg, pool_rate_h, pool_rate_n)
     )
 
     # Greedy addition phase.
@@ -116,6 +130,8 @@ def _run_single_restart(
             target,
             ratio_target,
             cfg,
+            pool_rate_h,
+            pool_rate_n,
         )
         best_pos = int(np.argmin(cand_loss + rng.uniform(0.0, 1e-9, size=remaining.size)))
         idx = int(remaining[best_pos])
@@ -159,7 +175,7 @@ def _run_single_restart(
         sum_pos_n += float(pos_n[add_idx])
         sum_neg_n += float(neg_n[add_idx])
         current_loss = float(
-            _loss(sum_h, sum_n, sum_pos_h, sum_neg_h, sum_pos_n, sum_neg_n, total_h, total_n, target, ratio_target, cfg)
+            _loss(sum_h, sum_n, sum_pos_h, sum_neg_h, sum_pos_n, sum_neg_n, total_h, total_n, target, ratio_target, cfg, pool_rate_h, pool_rate_n)
         )
 
     # Prune phase.
@@ -180,6 +196,8 @@ def _run_single_restart(
                     target,
                     ratio_target,
                     cfg,
+                    pool_rate_h,
+                    pool_rate_n,
                 )
             )
             if new_loss < current_loss - 1e-12:
@@ -242,6 +260,14 @@ def select_universal_test_scaffolds(
 
     ratio_target = float(total_unique_human / total_unique_non_human)
 
+    # Pool class rates for class-rate preservation in loss.
+    total_pos_h = float(pos_h.sum())
+    total_pos_n = float(pos_n.sum())
+    total_rows_h = float((pos_h + neg_h).sum())
+    total_rows_n = float((pos_n + neg_n).sum())
+    pool_rate_h = total_pos_h / max(total_rows_h, 1e-12)
+    pool_rate_n = total_pos_n / max(total_rows_n, 1e-12)
+
     best_selected = None
     best_metrics = None
     best_loss = float("inf")
@@ -263,6 +289,8 @@ def select_universal_test_scaffolds(
             ratio_target=ratio_target,
             cfg=config,
             rng=rng,
+            pool_rate_h=pool_rate_h,
+            pool_rate_n=pool_rate_n,
         )
 
         sel = np.zeros_like(sel_perm)

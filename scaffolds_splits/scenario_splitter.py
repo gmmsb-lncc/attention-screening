@@ -22,10 +22,12 @@ SCENARIO_NAMES = {
 class ScenarioSplitConfig:
     val_fraction_in_pool: float
     seed: int = 42
-    restarts: int = 16
+    restarts: int = 64
     s4_restarts: int = 192
     class_penalty: float = 10.0
     class_rate_weight: float = 2.0
+    min_val_groups: int = 15
+    monotonic_group_penalty: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,10 @@ def _split_loss(
     class_penalty: float,
     class_rate_weight: float,
     drop_fraction: float = 0.0,
+    monotonic_val_rows: int = 0,
+    n_val_groups: int = 0,
+    min_val_groups: int = 0,
+    monotonic_group_penalty: float = 0.0,
 ) -> float:
     kept_total = train_total + val_total
     if kept_total <= 0:
@@ -78,11 +84,22 @@ def _split_loss(
 
     missing = _class_missing_penalty(train_pos, train_neg) + _class_missing_penalty(val_pos, val_neg)
 
+    # Penalize monotonic groups (all-positive or all-negative) in validation.
+    mono_frac = monotonic_val_rows / max(val_total, 1)
+    mono_pen = monotonic_group_penalty * mono_frac
+
+    # Penalize low diversity (too few groups in validation).
+    diversity_pen = 0.0
+    if min_val_groups > 0 and n_val_groups < min_val_groups:
+        diversity_pen = 0.5 * (min_val_groups - n_val_groups) / max(min_val_groups, 1)
+
     return float(
         err_fraction
         + class_rate_weight * err_rate
         + class_penalty * missing
         + 0.5 * drop_fraction
+        + mono_pen
+        + diversity_pen
     )
 
 
@@ -103,6 +120,10 @@ def _select_validation_groups(
     n_pos = grouped["rows_pos"].to_numpy(dtype=float)
     n_neg = grouped["rows_neg"].to_numpy(dtype=float)
 
+    # Precompute which groups are monotonic (all-positive or all-negative).
+    is_monotonic = ((n_pos == 0) | (n_neg == 0)).astype(float)
+    mono_rows = is_monotonic * n_rows  # rows in monotonic groups
+
     total_rows = float(len(df))
     total_pos = float((df["label"] == 1).sum())
     total_neg = total_rows - total_pos
@@ -111,8 +132,29 @@ def _select_validation_groups(
     target_rows = cfg.val_fraction_in_pool * total_rows
     floor_target = 0.98 * target_rows
 
+    def _compute_loss(sel, v_rows, v_pos, v_neg):
+        """Helper to compute loss with all penalty terms."""
+        t_rows = total_rows - v_rows
+        t_pos = total_pos - v_pos
+        t_neg = total_neg - v_neg
+        v_mono = float(mono_rows[sel].sum()) if sel.any() else 0.0
+        v_ngrp = int(sel.sum())
+        return _split_loss(
+            train_total=int(t_rows), train_pos=int(t_pos), train_neg=int(t_neg),
+            val_total=int(v_rows), val_pos=int(v_pos), val_neg=int(v_neg),
+            target_val_fraction=cfg.val_fraction_in_pool,
+            pool_pos_rate=pool_pos_rate,
+            class_penalty=cfg.class_penalty,
+            class_rate_weight=cfg.class_rate_weight,
+            monotonic_val_rows=int(v_mono),
+            n_val_groups=v_ngrp,
+            min_val_groups=cfg.min_val_groups,
+            monotonic_group_penalty=cfg.monotonic_group_penalty,
+        )
+
     best_sel = None
     best_loss = float("inf")
+    no_improve_count = 0
 
     for restart in range(cfg.restarts):
         rng = np.random.default_rng(cfg.seed + 3571 * restart)
@@ -169,10 +211,11 @@ def _select_validation_groups(
             val_neg += float(n_neg[idx])
 
         # Ensure both classes in val if feasible.
+        # Use SMALLEST group with the needed class to minimize overshoot.
         if val_pos <= 0:
             cand = np.where((~selected) & (n_pos > 0))[0]
             if cand.size > 0:
-                idx = int(cand[np.argmax(n_pos[cand])])
+                idx = int(cand[np.argmin(n_rows[cand])])
                 selected[idx] = True
                 val_rows += float(n_rows[idx])
                 val_pos += float(n_pos[idx])
@@ -181,27 +224,13 @@ def _select_validation_groups(
         if val_neg <= 0:
             cand = np.where((~selected) & (n_neg > 0))[0]
             if cand.size > 0:
-                idx = int(cand[np.argmax(n_neg[cand])])
+                idx = int(cand[np.argmin(n_rows[cand])])
                 selected[idx] = True
                 val_rows += float(n_rows[idx])
                 val_pos += float(n_pos[idx])
                 val_neg += float(n_neg[idx])
 
-        train_rows = total_rows - val_rows
-        train_pos = total_pos - val_pos
-        train_neg = total_neg - val_neg
-        current_loss = _split_loss(
-            train_total=int(train_rows),
-            train_pos=int(train_pos),
-            train_neg=int(train_neg),
-            val_total=int(val_rows),
-            val_pos=int(val_pos),
-            val_neg=int(val_neg),
-            target_val_fraction=cfg.val_fraction_in_pool,
-            pool_pos_rate=pool_pos_rate,
-            class_penalty=cfg.class_penalty,
-            class_rate_weight=cfg.class_rate_weight,
-        )
+        current_loss = _compute_loss(selected, val_rows, val_pos, val_neg)
 
         # Lightweight pruning for tighter target while keeping class support.
         selected_idx = np.where(selected)[0]
@@ -211,23 +240,14 @@ def _select_validation_groups(
             for idx in prune_order[:max_prune]:
                 next_pos = val_pos - float(n_pos[idx])
                 next_neg = val_neg - float(n_neg[idx])
-                train_pos = total_pos - next_pos
-                train_neg = total_neg - next_neg
-                if next_pos <= 0 or next_neg <= 0 or train_pos <= 0 or train_neg <= 0:
+                chk_train_pos = total_pos - next_pos
+                chk_train_neg = total_neg - next_neg
+                if next_pos <= 0 or next_neg <= 0 or chk_train_pos <= 0 or chk_train_neg <= 0:
                     continue
                 next_rows = val_rows - float(n_rows[idx])
-                next_loss = _split_loss(
-                    train_total=int(total_rows - next_rows),
-                    train_pos=int(train_pos),
-                    train_neg=int(train_neg),
-                    val_total=int(next_rows),
-                    val_pos=int(next_pos),
-                    val_neg=int(next_neg),
-                    target_val_fraction=cfg.val_fraction_in_pool,
-                    pool_pos_rate=pool_pos_rate,
-                    class_penalty=cfg.class_penalty,
-                    class_rate_weight=cfg.class_rate_weight,
-                )
+                sel_tmp = selected.copy()
+                sel_tmp[idx] = False
+                next_loss = _compute_loss(sel_tmp, next_rows, next_pos, next_neg)
                 if next_loss <= current_loss:
                     selected[idx] = False
                     val_rows = next_rows
@@ -235,25 +255,18 @@ def _select_validation_groups(
                     val_neg = next_neg
                     current_loss = next_loss
 
-        train_rows = total_rows - val_rows
-        train_pos = total_pos - val_pos
-        train_neg = total_neg - val_neg
-        loss = _split_loss(
-            train_total=int(train_rows),
-            train_pos=int(train_pos),
-            train_neg=int(train_neg),
-            val_total=int(val_rows),
-            val_pos=int(val_pos),
-            val_neg=int(val_neg),
-            target_val_fraction=cfg.val_fraction_in_pool,
-            pool_pos_rate=pool_pos_rate,
-            class_penalty=cfg.class_penalty,
-            class_rate_weight=cfg.class_rate_weight,
-        )
+        loss = _compute_loss(selected, val_rows, val_pos, val_neg)
 
         if loss < best_loss:
             best_loss = loss
             best_sel = selected.copy()
+            no_improve_count = 0
+        else:
+            no_improve_count += 1
+
+        # Early stopping: stop if no improvement for 16 consecutive restarts.
+        if no_improve_count >= 16 and restart >= 16:
+            break
 
     if best_sel is None:
         raise RuntimeError(f"Failed to select validation groups for column '{group_col}'")
