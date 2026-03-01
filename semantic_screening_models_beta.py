@@ -192,8 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Max epochs for Level 3 (default: 500)")
     p.add_argument("--batch_size", type=int, default=32,
                     help="Batch size for Level 3 (default: 32)")
-    p.add_argument("--patience", type=int, default=30,
-                    help="Early stopping patience (default: 30, 0 to disable)")
+    p.add_argument("--patience", type=int, default=5,
+                    help="Early stopping patience (default: 5, 0 to disable)")
     p.add_argument("--learning_rate", type=float, default=1e-4,
                     help="Learning rate for Level 3 (default: 1e-4)")
 
