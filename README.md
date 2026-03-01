@@ -49,7 +49,7 @@ For detailed information:
 - **Ligand input modes**: MoLFormer matrices are default; use `--smited_ligand` or `--ligand_vectors` to override.
 - **External test protocol**: Use `--external_test_mode` to train on train/val only and automatically evaluate on `scaffolds_splits/output/{dataset}_test.tsv` (or `.tsv.gz`) after training.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Scaffold-based splitting methodology (Murcko scaffolds).
-- **[Unified Benchmark](docs/methodology.md#chapter-8-unified-benchmark-pipeline)** - 3-level model comparison: Fingerprint vs Embedding Vectors vs DT-Kinase.
+- **[Unified Benchmark](docs/methodology.md#chapter-11-unified-benchmark-pipeline)** - 3-level model comparison: Fingerprint vs Embedding Vectors vs DT-Kinase.
 
 ---
 
@@ -91,7 +91,7 @@ Causal transformer trained with Next Token Prediction (NTP). Better for capturin
 |-------|------------|---------------|--------|-------|
 | `esmc-300m-2024-12` | 300M | 960 | ~3 GB | Fast |
 | `esmc-600m-2024-12` | 600M | 1152 | ~5 GB | Medium |
-| `esmc-6b-2024-12` | 6B | 4096 | ~24 GB | Slow (API) |
+| `esmc-6b-2024-12` | 6B | 3072 | ~24 GB | Slow (API) |
 
 ### Ligand Embedding Models
 
@@ -279,7 +279,7 @@ cd semantic-screening
 
 # Create conda environment
 conda env create -f environment.yml
-conda activate semantic-screening
+conda activate docktkinase
 
 # Install dependencies
 python scripts/post_install.py

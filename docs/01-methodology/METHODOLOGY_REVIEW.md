@@ -31,7 +31,7 @@
 
 1. [Visão Geral do Projeto](#visão-geral-do-projeto)
 2. [Contexto Científico](#contexto-científico)
-3. [Pipeline Completo (7 Fases)](#pipeline-completo-7-fases)
+3. [Pipeline Benchmark (5 Steps)](#pipeline-completo-7-fases)
 4. [Metodologia de Estratificação](#metodologia-de-estratificação)
 5. [Módulos de ML e Deep Learning](#módulos-de-ml-e-deep-learning)
 6. [Arquitetura de Software](#arquitetura-de-software)
@@ -101,7 +101,7 @@ Total: 15,616 moléculas
 
 ---
 
-## 🔄 Pipeline Completo (7 Fases)
+## 🔄 Pipeline Benchmark (5 Steps)
 
 ### Visão Geral
 
@@ -670,23 +670,17 @@ print(f"Best Regression: {results['regression']['best_model']}")
 
 ## 📊 Garantias e Validações
 
-### 1️⃣ Prevenção de Data Leakage
+### 1. Prevenção de Data Leakage
 
-**Implementação**: Agglomerative Clustering com Cosine Similarity
+**Implementação**: Scaffold-based splitting via `scaffold_split.py`
 
-✅ **Garantia**: Moléculas similares NUNCA divididas entre train/test
+**Garantia**: Compostos da mesma série química (scaffold Murcko) NUNCA divididos entre splits
 
 ```python
-# Validação implementada
-similarity_between_splits = compute_inter_split_similarity(
-    train_embeddings=X[train_idx],
-    test_embeddings=X[test_idx]
-)
-
-if similarity_between_splits.max() > 0.90:
-    ⚠️  WARNING: Potential data leakage detected!
-else:
-    ✅ PASS: Train and test are structurally different
+# Validação implementada em scaffolds_splits/validation.py
+validate_scenario_split("Sc", train_df, val_df)
+# Verifica: scaffolds_train ∩ scaffolds_val == ∅
+# Verifica: scaffolds_train ∩ scaffolds_test == ∅
 ```
 
 ---
@@ -879,26 +873,19 @@ config = IntegratedConfig(
 
 ### Para Pesquisa (Maximum Quality)
 
-```python
-config = IntegratedConfig(
-    esm_model="esm2_t36_3B_UR50D",    # Melhor qualidade
-    device="cuda",
-    
-    stratifier_method='silhouette',   # Melhor clustering
-    classifier_cv_folds=10,            # Mais validação
-    regression_cv_folds=10,
-    
-    classification_models='all',       # 12 modelos
-    regression_models='all',           # 12 modelos
-)
+```bash
+# Benchmark completo com todos os 3 níveis e 5 seeds
+python semantic_screening_models_beta.py \
+    --dataset non_human --embedding 650M \
+    --seeds 42 123 456 789 1024
 ```
 
 ### Para Prototipagem Rápida
 
-```python
-config = IntegratedConfig(
-    esm_model="esm2_t6_8M_UR50D",     # Rápido
-    device="cpu",
+```bash
+# Apenas Level 1 e 2 (sem GPU, rápido)
+python semantic_screening_models_beta.py \
+    --dataset non_human --embedding 8M --levels 1,2
     
     classification_models=['RandomForest', 'XGBoost'],
     regression_models=['RandomForest'],
