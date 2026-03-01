@@ -48,7 +48,8 @@ For detailed information:
 - **[Suggested Command Presets](crossattention_split_analysis_main.py)** - Run `--print_suggested_commands` to print common training commands.
 - **Ligand input modes**: MoLFormer matrices are default; use `--smited_ligand` or `--ligand_vectors` to override.
 - **External test protocol**: Use `--external_test_mode` to train on train/val only and automatically evaluate on `scaffolds_splits/output/{dataset}_test.tsv` (or `.tsv.gz`) after training.
-- **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Three split modes: Random, Compound-Only, Compound+Protein.
+- **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Scaffold-based splitting methodology (Murcko scaffolds).
+- **[Unified Benchmark](docs/methodology.md#chapter-8-unified-benchmark-pipeline)** - 3-level model comparison: Fingerprint vs Embedding Vectors vs DT-Kinase.
 
 ---
 
@@ -63,7 +64,8 @@ For detailed information:
 | 🧼 **Standardized Normalization** | LayerNorm is applied after token encoders across all pipeline variants (CNN, Lite, Diffusion) |
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
-| 🔀 **Rigorous Split Modes** | Random, Compound-Only, Compound+Protein splits to prevent data leakage |
+| 🔀 **Scaffold-Based Splits** | Murcko scaffold decomposition prevents chemical series leakage |
+| 📋 **3-Level Benchmark** | Unified pipeline: Fingerprint → Embedding Vectors → DT-Kinase with progress tracking |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 
 ## Supported Models
@@ -238,31 +240,32 @@ When `--filter_monotonic_compounds` is enabled:
 ## Project Structure
 
 ```
-docktkinase/
-├── run_complete_pipeline.py    # Main pipeline CLI
-├── attention_matrix.py         # Cross-Attention training CLI
-├── environment.yml             # Conda environment
-├── requirements.txt            # Python dependencies
+semantic-screening/
+├── semantic_screening_models_beta.py   # Unified 3-level benchmark orchestrator
+├── scaffold_split.py                   # Scaffold split generation (Murcko)
+├── split_comparison_analysis.py        # Level 1 & 2 analysis (KNN/MLP)
+├── crossattention_split_analysis/      # Level 3 analysis (CNN+CrossAttention)
+│   ├── experiment.py                   # Multi-seed experiment runner
+│   ├── config.py                       # Training config, constants
+│   ├── data/                           # Datasets & splits
+│   └── training/                       # Trainer, evaluator
+│
+├── scaffolds_splits/                   # Scaffold split logic & output
+│   ├── scenario_splitter.py            # Scenario-specific splitting
+│   └── output/                         # Generated splits (train/val/test TSVs)
 │
 ├── src/
-│   ├── integrated_pipeline.py  # Pipeline orchestration
-│   │
-│   ├── attention_matrix/       # Cross-Attention Deep Learning Module
-│   │   ├── model.py            # CNN + Cross-Attention Architecture
-│   │   └── ...
-│   │
-│   ├── build/                  # Data Ingestion & Embedding Generation
-│   │   ├── embeddings/         # ESM-2, ESM-3, SMI-TED, MoLFormer wrappers
-│   │   ├── matrix/             # Matrix construction
-│   │   └── stratification/     # K-means++ Stratification logic
-│   │
-│   ├── classifier/             # Classical ML Classification (XGBoost, etc.)
-│   │
-│   └── regression/             # Classical ML Regression
+│   ├── attention_matrix/               # DT-Kinase architecture
+│   │   └── model.py                    # CNN + Cross-Attention model
+│   ├── build/                          # Embedding generation
+│   │   ├── embeddings/strategies/      # ESM-2, ESM-C, SMI-TED, MoLFormer
+│   │   └── stratification/             # Legacy stratification
+│   ├── classifier/                     # Classical ML classification
+│   └── regression/                     # Classical ML regression
 │
-├── docs/                       # Comprehensive Documentation
-├── examples/                   # Usage Examples
-└── tests/                      # Unit and Integration Tests
+├── scripts/                            # Analysis & visualization scripts
+├── docs/                               # Comprehensive documentation
+└── tests/                              # Unit and integration tests
 ```
 
 ## Quick Start
@@ -282,45 +285,62 @@ conda activate semantic-screening
 python scripts/post_install.py
 ```
 
-### Running the Pipeline
+### Running the Unified Benchmark
 
 ```bash
-# Run complete pipeline (embeddings → stratification → classification → regression)
-python run_complete_pipeline.py \
-    --input data/kinase_compounds.tsv \
-    --output results/my_run \
-    --protein-model esm2_t33_650M_UR50D \
-    --seed 42
+# Full benchmark: all 3 levels (non-human dataset, ESM-2 8M)
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M
+
+# Human dataset
+python semantic_screening_models_beta.py --dataset human --embedding 8M
+
+# Combined (human + non_human)
+python semantic_screening_models_beta.py --dataset all --embedding 8M
+
+# Only Level 1 and 2 (quick baseline, no GPU needed)
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
+
+# Only Level 3 with custom hyperparameters
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 \
+    --epochs 100 --batch_size 32 --patience 15
 ```
 
-### Training Cross-Attention Model
+The benchmark includes real-time progress bars showing global step progress, per-seed tracking,
+and timing per step.
+
+### Running Individual Components
 
 ```bash
-python attention_matrix.py \
-    --input data/kinase_compounds.tsv \
-    --embedding-matrix concatenated_embeddings/embedding_matrix.npy \
-    --output results/attention_run \
-    --attention-matrix on
+# Generate scaffold splits only
+python scaffold_split.py --output-dir scaffolds_splits/output --scenarios Sc
+
+# Level 1 & 2 analysis standalone
+python split_comparison_analysis.py --dataset non_human --scenarios scaffold
+
+# Level 3 (CNN+CrossAttention) standalone
+python crossattention_split_analysis_main.py --embedding 8M --dataset non_human
 ```
 
 ## CLI Reference
 
 | Script | Description | Key Arguments |
 |--------|-------------|---------------|
-| `run_complete_pipeline.py` | End-to-end workflow | `--input`, `--output`, `--protein-model`, `--stratifier-method` |
-| `attention_matrix.py` | Train DL model | `--input`, `--embedding-matrix`, `--epochs`, `--batch-size` |
+| `semantic_screening_models_beta.py` | **Unified 3-level benchmark** | `--dataset`, `--embedding`, `--levels`, `--epochs` |
+| `scaffold_split.py` | Generate scaffold splits | `--output-dir`, `--scenarios`, `--seed` |
+| `split_comparison_analysis.py` | Baseline models (KNN/MLP) | `--dataset`, `--feature_type`, `--scaffold_split_dir` |
+| `crossattention_split_analysis_main.py` | DT-Kinase training | `--embedding`, `--dataset`, `--seeds` |
 
 See [User Guide](docs/02-user-guide/) for full parameter lists.
 
 ## Citation
 
 ```bibtex
-@software{semanticscreening2025,
+@software{semanticscreening2026,
   title = {semantic-screening: Platform for semantic screening of protein-ligand interactions},
-  author = {semantic-screening Development Team},
-  year = {2025},
+  author = {Sulfierry, Leon and GMMSB-LNCC},
+  year = {2026},
   url = {https://github.com/gmmsb-lncc/semantic-screening},
-  version = {2.1}
+  version = {3.0}
 }
 ```
 
@@ -331,4 +351,4 @@ See [User Guide](docs/02-user-guide/) for full parameter lists.
 
 ---
 
-**Status**: ✅ Production Ready | **Version**: 2.1 | **Last Updated**: December 2025
+**Status**: Production Ready | **Version**: 3.0 | **Last Updated**: February 2026

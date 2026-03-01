@@ -23,7 +23,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -32,6 +32,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+from tqdm import tqdm
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,87 @@ LEVEL_COLORS = {
     "level2_emb_mlp": "#a6a3d9",
     "level3_cnn_ca": "#d95f02",
 }
+
+
+# ---------------------------------------------------------------------------
+# Progress tracking
+# ---------------------------------------------------------------------------
+
+class BenchmarkProgress:
+    """Global progress tracker with nested step/substep display."""
+
+    def __init__(self, levels: List[int], dataset: str, embedding: str):
+        self.dataset = dataset
+        self.embedding = embedding
+        self.step_timings: Dict[str, float] = {}
+        self._step_start: float = 0.0
+
+        # Build ordered list of steps
+        self.steps = ["Step 0: Scaffold Splits"]
+        if 2 in levels:
+            self.steps.append("Step 0b: Ligand Vectors")
+        if 1 in levels:
+            self.steps.append("Step 1: Level 1 (FP+KNN/MLP)")
+        if 2 in levels:
+            self.steps.append("Step 2: Level 2 (Emb+KNN/MLP)")
+        if 3 in levels:
+            self.steps.append("Step 3: Level 3 (CNN+CrossAttn)")
+        self.steps.append("Step 4: Report + Visualizations")
+
+        self.total = len(self.steps)
+        self.current_idx = 0
+        self.global_bar = tqdm(
+            total=self.total,
+            desc=f"Benchmark {dataset}/{embedding}",
+            bar_format=(
+                "{l_bar}{bar}| {n_fmt}/{total_fmt} steps "
+                "[{elapsed}<{remaining}, {postfix}]"
+            ),
+            position=0,
+            leave=True,
+            colour="green",
+        )
+        self.global_bar.set_postfix_str(self.steps[0])
+
+    def begin_step(self, step_name: str) -> None:
+        """Mark the start of a step (prints banner + updates global bar)."""
+        self._step_start = time.time()
+        self.global_bar.set_postfix_str(step_name)
+        # Print a visible banner below the bar
+        tqdm.write("")
+        tqdm.write("=" * 70)
+        tqdm.write(f"[{self.current_idx}/{self.total}] {step_name}")
+        tqdm.write("=" * 70)
+
+    def end_step(self, step_name: str) -> None:
+        """Mark step completion, advance global bar."""
+        elapsed = time.time() - self._step_start
+        self.step_timings[step_name] = elapsed
+        self.current_idx += 1
+        self.global_bar.update(1)
+        mins, secs = divmod(int(elapsed), 60)
+        tqdm.write(f"  -> {step_name} done in {mins}m{secs:02d}s")
+
+    def close(self, total_elapsed: float) -> None:
+        """Print final summary and close bars."""
+        self.global_bar.set_postfix_str("COMPLETE")
+        self.global_bar.close()
+        tqdm.write("")
+        tqdm.write("=" * 70)
+        tqdm.write("BENCHMARK TIMING SUMMARY")
+        tqdm.write("=" * 70)
+        for name, secs in self.step_timings.items():
+            m, s = divmod(int(secs), 60)
+            h, m = divmod(m, 60)
+            if h:
+                tqdm.write(f"  {name:<42s}  {h}h{m:02d}m{s:02d}s")
+            else:
+                tqdm.write(f"  {name:<42s}  {m}m{s:02d}s")
+        tqdm.write("-" * 70)
+        h, rem = divmod(int(total_elapsed), 3600)
+        m, s = divmod(rem, 60)
+        tqdm.write(f"  {'TOTAL':<42s}  {h}h{m:02d}m{s:02d}s")
+        tqdm.write("=" * 70)
 
 
 # ---------------------------------------------------------------------------
@@ -1017,33 +1099,36 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     t_start = time.time()
 
+    # Initialize global progress tracker
+    progress = BenchmarkProgress(levels, dataset, embedding_short)
+
     # -----------------------------------------------------------------------
     # Step 0: Scaffold splits
     # -----------------------------------------------------------------------
-    print("\n" + "=" * 70)
-    print("[Step 0] Scaffold Splits")
-    print("=" * 70)
+    step_name = "Step 0: Scaffold Splits"
+    progress.begin_step(step_name)
     if not ensure_scaffold_splits(dataset, scaffold_split_dir, args.force_split):
-        print("FATAL: Cannot proceed without scaffold splits.")
+        tqdm.write("FATAL: Cannot proceed without scaffold splits.")
+        progress.global_bar.close()
         sys.exit(1)
+    progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
     # Step 0b: Ligand vectors (if level 2)
     # -----------------------------------------------------------------------
     if 2 in levels:
-        print("\n" + "=" * 70)
-        print("[Step 0b] Ligand Vectors (prerequisite for Level 2)")
-        print("=" * 70)
+        step_name = "Step 0b: Ligand Vectors"
+        progress.begin_step(step_name)
         ensure_ligand_vectors(dataset, embedding_name, force)
+        progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
     # Step 1: Level 1
     # -----------------------------------------------------------------------
     level1_results = None
     if 1 in levels:
-        print("\n" + "=" * 70)
-        print("[Step 1] Level 1 — Fingerprint + KNN/MLP")
-        print("=" * 70)
+        step_name = "Step 1: Level 1 (FP+KNN/MLP)"
+        progress.begin_step(step_name)
         level1_results = run_level1(
             dataset=dataset,
             output_dir=output_dir,
@@ -1052,18 +1137,18 @@ def main():
             force=force,
         )
         if level1_results:
-            print("  Level 1 completed successfully.")
+            tqdm.write("  Level 1 completed successfully.")
         else:
-            print("  WARNING: Level 1 returned no results.")
+            tqdm.write("  WARNING: Level 1 returned no results.")
+        progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
     # Step 2: Level 2
     # -----------------------------------------------------------------------
     level2_results = None
     if 2 in levels:
-        print("\n" + "=" * 70)
-        print("[Step 2] Level 2 — Embedding Vectors + KNN/MLP")
-        print("=" * 70)
+        step_name = "Step 2: Level 2 (Emb+KNN/MLP)"
+        progress.begin_step(step_name)
         level2_results = run_level2(
             dataset=dataset,
             embedding_name=embedding_name,
@@ -1074,18 +1159,20 @@ def main():
             force=force,
         )
         if level2_results:
-            print("  Level 2 completed successfully.")
+            tqdm.write("  Level 2 completed successfully.")
         else:
-            print("  WARNING: Level 2 returned no results.")
+            tqdm.write("  WARNING: Level 2 returned no results.")
+        progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
     # Step 3: Level 3
     # -----------------------------------------------------------------------
     level3_results = None
     if 3 in levels:
-        print("\n" + "=" * 70)
-        print("[Step 3] Level 3 — CNN + CrossAttention (DT-Kinase)")
-        print("=" * 70)
+        step_name = "Step 3: Level 3 (CNN+CrossAttn)"
+        progress.begin_step(step_name)
+        tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
+        tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
         level3_results = run_level3(
             dataset=dataset,
             embedding_name=embedding_name,
@@ -1100,46 +1187,49 @@ def main():
             learning_rate=args.learning_rate,
         )
         if level3_results:
-            print("  Level 3 completed successfully.")
+            tqdm.write("  Level 3 completed successfully.")
         else:
-            print("  WARNING: Level 3 returned no results.")
+            tqdm.write("  WARNING: Level 3 returned no results.")
+        progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
     # Step 4: Comparative report + visualizations
     # -----------------------------------------------------------------------
-    elapsed = time.time() - t_start
-
-    print("\n" + "=" * 70)
-    print("[Step 4] Benchmark Comparison")
-    print("=" * 70)
+    step_name = "Step 4: Report + Visualizations"
+    progress.begin_step(step_name)
 
     aggregated = aggregate_benchmark_metrics(level1_results, level2_results, level3_results)
 
     if not aggregated:
-        print("  No results to compare. At least one level must produce results.")
+        tqdm.write("  No results to compare. At least one level must produce results.")
+        progress.global_bar.close()
         sys.exit(1)
 
     # Terminal table
     print_comparison_table(aggregated, dataset, embedding_short)
 
     # Save JSON
+    elapsed = time.time() - t_start
     json_path = save_benchmark_json(
         aggregated, dataset, embedding_short, output_dir, levels, seeds, elapsed,
     )
 
     # Visualizations
     viz_paths = generate_all_visualizations(aggregated, dataset, embedding_short, output_dir)
+    progress.end_step(step_name)
 
+    # -----------------------------------------------------------------------
     # Final summary
-    print("\n" + "=" * 70)
-    print("BENCHMARK COMPLETE")
-    print("=" * 70)
-    print(f"  Elapsed: {elapsed:.0f}s ({elapsed / 60:.1f} min)")
-    print(f"  Results: {json_path}")
+    # -----------------------------------------------------------------------
+    total_elapsed = time.time() - t_start
+    progress.close(total_elapsed)
+
+    tqdm.write("")
+    tqdm.write(f"  Results: {json_path}")
     if viz_paths:
-        print(f"  Plots:   {len(viz_paths)} generated in {output_dir}/")
+        tqdm.write(f"  Plots:   {len(viz_paths)} generated in {output_dir}/")
         for p in viz_paths:
-            print(f"           - {os.path.basename(p)}")
+            tqdm.write(f"           - {os.path.basename(p)}")
 
     return aggregated
 
