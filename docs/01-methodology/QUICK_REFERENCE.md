@@ -26,17 +26,15 @@ Sequências  →  Embeddings (ESM-2/SMI-TED)  →  Processamento
 
 ---
 
-## 7 Fases do Pipeline semantic-screening
+## Pipeline Benchmark Unificado
 
-| Fase | O Quê | Como | Output |
+| Step | O Quê | Como | Output |
 |------|-------|------|--------|
-| 1 | Embeddings | ESM-2/ESM-C (proteína) + SMI-TED (ligante) | 1920-dim vectors |
-| 2 | Matrizes | Concatenação + validação | concatenated_embeddings.npy |
-| 3 | Labels | pChEMBL > 6.0 (binary) + affinity (regression) | binary_labels.npy |
-| 4 | ⭐ **Stratify** | **Cosine sim → Agglomerative → 80/10/10** | **train/val/test split** |
-| 5 | Classificação | 12 algoritmos ML (ExtraTrees best) | ROC-AUC, F1, Accuracy, ... |
-| 6 | Regressão | 12 algoritmos ML (RandomForest best) | MAE, R², RMSE, ... |
-| 7 | DL (opcional) | **DT-Kinase**: CNN + Cross-Attention | Attention maps + predições |
+| 0 | **Scaffold Split** | Murcko scaffolds → fixed test set | train/val/test TSVs |
+| 1 | Level 1 (Baseline) | Fingerprints ECFP + KNN/MLP | Métricas classificação |
+| 2 | Level 2 (Embeddings) | ESM-2 + MoLFormer mean-pooled + KNN/MLP | Métricas classificação |
+| 3 | Level 3 (DT-Kinase) | Per-token matrices + CNN + CrossAttention | Métricas multi-seed |
+| 4 | Relatório | Agregar 3 níveis + gerar visualizações | benchmark_comparison.json + plots |
 
 ---
 
@@ -54,17 +52,17 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 
 ---
 
-## 🔐 Por Que Previne Data Leakage?
+## Por Que Previne Data Leakage?
 
-**Problema**: Random split pode dividir moléculas similares
+**Problema**: Random split pode colocar compostos da mesma série química em train e test
 
-**Solução**: 
-1. Cosine similarity entre embeddings (0-1 scale)
-2. Agglomerative clustering encontra ~100 famílias químicas
-3. Atribuir clusters inteiros (NUNCA dividir) a train/val/test
-4. Resultado: Test tem **estruturas completamente diferentes** do train
+**Solução**: Scaffold-based split
+1. Extrair scaffolds Murcko de todos os compostos
+2. Selecionar scaffolds de teste via otimização (fixo, compartilhado)
+3. Dividir scaffolds restantes em train/val (scaffold-disjoint)
+4. Resultado: Test contém **scaffolds completamente diferentes** do train
 
-**Garantia**: ✅ Moléculas similares SEMPRE no mesmo split
+**Garantia**: Compostos da mesma série química SEMPRE no mesmo split
 
 ---
 
@@ -88,13 +86,13 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 
 ---
 
-## ✅ 5 Garantias Implementadas
+## 5 Garantias Implementadas
 
-1. **No Data Leakage**: Cluster-based stratification
-2. **Reproducible**: Fixed random_state=42
-3. **Validated**: 5-fold cross-validation
-4. **Overfitting Detection**: Val vs Test comparison
-5. **Multiple Metrics**: 7 para classificação, 4 para regressão
+1. **No Data Leakage**: Scaffold-based splitting (Murcko scaffolds)
+2. **Reproducible**: Fixed seeds [42, 123, 456, 789, 1024]
+3. **Multi-seed**: 5 seeds para significância estatística (Level 3)
+4. **Fair Comparison**: Mesmo scaffold split para todos os níveis
+5. **Multiple Metrics**: MCC (primária), AUC, F1, Accuracy, Precision, Recall
 
 ---
 
@@ -173,9 +171,9 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 ✅ Limitações identificadas: MITIGADAS
 ✅ Pronta para publicação: SIM
 
-Versão: 2.0
-Data: Dezembro 2025
-Foco: Super-resistência bacteriana
+Versão: 3.0
+Data: Fevereiro 2026
+Foco: Scaffold splits + Benchmark unificado
 Status: Production-Ready
 ```
 
