@@ -131,32 +131,24 @@ O sistema utiliza modelos de linguagem de proteínas pré-treinados:
 
 ### 3.3 Geração de Embeddings de Moléculas
 
-**Arquivo**: `src/build/embeddings/ligand_embedding.py`
+Dois modelos de ligante são suportados:
 
-Utiliza o modelo **SMI-TED** (IBM Research):
+| Modelo | Saída | Uso |
+|--------|-------|-----|
+| **MoLFormer** (padrão) | Matriz per-token `[seq_len, 768]` | Cross-Attention (Level 3) e vetores mean-pooled (Level 2) |
+| **SMI-TED** (IBM) | Vetor `[1, 768]` | Pipeline clássico (legado) |
 
 - **Entrada**: Código SMILES (ex: `CC(=O)Nc1ccc(O)cc1`)
-- **Saída**: Vetor de 768 dimensões
-- **Modelo**: SMI-TED Light (~100M parâmetros)
+- **Saída**: 768 dimensões por token (MoLFormer) ou vetor único (SMI-TED)
+- **Padrão**: MoLFormer é o modelo recomendado para o benchmark unificado
 
-**Características do SMI-TED**:
-- Treinado em milhões de moléculas
-- Captura propriedades químicas (polaridade, aromaticidade, grupos funcionais)
-- Representa a "semântica" da molécula no espaço vetorial
+### 3.4 Representação por Nível
 
-### 3.4 Concatenação de Embeddings
-
-**Arquivo**: `src/build/matrix/embedding_matrix.py`
-
-Para cada par (proteína, molécula):
-
-```
-embedding_final = [embedding_proteína | embedding_molécula]
-                = [2560-dim          | 768-dim          ]
-                = 3328-dim vetor concatenado
-```
-
-Este vetor representa o "contexto de interação" e será usado pelos classificadores/regressores.
+| Nível | Proteína | Ligante | Dimensão |
+|-------|----------|---------|----------|
+| Level 1 | N/A (fingerprints) | Morgan FP (ECFP) | 2048 bits |
+| Level 2 | ESM-2 mean-pooled `[d]` | MoLFormer mean-pooled `[768]` | d + 768 |
+| Level 3 | ESM-2 per-residue `[L, d]` | MoLFormer per-token `[M, 768]` | Matrizes |
 
 ### 3.5 Scaffold Split (Divisão por Scaffolds Murcko)
 

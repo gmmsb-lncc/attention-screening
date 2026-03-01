@@ -751,7 +751,7 @@ This closes the loop, creating a self-improving cycle where the model diagnoses 
 
 ---
 
-## Chapter 8: Unified Benchmark Pipeline
+## Chapter 11: Unified Benchmark Pipeline
 
 To facilitate reproducible and comprehensive model comparison, semantic-screening provides a **unified benchmark orchestrator** that coordinates all evaluation levels through a single entry point.
 

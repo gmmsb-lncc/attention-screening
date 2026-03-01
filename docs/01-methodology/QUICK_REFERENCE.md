@@ -98,10 +98,10 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 
 ## 🎯 Use Cases por Profissional
 
-### 🧪 Biólogo Computacional
-- Ler: **Metodologia de Estratificação** (linhas 350-500)
-- Entender: Binary search, cosine similarity, UPGMA
-- Validar: Implementação em `src/build/stratification/`
+### Biólogo Computacional
+- Ler: **Scaffold Split** (scaffold_split.py, scaffolds_splits/)
+- Entender: Murcko scaffold decomposition, disjointness validation
+- Validar: Implementação em `scaffold_split.py` e `scaffolds_splits/`
 
 ### 💊 Farmacêutico
 - Ler: **Benchmarks e Resultados** (linhas 750-850)
@@ -155,10 +155,10 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 
 ## 🔗 Referências Cruzadas
 
-- **Código**: `src/build/stratification/adaptive_clustering.py`
-- **Testes**: `tests/test_integration/`
-- **Exemplos**: `examples/demo_kinase_non_human_pipeline.py`
-- **Visualizações**: `scripts/visualize_ml_comparison.py`
+- **Benchmark**: `semantic_screening_models_beta.py`
+- **Scaffold splits**: `scaffold_split.py`, `scaffolds_splits/`
+- **Level 1 & 2**: `split_comparison_analysis.py`
+- **Level 3**: `crossattention_split_analysis/experiment.py`
 
 ---
 

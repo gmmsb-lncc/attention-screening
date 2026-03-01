@@ -21,6 +21,7 @@ from .config import (
     MAX_SEQ_LEN,
     DEFAULT_SEEDS,
     LIGAND_MATRIX_DIRS,
+    LIGAND_VECTOR_DIR,
     MOLFORMER_DIM
 )
 from .data import (
