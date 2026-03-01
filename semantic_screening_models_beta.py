@@ -378,34 +378,119 @@ def ensure_ligand_vectors(
 # Step 1: Level 1 — Fingerprint baseline
 # ---------------------------------------------------------------------------
 
+def _run_level_multiseed(
+    dataset: str,
+    output_dir: str,
+    scaffold_split_dir: str,
+    seeds: List[int],
+    force: bool,
+    feature_type: str,
+    embedding_name: str = None,
+) -> Optional[Dict]:
+    """Run Level 1 or 2 across multiple seeds, aggregate mean+std.
+
+    Each seed re-trains KNN/MLP with different random init. The scaffold
+    splits are fixed (precomputed), so only model randomness varies.
+    """
+    from split_comparison_analysis import run_single_dataset
+
+    seed_results_per_model: Dict[str, Dict[str, List[float]]] = {}
+
+    for i, seed in enumerate(seeds):
+        seed_dir = os.path.join(output_dir, f"seed_{seed}")
+        tqdm.write(f"  Seed {i+1}/{len(seeds)}: {seed}")
+
+        result = run_single_dataset(
+            dataset_type=dataset,
+            output_dir=seed_dir,
+            force=force,
+            seed=seed,
+            scenarios=["scaffold"],
+            scaffold_split_dir=scaffold_split_dir,
+            feature_type=feature_type,
+            embedding_name=embedding_name,
+        )
+
+        # If cached, load from disk
+        if result is None:
+            result = _load_split_comparison_results(seed_dir)
+
+        if result is None:
+            tqdm.write(f"    WARNING: seed {seed} returned no results.")
+            continue
+
+        # Find scaffold scenario
+        sc_key = None
+        for key in result:
+            if "scaffold" in key.replace("\n", " ").lower():
+                sc_key = key
+                break
+        if sc_key is None and result:
+            sc_key = next(iter(result))
+        if sc_key is None:
+            continue
+
+        sc = result[sc_key]
+        for model in ["KNN", "MLP"]:
+            if model not in sc:
+                continue
+            if model not in seed_results_per_model:
+                seed_results_per_model[model] = {}
+            for metric in METRICS_ORDER:
+                val = sc[model].get(metric)
+                if val is not None and isinstance(val, (int, float)) and not np.isnan(val):
+                    seed_results_per_model[model].setdefault(metric, []).append(float(val))
+
+    if not seed_results_per_model:
+        return None
+
+    # Aggregate: build result dict matching the format expected by aggregate_benchmark_metrics
+    scaffold_key = "Split by Scaffold"
+    aggregated = {}
+    for model, metrics_dict in seed_results_per_model.items():
+        agg = {}
+        for metric, values in metrics_dict.items():
+            arr = np.array(values)
+            agg[metric] = float(np.mean(arr))
+            agg[f"{metric}_std"] = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+        agg["n_seeds"] = len(next(iter(metrics_dict.values())))
+        aggregated[model] = agg
+
+    # Save aggregated JSON
+    os.makedirs(output_dir, exist_ok=True)
+    agg_path = os.path.join(output_dir, "split_comparison_results.json")
+    with open(agg_path, "w") as f:
+        json.dump({
+            "dataset": dataset,
+            "feature_type": feature_type,
+            "embedding_name": embedding_name,
+            "seeds": seeds,
+            "results": {scaffold_key: aggregated},
+        }, f, indent=2)
+    tqdm.write(f"  Aggregated results saved: {agg_path}")
+
+    return {scaffold_key: aggregated}
+
+
 def run_level1(
     dataset: str,
     output_dir: str,
     scaffold_split_dir: str,
-    seed: int,
+    seeds: List[int],
     force: bool,
 ) -> Optional[Dict]:
-    """Run Level 1: Fingerprint + KNN/MLP. Returns results dict or None."""
-    from split_comparison_analysis import run_single_dataset
-
+    """Run Level 1: Fingerprint + KNN/MLP (multi-seed). Returns results dict or None."""
     level_dir = os.path.join(output_dir, "level1_fingerprint", dataset)
     print(f"  Output: {level_dir}")
 
-    results = run_single_dataset(
-        dataset_type=dataset,
+    return _run_level_multiseed(
+        dataset=dataset,
         output_dir=level_dir,
-        force=force,
-        seed=seed,
-        scenarios=["scaffold"],
         scaffold_split_dir=scaffold_split_dir,
+        seeds=seeds,
+        force=force,
         feature_type="fingerprint",
     )
-
-    # If cached (returns None), try to load from disk
-    if results is None:
-        results = _load_split_comparison_results(level_dir)
-
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -418,31 +503,22 @@ def run_level2(
     embedding_short: str,
     output_dir: str,
     scaffold_split_dir: str,
-    seed: int,
+    seeds: List[int],
     force: bool,
 ) -> Optional[Dict]:
-    """Run Level 2: Embedding vectors + KNN/MLP. Returns results dict or None."""
-    from split_comparison_analysis import run_single_dataset
-
+    """Run Level 2: Embedding vectors + KNN/MLP (multi-seed). Returns results dict or None."""
     level_dir = os.path.join(output_dir, f"level2_embedding_{embedding_short}", dataset)
     print(f"  Output: {level_dir}")
 
-    results = run_single_dataset(
-        dataset_type=dataset,
+    return _run_level_multiseed(
+        dataset=dataset,
         output_dir=level_dir,
-        force=force,
-        seed=seed,
-        scenarios=["scaffold"],
         scaffold_split_dir=scaffold_split_dir,
+        seeds=seeds,
+        force=force,
         feature_type="embedding",
         embedding_name=embedding_name,
     )
-
-    # If cached, try to load from disk
-    if results is None:
-        results = _load_split_comparison_results(level_dir)
-
-    return results
 
 
 def _load_split_comparison_results(level_dir: str) -> Optional[Dict]:
@@ -1208,7 +1284,7 @@ def main():
             dataset=dataset,
             output_dir=output_dir,
             scaffold_split_dir=scaffold_split_dir,
-            seed=seeds[0],
+            seeds=seeds,
             force=force,
         )
         if level1_results:
@@ -1230,7 +1306,7 @@ def main():
             embedding_short=embedding_short,
             output_dir=output_dir,
             scaffold_split_dir=scaffold_split_dir,
-            seed=seeds[0],
+            seeds=seeds,
             force=force,
         )
         if level2_results:

@@ -282,8 +282,8 @@ def _l2_normalize(X: np.ndarray) -> np.ndarray:
 
 def prepare_embedding_features(
     df: pd.DataFrame,
-    protein_vector_dir: str,
-    ligand_vector_dir: str,
+    protein_vector_dir,
+    ligand_vector_dir,
 ) -> tuple:
     """Prepare features from PLM embedding vectors (ESM-2 + MoLFormer).
 
@@ -291,10 +291,29 @@ def prepare_embedding_features(
     concatenation so that both modalities contribute equally regardless
     of their original magnitude.
 
+    Args:
+        df: DataFrame with seq_id, chembl_id, label columns.
+        protein_vector_dir: Single path (str/Path) or list of paths to search.
+        ligand_vector_dir: Single path (str/Path) or list of paths to search.
+
     Returns (X, y, valid_indices) where X has shape [n, protein_dim + ligand_dim].
     """
-    prot_dir = Path(protein_vector_dir)
-    lig_dir = Path(ligand_vector_dir)
+    # Support single dir or list of dirs (needed for dataset="all")
+    if isinstance(protein_vector_dir, (str, Path)):
+        prot_dirs = [Path(protein_vector_dir)]
+    else:
+        prot_dirs = [Path(d) for d in protein_vector_dir]
+    if isinstance(ligand_vector_dir, (str, Path)):
+        lig_dirs = [Path(ligand_vector_dir)]
+    else:
+        lig_dirs = [Path(d) for d in ligand_vector_dir]
+
+    def _find_file(dirs, filename):
+        for d in dirs:
+            p = d / filename
+            if p.exists():
+                return p
+        return None
 
     seq_ids = df['seq_id'].astype(str).values
     chembl_ids = df['chembl_id'].astype(str).values
@@ -305,10 +324,10 @@ def prepare_embedding_features(
     valid_idx = []
 
     for i in range(len(df)):
-        prot_path = prot_dir / f"{seq_ids[i]}_embedding.npy"
-        lig_path = lig_dir / f"{chembl_ids[i]}_embedding.npy"
+        prot_path = _find_file(prot_dirs, f"{seq_ids[i]}_embedding.npy")
+        lig_path = _find_file(lig_dirs, f"{chembl_ids[i]}_embedding.npy")
 
-        if not prot_path.exists() or not lig_path.exists():
+        if prot_path is None or lig_path is None:
             continue
 
         prot_vecs.append(np.load(prot_path))
@@ -1231,12 +1250,22 @@ def run_comparison(
                 prot_vec_dir = None
                 lig_vec_dir = None
                 if feature_type == "embedding" and embedding_name:
-                    from crossattention_split_analysis.config import SUPPORTED_EMBEDDINGS
+                    from crossattention_split_analysis.config import (
+                        SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
+                    )
                     esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
-                    emb_base = EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)
-                    build_dir = os.path.join(emb_base, esm_model, "build")
-                    prot_vec_dir = os.path.join(build_dir, "proteins")
-                    lig_vec_dir = os.path.join(build_dir, "ligand_embeddings")
+                    if dataset_type == "all":
+                        build_dirs = [
+                            os.path.join(bp, esm_model, "build")
+                            for bp in EMBEDDING_BASE_PATHS_ALL
+                        ]
+                    else:
+                        build_dirs = [os.path.join(
+                            EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
+                            esm_model, "build",
+                        )]
+                    prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
+                    lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
                     print(f"    Embedding features: {esm_model}")
                     print(f"      Protein vectors: {prot_vec_dir}")
                     print(f"      Ligand vectors:  {lig_vec_dir}")
