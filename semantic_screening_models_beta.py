@@ -56,7 +56,7 @@ LEVEL_LABELS = {
     "level2_emb_knn": "Level 2 (Emb+KNN)",
     "level2_emb_mlp": "Level 2 (Emb+MLP)",
     "level3_cnn": "Level 3 (CNN)",
-    "level3_cnn_ca": "Level 3 (CNN+CA)",
+    "level4_cnn_ca": "Level 4 (CNN+CA)",
 }
 
 METRICS_ORDER = ["accuracy", "mcc", "f1", "precision", "recall", "auc"]
@@ -68,7 +68,7 @@ LEVEL_COLORS = {
     "level2_emb_knn": "#7570b3",
     "level2_emb_mlp": "#a6a3d9",
     "level3_cnn": "#d95f02",
-    "level3_cnn_ca": "#e7298a",
+    "level4_cnn_ca": "#e7298a",
 }
 
 
@@ -79,8 +79,7 @@ LEVEL_COLORS = {
 class BenchmarkProgress:
     """Global progress tracker with nested step/substep display."""
 
-    def __init__(self, levels: List[int], dataset: str, embedding: str,
-                 use_cross_attention: bool = False):
+    def __init__(self, levels: List[int], dataset: str, embedding: str):
         self.dataset = dataset
         self.embedding = embedding
         self.step_timings: Dict[str, float] = {}
@@ -95,9 +94,10 @@ class BenchmarkProgress:
         if 2 in levels:
             self.steps.append("Step 2: Level 2 (Emb+KNN/MLP)")
         if 3 in levels:
-            l3_label = "CNN+CA" if use_cross_attention else "CNN"
-            self.steps.append(f"Step 3: Level 3 ({l3_label})")
-        self.steps.append("Step 4: Report + Visualizations")
+            self.steps.append("Step 3: Level 3 (CNN)")
+        if 4 in levels:
+            self.steps.append("Step 4: Level 4 (CNN+CA)")
+        self.steps.append("Report + Visualizations")
 
         self.total = len(self.steps)
         self.current_idx = 0
@@ -173,7 +173,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Level selection
     p.add_argument("--levels", default="1,2,3",
-                    help="Comma-separated levels to run (default: 1,2,3)")
+                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA "
+                         "(default: 1,2,3)")
 
     # Output
     p.add_argument("--output_dir", default=None,
@@ -191,18 +192,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force_split", action="store_true",
                     help="Force regeneration of scaffold splits")
 
-    # Level 3 hyperparameters
+    # Level 3/4 hyperparameters
     p.add_argument("--epochs", type=int, default=500,
-                    help="Max epochs for Level 3 (default: 500)")
+                    help="Max epochs for Level 3/4 (default: 500)")
     p.add_argument("--batch_size", type=int, default=32,
-                    help="Batch size for Level 3 (default: 32)")
+                    help="Batch size for Level 3/4 (default: 32)")
     p.add_argument("--patience", type=int, default=5,
                     help="Early stopping patience (default: 5, 0 to disable)")
     p.add_argument("--learning_rate", type=float, default=1e-4,
-                    help="Learning rate for Level 3 (default: 1e-4)")
-    p.add_argument("--cross_attention", action="store_true",
-                    help="Add cross-attention on top of CNN in Level 3 "
-                         "(default: CNN-only; use this flag to enable CNN+CA)")
+                    help="Learning rate for Level 3/4 (default: 1e-4)")
 
     # Debug
     p.add_argument("--debug", action="store_true",
@@ -216,8 +214,8 @@ def parse_levels(levels_str: str) -> List[int]:
     try:
         levels = sorted(set(int(x.strip()) for x in levels_str.split(",")))
         for lv in levels:
-            if lv not in (1, 2, 3):
-                raise ValueError(f"Invalid level: {lv}")
+            if lv not in (1, 2, 3, 4):
+                raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4")
         return levels
     except ValueError as e:
         print(f"ERROR: Invalid --levels value: {e}")
@@ -486,8 +484,11 @@ def run_level3(
     """
     from crossattention_split_analysis.experiment import run_single_analysis
 
-    tag = "cnn_ca" if num_cross_attn_layers > 0 else "cnn"
-    level_dir = os.path.join(output_dir, f"level3_{tag}_{embedding_short}")
+    if num_cross_attn_layers > 0:
+        tag = "level4_cnn_ca"
+    else:
+        tag = "level3_cnn"
+    level_dir = os.path.join(output_dir, f"{tag}_{embedding_short}")
     print(f"  Output: {level_dir}")
     print(f"  Cross-attention layers: {num_cross_attn_layers}"
           f" ({'CNN+CA' if num_cross_attn_layers > 0 else 'CNN-only'})")
@@ -689,7 +690,7 @@ def print_comparison_table(
     for model_key in [
         "level1_fp_knn", "level1_fp_mlp",
         "level2_emb_knn", "level2_emb_mlp",
-        "level3_cnn", "level3_cnn_ca",
+        "level3_cnn", "level4_cnn_ca",
     ]:
         if model_key not in aggregated:
             continue
@@ -765,7 +766,7 @@ def save_benchmark_json(
 def _available_models(aggregated: Dict) -> List[str]:
     """Return model keys that have at least one non-None metric."""
     order = ["level1_fp_knn", "level1_fp_mlp", "level2_emb_knn", "level2_emb_mlp",
-             "level3_cnn", "level3_cnn_ca"]
+             "level3_cnn", "level4_cnn_ca"]
     available = []
     for k in order:
         if k in aggregated:
@@ -1163,24 +1164,18 @@ def main():
     print(f"  Output dir:       {output_dir}")
     print(f"  Scaffold splits:  {scaffold_split_dir}")
     print(f"  Force:            {force}")
-    # Resolve cross-attention config
-    use_cross_attention = args.cross_attention
-    num_cross_attn_layers = 2 if use_cross_attention else 0
-    level3_key = "level3_cnn_ca" if use_cross_attention else "level3_cnn"
-
-    if 3 in levels:
-        print(f"  L3 model:         {'CNN + CrossAttention' if use_cross_attention else 'CNN-only'}")
-        print(f"  L3 epochs:        {args.epochs}")
-        print(f"  L3 batch_size:    {args.batch_size}")
-        print(f"  L3 patience:      {patience}")
-        print(f"  L3 learning_rate: {args.learning_rate}")
+    if 3 in levels or 4 in levels:
+        print(f"  DL epochs:        {args.epochs}")
+        print(f"  DL batch_size:    {args.batch_size}")
+        print(f"  DL patience:      {patience}")
+        print(f"  DL learning_rate: {args.learning_rate}")
     print("=" * 70)
 
     os.makedirs(output_dir, exist_ok=True)
     t_start = time.time()
 
     # Initialize global progress tracker
-    progress = BenchmarkProgress(levels, dataset, embedding_short, use_cross_attention)
+    progress = BenchmarkProgress(levels, dataset, embedding_short)
 
     # -----------------------------------------------------------------------
     # Step 0: Scaffold splits
@@ -1245,12 +1240,11 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 3: Level 3
+    # Step 3: Level 3 — CNN-only
     # -----------------------------------------------------------------------
     level3_results = None
     if 3 in levels:
-        l3_label = "CNN+CA" if use_cross_attention else "CNN"
-        step_name = f"Step 3: Level 3 ({l3_label})"
+        step_name = "Step 3: Level 3 (CNN)"
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
@@ -1266,7 +1260,7 @@ def main():
             batch_size=args.batch_size,
             patience=patience,
             learning_rate=args.learning_rate,
-            num_cross_attn_layers=num_cross_attn_layers,
+            num_cross_attn_layers=0,
         )
         if level3_results:
             tqdm.write("  Level 3 completed successfully.")
@@ -1275,14 +1269,49 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 4: Comparative report + visualizations
+    # Step 4: Level 4 — CNN + CrossAttention
     # -----------------------------------------------------------------------
-    step_name = "Step 4: Report + Visualizations"
+    level4_results = None
+    if 4 in levels:
+        step_name = "Step 4: Level 4 (CNN+CA)"
+        progress.begin_step(step_name)
+        tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
+        tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
+        level4_results = run_level3(
+            dataset=dataset,
+            embedding_name=embedding_name,
+            embedding_short=embedding_short,
+            output_dir=output_dir,
+            scaffold_split_dir=scaffold_split_dir,
+            seeds=seeds,
+            force=force,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            patience=patience,
+            learning_rate=args.learning_rate,
+            num_cross_attn_layers=2,
+        )
+        if level4_results:
+            tqdm.write("  Level 4 completed successfully.")
+        else:
+            tqdm.write("  WARNING: Level 4 returned no results.")
+        progress.end_step(step_name)
+
+    # -----------------------------------------------------------------------
+    # Report: Comparative report + visualizations
+    # -----------------------------------------------------------------------
+    step_name = "Report + Visualizations"
     progress.begin_step(step_name)
 
     aggregated = aggregate_benchmark_metrics(
-        level1_results, level2_results, level3_results, level3_key=level3_key,
+        level1_results, level2_results, level3_results, level3_key="level3_cnn",
     )
+    # Merge Level 4 if present
+    if level4_results:
+        l4_agg = aggregate_benchmark_metrics(
+            None, None, level4_results, level3_key="level4_cnn_ca",
+        )
+        aggregated.update(l4_agg)
 
     if not aggregated:
         tqdm.write("  No results to compare. At least one level must produce results.")
