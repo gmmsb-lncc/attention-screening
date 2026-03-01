@@ -10,14 +10,12 @@ Revisão completa e especializada da metodologia do DockTKinase.
 **Conteúdo**:
 - ✅ Executive summary
 - ✅ Contexto científico (super-resistência bacteriana)
-- ✅ Pipeline completo (7 fases detalha)
-  1. Geração de embeddings (ESM-2/ESM-C + FM4M)
-  2. Construção de matrizes
-  3. Geração de labels
-  4. **Estratificação inteligente** (método de cosine similarity + agglomerative clustering)
-  5. Classificação (12 ML models)
-  6. Regressão (12 ML models)
-  7. Deep Learning (CNN + Cross-Attention)
+- ✅ Pipeline benchmark (5 steps)
+  0. **Scaffold split** (Murcko scaffold decomposition)
+  1. Level 1: Fingerprint + KNN/MLP (baseline)
+  2. Level 2: Embedding vectors + KNN/MLP
+  3. Level 3: CNN + Cross-Attention (DT-Kinase, multi-seed)
+  4. Comparative report + visualizations
 - ✅ Arquitetura de software (SOLID, KISS, Clean Code)
 - ✅ Garantias e validações (5 mecanismos principais)
 - ✅ Benchmarks e resultados (7 modelos de proteína, 12 algoritmos)

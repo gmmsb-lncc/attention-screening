@@ -18,11 +18,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import subprocess
 import sys
 import time
+import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -273,8 +275,8 @@ def ensure_scaffold_splits(
     print(f"  Running: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=False)
-        return result.returncode == 0
+        subprocess.run(cmd, check=True, capture_output=False)
+        return True
     except subprocess.CalledProcessError as e:
         print(f"  ERROR: scaffold_split.py failed with code {e.returncode}")
         return False
@@ -286,6 +288,43 @@ def ensure_scaffold_splits(
 # ---------------------------------------------------------------------------
 # Step 0b: Ligand vectors
 # ---------------------------------------------------------------------------
+
+def _extract_ligand_vectors(
+    matrix_dir: Path,
+    output_dir: Path,
+    force: bool = False,
+) -> dict:
+    """Mean-pool MoLFormer per-token matrices into ligand vectors.
+
+    Reads {chembl_id}_matrix.npy (shape [n_tokens, 768]) and writes
+    {chembl_id}_embedding.npy (shape [768]) via mean pooling.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    matrix_files = sorted(matrix_dir.glob("*_matrix.npy"))
+    if not matrix_files:
+        print(f"  WARNING: no matrix files found in {matrix_dir}")
+        return {"processed": 0, "skipped": 0, "errors": 0}
+
+    processed = skipped = errors = 0
+    for mf in matrix_files:
+        chembl_id = mf.stem.replace("_matrix", "")
+        out_path = output_dir / f"{chembl_id}_embedding.npy"
+        if out_path.exists() and not force:
+            skipped += 1
+            continue
+        try:
+            mat = np.load(mf)
+            if mat.ndim != 2:
+                print(f"  WARNING: unexpected shape {mat.shape} for {mf.name}, skipping")
+                errors += 1
+                continue
+            np.save(out_path, mat.mean(axis=0).astype(np.float32))
+            processed += 1
+        except Exception as e:
+            print(f"  ERROR processing {mf.name}: {e}")
+            errors += 1
+    return {"processed": processed, "skipped": skipped, "errors": errors}
+
 
 def ensure_ligand_vectors(
     dataset: str,
@@ -319,9 +358,7 @@ def ensure_ligand_vectors(
 
         print(f"  Extracting ligand vectors ({ds}) from {molformer_dir}...")
 
-        from scripts.extract_ligand_vectors import extract_vectors
-
-        stats = extract_vectors(molformer_dir, vector_dir, force=force)
+        stats = _extract_ligand_vectors(molformer_dir, vector_dir, force=force)
         print(
             f"  Done ({ds}): {stats['processed']} extracted, "
             f"{stats['skipped']} skipped, {stats['errors']} errors"
@@ -477,7 +514,6 @@ def _load_crossattention_results(
 
     if not os.path.exists(json_path):
         # Try finding any matching file
-        import glob
         candidates = glob.glob(os.path.join(level_dir, "*crossattention_analysis_results.json"))
         if candidates:
             json_path = candidates[0]
@@ -526,9 +562,13 @@ def _find_scaffold_scenario_key(results: Dict) -> Optional[str]:
         if "scaffold" in normalized:
             return key
 
-    # Fallback: return first key
+    # Fallback: return first key with warning
     if results:
-        return next(iter(results))
+        first_key = next(iter(results))
+        warnings.warn(
+            f"No 'scaffold' scenario found in results; falling back to '{first_key}'"
+        )
+        return first_key
     return None
 
 
@@ -642,7 +682,8 @@ def print_comparison_table(
             if val is None:
                 line += f"  {'N/A':>10s}"
             elif std is not None and std > 0:
-                line += f"  {val:>5.3f}±{std:<4.3f}"
+                cell = f"{val:.3f}\u00b1{std:.3f}"
+                line += f"  {cell:>10s}"
             else:
                 line += f"  {val:>10.4f}"
         print(line)
@@ -731,15 +772,17 @@ def plot_grouped_bar_chart(
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
+    all_vals = []
     for i, mk in enumerate(models):
         row = aggregated[mk]
-        vals = [row.get(m) or 0.0 for m in METRICS_ORDER]
+        vals = [row.get(m) if row.get(m) is not None else np.nan for m in METRICS_ORDER]
         stds = [row.get(f"{m}_std") or 0.0 for m in METRICS_ORDER]
+        all_vals.extend(v for v in vals if not np.isnan(v))
         offset = (i - n_models / 2 + 0.5) * bar_width
 
         bars = ax.bar(
             x + offset,
-            vals,
+            [v if not np.isnan(v) else 0 for v in vals],
             bar_width * 0.9,
             yerr=stds if any(s > 0 for s in stds) else None,
             capsize=3,
@@ -751,10 +794,11 @@ def plot_grouped_bar_chart(
 
         # Value labels on bars
         for bar, val in zip(bars, vals):
-            if val > 0:
+            if not np.isnan(val) and val != 0:
+                y_pos = max(bar.get_height(), 0) + 0.01
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + 0.01,
+                    y_pos,
                     f"{val:.3f}",
                     ha="center", va="bottom",
                     fontsize=7, rotation=45,
@@ -762,7 +806,8 @@ def plot_grouped_bar_chart(
 
     ax.set_xticks(x)
     ax.set_xticklabels([m.upper() for m in METRICS_ORDER], fontsize=11)
-    ax.set_ylim(0, 1.15)
+    y_min = min(all_vals) if all_vals else 0
+    ax.set_ylim(min(0, y_min - 0.05), 1.15)
     ax.set_ylabel("Score", fontsize=12)
     ax.set_title(
         f"Model Comparison — {dataset} / ESM-2 {embedding_short} / Scaffold Split",
@@ -801,9 +846,11 @@ def plot_radar_chart(
 
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
 
+    all_radar_vals = []
     for mk in models:
         row = aggregated[mk]
-        vals = [row.get(m) or 0.0 for m in metrics]
+        vals = [row.get(m) if row.get(m) is not None else 0.0 for m in metrics]
+        all_radar_vals.extend(vals)
         vals += vals[:1]  # close polygon
         ax.plot(angles, vals, "o-", linewidth=2, label=LEVEL_LABELS[mk],
                 color=LEVEL_COLORS[mk], markersize=5)
@@ -811,7 +858,8 @@ def plot_radar_chart(
 
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels([m.upper() for m in metrics], fontsize=11)
-    ax.set_ylim(0, 1.0)
+    r_min = min(all_radar_vals) if all_radar_vals else 0
+    ax.set_ylim(min(0, r_min - 0.05), 1.05)
     ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
     ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=8, alpha=0.6)
     ax.set_title(
@@ -930,14 +978,17 @@ def plot_mcc_ranking(
     for bar, mcc_val, std_val in zip(bars, mccs, stds):
         txt = f"{mcc_val:.3f}"
         if std_val > 0:
-            txt += f" ± {std_val:.3f}"
-        ax.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+            txt += f" \u00b1 {std_val:.3f}"
+        x_pos = max(bar.get_width(), 0) + 0.01
+        ax.text(x_pos, bar.get_y() + bar.get_height() / 2,
                 txt, ha="left", va="center", fontsize=10, fontweight="bold")
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels, fontsize=11)
     ax.set_xlabel("MCC", fontsize=12)
-    ax.set_xlim(0, max(mccs) * 1.25 if max(mccs) > 0 else 1.0)
+    x_min = min(mccs) if mccs else 0
+    x_max = max(mccs) if mccs else 0
+    ax.set_xlim(min(0, x_min - 0.05), max(x_max * 1.25, 0.1))
     ax.set_title(
         f"MCC Ranking — {dataset} / ESM-2 {embedding_short} / Scaffold Split",
         fontsize=13, fontweight="bold",
@@ -984,21 +1035,23 @@ def plot_level_comparison_strip(
         for mk in models:
             v = aggregated[mk].get(metric)
             s = aggregated[mk].get(f"{metric}_std")
-            vals.append(v if v is not None else 0.0)
+            vals.append(v if v is not None else np.nan)
             stds.append(s if s is not None else 0.0)
             colors.append(LEVEL_COLORS[mk])
 
-        ax.barh(y_pos, vals,
+        plot_vals = [v if not np.isnan(v) else 0.0 for v in vals]
+        ax.barh(y_pos, plot_vals,
                 xerr=stds if any(s > 0 for s in stds) else None,
                 capsize=3, color=colors, edgecolor="white",
                 linewidth=0.5, height=0.55)
 
         for i, (v, s) in enumerate(zip(vals, stds)):
-            if v > 0:
+            if not np.isnan(v) and v != 0:
                 txt = f"{v:.3f}"
-                ax.text(v + 0.005, i, txt, ha="left", va="center", fontsize=8)
+                ax.text(max(v, 0) + 0.005, i, txt, ha="left", va="center", fontsize=8)
 
-        ax.set_xlim(0, 1.05)
+        v_min = min((v for v in vals if not np.isnan(v)), default=0)
+        ax.set_xlim(min(0, v_min - 0.05), 1.05)
         ax.set_title(metric.upper(), fontsize=11, fontweight="bold")
         ax.grid(axis="x", alpha=0.25, linestyle="--")
         ax.spines["top"].set_visible(False)
