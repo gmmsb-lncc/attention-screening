@@ -1,14 +1,14 @@
 # semantic-screening: Semantic Interaction Prediction via Multi-Modal Foundation Models
 
 **Author**: Leon Sulfierry (GMMSB-LNCC)
-**Date**: January 2026
-**Version**: 2.1 (Aligned with PhD Thesis and Codebase)
+**Date**: February 2026
+**Version**: 3.0 (Scaffold splits + Unified Benchmark)
 
 ---
 
 ## Abstract
 
-The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-3/ESM-C) and Chemical Foundation Models (SMI-TED, MoLFormer) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a mathematically grounded stratification methodology with three distinct split modes—**Random**, **Compound-Only**, and **Compound+Protein**—to rigorously evaluate generalization capabilities and prevent data leakage. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
+The accurate identification of potent kinase inhibitors is a cornerstone of modern drug discovery, yet it remains a computationally challenging problem due to the high dimensionality of biological space and the scarcity of labeled structural data. This document presents **semantic-screening**, a modular, scalable, and scientifically rigorous deep learning platform designed to address these challenges. By integrating state-of-the-art Protein Language Models (ESM-2, ESM-3/ESM-C) and Chemical Foundation Models (SMI-TED, MoLFormer) within the novel **DT-Kinase** architecture—a Cross-Attention Convolutional neural network—semantic-screening learns to predict both **binary bioactivity** (active/inactive) and **binding affinity** ($K_d, IC_{50}$) directly from sequence and SMILES representations. This approach enables high-throughput **candidate prioritization** by bypassing the need for explicit 3D co-crystal structures during inference, effectively performing "semantic docking" in a latent space. We introduce a **scaffold-based splitting methodology** using Murcko scaffold decomposition to rigorously evaluate generalization capabilities and prevent chemical series leakage. This document details the theoretical foundations, architectural decisions, and implementation strategies that define the semantic-screening platform and DT-Kinase architecture.
 
 ---
 
@@ -152,7 +152,7 @@ This design allows researchers to experiment with cutting-edge models simply by 
 
 The `IntegratedPipeline` class (`src.integrated_pipeline.py`) serves as the master orchestrator. It manages the data flow between modules, handles checkpointing, and ensures that the output of the Build module (embedding matrices) is correctly formatted for the Classifier and Regression modules.
 
-$$ \text{Raw Data} \xrightarrow{\text{Build}} \text{Embeddings} \xrightarrow{\text{Stratification}} \text{Splits} \xrightarrow{\text{Classifier}} \text{Candidates} \xrightarrow{\text{Regression}} \text{Predictions} $$
+$$ \text{Raw Data} \xrightarrow{\text{Build}} \text{Embeddings} \xrightarrow{\text{Scaffold Split}} \text{Train/Val/Test} \xrightarrow{\text{3-Level Benchmark}} \text{Comparison} $$
 
 This linear flow is augmented by a robust **Checkpoint System**, which caches intermediate results (e.g., `embedding_matrix.npy`) to prevent redundant computations—a crucial feature when working with large-scale biological datasets that can take days to process.
 
@@ -493,137 +493,101 @@ A pervasive issue in machine learning for biology is **data leakage** caused by 
 ### 7.1 The Data Leakage Problem
 
 Standard random splitting assumes independent and identically distributed (i.i.d.) data. However, drug discovery data is structured:
-- **Compound families**: Many compounds share the same scaffold
+- **Compound families**: Many compounds share the same **Murcko scaffold** (core ring system)
 - **Protein families**: Kinases share high sequence similarity (>85% in ATP-binding pocket)
+- **Cross-contamination**: A random split might place Compound A in training and its close analog Compound B in test, inflating performance
 
-A random split might place Compound A in the training set and its close analog Compound B in the test set. Since they share 90% structural similarity and likely bind the same targets, the test performance will be optimistically biased.
+### 7.2 Scaffold-Based Splitting (Primary Methodology)
 
-### 7.2 Three Split Modes for Rigorous Evaluation
+**Implementation**: `scaffold_split.py` + `scaffolds_splits/scenario_splitter.py`
 
-semantic-screening implements three distinct split strategies, ordered from **easiest to hardest**:
+semantic-screening uses **Murcko scaffold decomposition** as the primary splitting strategy. This ensures that compounds sharing the same chemical backbone are never split across train/val/test sets, providing the most chemically meaningful separation.
 
-#### 7.2.1 Random Split (Baseline with Leakage)
+#### 7.2.1 Murcko Scaffolds
 
-**Implementation**: `crossattention_split_analysis/data/splits.py::split_random()`
+A **Murcko scaffold** is the core ring system of a molecule after removing all side chains. For example, all benzodiazepines share the same scaffold regardless of their substituents. This captures the medicinal chemistry concept of "chemical series".
 
-The simplest approach: stratified random sampling by label distribution.
+$$ \text{scaffold}: \mathcal{C} \to \mathcal{S}, \quad \text{scaffold}(c) = \text{MurckoScaffold}(\text{SMILES}(c)) $$
 
-**Algorithm**:
-1. Stratify by label to maintain class balance
-2. Split: 80% train+val, 20% temporary
-3. Further split temporary: 50% validation, 50% test
-4. Result: ~80% train, ~10% val, ~10% test
+#### 7.2.2 Fixed Test Set with Shared Scaffolds
 
-**Mathematical Formulation**:
-Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$ be the dataset. The random split partitions:
+The splitting proceeds in two phases:
 
-$$ \mathcal{D} = \mathcal{D}_{train} \cup \mathcal{D}_{val} \cup \mathcal{D}_{test} $$
+**Phase 1 — Test scaffold selection** (shared across human and non-human datasets):
+1. Compute Murcko scaffolds for all compounds across both datasets
+2. Select test scaffolds via optimization with random restarts to balance:
+   - Target test fraction (~10% of unique compounds)
+   - Class distribution preservation (active/inactive ratio)
+   - Cross-dataset proportionality
+3. All rows belonging to test scaffolds form the **fixed test set**
 
-Where samples are drawn uniformly at random, with stratification ensuring that the class distribution is preserved in each split:
+**Phase 2 — Scenario-specific train/val partitioning** (from the remainder pool):
 
-$$\frac{N_{positive,k}}{N_k} \approx \frac{N_{positive}}{N} \quad \text{for } k \in \{train, val, test\}$$
+| Scenario | Code | Splitting Unit | Disjointness Guarantee |
+|----------|------|----------------|------------------------|
+| **Scaffold** | `Sc` | Scaffold groups | No scaffold overlap between train and val |
+| Random | `S1` | Individual rows | Stratified random (baseline) |
+| Compound | `S2` | Unique compounds | No compound overlap |
+| Kinase | `S3` | Unique kinases | No kinase overlap |
+| New Comp. + New Kinase | `S4` | Both compounds and kinases | Double disjointness |
 
-**Characteristics**:
-- ✅ Both compounds and kinases may appear in multiple splits
-- ⚠️ **Allows data leakage** - compounds and kinases can overlap
-- 📊 Serves as upper-bound baseline (optimistic performance)
-- 🎯 Use case: Initial model development and debugging
+The **Scaffold (Sc)** scenario is the default and recommended split for all benchmarks. It provides the most chemically meaningful evaluation of generalization.
 
-#### 7.2.2 Compound-Only Split (Medium Difficulty)
+#### 7.2.3 Mathematical Formulation
 
-**Implementation**: `crossattention_split_analysis/data/splits.py::split_by_compound()`
+Let $s(c)$ denote the Murcko scaffold of compound $c$, and let $s(x_i)$ denote the scaffold of the compound in sample $x_i$. The scaffold split ensures:
 
-Stratification by unique compounds to prevent compound leakage.
+$$\mathcal{S}_{train} \cap \mathcal{S}_{val} = \emptyset, \quad \mathcal{S}_{train} \cap \mathcal{S}_{test} = \emptyset, \quad \mathcal{S}_{val} \cap \mathcal{S}_{test} = \emptyset$$
 
-**Algorithm**:
-1. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
-2. Shuffle compounds with fixed seed
-3. Partition compounds:
-   - Train compounds: first 80% of unique compounds
-   - Validation compounds: next 10% of unique compounds
-   - Test compounds: final 10% of unique compounds
-4. Assign all samples where compound $\in$ compound set
+Where $\mathcal{S}_k = \{s(x_i) : x_i \in \mathcal{D}_k\}$ for $k \in \{train, val, test\}$.
 
-**Mathematical Formulation**:
-Let $c(x_i)$ denote the compound ID of sample $x_i$. The split ensures no overlap between compound sets:
+The training set contains all samples whose scaffolds belong to the training scaffold set:
 
-$$\mathcal{C}_{train} \cap \mathcal{C}_{val} = \emptyset, \quad \mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset, \quad \mathcal{C}_{val} \cap \mathcal{C}_{test} = \emptyset$$
+$$\mathcal{D}_{train} = \{(x_i, y_i) : s(x_i) \in \mathcal{S}_{train}\}$$
 
-The training set contains all samples whose compounds belong to the training compound set:
+This guarantees that the model cannot exploit scaffold-level memorization during evaluation.
 
-$$\mathcal{D}_{train} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{train}\}$$
+#### 7.2.4 Split Output Structure
 
-**Characteristics**:
-- ✅ **No compound leakage** - same compound never in train and test
-- ⚠️ Kinases may still overlap between splits
-- 📊 Evaluates generalization to **new compounds**
-- 🎯 Use case: Drug discovery scenario - predict activity for novel molecules
+```
+scaffolds_splits/output/
+    manifest.json                          # Full split metadata
+    universal_scaffolds.json               # Scaffold assignments
+    universal_test.tsv                     # Combined test set
+    human_test.tsv                         # Human-specific test
+    non_human_test.tsv                     # Non-human-specific test
+    human_train.tsv / human_val.tsv        # Default (Sc) train/val
+    non_human_train.tsv / non_human_val.tsv
+    scenarios/
+        Sc/                                # Scaffold-disjoint
+            {dataset}_train.tsv
+            {dataset}_val.tsv
+        S1/ ... S4/                        # Other scenarios
+    split_class_distribution_summary.csv   # Class balance report
+```
 
-#### 7.2.3 Compound + Protein Split (Hardest - True Generalization)
+#### 7.2.5 Validation of Split Integrity
 
-**Implementation**: `crossattention_split_analysis/data/splits.py::split_new_compound_new_kinase()`
+The splitting system validates disjointness constraints automatically:
+- **Sc**: No scaffold overlap between train and val
+- **S2**: No compound overlap
+- **S3**: No kinase overlap
+- **S4**: No compound or kinase overlap
 
-The most stringent split: both compounds AND kinases are held out.
+Class distribution is monitored across all splits with optimization to minimize class-rate deviation from the overall dataset.
 
-**Algorithm**:
-1. Extract unique kinases: $\mathcal{P} = \{p_1, p_2, ..., p_J\}$
-2. Extract unique compounds: $\mathcal{C} = \{c_1, c_2, ..., c_K\}$
-3. Shuffle each independently with seed
-4. Select test kinases: first 15% of unique kinases
-5. Select test compounds: first 15% of unique compounds
-6. Create masks:
-   - Train mask: samples where compound and kinase are both in training sets
-   - Test mask: samples where compound and kinase are both in test sets
-   - Validation mask: all remaining samples
-7. Recursive expansion if test set < 50 samples
+### 7.3 Why Scaffold Splits Over Other Methods
 
-**Mathematical Formulation**:
-Let $c(x_i)$ and $p(x_i)$ denote the compound and protein IDs of sample $x_i$. The split ensures no overlap in both dimensions:
+| Aspect | Random | Compound | Scaffold | Comp.+Kinase |
+|--------|--------|----------|----------|--------------|
+| **Chemical series leakage** | Yes | Partial | **No** | **No** |
+| **Compound leakage** | Yes | **No** | **No** | **No** |
+| **Kinase leakage** | Yes | Yes | Yes | **No** |
+| **Medicinal chemistry relevance** | Low | Medium | **High** | High |
+| **Test set stability** | Variable | Variable | **Fixed** | Variable |
+| **Recommended for benchmarks** | No | No | **Yes** | Ablation only |
 
-$$\mathcal{C}_{train} \cap \mathcal{C}_{test} = \emptyset \quad \text{and} \quad \mathcal{P}_{train} \cap \mathcal{P}_{test} = \emptyset$$
-
-The test set contains only samples where **both** compound and protein are unseen:
-
-$$\mathcal{D}_{test} = \{(x_i, y_i) : c(x_i) \in \mathcal{C}_{test} \text{ and } p(x_i) \in \mathcal{P}_{test}\}$$
-
-**Characteristics**:
-- ✅ **No compound leakage** - compounds are completely held out
-- ✅ **No protein leakage** - kinases are completely held out
-- 📊 Evaluates **true generalization** to unseen chemical and biological space
-- 🎯 Use case: Most realistic evaluation for drug lead optimization
-
-### 7.3 Split Comparison Summary
-
-| Aspect | Random | Compound | Compound+Protein |
-|--------|--------|----------|-----------------|
-| **Compound Leakage** | Yes | **No** | **No** |
-| **Protein Leakage** | Yes | Yes | **No** |
-| **Difficulty** | Easiest | Medium | **Hardest** |
-| **Realistic** | No | Partial | **Yes** |
-| **Test Size** | ~10% | ~10% | Adaptive (min 50) |
-| **Use Case** | Upper bound | New compound discovery | True generalization |
-
-### 7.4 Clustering-Based Stratification (Alternative)
-
-For the classical ML pipeline, semantic-screening also supports **clustering-based stratification** using the embedding space.
-
-#### 7.4.1 Multi-View Stratification
-
-**Implementation**: `src/build/stratification/stratifier.py::multi_view_stratified_split()`
-
-Combines protein and ligand embeddings with weighted similarity:
-
-$$ \mathbf{V}_{joint} = [\sqrt{\alpha} \cdot \hat{\mathbf{E}}_P ; \sqrt{\beta} \cdot \hat{\mathbf{E}}_L] $$
-
-Where $\hat{\mathbf{E}}$ denotes L2-normalized embeddings and $\alpha=0.6$, $\beta=0.4$ are the default weights.
-
-**Algorithm**:
-1. Normalize embeddings: $\hat{\mathbf{E}} = \mathbf{E} / ||\mathbf{E}||_2$
-2. Combine with weights
-3. Cluster using MiniBatchKMeans with k-means++ initialization
-4. Assign entire clusters to train/val/test (no cluster splitting)
-
-**Constraint**: A cluster is never split across sets. All samples from the same cluster are assigned to the same split (train, val, or test).
+The scaffold split strikes the optimal balance: it prevents the most common form of data leakage in drug discovery (same chemical series in train/test) while maintaining enough data in each split for reliable evaluation. The fixed shared test set across datasets also enables fair cross-dataset comparison.
 
 ### 7.5 Validation Metrics
 
@@ -787,9 +751,83 @@ This closes the loop, creating a self-improving cycle where the model diagnoses 
 
 ---
 
+## Chapter 8: Unified Benchmark Pipeline
+
+To facilitate reproducible and comprehensive model comparison, semantic-screening provides a **unified benchmark orchestrator** that coordinates all evaluation levels through a single entry point.
+
+### 8.1 Three-Level Model Hierarchy
+
+The benchmark evaluates models at three levels of increasing complexity and representational richness:
+
+| Level | Input Representation | Models | Description |
+|-------|---------------------|--------|-------------|
+| **Level 1** | Molecular Fingerprints (ECFP) | KNN, MLP | Baseline using classical cheminformatics descriptors |
+| **Level 2** | Mean-pooled Embedding Vectors | KNN, MLP | PLM-based fixed-size representations |
+| **Level 3** | Per-token Embedding Matrices | CNN+CrossAttention | Full DT-Kinase architecture with sequence-level context |
+
+This hierarchy answers a fundamental scientific question: **how much does each level of representation contribute to predictive performance?**
+
+- **Level 1 vs Level 2**: Measures the value of PLM embeddings over hand-crafted fingerprints
+- **Level 2 vs Level 3**: Measures the value of preserving per-residue/per-atom context (sequence-level vs pooled)
+
+### 8.2 Benchmark Execution
+
+**Entry point**: `semantic_screening_models_beta.py`
+
+```bash
+# Full benchmark (all 3 levels)
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M
+
+# Specific levels
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
+
+# Level 3 with custom hyperparameters
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 --epochs 100
+```
+
+### 8.3 Benchmark Pipeline Flow
+
+```
+Step 0:  Verify/generate scaffold splits (scaffold_split.py)
+Step 0b: Verify/extract ligand vectors (mean-pool MoLFormer matrices)
+Step 1:  Level 1 — Fingerprint + KNN/MLP
+Step 2:  Level 2 — Embedding vectors + KNN/MLP
+Step 3:  Level 3 — Per-token matrices + CNN+CrossAttention (multi-seed)
+Step 4:  Comparative report + visualizations
+```
+
+All levels use the **same scaffold split** to ensure fair comparison. Level 3 uses multi-seed evaluation (default: 5 seeds) for statistical robustness.
+
+### 8.4 Comparative Visualizations
+
+The benchmark generates five comparative plots:
+
+1. **Grouped Bar Chart** (`benchmark_grouped_bar.png`): All metrics side-by-side per model, with error bars for multi-seed std
+2. **Radar Chart** (`benchmark_radar.png`): Each model as a polygon overlaid for quick visual comparison of relative strengths
+3. **Heatmap** (`benchmark_heatmap.png`): Color-coded models (rows) x metrics (columns), with $\pm$ std annotations
+4. **MCC Ranking** (`benchmark_mcc_ranking.png`): Horizontal bars ranking models by MCC (the primary selection metric)
+5. **Per-Metric Strip** (`benchmark_per_metric.png`): One panel per metric showing exact values per model
+
+### 8.5 Output Structure
+
+```
+results/benchmark_{dataset}_{embedding}/
+    level1_fingerprint/{dataset}/          # Fingerprint baseline results
+    level2_embedding_{emb}/{dataset}/      # PLM vector results
+    level3_cnn_crossattn_{emb}/            # DT-Kinase results
+    benchmark_comparison.json              # Unified metrics table
+    benchmark_grouped_bar.png              # Comparative plots
+    benchmark_radar.png
+    benchmark_heatmap.png
+    benchmark_mcc_ranking.png
+    benchmark_per_metric.png
+```
+
+---
+
 ## Conclusion
 
-semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-3/ESM-C, SMI-TED, MoLFormer) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous validation methodology with three distinct split modes (Random, Compound-Only, Compound+Protein), it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
+semantic-screening represents a holistic approach to the protein-ligand affinity prediction problem, implementing the theoretical framework developed in the PhD thesis "DT-Kinase: Semantic Screening of Protein-Ligand Interactions via Cross-Attention over Protein Language Model Embeddings". By synthesizing the representational power of foundation models (ESM-2, ESM-3/ESM-C, SMI-TED, MoLFormer) with the physics-inspired DT-Kinase Cross-Attention architecture and a rigorous scaffold-based validation methodology, it offers a robust platform for computational drug discovery that resolves the selectivity paradox through semantic compatibility in latent space rather than geometric fitting in 3D space. The three-level benchmark pipeline enables systematic evaluation of representation quality—from classical fingerprints through PLM vectors to full per-token cross-attention—providing clear scientific evidence for the contribution of each component. The modular design ensures that as the field advances—whether through better language models or novel attention mechanisms—semantic-screening can evolve, serving as a flexible platform for future research.
 
 ---
 

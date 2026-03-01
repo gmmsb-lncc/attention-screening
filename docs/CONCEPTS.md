@@ -11,7 +11,8 @@
   - **Classical models**: 12 ML algorithms (classification + regression)
   - **Neural architecture**: DT-Kinase (CNN + Cross-Attention)
   - **Embedding models**: ESM-2, ESM-3/ESM-C (protein), SMI-TED, MoLFormer (ligand)
-- Robust stratification with leakage validation
+- Scaffold-based splitting to prevent chemical series leakage
+- 3-level unified benchmark (fingerprint → embedding vectors → DT-Kinase)
 - Modular and reusable for new datasets, models, and approaches
 
 **Analogy**: semantic-screening is like a "toolkit" – it provides reusable components and patterns for building screening solutions.
@@ -70,9 +71,9 @@
 │                                                                │
 │  ┌──────────────────────────────────────────────────┐          │
 │  │  STRATIFICATION & VALIDATION                     │          │
-│  │  • Agglomerative clustering                      │          │
-│  │  • Cosine similarity validation                  │          │
-│  │  • Train/Val/Test splitting                      │          │
+│  │  • Scaffold-based splitting (Murcko scaffolds)   │          │
+│  │  • Fixed shared test set across datasets         │          │
+│  │  • 3-level unified benchmark pipeline            │          │
 │  └──────────────────────────────────────────────────┘          │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -191,6 +192,6 @@ Use when you want:
 
 ---
 
-**Last updated**: January 2026
+**Last updated**: February 2026
 **Document**: Conceptual clarification
 **Status**: Reference for all documentation
