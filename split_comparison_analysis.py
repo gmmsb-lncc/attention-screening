@@ -25,7 +25,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score, matthews_corrcoef, f1_score,
-    precision_score, recall_score, roc_auc_score
+    precision_score, recall_score, roc_auc_score, log_loss
 )
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
@@ -36,6 +36,13 @@ warnings.filterwarnings('ignore')
 
 from crossattention_split_analysis.config import (
     DATASET_PATHS, DEFAULT_AFFINITY_THRESHOLD,
+    AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS
+)
+from crossattention_split_analysis.experiment import (
+    _load_precomputed_scaffold_splits,
+)
+from crossattention_split_analysis.training.evaluator import (
+    optimize_threshold_from_predictions,
 )
 from crossattention_split_analysis.utils.json_io import read_json, write_json
 from crossattention_split_analysis.visualization.leakage_analysis import (
@@ -51,7 +58,9 @@ DEFAULT_TEST_FRACTION = 0.10
 DEFAULT_S4_RESTARTS = 2048
 MIN_TEST_SAMPLES = 50
 DEFAULT_SPLIT_MODE = "single_90_10"
+DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
 SPLIT_PROTOCOL_VERSION = "single_split_v1"
+EMBEDDING_BASE_PATH = "./results/protein_model_benchmark_{dataset_type}_v2"
 
 # Plot style
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -264,6 +273,64 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
     return X, y, valid_idx_pos
 
 
+def _l2_normalize(X: np.ndarray) -> np.ndarray:
+    """L2-normalize each row of X (unit norm per sample)."""
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    return X / norms
+
+
+def prepare_embedding_features(
+    df: pd.DataFrame,
+    protein_vector_dir: str,
+    ligand_vector_dir: str,
+) -> tuple:
+    """Prepare features from PLM embedding vectors (ESM-2 + MoLFormer).
+
+    Each protein/ligand vector is L2-normalized independently before
+    concatenation so that both modalities contribute equally regardless
+    of their original magnitude.
+
+    Returns (X, y, valid_indices) where X has shape [n, protein_dim + ligand_dim].
+    """
+    prot_dir = Path(protein_vector_dir)
+    lig_dir = Path(ligand_vector_dir)
+
+    seq_ids = df['seq_id'].astype(str).values
+    chembl_ids = df['chembl_id'].astype(str).values
+    labels = df['label'].values
+
+    prot_vecs = []
+    lig_vecs = []
+    valid_idx = []
+
+    for i in range(len(df)):
+        prot_path = prot_dir / f"{seq_ids[i]}_embedding.npy"
+        lig_path = lig_dir / f"{chembl_ids[i]}_embedding.npy"
+
+        if not prot_path.exists() or not lig_path.exists():
+            continue
+
+        prot_vecs.append(np.load(prot_path))
+        lig_vecs.append(np.load(lig_path))
+        valid_idx.append(i)
+
+    if not prot_vecs:
+        return np.empty((0, 0), dtype=np.float32), np.array([]), []
+
+    prot_mat = np.stack(prot_vecs, axis=0).astype(np.float32)  # [n, protein_dim]
+    lig_mat = np.stack(lig_vecs, axis=0).astype(np.float32)    # [n, ligand_dim]
+
+    # L2-normalize each modality independently before concatenation.
+    prot_norm = _l2_normalize(prot_mat)
+    lig_norm = _l2_normalize(lig_mat)
+
+    X = np.hstack([prot_norm, lig_norm])  # [n, protein_dim + ligand_dim]
+    y = labels[valid_idx]
+
+    return X, y, valid_idx
+
+
 # =============================================================================
 # TRAINING AND EVALUATION
 # =============================================================================
@@ -279,42 +346,20 @@ def _compute_metrics(y_true, y_pred, y_proba=None):
     }
     if y_proba is not None and len(np.unique(y_true)) == 2:
         try:
-            metrics['auroc'] = float(roc_auc_score(y_true, y_proba))
+            metrics['auc'] = float(roc_auc_score(y_true, y_proba))
         except ValueError:
-            metrics['auroc'] = float('nan')
+            metrics['auc'] = float('nan')
+        probs_clipped = np.clip(y_proba, 1e-7, 1.0 - 1e-7)
+        metrics['loss'] = float(log_loss(y_true, probs_clipped, labels=[0, 1]))
     else:
-        metrics['auroc'] = float('nan')
+        metrics['auc'] = float('nan')
+        metrics['loss'] = float('nan')
     return metrics
-
-
-def _nan_metrics():
-    """Return metric dict filled with NaN for unavailable evaluation splits."""
-    return {
-        'accuracy': float('nan'),
-        'mcc': float('nan'),
-        'f1': float('nan'),
-        'precision': float('nan'),
-        'recall': float('nan'),
-        'auroc': float('nan'),
-    }
-
-
-def _format_metrics_for_print(metrics: dict) -> str:
-    """Format metrics for concise terminal output."""
-    auroc = metrics.get('auroc', float('nan'))
-    auroc_str = f", AUROC={auroc:.4f}" if not np.isnan(auroc) else ""
-    return (
-        f"Acc={metrics.get('accuracy', float('nan')):.4f}, "
-        f"MCC={metrics.get('mcc', float('nan')):.4f}, "
-        f"F1={metrics.get('f1', float('nan')):.4f}"
-        f"{auroc_str}"
-    )
 
 
 def train_and_evaluate(
     df: pd.DataFrame,
     train_idx,
-    val_idx,
     test_idx,
     seed: int = 42,
     fp_cache: dict = None,
@@ -325,7 +370,7 @@ def train_and_evaluate(
     dataset_metadata: dict = None,
     save_knn_features: bool = False,
 ):
-    """Train KNN (FAISS) and MLP and return validation/test metrics.
+    """Train KNN (FAISS) and MLP and return metrics.
 
     NOTE on blind-target condition: When unseen kinases appear in the test set
     (kinase and new_compound_new_kinase scenarios), their one-hot encoding is
@@ -342,27 +387,22 @@ def train_and_evaluate(
     """
 
     train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
     test_df = df.iloc[test_idx].reset_index(drop=True)
 
     # IMPORTANT: one-hot kinase space is defined from TRAIN only.
     # Unseen kinases in test therefore map to all-zero vectors (blind-target).
     train_kinases = list(train_df['target_kinase'].unique())
     X_train, y_train, train_valid = prepare_features(train_df, train_kinases, fp_cache)
-    X_val, y_val, val_valid = prepare_features(val_df, train_kinases, fp_cache)
     X_test, y_test, test_valid = prepare_features(test_df, train_kinases, fp_cache)
 
     if len(X_test) == 0 or len(X_train) == 0:
         return None
-    if len(X_val) == 0:
-        print("    WARNING: validation split has no usable rows after feature preparation.")
     if len(np.unique(y_train)) < 2:
         print("    WARNING: training fold has single class; skipping fold.")
         return None
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train).astype(np.float32)
-    X_val_scaled = scaler.transform(X_val).astype(np.float32) if len(X_val) > 0 else None
     X_test_scaled = scaler.transform(X_test).astype(np.float32)
 
     results = {}
@@ -371,21 +411,9 @@ def train_and_evaluate(
     print("    Training KNN (FAISS)...")
     t0 = time.time()
     knn_k = 5
-    knn_pred_test, knn_proba_test = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
-    if X_val_scaled is not None and len(y_val) > 0:
-        knn_pred_val, knn_proba_val = faiss_knn_predict(X_train_scaled, y_train, X_val_scaled, k=knn_k)
-        knn_val_metrics = _compute_metrics(y_val, knn_pred_val, knn_proba_val)
-    else:
-        knn_val_metrics = _nan_metrics()
+    knn_pred, knn_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
     knn_time = time.time() - t0
-    knn_test_metrics = _compute_metrics(y_test, knn_pred_test, knn_proba_test)
-    results['KNN'] = {
-        **knn_test_metrics,  # keep backward compatibility (top-level = test/external test)
-        'test_metrics': dict(knn_test_metrics),
-        'validation_metrics': dict(knn_val_metrics),
-        'n_test_samples': int(len(y_test)),
-        'n_validation_samples': int(len(y_val)),
-    }
+    results['KNN'] = _compute_metrics(y_test, knn_pred, knn_proba)
     print(f"    KNN done in {format_time(knn_time)}")
 
     # MLP
@@ -405,23 +433,10 @@ def train_and_evaluate(
         random_state=seed
     )
     mlp.fit(X_train_scaled, y_train)
-    mlp_pred_test = mlp.predict(X_test_scaled)
-    mlp_proba_test = mlp.predict_proba(X_test_scaled)[:, 1]
-    if X_val_scaled is not None and len(y_val) > 0:
-        mlp_pred_val = mlp.predict(X_val_scaled)
-        mlp_proba_val = mlp.predict_proba(X_val_scaled)[:, 1]
-        mlp_val_metrics = _compute_metrics(y_val, mlp_pred_val, mlp_proba_val)
-    else:
-        mlp_val_metrics = _nan_metrics()
+    mlp_pred = mlp.predict(X_test_scaled)
+    mlp_proba = mlp.predict_proba(X_test_scaled)[:, 1]
     mlp_time = time.time() - t0
-    mlp_test_metrics = _compute_metrics(y_test, mlp_pred_test, mlp_proba_test)
-    results['MLP'] = {
-        **mlp_test_metrics,  # keep backward compatibility (top-level = test/external test)
-        'test_metrics': dict(mlp_test_metrics),
-        'validation_metrics': dict(mlp_val_metrics),
-        'n_test_samples': int(len(y_test)),
-        'n_validation_samples': int(len(y_val)),
-    }
+    results['MLP'] = _compute_metrics(y_test, mlp_pred, mlp_proba)
     print(f"    MLP done in {format_time(mlp_time)}")
 
     artifact_paths = {}
@@ -446,11 +461,9 @@ def train_and_evaluate(
         np.savez_compressed(
             split_indices_path,
             train_idx_raw=np.asarray(train_idx, dtype=np.int64),
-            val_idx_raw=np.asarray(val_idx, dtype=np.int64),
             test_idx_raw=np.asarray(test_idx, dtype=np.int64),
             dropped_idx_raw=dropped_idx_arr,
             train_valid_pos=np.asarray(train_valid, dtype=np.int64),
-            val_valid_pos=np.asarray(val_valid, dtype=np.int64),
             test_valid_pos=np.asarray(test_valid, dtype=np.int64),
         )
 
@@ -475,11 +488,9 @@ def train_and_evaluate(
             "scenario_id": scenario_id,
             "seed": int(seed),
             "train_rows_raw": int(len(train_idx)),
-            "val_rows_raw": int(len(val_idx)),
             "test_rows_raw": int(len(test_idx)),
             "dropped_rows_raw": int(len(dropped_idx_arr)),
             "train_rows_used": int(len(X_train)),
-            "val_rows_used": int(len(X_val)),
             "test_rows_used": int(len(X_test)),
             "knn_k": int(knn_k),
             "knn_payload_has_features": bool(knn_payload_saved),
@@ -516,6 +527,119 @@ def train_and_evaluate(
     return results
 
 
+def train_and_evaluate_with_val(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    seed: int = 42,
+    fp_cache: dict = None,
+    threshold_metric: str = "mcc",
+    feature_type: str = "fingerprint",
+    protein_vector_dir: str = None,
+    ligand_vector_dir: str = None,
+):
+    """Train KNN+MLP with threshold optimization on validation set.
+
+    Used for precomputed scaffold splits where train/val/test are separate
+    DataFrames (same splits as the crossattention pipeline).
+
+    feature_type: "fingerprint" (Morgan FP + one-hot kinase) or
+                  "embedding" (L2-normalized protein + ligand vectors).
+    Threshold is optimized on val, final evaluation on test.
+    """
+    print(f"    Preparing features ({feature_type}): train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+
+    if feature_type == "embedding":
+        if not protein_vector_dir or not ligand_vector_dir:
+            raise ValueError("protein_vector_dir and ligand_vector_dir are required for embedding features")
+        X_train, y_train, _ = prepare_embedding_features(train_df, protein_vector_dir, ligand_vector_dir)
+        X_val, y_val, _ = prepare_embedding_features(val_df, protein_vector_dir, ligand_vector_dir)
+        X_test, y_test, _ = prepare_embedding_features(test_df, protein_vector_dir, ligand_vector_dir)
+    else:
+        # One-hot kinase space defined from TRAIN only (unseen kinases → all-zero).
+        train_kinases = list(train_df['target_kinase'].unique())
+        X_train, y_train, _ = prepare_features(train_df, train_kinases, fp_cache)
+        X_val, y_val, _ = prepare_features(val_df, train_kinases, fp_cache)
+        X_test, y_test, _ = prepare_features(test_df, train_kinases, fp_cache)
+
+    if len(X_train) == 0 or len(X_val) == 0 or len(X_test) == 0:
+        print("    WARNING: empty feature set after preparation; skipping.")
+        return None
+    if len(np.unique(y_train)) < 2:
+        print("    WARNING: training set has single class; skipping.")
+        return None
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train).astype(np.float32)
+    X_val_scaled = scaler.transform(X_val).astype(np.float32)
+    X_test_scaled = scaler.transform(X_test).astype(np.float32)
+
+    results = {}
+
+    # --- KNN via FAISS ---
+    print("    Training KNN (FAISS)...")
+    t0 = time.time()
+    knn_k = 5
+
+    # Optimize threshold on validation
+    _, knn_val_proba = faiss_knn_predict(X_train_scaled, y_train, X_val_scaled, k=knn_k)
+    knn_threshold_info = optimize_threshold_from_predictions(
+        np.asarray(y_val, dtype=np.int64),
+        np.asarray(knn_val_proba, dtype=np.float64),
+        metric=threshold_metric,
+    )
+    knn_threshold = knn_threshold_info['decision_threshold']
+
+    # Evaluate on test with optimized threshold
+    _, knn_test_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
+    knn_test_pred = (knn_test_proba >= knn_threshold).astype(int)
+    knn_time = time.time() - t0
+
+    results['KNN'] = _compute_metrics(y_test, knn_test_pred, knn_test_proba)
+    results['KNN']['decision_threshold'] = float(knn_threshold)
+    results['KNN']['threshold_source'] = f'validation_{threshold_metric}'
+    print(f"    KNN done in {format_time(knn_time)} (threshold={knn_threshold:.4f})")
+
+    # --- MLP ---
+    print("    Training MLP...")
+    t0 = time.time()
+    mlp = MLPClassifier(
+        hidden_layer_sizes=(256, 128),
+        activation='relu',
+        solver='adam',
+        alpha=0.0001,
+        learning_rate='adaptive',
+        learning_rate_init=0.001,
+        max_iter=500,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=20,
+        random_state=seed,
+    )
+    mlp.fit(X_train_scaled, y_train)
+
+    # Optimize threshold on validation
+    mlp_val_proba = mlp.predict_proba(X_val_scaled)[:, 1]
+    mlp_threshold_info = optimize_threshold_from_predictions(
+        np.asarray(y_val, dtype=np.int64),
+        np.asarray(mlp_val_proba, dtype=np.float64),
+        metric=threshold_metric,
+    )
+    mlp_threshold = mlp_threshold_info['decision_threshold']
+
+    # Evaluate on test with optimized threshold
+    mlp_test_proba = mlp.predict_proba(X_test_scaled)[:, 1]
+    mlp_test_pred = (mlp_test_proba >= mlp_threshold).astype(int)
+    mlp_time = time.time() - t0
+
+    results['MLP'] = _compute_metrics(y_test, mlp_test_pred, mlp_test_proba)
+    results['MLP']['decision_threshold'] = float(mlp_threshold)
+    results['MLP']['threshold_source'] = f'validation_{threshold_metric}'
+    print(f"    MLP done in {format_time(mlp_time)} (threshold={mlp_threshold:.4f})")
+
+    return results
+
+
 # =============================================================================
 # MAIN ANALYSIS
 # =============================================================================
@@ -543,7 +667,6 @@ ALL_SCENARIOS_CONFIG = {
         'Random Split\n(Original)'
     ),
 }
-DEFAULT_SPLIT_SCENARIOS = list(ALL_SCENARIOS_CONFIG.keys())
 
 
 def format_time(seconds: float) -> str:
@@ -608,108 +731,6 @@ def resolve_dataset_input_path(
         print(f"  WARNING: without-test input not found: {candidate}. Falling back to default dataset path.")
 
     return DATASET_PATHS.get(dataset_type)
-
-
-def _read_tsv_or_gz(path: Path, split_name: str) -> tuple[pd.DataFrame, Path]:
-    """Read split file from .tsv or .tsv.gz with clear error messaging."""
-    candidates = [path, path.with_suffix(path.suffix + ".gz")]
-    selected = next((p for p in candidates if p.exists()), None)
-    if selected is None:
-        raise FileNotFoundError(
-            f"Required split file not found: {path} "
-            f"(also checked: {path.with_suffix(path.suffix + '.gz')})"
-        )
-    try:
-        return pd.read_csv(selected, sep="\t"), selected
-    except Exception as exc:
-        raise RuntimeError(f"Failed to read {split_name} split file {selected}: {exc}") from exc
-
-
-def _ensure_split_label_column(df: pd.DataFrame, split_name: str) -> pd.DataFrame:
-    """Ensure `label` exists for split DataFrames; derive from pChEMBL when needed."""
-    out = df.copy()
-    if "label" not in out.columns:
-        if "pchembl_value" not in out.columns:
-            raise ValueError(f"{split_name}: missing both 'label' and 'pchembl_value'")
-        threshold = DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl
-        out["label"] = (pd.to_numeric(out["pchembl_value"], errors="coerce") >= threshold).astype(int)
-    else:
-        out["label"] = pd.to_numeric(out["label"], errors="coerce").astype(int)
-    return out
-
-
-def _load_precomputed_scaffold_splits(
-    dataset_type: str,
-    scaffold_split_dir: str,
-) -> dict:
-    """
-    Load precomputed scaffold split files from scaffold_split.py outputs.
-
-    Expected:
-      - {dir}/scenarios/Sc/{dataset}_train.tsv(.gz)
-      - {dir}/scenarios/Sc/{dataset}_val.tsv(.gz)
-      - {dir}/{dataset}_test.tsv(.gz)
-    """
-    base = Path(scaffold_split_dir)
-    scenario_dir = base / "scenarios" / "Sc"
-
-    required_cols = {"chembl_id", "canonical_smiles", "target_kinase", "label"}
-
-    def _load_one(ds: str):
-        train_df, train_path = _read_tsv_or_gz(scenario_dir / f"{ds}_train.tsv", f"{ds} scaffold train")
-        val_df, val_path = _read_tsv_or_gz(scenario_dir / f"{ds}_val.tsv", f"{ds} scaffold val")
-        test_df, test_path = _read_tsv_or_gz(base / f"{ds}_test.tsv", f"{ds} external test")
-
-        train_df = _ensure_split_label_column(train_df, f"{ds} train")
-        val_df = _ensure_split_label_column(val_df, f"{ds} val")
-        test_df = _ensure_split_label_column(test_df, f"{ds} test")
-
-        for split_name, frame in (("train", train_df), ("val", val_df), ("test", test_df)):
-            missing = sorted(required_cols - set(frame.columns))
-            if missing:
-                raise ValueError(f"{ds} {split_name}: missing required column(s): {missing}")
-
-        return {
-            "train_df": train_df.reset_index(drop=True),
-            "val_df": val_df.reset_index(drop=True),
-            "test_df": test_df.reset_index(drop=True),
-            "paths": {
-                "train_path": str(train_path),
-                "val_path": str(val_path),
-                "test_path": str(test_path),
-            },
-        }
-
-    if dataset_type in {"human", "non_human"}:
-        payload = _load_one(dataset_type)
-        return {
-            "dataset_type": dataset_type,
-            "mode": "precomputed_scaffold_external_test",
-            **payload,
-        }
-
-    if dataset_type == "all":
-        human = _load_one("human")
-        non_human = _load_one("non_human")
-        for source, payload in (("human", human), ("non_human", non_human)):
-            for split_key in ("train_df", "val_df", "test_df"):
-                frame = payload[split_key]
-                if "dataset_source" not in frame.columns:
-                    frame["dataset_source"] = source
-
-        return {
-            "dataset_type": dataset_type,
-            "mode": "precomputed_scaffold_external_test",
-            "train_df": pd.concat([human["train_df"], non_human["train_df"]], axis=0, ignore_index=True),
-            "val_df": pd.concat([human["val_df"], non_human["val_df"]], axis=0, ignore_index=True),
-            "test_df": pd.concat([human["test_df"], non_human["test_df"]], axis=0, ignore_index=True),
-            "paths": {
-                "human": human["paths"],
-                "non_human": non_human["paths"],
-            },
-        }
-
-    raise ValueError(f"Unsupported dataset_type={dataset_type!r}. Expected human, non_human, or all.")
 
 
 def _split_quality_loss(
@@ -1057,7 +1078,9 @@ def run_comparison(
     model_output_dir: str = None,
     dataset_metadata: dict = None,
     s4_restarts: int = DEFAULT_S4_RESTARTS,
-    scaffold_precomputed: dict = None,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    feature_type: str = "fingerprint",
+    embedding_name: str = None,
 ):
     """Run comparison across split scenarios.
 
@@ -1073,7 +1096,7 @@ def run_comparison(
     if split_mode == "single_90_10" and not (0.0 < test_fraction < 1.0):
         raise ValueError("test_fraction must be in (0, 1) when split_mode='single_90_10'")
     if scenarios is None:
-        scenarios = DEFAULT_SPLIT_SCENARIOS
+        scenarios = DEFAULT_SCENARIOS
     if save_models and not model_output_dir:
         model_output_dir = os.path.join(output_dir, "models")
     if save_models and model_output_dir:
@@ -1150,11 +1173,7 @@ def run_comparison(
     # Build scaffold map if scaffold scenario is requested
     scaffold_map = None
     scenario_ids = [s for s, _, _ in scenarios_config]
-    needs_internal_scaffold_map = (
-        'scaffold' in scenario_ids
-        and not (split_mode == "single_90_10" and scaffold_precomputed is not None)
-    )
-    if needs_internal_scaffold_map:
+    if 'scaffold' in scenario_ids:
         scaffold_map = _build_compound_scaffold_map(df)
 
     for scenario_pos, (scenario_id, scenario_name, scenario_key) in enumerate(scenarios_config, 1):
@@ -1166,76 +1185,134 @@ def run_comparison(
             print("  [checkpoint] Scenario already computed. Skipping recalculation.")
             continue
 
+        # -----------------------------------------------------------------
+        # SCAFFOLD scenario with precomputed splits (aligned with crossattention pipeline)
+        # -----------------------------------------------------------------
+        if scenario_id == 'scaffold' and scaffold_split_dir:
+            dataset_type = (dataset_metadata or {}).get('dataset_type', 'non_human')
+            threshold = DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl
+            try:
+                sc_train_df, sc_val_df, sc_test_df, sc_meta = _load_precomputed_scaffold_splits(
+                    dataset_type=dataset_type,
+                    scaffold_split_dir=scaffold_split_dir,
+                    threshold=threshold,
+                )
+            except (FileNotFoundError, RuntimeError, ValueError) as exc:
+                print(f"  WARNING: Could not load precomputed scaffold splits: {exc}")
+                print("  Falling back to runtime scaffold split generation.")
+                sc_train_df = None
+
+            if sc_train_df is not None:
+                print(f"  Using PRECOMPUTED scaffold splits (same as crossattention pipeline):")
+                print(f"    Train: {len(sc_train_df)}, Val: {len(sc_val_df)}, Test: {len(sc_test_df)}")
+                print(f"    Source: {scaffold_split_dir}")
+
+                train_compounds = set(sc_train_df['chembl_id'])
+                test_compounds = set(sc_test_df['chembl_id'])
+                leaked = train_compounds & test_compounds
+                total_rows = len(sc_train_df) + len(sc_val_df) + len(sc_test_df)
+
+                stats = {
+                    'train_size': len(sc_train_df),
+                    'val_size': len(sc_val_df),
+                    'test_size': len(sc_test_df),
+                    'dropped_size': 0,
+                    'test_compounds': len(test_compounds),
+                    'leaked_compounds': len(leaked),
+                    'leak_pct': 100 * len(leaked) / len(test_compounds) if test_compounds else 0,
+                    'test_fraction_used': float(len(sc_test_df) / total_rows) if total_rows > 0 else 0.0,
+                    'test_fraction_total': float(len(sc_test_df) / total_rows) if total_rows > 0 else 0.0,
+                    'split_source': 'precomputed_scaffold_split',
+                }
+                print(f"    Test compounds: {len(test_compounds)}, Leaked: {len(leaked)} ({stats['leak_pct']:.1f}%)")
+                stats['feature_type'] = feature_type
+
+                # Resolve embedding directories for embedding feature mode.
+                prot_vec_dir = None
+                lig_vec_dir = None
+                if feature_type == "embedding" and embedding_name:
+                    from crossattention_split_analysis.config import SUPPORTED_EMBEDDINGS
+                    esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
+                    emb_base = EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)
+                    build_dir = os.path.join(emb_base, esm_model, "build")
+                    prot_vec_dir = os.path.join(build_dir, "proteins")
+                    lig_vec_dir = os.path.join(build_dir, "ligand_embeddings")
+                    print(f"    Embedding features: {esm_model}")
+                    print(f"      Protein vectors: {prot_vec_dir}")
+                    print(f"      Ligand vectors:  {lig_vec_dir}")
+
+                results = train_and_evaluate_with_val(
+                    sc_train_df, sc_val_df, sc_test_df,
+                    seed=seed,
+                    fp_cache=fp_cache,
+                    threshold_metric="mcc",
+                    feature_type=feature_type,
+                    protein_vector_dir=prot_vec_dir,
+                    ligand_vector_dir=lig_vec_dir,
+                )
+
+                if results is not None:
+                    split_stats[scenario_key] = stats
+                    # Single-round result, same structure as other scenarios
+                    single = results
+                    all_results[scenario_key] = single
+                    for model in ['KNN', 'MLP']:
+                        m = results[model]
+                        auc_str = f", AUROC={m['auc']:.4f}" if not np.isnan(m.get('auc', float('nan'))) else ""
+                        thr_str = f", thr={m.get('decision_threshold', 0.5):.4f}"
+                        print(f"  {model}: Acc={m['accuracy']:.4f}, MCC={m['mcc']:.4f}, F1={m['f1']:.4f}{auc_str}{thr_str}")
+                else:
+                    print("  WARNING: Scaffold scenario evaluation returned None.")
+
+                if checkpoint_path and scenario_key not in completed_scenarios:
+                    completed_scenarios.append(scenario_key)
+                    write_json(checkpoint_path, {
+                        'config': {
+                            'seed': seed, 'split_mode': split_mode,
+                            'test_fraction': test_fraction,
+                            'scenarios': [s for s, _, _ in scenarios_config],
+                        },
+                        'all_results': all_results,
+                        'split_stats': split_stats,
+                        'completed_scenarios': completed_scenarios,
+                    })
+                continue  # Skip the normal split generation path for scaffold
+
+        # -----------------------------------------------------------------
+        # Standard runtime split path (all non-scaffold scenarios, or fallback)
+        # -----------------------------------------------------------------
         eval_rounds = []
         if split_mode == "single_90_10":
-            if scenario_id == "scaffold" and scaffold_precomputed is not None:
-                train_df = scaffold_precomputed["train_df"].copy()
-                val_df = scaffold_precomputed["val_df"].copy()
-                test_df = scaffold_precomputed["test_df"].copy()
-                scenario_df = pd.concat([train_df, val_df, test_df], axis=0, ignore_index=True)
-
-                n_train = len(train_df)
-                n_val = len(val_df)
-                n_test = len(test_df)
-                train_idx = np.arange(0, n_train, dtype=np.int64)
-                val_idx = np.arange(n_train, n_train + n_val, dtype=np.int64)
-                test_idx = np.arange(n_train + n_val, n_train + n_val + n_test, dtype=np.int64)
-                # Keep val rows explicitly out of train/test for this baseline runner.
-                dropped_idx = val_idx
-                used_rows = len(train_idx) + len(test_idx)
-                split_payload = {
-                    "source": "precomputed_scaffold_external_test",
-                    "test_fraction_used": float(len(test_idx) / max(used_rows, 1)),
-                    "test_fraction_total": float(len(test_idx) / max(len(scenario_df), 1)),
-                    "paths": scaffold_precomputed.get("paths", {}),
-                }
-                eval_rounds = [(
-                    0,
-                    train_idx,
-                    val_idx,
-                    test_idx,
-                    dropped_idx,
-                    split_payload,
-                    scenario_df,
-                )]
-                print(
-                    "  Precomputed scaffold split loaded: "
-                    f"train={n_train}, val={n_val}, external_test={n_test}, "
-                    f"test_used={split_payload['test_fraction_used']:.4f}, "
-                    f"test_total={split_payload['test_fraction_total']:.4f}"
-                )
-            else:
-                split_payload = _generate_single_split(
-                    df=df,
-                    scenario_id=scenario_id,
-                    seed=seed,
-                    test_fraction=test_fraction,
-                    scaffold_map=scaffold_map,
-                    s4_restarts=s4_restarts,
-                )
-                train_idx = split_payload["train_idx"]
-                test_idx = split_payload["test_idx"]
-                dropped_idx = split_payload["dropped_idx"]
-                eval_rounds = [(
-                    0,
-                    train_idx,
-                    np.array([], dtype=np.int64),
-                    test_idx,
-                    dropped_idx,
-                    split_payload,
-                    None,
-                )]
-                print(
-                    "  Single split ready: "
-                    f"train={len(train_idx)}, test={len(test_idx)}, dropped={len(dropped_idx)}, "
-                    f"test_used={split_payload['test_fraction_used']:.4f}, "
-                    f"test_total={split_payload['test_fraction_total']:.4f}"
-                )
+            split_payload = _generate_single_split(
+                df=df,
+                scenario_id=scenario_id,
+                seed=seed,
+                test_fraction=test_fraction,
+                scaffold_map=scaffold_map,
+                s4_restarts=s4_restarts,
+            )
+            train_idx = split_payload["train_idx"]
+            test_idx = split_payload["test_idx"]
+            dropped_idx = split_payload["dropped_idx"]
+            eval_rounds = [(
+                0,
+                train_idx,
+                np.array([], dtype=np.int64),
+                test_idx,
+                dropped_idx,
+                split_payload,
+            )]
+            print(
+                "  Single split ready: "
+                f"train={len(train_idx)}, test={len(test_idx)}, dropped={len(dropped_idx)}, "
+                f"test_used={split_payload['test_fraction_used']:.4f}, "
+                f"test_total={split_payload['test_fraction_total']:.4f}"
+            )
         else:
             cv_folds = _generate_cv_folds(df, scenario_id, n_folds, seed, scaffold_map)
             print(f"  Valid folds: {len(cv_folds)}/{n_folds}")
             eval_rounds = [
-                (fold_i, train_idx, val_idx, test_idx, np.array([], dtype=np.int64), None, None)
+                (fold_i, train_idx, val_idx, test_idx, np.array([], dtype=np.int64), None)
                 for (fold_i, train_idx, val_idx, test_idx) in cv_folds
             ]
             if not eval_rounds:
@@ -1245,13 +1322,12 @@ def run_comparison(
         fold_results = {}
         fold_split_stats = []
 
-        for round_pos, (round_i, train_idx, val_idx, test_idx, dropped_idx, split_payload, df_round) in enumerate(eval_rounds, 1):
-            df_eval = df_round if df_round is not None else df
+        for round_pos, (round_i, train_idx, val_idx, test_idx, dropped_idx, split_payload) in enumerate(eval_rounds, 1):
             round_label = "Split" if split_mode == "single_90_10" else "Fold"
             print(f"\n  {round_label} {round_pos}/{len(eval_rounds)} (id={round_i})")
 
-            train_compounds = set(df_eval.iloc[train_idx]['chembl_id'])
-            test_compounds = set(df_eval.iloc[test_idx]['chembl_id'])
+            train_compounds = set(df.iloc[train_idx]['chembl_id'])
+            test_compounds = set(df.iloc[test_idx]['chembl_id'])
             leaked = train_compounds & test_compounds
 
             stats = {
@@ -1263,14 +1339,14 @@ def run_comparison(
                 'leaked_compounds': len(leaked),
                 'leak_pct': 100 * len(leaked) / len(test_compounds) if test_compounds else 0
             }
-            if len(df_eval) > 0:
-                stats['test_fraction_total'] = float(len(test_idx) / len(df_eval))
-                stats['dropped_fraction_total'] = float(len(dropped_idx) / len(df_eval))
+            if len(df) > 0:
+                stats['test_fraction_total'] = float(len(test_idx) / len(df))
+                stats['dropped_fraction_total'] = float(len(dropped_idx) / len(df))
             used_rows = len(train_idx) + len(test_idx)
             stats['test_fraction_used'] = float(len(test_idx) / used_rows) if used_rows > 0 else 0.0
             if scenario_id in ('kinase', 'new_compound_new_kinase'):
-                train_kinases = set(df_eval.iloc[train_idx]['target_kinase'])
-                test_kinases_set = set(df_eval.iloc[test_idx]['target_kinase'])
+                train_kinases = set(df.iloc[train_idx]['target_kinase'])
+                test_kinases_set = set(df.iloc[test_idx]['target_kinase'])
                 stats['test_kinases'] = len(test_kinases_set)
                 stats['leaked_kinases'] = len(train_kinases & test_kinases_set)
             fold_split_stats.append(stats)
@@ -1294,13 +1370,10 @@ def run_comparison(
                 "test_fraction_used": float(stats['test_fraction_used']),
                 "test_fraction_total": float(stats.get('test_fraction_total', 0.0)),
             })
-            if split_payload is not None and split_payload.get("source") == "precomputed_scaffold_external_test":
-                per_run_metadata["precomputed_scaffold_paths"] = split_payload.get("paths", {})
             artifact_scenario_id = scenario_id if split_mode == "single_90_10" else f"{scenario_id}/fold_{round_i}"
             results = train_and_evaluate(
-                df_eval,
+                df,
                 train_idx,
-                val_idx,
                 test_idx,
                 seed=seed,
                 fp_cache=fp_cache,
@@ -1315,15 +1388,10 @@ def run_comparison(
                 fold_results[round_i] = {
                     'metrics': results
                 }
-                eval_test_label = "External Test" if (
-                    split_payload is not None
-                    and split_payload.get("source") == "precomputed_scaffold_external_test"
-                ) else "Test"
-                for model in ['KNN', 'MLP']:
-                    val_metrics = results[model].get('validation_metrics', _nan_metrics())
-                    test_metrics = results[model].get('test_metrics', results[model])
-                    print(f"  {model} (Validation): {_format_metrics_for_print(val_metrics)}")
-                    print(f"  {model} ({eval_test_label}): {_format_metrics_for_print(test_metrics)}")
+                knn_auc = f", AUROC={results['KNN']['auc']:.4f}" if not np.isnan(results['KNN'].get('auc', float('nan'))) else ""
+                mlp_auc = f", AUROC={results['MLP']['auc']:.4f}" if not np.isnan(results['MLP'].get('auc', float('nan'))) else ""
+                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auc}")
+                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auc}")
 
         # Aggregate across folds
         if fold_results:
@@ -1350,7 +1418,7 @@ def run_comparison(
                 aggregated = {}
                 for model in ['KNN', 'MLP']:
                     model_agg = {}
-                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                         values = [r['metrics'][model][metric] for r in fold_results.values()
                                   if not np.isnan(r['metrics'][model].get(metric, float('nan')))]
                         if values:
@@ -1359,32 +1427,6 @@ def run_comparison(
                         else:
                             model_agg[metric] = float('nan')
                             model_agg[f'{metric}_std'] = 0.0
-
-                    for split_name in ['validation_metrics', 'test_metrics']:
-                        split_agg = {}
-                        for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
-                            values = [
-                                r['metrics'][model].get(split_name, {}).get(metric, float('nan'))
-                                for r in fold_results.values()
-                            ]
-                            values = [v for v in values if not np.isnan(v)]
-                            if values:
-                                split_agg[metric] = float(np.mean(values))
-                                split_agg[f'{metric}_std'] = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
-                            else:
-                                split_agg[metric] = float('nan')
-                                split_agg[f'{metric}_std'] = 0.0
-                        model_agg[split_name] = split_agg
-
-                    for sample_key in ['n_validation_samples', 'n_test_samples']:
-                        sample_vals = [
-                            r['metrics'][model].get(sample_key)
-                            for r in fold_results.values()
-                            if r['metrics'][model].get(sample_key) is not None
-                        ]
-                        if sample_vals:
-                            model_agg[sample_key] = int(round(float(np.mean(sample_vals))))
-
                     model_agg['fold_results'] = {
                         str(f_idx): {
                             'metrics': f_data['metrics'][model]
@@ -1403,19 +1445,10 @@ def run_comparison(
                 print(f"\n  --- Aggregate ({len(fold_results)} folds) ---")
                 for model in ['KNN', 'MLP']:
                     m = aggregated[model]
-                    test_auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
-                    print(f"  {model} (Test): Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
+                    auc_str = f", AUROC={m['auc']:.4f}" if not np.isnan(m.get('auc', float('nan'))) else ""
+                    print(f"  {model}: Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
                           f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}, "
-                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{test_auroc_str}")
-                    val = m.get('validation_metrics', {})
-                    val_auroc_str = f", AUROC={val.get('auroc', float('nan')):.4f}" if not np.isnan(val.get('auroc', float('nan'))) else ""
-                    print(
-                        f"  {model} (Validation): "
-                        f"Acc={val.get('accuracy', float('nan')):.4f}+/-{val.get('accuracy_std', 0.0):.4f}, "
-                        f"MCC={val.get('mcc', float('nan')):.4f}+/-{val.get('mcc_std', 0.0):.4f}, "
-                        f"F1={val.get('f1', float('nan')):.4f}+/-{val.get('f1_std', 0.0):.4f}"
-                        f"{val_auroc_str}"
-                    )
+                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auc_str}")
 
             if scenario_key not in completed_scenarios:
                 completed_scenarios.append(scenario_key)
@@ -1591,12 +1624,13 @@ def run_single_dataset(
     input_path: str = None,
     use_without_test_input: bool = True,
     without_test_dir: str = "scaffolds_splits/output",
-    scaffold_split_dir: str = "scaffolds_splits/output",
-    use_precomputed_scaffold_split: bool = True,
     save_models: bool = True,
     save_knn_features: bool = False,
     model_output_dir: str = None,
     s4_restarts: int = DEFAULT_S4_RESTARTS,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    feature_type: str = "fingerprint",
+    embedding_name: str = None,
 ):
     """Run analysis for a single dataset type."""
     data_path = resolve_dataset_input_path(
@@ -1639,8 +1673,6 @@ def run_single_dataset(
     else:
         print(f"k-folds: {n_folds}")
     print(f"Model artifacts directory: {model_output_dir}")
-    print(f"Scaffold split dir: {scaffold_split_dir}")
-    print(f"Use precomputed scaffold split: {use_precomputed_scaffold_split}")
     print(f"Save models: {save_models} (save_knn_features={save_knn_features})")
 
     if force:
@@ -1652,51 +1684,13 @@ def run_single_dataset(
                 except OSError:
                     pass
 
-    scenarios_requested = scenarios if scenarios is not None else DEFAULT_SPLIT_SCENARIOS
-    scaffold_only_requested = set(scenarios_requested) == {"scaffold"}
-    scaffold_precomputed = None
-    if (
-        use_precomputed_scaffold_split
-        and split_mode == "single_90_10"
-        and "scaffold" in scenarios_requested
-    ):
-        try:
-            scaffold_precomputed = _load_precomputed_scaffold_splits(
-                dataset_type=dataset_type,
-                scaffold_split_dir=scaffold_split_dir,
-            )
-            print(
-                "  Precomputed scaffold split loaded for scaffold scenario: "
-                f"train={len(scaffold_precomputed['train_df'])}, "
-                f"val={len(scaffold_precomputed['val_df'])}, "
-                f"external_test={len(scaffold_precomputed['test_df'])}"
-            )
-        except (FileNotFoundError, RuntimeError, ValueError) as exc:
-            print(
-                "  WARNING: Could not load precomputed scaffold split; "
-                f"falling back to generated split for scaffold scenario. Reason: {exc}"
-            )
-
     print(f"\n[1/4] Loading dataset: {dataset_type}...")
-    if scaffold_only_requested and scaffold_precomputed is not None:
-        df = pd.concat(
-            [
-                scaffold_precomputed["train_df"],
-                scaffold_precomputed["val_df"],
-                scaffold_precomputed["test_df"],
-            ],
-            axis=0,
-            ignore_index=True,
-        )
-        data_path = f"precomputed_scaffold_split:{scaffold_split_dir}"
-        print("  Using precomputed scaffold train/val + external test as analysis dataset.")
-    else:
-        try:
-            df = load_dataset(data_path, keep_monotonic=keep_monotonic,
-                              filter_monotonic_compounds=filter_monotonic_compounds)
-        except FileNotFoundError:
-            print(f"  ERROR: File not found: {data_path}")
-            return None
+    try:
+        df = load_dataset(data_path, keep_monotonic=keep_monotonic,
+                          filter_monotonic_compounds=filter_monotonic_compounds)
+    except FileNotFoundError:
+        print(f"  ERROR: File not found: {data_path}")
+        return None
 
     print(f"  Total: {len(df)} rows, {df['chembl_id'].nunique()} compounds, {df['target_kinase'].nunique()} kinases")
 
@@ -1773,10 +1767,7 @@ def run_single_dataset(
         "test_fraction_target": float(test_fraction),
         "monotonic_kinase_filter": not keep_monotonic,
         "monotonic_compound_filter": filter_monotonic_compounds,
-        "use_precomputed_scaffold_split": bool(scaffold_precomputed is not None),
     }
-    if scaffold_precomputed is not None:
-        dataset_metadata["precomputed_scaffold_paths"] = scaffold_precomputed.get("paths", {})
     all_results, split_stats = run_comparison(
         df,
         output_dir,
@@ -1792,7 +1783,9 @@ def run_single_dataset(
         model_output_dir=model_output_dir,
         dataset_metadata=dataset_metadata,
         s4_restarts=s4_restarts,
-        scaffold_precomputed=scaffold_precomputed,
+        scaffold_split_dir=scaffold_split_dir,
+        feature_type=feature_type,
+        embedding_name=embedding_name,
     )
     if not all_results:
         print("  No results generated.")
@@ -1812,7 +1805,7 @@ def run_single_dataset(
         dataset_type=dataset_type,
         seed=seed,
         n_folds=n_folds,
-        scenarios=scenarios if scenarios else DEFAULT_SPLIT_SCENARIOS,
+        scenarios=scenarios if scenarios else DEFAULT_SCENARIOS,
         split_protocol_version=SPLIT_PROTOCOL_VERSION,
         affinity_threshold_pchembl=DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
         leakage_artifacts=leakage_artifacts,
@@ -1828,34 +1821,17 @@ def run_single_dataset(
         for model in ['KNN', 'MLP']:
             m = all_results[scenario_key][model]
             scenario_json[model] = {}
-            for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+            for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                 val = m.get(metric)
                 if val is not None and not (isinstance(val, float) and np.isnan(val)):
                     scenario_json[model][metric] = val
-
-            for split_name in ['validation_metrics', 'test_metrics']:
-                split_metrics = m.get(split_name)
-                if isinstance(split_metrics, dict):
-                    split_json = {}
-                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
-                        split_val = split_metrics.get(metric)
-                        if split_val is not None and not (isinstance(split_val, float) and np.isnan(split_val)):
-                            split_json[metric] = split_val
-                    if multi_round:
-                        for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
-                            split_std = split_metrics.get(f'{metric}_std', 0.0)
-                            if not (isinstance(split_std, float) and np.isnan(split_std)):
-                                split_json[f'{metric}_std'] = split_std
-                    if split_json:
-                        scenario_json[model][split_name] = split_json
-
-            for sample_key in ['n_validation_samples', 'n_test_samples']:
-                sample_val = m.get(sample_key)
-                if sample_val is not None and not (isinstance(sample_val, float) and np.isnan(sample_val)):
-                    scenario_json[model][sample_key] = sample_val
-
+            # Threshold info (from precomputed scaffold splits with val-based optimization)
+            if 'decision_threshold' in m:
+                scenario_json[model]['decision_threshold'] = m['decision_threshold']
+            if 'threshold_source' in m:
+                scenario_json[model]['threshold_source'] = m['threshold_source']
             if multi_round:
-                for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                     std_val = m.get(f'{metric}_std', 0.0)
                     if not (isinstance(std_val, float) and np.isnan(std_val)):
                         scenario_json[model][f'{metric}_std'] = std_val
@@ -1883,7 +1859,7 @@ def run_single_dataset(
             'save_knn_features': save_knn_features,
             'monotonic_kinase_filter': not keep_monotonic,
             'monotonic_compound_filter': filter_monotonic_compounds,
-            'scenarios': scenarios if scenarios else DEFAULT_SPLIT_SCENARIOS,
+            'scenarios': scenarios if scenarios else DEFAULT_SCENARIOS,
             'affinity_threshold_pchembl': DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl,
             'auxiliary_artifacts': leakage_artifacts,
             'checkpoints': {
@@ -2156,21 +2132,24 @@ Available scenarios (Pahikkala et al. 2015 framework):
     parser.add_argument(
         '--scaffold_split_dir',
         type=str,
-        default='scaffolds_splits/output',
-        help='Directory containing precomputed scaffold splits (Sc train/val + external test).'
+        default=DEFAULT_SCAFFOLD_SPLIT_DIR,
+        help='Directory with precomputed scaffold splits from scaffold_split.py. '
+             'Used for the scaffold scenario to align with the crossattention pipeline '
+             f'(default: {DEFAULT_SCAFFOLD_SPLIT_DIR})'
     )
     parser.add_argument(
-        '--use_precomputed_scaffold_split',
-        dest='use_precomputed_scaffold_split',
-        action='store_true',
-        default=True,
-        help='For scaffold scenario in single_90_10 mode, reuse precomputed Sc train/val/test files.'
+        '--feature_type',
+        choices=['fingerprint', 'embedding'],
+        default='fingerprint',
+        help='Feature type: "fingerprint" (Morgan FP + one-hot kinase) or '
+             '"embedding" (L2-normalized ESM-2 + MoLFormer vectors). '
+             'Embedding mode requires --embedding and precomputed vectors.'
     )
     parser.add_argument(
-        '--no_precomputed_scaffold_split',
-        dest='use_precomputed_scaffold_split',
-        action='store_false',
-        help='Disable precomputed scaffold split usage and regenerate scaffold split internally.'
+        '--embedding', '-e',
+        choices=['8M', '150M', '650M'],
+        default=None,
+        help='ESM-2 model for embedding features (required when --feature_type embedding)'
     )
     parser.add_argument(
         '--use_without_test_input',
@@ -2275,17 +2254,19 @@ Available scenarios (Pahikkala et al. 2015 framework):
         parser.error("--test_fraction must be in (0, 1) when --split_mode single_90_10")
     if args.s4_restarts < 1:
         parser.error("--s4_restarts must be >= 1")
+    if args.feature_type == 'embedding' and args.embedding is None:
+        parser.error("--embedding is required when --feature_type embedding")
 
     if args.scenarios:
         if args.scenarios.strip().lower() == 'all':
-            scenarios = DEFAULT_SPLIT_SCENARIOS
+            scenarios = DEFAULT_SCENARIOS
         else:
             scenarios = [s.strip() for s in args.scenarios.split(',')]
             for s in scenarios:
-                if s not in ALL_SCENARIOS_CONFIG:
-                    parser.error(f"Unknown scenario: {s}. Available: {list(ALL_SCENARIOS_CONFIG.keys())}")
+                if s not in AVAILABLE_SCENARIOS:
+                    parser.error(f"Unknown scenario: {s}. Available: {list(AVAILABLE_SCENARIOS.keys())}")
     else:
-        scenarios = DEFAULT_SPLIT_SCENARIOS
+        scenarios = DEFAULT_SCENARIOS
 
     if args.run_all:
         datasets_to_run = ['non_human', 'human', 'all']
@@ -2314,8 +2295,6 @@ Available scenarios (Pahikkala et al. 2015 framework):
         print(f"Split ratio:      {train_pct:.0%}/{args.test_fraction:.0%} (train/test)")
         print(f"S4 restarts:      {args.s4_restarts}")
     print(f"Without-test input: {args.use_without_test_input} (dir={args.without_test_dir})")
-    print(f"Scaffold split dir: {args.scaffold_split_dir}")
-    print(f"Use precomputed scaffold split: {args.use_precomputed_scaffold_split}")
     if args.input_path:
         print(f"Input override:   {args.input_path}")
     print(f"Save models:      {args.save_models}")
@@ -2363,12 +2342,13 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 input_path=args.input_path if not args.run_all else None,
                 use_without_test_input=args.use_without_test_input,
                 without_test_dir=args.without_test_dir,
-                scaffold_split_dir=args.scaffold_split_dir,
-                use_precomputed_scaffold_split=args.use_precomputed_scaffold_split,
                 save_models=args.save_models,
                 save_knn_features=args.save_knn_features,
                 model_output_dir=dataset_model_output_dir,
                 s4_restarts=args.s4_restarts,
+                scaffold_split_dir=args.scaffold_split_dir,
+                feature_type=args.feature_type,
+                embedding_name=args.embedding,
             )
             dataset_time = time.time() - dataset_start_time
             all_dataset_times[dataset_type] = dataset_time
