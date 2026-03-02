@@ -869,6 +869,7 @@ def run_single_analysis(
     num_heads: int = 8,
     ff_dim: int = 1024,
     dropout: float = 0.1,
+    classifier_dropout: float = 0.2,
     diffusion_steps: int = 200,
     diffusion_beta_start: float = 1e-4,
     diffusion_beta_end: float = 0.02,
@@ -920,6 +921,7 @@ def run_single_analysis(
         num_heads: Number of attention heads per block
         ff_dim: Feed-forward hidden size in attention blocks
         dropout: Dropout applied throughout model
+        classifier_dropout: Dropout for classifier head (for level5_lite)
         diffusion_steps: Number of diffusion timesteps
         diffusion_beta_start: Diffusion beta start value
         diffusion_beta_end: Diffusion beta end value
@@ -1048,6 +1050,7 @@ def run_single_analysis(
         num_heads=num_heads,
         ff_dim=ff_dim,
         dropout=dropout,
+        classifier_dropout=classifier_dropout,
         diffusion_steps=diffusion_steps,
         diffusion_beta_start=diffusion_beta_start,
         diffusion_beta_end=diffusion_beta_end,
