@@ -768,14 +768,14 @@ def run_level6_optimized(
         import numpy as np
         import torch
         import torch.nn as nn
+        from sklearn.metrics import matthews_corrcoef, accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
         from crossattention_split_analysis.config import (
             SUPPORTED_EMBEDDINGS,
             PROTEIN_DIMS,
             EMBEDDING_BASE_PATH,
             LIGAND_DIM
         )
-        from crossattention_split_analysis.data.datasets import AttentionMatrixDataset, collate_attention_batch
-        from crossattention_split_analysis.training.evaluator import evaluate
+        from src.classifier.utils.matrix_dataloader import MatrixEmbeddingDataset, collate_matrix_batch
         from src.models.level6_optimized import Level6OptimizedModel, load_hparam_config
         
         # Helper functions
@@ -899,24 +899,38 @@ def run_level6_optimized(
             # Create data loaders
             batch_size = fixed_params['batch_size']
             
-            train_dataset = AttentionMatrixDataset(
+            # Ensure label column exists
+            if 'label' not in train_df.columns:
+                train_df['label'] = (train_df['pchembl_value'] >= 6.0).astype(int)
+            if 'label' not in val_df.columns:
+                val_df['label'] = (val_df['pchembl_value'] >= 6.0).astype(int)
+            
+            train_dataset = MatrixEmbeddingDataset(
                 train_df,
-                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                protein_id_column='seq_id',
+                ligand_id_column='chembl_id',
+                label_column='label',
+                regression_column='pchembl_value',
             )
-            val_dataset = AttentionMatrixDataset(
+            val_dataset = MatrixEmbeddingDataset(
                 val_df,
-                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                protein_id_column='seq_id',
+                ligand_id_column='chembl_id',
+                label_column='label',
+                regression_column='pchembl_value',
             )
             
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=batch_size, shuffle=True,
-                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
             )
             val_loader = torch.utils.data.DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
             )
             
             # Loss + optimizer
@@ -939,22 +953,38 @@ def run_level6_optimized(
             for epoch in range(max_epochs):
                 model.train()
                 for batch in train_loader:
-                    protein = batch['protein'].to(device)
-                    ligand = batch['ligand'].to(device)
-                    labels = batch['labels'].to(device).float().unsqueeze(1)
+                    protein = batch['protein_matrix'].to(device)
+                    ligand = batch['ligand_matrix'].to(device)
+                    batch_labels = batch['labels'].to(device).float()
                     protein_mask = batch['protein_mask'].to(device)
                     ligand_mask = batch['ligand_mask'].to(device)
                     
                     optimizer.zero_grad()
                     logits = model(protein, ligand, protein_mask, ligand_mask)
-                    loss = criterion(logits, labels)
+                    loss = criterion(logits, batch_labels)
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), fixed_params['grad_clip'])
                     optimizer.step()
                 
                 # Validation
-                val_metrics = evaluate(model, val_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
-                val_mcc = val_metrics['mcc']
+                model.eval()
+                all_preds = []
+                all_labels = []
+                with torch.no_grad():
+                    for batch in val_loader:
+                        protein = batch['protein_matrix'].to(device)
+                        ligand = batch['ligand_matrix'].to(device)
+                        batch_labels = batch['labels'].to(device)
+                        protein_mask = batch['protein_mask'].to(device)
+                        ligand_mask = batch['ligand_mask'].to(device)
+                        
+                        logits = model(protein, ligand, protein_mask, ligand_mask)
+                        probs = torch.sigmoid(logits)
+                        all_preds.extend(probs.cpu().numpy().flatten())
+                        all_labels.extend(batch_labels.cpu().numpy().flatten())
+                
+                preds_binary = [1 if p >= 0.5 else 0 for p in all_preds]
+                val_mcc = matthews_corrcoef(all_labels, preds_binary)
                 
                 trial.report(val_mcc, epoch)
                 if trial.should_prune():
@@ -1046,33 +1076,50 @@ def run_level6_optimized(
             
             # Create data loaders
             batch_size = fixed_params['batch_size']
-            train_dataset = AttentionMatrixDataset(
+            
+            # Ensure label column exists
+            if 'label' not in test_df.columns:
+                test_df['label'] = (test_df['pchembl_value'] >= 6.0).astype(int)
+            
+            train_dataset = MatrixEmbeddingDataset(
                 train_df,
-                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                protein_id_column='seq_id',
+                ligand_id_column='chembl_id',
+                label_column='label',
+                regression_column='pchembl_value',
             )
-            val_dataset = AttentionMatrixDataset(
+            val_dataset = MatrixEmbeddingDataset(
                 val_df,
-                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                protein_id_column='seq_id',
+                ligand_id_column='chembl_id',
+                label_column='label',
+                regression_column='pchembl_value',
             )
-            test_dataset = AttentionMatrixDataset(
+            test_dataset = MatrixEmbeddingDataset(
                 test_df,
-                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                protein_id_column='seq_id',
+                ligand_id_column='chembl_id',
+                label_column='label',
+                regression_column='pchembl_value',
             )
             
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=batch_size, shuffle=True,
-                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
             )
             val_loader = torch.utils.data.DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
             )
             test_loader = torch.utils.data.DataLoader(
                 test_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
             )
             
             # Loss + optimizer
@@ -1100,15 +1147,15 @@ def run_level6_optimized(
             for epoch in range(fixed_params['max_epochs']):
                 model.train()
                 for batch in train_loader:
-                    protein = batch['protein'].to(device)
-                    ligand = batch['ligand'].to(device)
-                    labels = batch['labels'].to(device).float().unsqueeze(1)
+                    protein = batch['protein_matrix'].to(device)
+                    ligand = batch['ligand_matrix'].to(device)
+                    batch_labels = batch['labels'].to(device).float()
                     protein_mask = batch['protein_mask'].to(device)
                     ligand_mask = batch['ligand_mask'].to(device)
                     
                     optimizer.zero_grad()
                     logits = model(protein, ligand, protein_mask, ligand_mask)
-                    loss = criterion(logits, labels)
+                    loss = criterion(logits, batch_labels)
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), fixed_params['grad_clip'])
                     optimizer.step()
@@ -1116,8 +1163,24 @@ def run_level6_optimized(
                 scheduler.step()
                 
                 # Validation
-                val_metrics = evaluate(model, val_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
-                val_mcc = val_metrics['mcc']
+                model.eval()
+                all_preds = []
+                all_labels = []
+                with torch.no_grad():
+                    for batch in val_loader:
+                        protein = batch['protein_matrix'].to(device)
+                        ligand = batch['ligand_matrix'].to(device)
+                        v_labels = batch['labels'].to(device)
+                        protein_mask = batch['protein_mask'].to(device)
+                        ligand_mask = batch['ligand_mask'].to(device)
+                        
+                        logits = model(protein, ligand, protein_mask, ligand_mask)
+                        probs = torch.sigmoid(logits)
+                        all_preds.extend(probs.cpu().numpy().flatten())
+                        all_labels.extend(v_labels.cpu().numpy().flatten())
+                
+                preds_binary = [1 if p >= 0.5 else 0 for p in all_preds]
+                val_mcc = matthews_corrcoef(all_labels, preds_binary)
                 
                 if val_mcc > best_val_mcc:
                     best_val_mcc = val_mcc
@@ -1131,7 +1194,29 @@ def run_level6_optimized(
             
             # Load best model and evaluate on test
             model.load_state_dict(best_model_state)
-            test_metrics = evaluate(model, test_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
+            model.eval()
+            test_preds = []
+            test_labels = []
+            with torch.no_grad():
+                for batch in test_loader:
+                    protein = batch['protein_matrix'].to(device)
+                    ligand = batch['ligand_matrix'].to(device)
+                    t_labels = batch['labels'].to(device)
+                    protein_mask = batch['protein_mask'].to(device)
+                    ligand_mask = batch['ligand_mask'].to(device)
+                    
+                    logits = model(protein, ligand, protein_mask, ligand_mask)
+                    probs = torch.sigmoid(logits)
+                    test_preds.extend(probs.cpu().numpy().flatten())
+                    test_labels.extend(t_labels.cpu().numpy().flatten())
+            
+            test_preds_binary = [1 if p >= 0.5 else 0 for p in test_preds]
+            test_metrics = {
+                'mcc': matthews_corrcoef(test_labels, test_preds_binary),
+                'accuracy': accuracy_score(test_labels, test_preds_binary),
+                'f1': f1_score(test_labels, test_preds_binary),
+                'auc': roc_auc_score(test_labels, test_preds) if len(set(test_labels)) > 1 else 0.5,
+            }
             
             tqdm.write(f"    Val MCC: {best_val_mcc:.4f} | Test MCC: {test_metrics['mcc']:.4f}")
             
@@ -1209,29 +1294,27 @@ def run_level6_optimized(
         
         with torch.no_grad():
             for batch in test_loader:
-                protein = batch['protein'].to(device)
-                ligand = batch['ligand'].to(device)
-                labels = batch['labels'].cpu().numpy()
+                protein = batch['protein_matrix'].to(device)
+                ligand = batch['ligand_matrix'].to(device)
+                batch_labels = batch['labels'].cpu().numpy()
                 protein_mask = batch['protein_mask'].to(device)
                 ligand_mask = batch['ligand_mask'].to(device)
                 
                 # Average predictions from all models
                 batch_preds = []
-                for model in ensemble_models:
-                    logits = model(protein, ligand, protein_mask, ligand_mask)
+                for ens_model in ensemble_models:
+                    logits = ens_model(protein, ligand, protein_mask, ligand_mask)
                     probs = torch.sigmoid(logits).cpu().numpy()
                     batch_preds.append(probs)
                 
                 ensemble_probs = np.mean(batch_preds, axis=0)
                 all_preds.append(ensemble_probs)
-                all_labels.append(labels)
+                all_labels.append(batch_labels)
         
         all_preds = np.concatenate(all_preds, axis=0).flatten()
         all_labels = np.concatenate(all_labels, axis=0)
         
         # Compute ensemble metrics
-        from sklearn.metrics import matthews_corrcoef, accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
-        
         ensemble_preds_binary = (all_preds >= 0.5).astype(int)
         ensemble_mcc = matthews_corrcoef(all_labels, ensemble_preds_binary)
         ensemble_acc = accuracy_score(all_labels, ensemble_preds_binary)
