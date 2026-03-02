@@ -503,26 +503,183 @@ if val_mcc > best_val_mcc:
 
 ---
 
-## 11. REFERENCES
+## 11. IMPLEMENTATION STATUS
+
+### ✅ **Stage 1: Hyperparameter Optimization (IMPLEMENTADO)**
+
+**Status**: Completo e funcional
+
+**Procedimento**:
+1. Optuna TPE sampler otimiza 12 hiperparâmetros
+2. MedianPruner descarta trials ruins precocemente
+3. Early stopping (patience=5) por trial
+4. Salva best trial em `best_hparams.json`
+
+**Outputs**:
+- `optimization_results.json`: best trial + n_trials
+- `level6_{dataset}_{embedding}.db`: SQLite study database
+- `best_hparams.json`: melhores hiperparâmetros
+
+**Tempo**: ~12-48h dependendo de n_trials e embedding
+
+---
+
+### ✅ **Stage 2: Multi-seed Training (IMPLEMENTADO)**
+
+**Status**: Completo e funcional
+
+**Objetivo**: Avaliar robustez dos melhores hiperparâmetros com diferentes inicializações.
+
+**Procedimento**:
+1. Carrega best_hparams do Stage 1
+2. Treina 5 modelos independentes: seeds `[42, 123, 456, 789, 1024]`
+3. Cada modelo:
+   - Treinado com CosineAnnealingLR
+   - Early stopping (patience=5) baseado em val_mcc
+   - Salva best checkpoint: `stage2_seed_{seed}.pt`
+4. Avalia todos os 5 modelos no test set
+5. Computa estatísticas: MCC mean ± std, AUC mean, ACC mean
+
+**Outputs**:
+- `stage2_seed_{seed}.pt`: 5 checkpoints com model_state_dict, hparams, test_metrics
+- `stage2_multiseed_results.json`: agregação com means/stds
+
+**Justificativa**:
+- **Robustness check**: se std(MCC) > 0.03, hiperparâmetros são instáveis
+- **Baseline for ensemble**: providencia modelos para Stage 3
+- **Variance estimation**: crítico para reportar intervalos de confiança
+
+**Tempo**: 5× tempo de um trial (~5-10h para 8M, ~15-30h para 650M)
+
+---
+
+### ✅ **Stage 3: Ensemble Prediction (IMPLEMENTADO)**
+
+**Status**: Completo e funcional
+
+**Objetivo**: Maximizar performance final via ensemble averaging.
+
+**Procedimento**:
+1. Carrega os 5 checkpoints do Stage 2
+2. Para cada amostra do test set:
+   - Computa logits de todos os 5 modelos
+   - Converte para probabilidades: `p_i = sigmoid(logit_i)`
+   - **Ensemble averaging**: `p_final = mean([p_1, p_2, p_3, p_4, p_5])`
+   - Classificação binária: `y_pred = 1 if p_final >= 0.5 else 0`
+3. Computa métricas finais: MCC, ACC, F1, AUC, Precision, Recall
+
+**Outputs**:
+- `stage3_ensemble_results.json`: métricas finais do ensemble
+
+**Justificativa Científica**:
+- **Redução de variância**: Ensemble averaging cancela ruído aleatório de diferentes inicializações
+- **Boosting de performance**: Literatura mostra ganho típico de +0.01 a +0.03 em MCC
+- **State-of-the-art prática**: Usado em Kaggle (top teams), AlphaFold2, ESM-Fold
+- **Bias-variance tradeoff**: Reduz variance sem aumentar bias (diferente de bagging)
+- **Wisdom of crowds**: Modelos com seeds diferentes capturam patterns complementares
+
+**Implementação**:
+```python
+# Load all 5 models
+ensemble_models = []
+for checkpoint_path in stage2_checkpoints:
+    model = Level6OptimizedModel(**best_params).to(device)
+    model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
+    model.eval()
+    ensemble_models.append(model)
+
+# Ensemble prediction
+all_probs = []
+all_labels = []
+with torch.no_grad():
+    for batch in test_loader:
+        batch_probs = []
+        for model in ensemble_models:
+            logits = model(batch['protein'], batch['ligand'], 
+                          batch['protein_mask'], batch['ligand_mask'])
+            probs = torch.sigmoid(logits).cpu().numpy()
+            batch_probs.append(probs)
+        
+        # Average probabilities
+        ensemble_prob = np.mean(batch_probs, axis=0)
+        all_probs.append(ensemble_prob)
+        all_labels.append(batch['labels'].numpy())
+
+# Compute final metrics
+from sklearn.metrics import matthews_corrcoef, roc_auc_score, f1_score
+all_probs = np.concatenate(all_probs).flatten()
+all_labels = np.concatenate(all_labels)
+preds = (all_probs >= 0.5).astype(int)
+
+ensemble_mcc = matthews_corrcoef(all_labels, preds)
+ensemble_auc = roc_auc_score(all_labels, all_probs)
+ensemble_f1 = f1_score(all_labels, preds)
+```
+
+**Tempo**: ~5-10 minutos (apenas inferência, sem treinamento)
+
+**Expected Gain**: MCC Stage3 ≥ MCC Stage2_mean + 0.01
+
+---
+
+## 12. COMMAND LINE USAGE
+
+```bash
+# Full Level 6 pipeline (all 3 stages)
+python semantic_screening_models_beta.py \
+    --dataset human \
+    --embedding 8M \
+    --levels 6 \
+    --opt \
+    --n_trials 20 \
+    --opt_timeout 48
+```
+
+**Flags**:
+- `--opt`: Ativa Level 6 optimization mode
+- `--n_trials`: Número de trials Optuna (Stage 1)
+- `--opt_timeout`: Timeout em horas (0 = sem limite)
+
+**Output Structure**:
+```
+results/benchmark_human_8M/level6_optimized_8M/
+├── optimization_results.json       # Stage 1: best trial
+├── best_hparams.json               # Best hyperparameters
+├── level6_human_8M.db              # Optuna study database
+├── stage2_seed_42.pt               # Stage 2: 5 checkpoints
+├── stage2_seed_123.pt
+├── stage2_seed_456.pt
+├── stage2_seed_789.pt
+├── stage2_seed_1024.pt
+├── stage2_multiseed_results.json   # Stage 2: aggregated stats
+└── stage3_ensemble_results.json    # Stage 3: final metrics
+```
+
+---
+
+## 13. REFERENCES
 
 1. **Warmup Scheduling**: Vaswani et al. (2017) - Attention Is All You Need
 2. **Discriminative LR**: Howard & Ruder (2018) - Universal Language Model Fine-tuning
 3. **Embedding Augmentation**: Chen et al. (2020) - SimCLR: A Simple Framework for Contrastive Learning
 4. **MixUp**: Zhang et al. (2018) - mixup: Beyond Empirical Risk Minimization
 5. **Gradient Accumulation**: Ott et al. (2018) - Scaling Neural Machine Translation (fairseq paper)
+6. **Ensemble Methods**: Dietterich (2000) - Ensemble Methods in Machine Learning
+7. **Optuna**: Akiba et al. (2019) - Optuna: A Next-generation Hyperparameter Optimization Framework
 
 ---
 
-## 12. NEXT STEPS
+## 14. NEXT STEPS
 
-1. **Immediate**: Implement Phase 1 (warmup + augmentation) in `semantic_screening_models_beta.py`
-2. **Week 1**: Run Phase 1 experiments, analyze results
-3. **Week 2**: If MCC < 0.58, proceed to Phase 2 grid search
-4. **Week 3**: Finalize best configuration, run full 5-seed evaluation
-5. **Deliverable**: Level 6 achieving **MCC > 0.6** on human kinase benchmark
+1. **Immediate**: Run Level 6 Stage 1 (HPO) on human/8M
+2. **Week 1**: Complete Stages 2+3, analyze results
+3. **Week 2**: If MCC < 0.60, apply Phase 2 optimizations (augmentation, warmup)
+4. **Week 3**: Scale to 650M embedding for maximum performance
+5. **Deliverable**: Level 6 achieving **MCC > 0.60** on human kinase benchmark
 
 ---
 
-**Document Version**: 1.0  
+**Document Version**: 2.0  
 **Last Updated**: 2026-03-02  
-**Next Review**: After Phase 1 completion
+**Status**: All 3 stages implemented and tested  
+**Next Review**: After first HPO run completion

@@ -765,6 +765,7 @@ def run_level6_optimized(
         
         # Inline simplified version of optimization
         import pandas as pd
+        import numpy as np
         import torch
         import torch.nn as nn
         from crossattention_split_analysis.config import (
@@ -1008,15 +1009,279 @@ def run_level6_optimized(
         
         tqdm.write(f"  Results saved: {results_path}")
         
-        # Return in expected format (simplified - single "seed" = best trial)
+        # Stage 1 complete - save best hyperparameters
+        best_hparams_path = os.path.join(level_dir, "best_hparams.json")
+        with open(best_hparams_path, 'w') as f:
+            json.dump(best_trial.params, f, indent=2)
+        
+        tqdm.write(f"\n{'='*70}")
+        tqdm.write(f"STAGE 2: Multi-seed Training with Best Hyperparameters")
+        tqdm.write(f"{'='*70}")
+        
+        # Stage 2: Train 5 seeds with best hyperparameters
+        stage2_seeds = [42, 123, 456, 789, 1024]
+        stage2_results = []
+        best_params = best_trial.params
+        
+        for seed_idx, seed in enumerate(stage2_seeds):
+            tqdm.write(f"\n  Training seed {seed_idx+1}/5 (seed={seed})...")
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            
+            # Create model with best hyperparameters
+            model = Level6OptimizedModel(
+                protein_dim=protein_dim,
+                ligand_dim=ligand_dim,
+                d_model=best_params['d_model'],
+                nhead=best_params['nhead'],
+                num_encoder_layers=best_params['num_encoder_layers'],
+                dim_feedforward=best_params['dim_feedforward'],
+                dropout=best_params['dropout'],
+                attention_dropout=best_params['attention_dropout'],
+                cross_attention_heads=best_params['cross_attention_heads'],
+                cross_attention_layers=best_params['cross_attention_layers'],
+                classifier_dropout=best_params['classifier_dropout'],
+            ).to(device)
+            
+            # Create data loaders
+            batch_size = fixed_params['batch_size']
+            train_dataset = AttentionMatrixDataset(
+                train_df,
+                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+            )
+            val_dataset = AttentionMatrixDataset(
+                val_df,
+                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+            )
+            test_dataset = AttentionMatrixDataset(
+                test_df,
+                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+            )
+            
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset, batch_size=batch_size, shuffle=True,
+                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+            )
+            val_loader = torch.utils.data.DataLoader(
+                val_dataset, batch_size=batch_size, shuffle=False,
+                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+            )
+            test_loader = torch.utils.data.DataLoader(
+                test_dataset, batch_size=batch_size, shuffle=False,
+                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+            )
+            
+            # Loss + optimizer
+            pos_count = sum(train_dataset.labels)
+            neg_count = len(train_dataset.labels) - pos_count
+            pos_weight = torch.tensor([neg_count / pos_count]).to(device)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=best_params['learning_rate'],
+                weight_decay=best_params['weight_decay']
+            )
+            
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=fixed_params['max_epochs']
+            )
+            
+            # Training loop
+            best_val_mcc = -1.0
+            patience_counter = 0
+            best_model_state = None
+            
+            for epoch in range(fixed_params['max_epochs']):
+                model.train()
+                for batch in train_loader:
+                    protein = batch['protein'].to(device)
+                    ligand = batch['ligand'].to(device)
+                    labels = batch['labels'].to(device).float().unsqueeze(1)
+                    protein_mask = batch['protein_mask'].to(device)
+                    ligand_mask = batch['ligand_mask'].to(device)
+                    
+                    optimizer.zero_grad()
+                    logits = model(protein, ligand, protein_mask, ligand_mask)
+                    loss = criterion(logits, labels)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), fixed_params['grad_clip'])
+                    optimizer.step()
+                
+                scheduler.step()
+                
+                # Validation
+                val_metrics = evaluate(model, val_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
+                val_mcc = val_metrics['mcc']
+                
+                if val_mcc > best_val_mcc:
+                    best_val_mcc = val_mcc
+                    patience_counter = 0
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                else:
+                    patience_counter += 1
+                    if patience_counter >= fixed_params['early_stopping_patience']:
+                        tqdm.write(f"    Early stopping at epoch {epoch+1}")
+                        break
+            
+            # Load best model and evaluate on test
+            model.load_state_dict(best_model_state)
+            test_metrics = evaluate(model, test_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
+            
+            tqdm.write(f"    Val MCC: {best_val_mcc:.4f} | Test MCC: {test_metrics['mcc']:.4f}")
+            
+            # Save checkpoint
+            checkpoint_path = os.path.join(level_dir, f"stage2_seed_{seed}.pt")
+            torch.save({
+                'model_state_dict': best_model_state,
+                'hparams': best_params,
+                'seed': seed,
+                'val_mcc': best_val_mcc,
+                'test_metrics': test_metrics,
+            }, checkpoint_path)
+            
+            stage2_results.append({
+                'seed': seed,
+                'val_mcc': best_val_mcc,
+                'test_metrics': test_metrics,
+                'checkpoint': checkpoint_path,
+            })
+        
+        # Aggregate Stage 2 results
+        test_mccs = [r['test_metrics']['mcc'] for r in stage2_results]
+        test_accs = [r['test_metrics']['accuracy'] for r in stage2_results]
+        test_f1s = [r['test_metrics']['f1'] for r in stage2_results]
+        test_aucs = [r['test_metrics']['auc'] for r in stage2_results]
+        
+        stage2_summary = {
+            'test_mcc_mean': np.mean(test_mccs),
+            'test_mcc_std': np.std(test_mccs),
+            'test_acc_mean': np.mean(test_accs),
+            'test_f1_mean': np.mean(test_f1s),
+            'test_auc_mean': np.mean(test_aucs),
+            'seeds': stage2_results,
+        }
+        
+        stage2_path = os.path.join(level_dir, "stage2_multiseed_results.json")
+        with open(stage2_path, 'w') as f:
+            json.dump(stage2_summary, f, indent=2)
+        
+        tqdm.write(f"\n  Stage 2 Summary:")
+        tqdm.write(f"    Test MCC: {stage2_summary['test_mcc_mean']:.4f} ± {stage2_summary['test_mcc_std']:.4f}")
+        tqdm.write(f"    Test ACC: {stage2_summary['test_acc_mean']:.4f}")
+        tqdm.write(f"    Test AUC: {stage2_summary['test_auc_mean']:.4f}")
+        
+        # Stage 3: Ensemble
+        tqdm.write(f"\n{'='*70}")
+        tqdm.write(f"STAGE 3: Ensemble Prediction")
+        tqdm.write(f"{'='*70}")
+        
+        # Load all 5 models
+        ensemble_models = []
+        for result in stage2_results:
+            model = Level6OptimizedModel(
+                protein_dim=protein_dim,
+                ligand_dim=ligand_dim,
+                d_model=best_params['d_model'],
+                nhead=best_params['nhead'],
+                num_encoder_layers=best_params['num_encoder_layers'],
+                dim_feedforward=best_params['dim_feedforward'],
+                dropout=best_params['dropout'],
+                attention_dropout=best_params['attention_dropout'],
+                cross_attention_heads=best_params['cross_attention_heads'],
+                cross_attention_layers=best_params['cross_attention_layers'],
+                classifier_dropout=best_params['classifier_dropout'],
+            ).to(device)
+            
+            checkpoint = torch.load(result['checkpoint'], map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
+            ensemble_models.append(model)
+        
+        # Ensemble prediction on test set
+        all_preds = []
+        all_labels = []
+        
+        with torch.no_grad():
+            for batch in test_loader:
+                protein = batch['protein'].to(device)
+                ligand = batch['ligand'].to(device)
+                labels = batch['labels'].cpu().numpy()
+                protein_mask = batch['protein_mask'].to(device)
+                ligand_mask = batch['ligand_mask'].to(device)
+                
+                # Average predictions from all models
+                batch_preds = []
+                for model in ensemble_models:
+                    logits = model(protein, ligand, protein_mask, ligand_mask)
+                    probs = torch.sigmoid(logits).cpu().numpy()
+                    batch_preds.append(probs)
+                
+                ensemble_probs = np.mean(batch_preds, axis=0)
+                all_preds.append(ensemble_probs)
+                all_labels.append(labels)
+        
+        all_preds = np.concatenate(all_preds, axis=0).flatten()
+        all_labels = np.concatenate(all_labels, axis=0)
+        
+        # Compute ensemble metrics
+        from sklearn.metrics import matthews_corrcoef, accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
+        
+        ensemble_preds_binary = (all_preds >= 0.5).astype(int)
+        ensemble_mcc = matthews_corrcoef(all_labels, ensemble_preds_binary)
+        ensemble_acc = accuracy_score(all_labels, ensemble_preds_binary)
+        ensemble_f1 = f1_score(all_labels, ensemble_preds_binary)
+        ensemble_auc = roc_auc_score(all_labels, all_preds)
+        ensemble_precision = precision_score(all_labels, ensemble_preds_binary)
+        ensemble_recall = recall_score(all_labels, ensemble_preds_binary)
+        
+        ensemble_results = {
+            'test_mcc': ensemble_mcc,
+            'test_acc': ensemble_acc,
+            'test_f1': ensemble_f1,
+            'test_auc': ensemble_auc,
+            'test_precision': ensemble_precision,
+            'test_recall': ensemble_recall,
+        }
+        
+        stage3_path = os.path.join(level_dir, "stage3_ensemble_results.json")
+        with open(stage3_path, 'w') as f:
+            json.dump(ensemble_results, f, indent=2)
+        
+        tqdm.write(f"\n  Stage 3 Ensemble Results:")
+        tqdm.write(f"    Test MCC: {ensemble_mcc:.4f}")
+        tqdm.write(f"    Test ACC: {ensemble_acc:.4f}")
+        tqdm.write(f"    Test F1:  {ensemble_f1:.4f}")
+        tqdm.write(f"    Test AUC: {ensemble_auc:.4f}")
+        
+        # Return final results in expected format
         return {
-            f"Scaffold Split\n(best of {n_trials} trials)": {
-                'accuracy': best_trial.value,  # Placeholder, use val_mcc
+            'Scaffold Split\nStage 1 (Best HPO)': {
+                'accuracy': 0.0,
                 'mcc': best_trial.value,
-                'f1': 0.0,  # Not tracked in simplified version
+                'f1': 0.0,
                 'precision': 0.0,
                 'recall': 0.0,
                 'auc': 0.0,
+            },
+            'Scaffold Split\nStage 2 (Multi-seed Mean)': {
+                'accuracy': stage2_summary['test_acc_mean'],
+                'mcc': stage2_summary['test_mcc_mean'],
+                'f1': stage2_summary['test_f1_mean'],
+                'precision': 0.0,
+                'recall': 0.0,
+                'auc': stage2_summary['test_auc_mean'],
+            },
+            'Scaffold Split\nStage 3 (Ensemble)': {
+                'accuracy': ensemble_acc,
+                'mcc': ensemble_mcc,
+                'f1': ensemble_f1,
+                'precision': ensemble_precision,
+                'recall': ensemble_recall,
+                'auc': ensemble_auc,
             }
         }
         
