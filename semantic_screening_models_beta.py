@@ -767,10 +767,31 @@ def run_level6_optimized(
         import pandas as pd
         import torch
         import torch.nn as nn
-        from crossattention_split_analysis.config import get_embedding_dims, get_embedding_base_path
+        from crossattention_split_analysis.config import (
+            SUPPORTED_EMBEDDINGS,
+            PROTEIN_DIMS,
+            EMBEDDING_BASE_PATH,
+            LIGAND_DIM
+        )
         from crossattention_split_analysis.data.datasets import AttentionMatrixDataset, collate_attention_batch
         from crossattention_split_analysis.training.evaluator import evaluate
         from src.models.level6_optimized import Level6OptimizedModel, load_hparam_config
+        
+        # Helper functions
+        def get_embedding_dims(embedding_short: str):
+            """Get protein and ligand dimensions for an embedding."""
+            model_name = SUPPORTED_EMBEDDINGS.get(embedding_short)
+            if not model_name:
+                raise ValueError(f"Unknown embedding shorthand: {embedding_short}. Expected one of: {list(SUPPORTED_EMBEDDINGS.keys())}")
+            protein_dim = PROTEIN_DIMS[model_name]
+            return protein_dim, LIGAND_DIM
+        
+        def get_embedding_base_path(dataset_type: str, embedding_short: str):
+            """Get base path for embeddings."""
+            model_name = SUPPORTED_EMBEDDINGS.get(embedding_short)
+            if not model_name:
+                raise ValueError(f"Unknown embedding shorthand: {embedding_short}")
+            return EMBEDDING_BASE_PATH.format(dataset_type=dataset_type) + f"/{model_name}/build"
         
         os.makedirs(level_dir, exist_ok=True)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -790,8 +811,8 @@ def run_level6_optimized(
         search_space = config['search_space']
         
         # Load data
-        protein_dim, ligand_dim = get_embedding_dims(embedding_name)
-        embedding_base_path = get_embedding_base_path(embedding_name, dataset)
+        protein_dim, ligand_dim = get_embedding_dims(embedding_short)
+        embedding_base_path = get_embedding_base_path(dataset, embedding_short)
         
         train_path = os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_train.tsv.gz")
         val_path = os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_val.tsv.gz")
@@ -879,15 +900,13 @@ def run_level6_optimized(
             
             train_dataset = AttentionMatrixDataset(
                 train_df,
-                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
-                affinity_threshold=6.0,
             )
             val_dataset = AttentionMatrixDataset(
                 val_df,
-                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                attention_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
                 ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
-                affinity_threshold=6.0,
             )
             
             train_loader = torch.utils.data.DataLoader(

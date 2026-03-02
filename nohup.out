@@ -1,0 +1,94 @@
+======================================================================
+SEMANTIC SCREENING — UNIFIED BENCHMARK
+======================================================================
+  Dataset:          human
+  Embedding:        8M (esm2_t6_8M_UR50D)
+  Levels:           [5]
+  Seeds:            [42, 123, 456, 789, 1024]
+  Output dir:       ./results/benchmark_human_8M
+  Scaffold splits:  scaffolds_splits/output
+  Force:            False
+======================================================================
+Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, ]Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]                                                                                   Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]                                                                                   Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]                                                                                   Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]                                                                                   Benchmark human/8M:   0%|[32m          [0m| 0/3 steps [00:00<?, , Step 0: Scaffold Splits]                                                                                   Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 0: Scaffold Splits]Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                       Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:00<00:00, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:01<00:03, , Step 5: Level 5-Lite]                                                                                    Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:01<00:03, , Step 5: Level 5-Lite]
+======================================================================
+[0/3] Step 0: Scaffold Splits
+======================================================================
+  [OK] Scaffold splits found:
+       human train: scaffolds_splits/output/scenarios/Sc/human_train.tsv.gz
+       human val: scaffolds_splits/output/scenarios/Sc/human_val.tsv.gz
+       human test: scaffolds_splits/output/human_test.tsv.gz
+  -> Step 0: Scaffold Splits done in 0m00s
+
+======================================================================
+[1/3] Step 5: Level 5-Lite
+======================================================================
+  Seeds to run: [42, 123, 456, 789, 1024] (5 total)
+  Max epochs per seed: 50, patience: 5
+  Output: ./results/benchmark_human_8M/level5_lite_8M
+  Architecture: Transformer + Cross-Attention (Level 5-Lite)
+
+======================================================================
+LEVEL5-LITE ANALYSIS: esm2_t6_8M_UR50D + human
+MODEL VARIANT: level5_lite
+PROTEIN INPUT: PER-TOKEN EMBEDDINGS
+LIGAND INPUT: PER-TOKEN EMBEDDINGS (MoLFormer)
+SEEDS: [42, 123, 456, 789, 1024]
+SCENARIOS: ['scaffold']
+SCAFFOLD SPLIT DIR: scaffolds_splits/output
+EVALUATION MODE: INTERNAL TEST (precomputed train/val/test)
+DECISION THRESHOLD: OPTIMIZED ON VALIDATION (mcc)
+EARLY STOPPING: patience=5
+======================================================================
+
+  Protein input: Per-token Embeddings
+  Protein dir: ./results/protein_model_benchmark_human_v2/esm2_t6_8M_UR50D/build/protein_matrices
+  Ligand input: Per-token Embeddings (MoLFormer)
+  Ligand dir: ./results/protein_model_benchmark_human_v2/esm2_t6_8M_UR50D/build/molformer_matrix
+
+Loading precomputed scaffold splits from: scaffolds_splits/output
+Traceback (most recent call last):
+  File "/media/storage/leon/semantic-screening/semantic_screening_models_beta.py", line 1550, in <module>
+    main()
+  File "/media/storage/leon/semantic-screening/semantic_screening_models_beta.py", line 1473, in main
+    level5_results = run_level5_lite(
+                     ^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/semantic_screening_models_beta.py", line 683, in run_level5_lite
+    results = run_single_analysis(
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/crossattention_split_analysis/experiment.py", line 1089, in run_single_analysis
+    all_results, split_stats = run_crossattention_analysis(
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/crossattention_split_analysis/experiment.py", line 654, in run_crossattention_analysis
+    train_df, val_df, test_df, split_source_metadata = _load_precomputed_scaffold_splits(
+                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/crossattention_split_analysis/experiment.py", line 144, in _load_precomputed_scaffold_splits
+    train_df, val_df, test_df, paths = _load_one(dataset_type)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/crossattention_split_analysis/experiment.py", line 119, in _load_one
+    train_df, train_used = _read_split_tsv(train_path, f"{ds} train")
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/crossattention_split_analysis/experiment.py", line 91, in _read_split_tsv
+    return pd.read_csv(selected, sep="\t"), selected
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/env/lib/python3.12/site-packages/pandas/io/parsers/readers.py", line 873, in read_csv
+    return _read(filepath_or_buffer, kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/env/lib/python3.12/site-packages/pandas/io/parsers/readers.py", line 306, in _read
+    return parser.read(nrows)
+           ^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/env/lib/python3.12/site-packages/pandas/io/parsers/readers.py", line 1947, in read
+    ) = self._engine.read(  # type: ignore[attr-defined]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/storage/leon/semantic-screening/env/lib/python3.12/site-packages/pandas/io/parsers/c_parser_wrapper.py", line 215, in read
+    chunks = self._reader.read_low_memory(nrows)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pandas/_libs/parsers.pyx", line 832, in pandas._libs.parsers.TextReader.read_low_memory
+  File "pandas/_libs/parsers.pyx", line 897, in pandas._libs.parsers.TextReader._read_rows
+  File "pandas/_libs/parsers.pyx", line 868, in pandas._libs.parsers.TextReader._tokenize_rows
+  File "pandas/_libs/parsers.pyx", line 885, in pandas._libs.parsers.TextReader._check_tokenize_status
+  File "pandas/_libs/parsers.pyx", line 2076, in pandas._libs.parsers.raise_parser_error
+  File "/usr/lib/python3.12/gzip.py", line 360, in closed
+    @property
+
+KeyboardInterrupt
+Benchmark human/8M:  33%|[32m███▎      [0m| 1/3 steps [00:02<00:05, , Step 5: Level 5-Lite]
