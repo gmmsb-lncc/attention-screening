@@ -215,12 +215,14 @@ MODEL_VARIANT_TO_ENCODER = {
     'cnn_crossattn': 'cnn',
     'cross_attention_lite': 'linear',
     'diffusion': 'diffusion',
+    'level5_lite': 'level5_lite',
 }
 
 MODEL_VARIANT_TO_LABEL = {
     'cnn_crossattn': 'CNN+CrossAttn',
     'cross_attention_lite': 'CrossAttnLite',
     'diffusion': 'Diffusion',
+    'level5_lite': 'Level5-Lite',
 }
 
 
@@ -346,7 +348,19 @@ def run_scenario(
         f"ligand_dim={config.ligand_dim})..."
     )
 
-    if encoder_type == "diffusion":
+    if encoder_type == "level5_lite":
+        from .models.level5_lite import Level5LiteModel
+        model = Level5LiteModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_encoder_layers=getattr(config, 'num_encoder_layers', 2),
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=getattr(config, 'classifier_dropout', 0.3),
+        )
+    elif encoder_type == "diffusion":
         model = DiffusionAffinityModel(
             protein_dim=config.protein_dim,
             ligand_dim=config.ligand_dim,
