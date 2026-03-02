@@ -54,9 +54,11 @@ class BidirectionalCrossAttention(nn.Module):
             batch_first=True,
         )
         
-        # Layer norms (Pre-LN style)
-        self.norm_p_pre = nn.LayerNorm(hidden_dim)
-        self.norm_l_pre = nn.LayerNorm(hidden_dim)
+        # Layer norms (Pre-LN style for both Q and K/V)
+        self.norm_p_q = nn.LayerNorm(hidden_dim)  # Normalize protein as query
+        self.norm_l_k = nn.LayerNorm(hidden_dim)  # Normalize ligand as key/value
+        self.norm_l_q = nn.LayerNorm(hidden_dim)  # Normalize ligand as query
+        self.norm_p_k = nn.LayerNorm(hidden_dim)  # Normalize protein as key/value
         
         # Feed-forward after cross-attention
         self.ffn_p = nn.Sequential(
@@ -96,23 +98,25 @@ class BidirectionalCrossAttention(nn.Module):
             protein_out: [batch, protein_len, hidden_dim] - protein enriched with ligand info
             ligand_out: [batch, ligand_len, hidden_dim] - ligand enriched with protein info
         """
-        # Protein attends to ligand
-        p_norm = self.norm_p_pre(protein)
+        # Protein attends to ligand (Pre-LN: normalize both Q and K/V)
+        p_q = self.norm_p_q(protein)
+        l_kv = self.norm_l_k(ligand)
         p_cross, _ = self.protein_to_ligand(
-            query=p_norm,
-            key=ligand,
-            value=ligand,
+            query=p_q,
+            key=l_kv,
+            value=l_kv,
             key_padding_mask=ligand_mask,
         )
         protein = protein + p_cross  # Residual connection
         protein = protein + self.ffn_p(self.norm_p_ffn(protein))
         
-        # Ligand attends to protein
-        l_norm = self.norm_l_pre(ligand)
+        # Ligand attends to protein (Pre-LN: normalize both Q and K/V)
+        l_q = self.norm_l_q(ligand)
+        p_kv = self.norm_p_k(protein)
         l_cross, _ = self.ligand_to_protein(
-            query=l_norm,
-            key=protein,
-            value=protein,
+            query=l_q,
+            key=p_kv,
+            value=p_kv,
             key_padding_mask=protein_mask,
         )
         ligand = ligand + l_cross  # Residual connection
