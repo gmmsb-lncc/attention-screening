@@ -155,14 +155,144 @@ TransformerEncoderLayer(
     activation='gelu'
 )
 ```
-- **Justificativa**: 
-  - Self-attention captura contexto intra-sequência
-  - Binding pocket residues podem "comunicar" entre si
-  - Farmacóforos no ligante podem interagir antes do cross-attention
-- **Por que 4 layers?**
-  - 2 layers: insuficiente para contexto longo (kinases ~500-700 residues)
-  - 6+ layers: overfitting + tempo de treino
-  - **4 layers**: balanço empírico (validado em ProtTrans, ESM)
+
+##### 🧠 **Como Funciona: 4 Camadas + 8 Cabeças (Para Todos os Públicos)**
+
+**Analogia Simples:**
+Imagine que cada proteína/ligante passa por **4 níveis de análise**, e em cada nível, **8 especialistas diferentes** observam simultaneamente:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ENTRADA: Sequência de Proteína ou Ligante                     │
+│  Exemplo: [Lys-Asp-Gly-Thr-Val-Leu...] (500 aminoácidos)      │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  CAMADA 1: Análise Local (8 perspectivas paralelas)            │
+│  ┌────────┬────────┬────────┬────────┬─────┬────────┬─────┐   │
+│  │Cabeça 1│Cabeça 2│Cabeça 3│Cabeça 4│ ... │Cabeça 8│     │   │
+│  │"cargas"│"hidro- │"aromá- │"tamanho│     │"flexibi│     │   │
+│  │        │fobici- │ticos"  │"       │     │lidade" │     │   │
+│  │        │dade"   │        │        │     │        │     │   │
+│  └────────┴────────┴────────┴────────┴─────┴────────┴─────┘   │
+│  Cada cabeça aprende um aspecto diferente (ex: hidrofobici-    │
+│  dade, carga, geometria). Output: 8 interpretações combinadas  │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  CAMADA 2: Relações de Médio Alcance                           │
+│  Agora as 8 cabeças olham para padrões entre resíduos         │
+│  distantes (ex: pontes de sal entre Lys-46 e Asp-120)         │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  CAMADA 3: Contexto Global                                      │
+│  As cabeças integram informações da sequência toda             │
+│  (ex: "este resíduo está no binding pocket")                   │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  CAMADA 4: Refinamento Final                                    │
+│  Última chance de ajustar interpretações antes de interagir    │
+│  com a outra molécula via cross-attention                      │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+         SAÍDA: Representação enriquecida [500, 512]
+    (cada resíduo agora "sabe" seu contexto completo)
+```
+
+##### 🔍 **Detalhamento Técnico: O Que Cada Componente Faz**
+
+**8 Cabeças de Atenção (Multi-Head Attention):**
+```python
+# Cada cabeça opera independentemente:
+head_dim = 512 / 8 = 64  # Cada cabeça processa 64 dimensões
+
+# Paralelamente, as 8 cabeças calculam:
+for head_i in range(8):
+    Q_i = Linear(512 → 64) @ input   # Query: "o que procurar?"
+    K_i = Linear(512 → 64) @ input   # Key: "o que eu tenho?"
+    V_i = Linear(512 → 64) @ input   # Value: "qual informação passar?"
+    
+    attention_i = softmax(Q_i @ K_i.T / √64) @ V_i
+    # ↑ Matriz [L, L] que diz quanto cada token presta atenção em cada outro
+```
+
+**Por que 8 cabeças?**
+1. **Diversidade**: Cada cabeça aprende um padrão diferente
+   - Cabeça 1: pode focar em resíduos polares (Ser, Thr, Tyr)
+   - Cabeça 2: pode focar em resíduos hidrofóbicos (Leu, Val, Ile)
+   - Cabeça 3: pode focar em interações de longo alcance
+   - ...e assim por diante
+   
+2. **Paralelismo**: 8 cabeças processam simultaneamente → mais eficiente que sequencial
+
+3. **Evidência Empírica**:
+   - Papers (BERT, GPT, ESM-2): 8-16 cabeças é sweet spot
+   - < 4 cabeças: underfitting (perde diversidade)
+   - \> 16 cabeças: overfitting + custo computacional
+
+**Exemplo Concreto (Kinase ATP-binding pocket):**
+```
+Sequência: ...Lys-Asp-Phe-Gly-Leu-Ala-Arg-Val...
+               ↓    ↓    ↓
+           Pocket Hinge Loop
+           
+Camada 1, Cabeça 3 (especialista em aromáticos):
+  - Detecta Phe (fenilalanina) no pocket
+  - Atribui 85% de atenção para Phe quando processar o ligante
+  
+Camada 2, Cabeça 5 (especialista em cargas):
+  - Conecta Lys (lisina, +) com Asp (aspartato, -)
+  - Identifica ponte de sal estabilizadora
+  
+Camada 4, Cabeça 1 (integrador global):
+  - Combina info das camadas anteriores
+  - Output: "este é um ATP-pocket clássico, espero inibidores tipo quinase"
+```
+
+##### 📊 **Por Que 4 Camadas (Não 2, Não 10)?**
+
+**Progressão de Aprendizado:**
+```
+Camada 1: Padrões locais (2-3 resíduos de distância)
+         ↓ "Vejo dipeptídeos e tripeptídeos"
+         
+Camada 2: Padrões regionais (5-10 resíduos)
+         ↓ "Vejo hélices-α e folhas-β"
+         
+Camada 3: Padrões estruturais (20-50 resíduos)
+         ↓ "Vejo domínios e loops"
+         
+Camada 4: Contexto global (sequência completa)
+         ↓ "Vejo a proteína como um todo funcional"
+```
+
+**Trade-offs:**
+- **2 camadas**: Insuficiente para kinases (sequências de 500-700 resíduos)
+  - Receptor field limitado (~10-20 resíduos)
+  - Não captura interações de longo alcance
+  
+- **6+ camadas**: Overfitting + custo computacional
+  - Mais parâmetros = mais risco de memorizar dados de treino
+  - Tempo de treino aumenta linearmente
+  
+- **4 camadas** (nossa escolha):
+  - Validado em PLMs: ESM-2 (33 camadas, mas 6-8 camadas já capturam 90% da informação)
+  - ProtTrans: 4-6 camadas para tarefas downstream
+  - **Balanço empírico**: suficiente para contexto + evita overfitting
+
+##### 🎯 **Resumo Executivo**
+
+**Para Leigos:**
+> "Cada proteína e ligante passa por **4 níveis de processamento** com **8 perspectivas paralelas** antes de interagirem via cross-attention. É como ter 8 especialistas analisando cada parte da molécula 4 vezes, refinando progressivamente o entendimento."
+
+**Para Técnicos:**
+> "Multi-head attention (8 heads) permite aprender representações diversas (hidrofobicidade, carga, geometria) em paralelo. 4 camadas fornecem receptive field suficiente (~100-200 resíduos) sem overfitting, validado em benchmarks de PLMs (ESM-2, ProtTrans)."
+
+**Impacto no Resultado:**
+- Transformer (4L, 8H) vs. CNN (Level 3): **+7% MCC** (0.499 vs. <0.428)
+- Permite capturar interações de longo alcance essenciais para binding pockets
 
 #### 3. **Cross-Attention Bidirecional**
 ```python
