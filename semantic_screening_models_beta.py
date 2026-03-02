@@ -1032,17 +1032,6 @@ def run_level6_optimized(
 # ---------------------------------------------------------------------------
 
 def _extract_metric(results_dict: Dict, model_key: str, metric: str) -> Optional[float]:
-    if results is None:
-        results = _load_crossattention_results(level_dir, dataset, embedding_short)
-    
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Step 6: Aggregate metrics
-# ---------------------------------------------------------------------------
-
-def _extract_metric(results_dict: Dict, model_key: str, metric: str) -> Optional[float]:
     """Safely extract a metric value from a model results block."""
     if not results_dict or model_key not in results_dict:
         return None
