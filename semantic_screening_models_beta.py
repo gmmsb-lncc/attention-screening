@@ -301,18 +301,39 @@ def _extract_ligand_vectors(
 ) -> dict:
     """Mean-pool MoLFormer per-token matrices into ligand vectors.
 
-    Reads {chembl_id}_matrix.npy (shape [n_tokens, 768]) and writes
-    {chembl_id}_embedding.npy (shape [768]) via mean pooling.
+    Reads {chembl_id}_matrix.npy or {chembl_id}_molformer_matrix.npy 
+    (shape [n_tokens, 768]) and writes {chembl_id}_embedding.npy (shape [768]).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Look for files with both patterns
     matrix_files = sorted(matrix_dir.glob("*_matrix.npy"))
+    molformer_files = sorted(matrix_dir.glob("*_molformer_matrix.npy"))
+    
+    # Combine and deduplicate (prefer _matrix.npy over _molformer_matrix.npy)
+    all_files = {}
+    for mf in matrix_files:
+        chembl_id = mf.stem.replace("_matrix", "")
+        all_files[chembl_id] = mf
+    for mf in molformer_files:
+        chembl_id = mf.name.replace("_molformer_matrix.npy", "")
+        if chembl_id not in all_files:
+            all_files[chembl_id] = mf
+    
+    matrix_files = sorted(all_files.values(), key=lambda x: x.name)
+    
     if not matrix_files:
         print(f"  WARNING: no matrix files found in {matrix_dir}")
         return {"processed": 0, "skipped": 0, "errors": 0}
 
     processed = skipped = errors = 0
     for mf in matrix_files:
-        chembl_id = mf.stem.replace("_matrix", "")
+        # Extract chembl_id from filename (handle both patterns)
+        if mf.name.endswith("_molformer_matrix.npy"):
+            chembl_id = mf.name.replace("_molformer_matrix.npy", "")
+        else:
+            chembl_id = mf.stem.replace("_matrix", "")
+        
         out_path = output_dir / f"{chembl_id}_embedding.npy"
         if out_path.exists() and not force:
             skipped += 1

@@ -308,11 +308,23 @@ def prepare_embedding_features(
     else:
         lig_dirs = [Path(d) for d in ligand_vector_dir]
 
-    def _find_file(dirs, filename):
+    def _find_file(dirs, filenames):
+        """Find a file trying multiple possible filenames.
+        
+        Args:
+            dirs: List of directories to search
+            filenames: List of possible filenames to try
+            
+        Returns:
+            Path to the first existing file, or None
+        """
+        if isinstance(filenames, str):
+            filenames = [filenames]
         for d in dirs:
-            p = d / filename
-            if p.exists():
-                return p
+            for filename in filenames:
+                p = d / filename
+                if p.exists():
+                    return p
         return None
 
     seq_ids = df['seq_id'].astype(str).values
@@ -324,8 +336,18 @@ def prepare_embedding_features(
     valid_idx = []
 
     for i in range(len(df)):
-        prot_path = _find_file(prot_dirs, f"{seq_ids[i]}_embedding.npy")
-        lig_path = _find_file(lig_dirs, f"{chembl_ids[i]}_embedding.npy")
+        # Try multiple protein embedding filename patterns
+        prot_path = _find_file(prot_dirs, [
+            f"{seq_ids[i]}_embedding.npy",
+            f"{seq_ids[i]}.npy",
+        ])
+        
+        # Try multiple ligand embedding filename patterns (including molformer)
+        lig_path = _find_file(lig_dirs, [
+            f"{chembl_ids[i]}_embedding.npy",
+            f"{chembl_ids[i]}_molformer_embedding.npy",
+            f"{chembl_ids[i]}.npy",
+        ])
 
         if prot_path is None or lig_path is None:
             continue
