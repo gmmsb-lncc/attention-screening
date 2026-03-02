@@ -191,6 +191,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Number of Optuna trials for Level 6 (default: 20)")
     p.add_argument("--opt_timeout", type=float, default=48,
                     help="Optimization timeout in hours for Level 6 (default: 48h, 0=no limit)")
+    p.add_argument("--opt_reset", action="store_true",
+                    help="Reset (delete) existing Level 6 Optuna study before optimization")
 
     # Output
     p.add_argument("--output_dir", default=None,
@@ -730,6 +732,7 @@ def run_level6_optimized(
     opt_enabled: bool = False,
     n_trials: int = 20,
     opt_timeout: float = 48.0,
+    opt_reset: bool = False,
     force: bool = False,
 ) -> Optional[Dict]:
     """Run Level 6: Optimized Transformer with Hyperparameter Search (Optuna).
@@ -926,11 +929,13 @@ def run_level6_optimized(
             
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=batch_size, shuffle=True,
-                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=4, pin_memory=True,
+                persistent_workers=True, prefetch_factor=2
             )
             val_loader = torch.utils.data.DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=4, pin_memory=True,
+                persistent_workers=True, prefetch_factor=2
             )
             
             # Loss + optimizer
@@ -1005,6 +1010,11 @@ def run_level6_optimized(
         storage_path = os.path.join(level_dir, f"{study_name}.db")
         storage = f"sqlite:///{storage_path}"
         
+        # Reset study if requested
+        if opt_reset and os.path.exists(storage_path):
+            os.remove(storage_path)
+            tqdm.write(f"  Deleted existing study: {storage_path}")
+        
         sampler = optuna.samplers.TPESampler(seed=42)
         pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
         
@@ -1014,8 +1024,12 @@ def run_level6_optimized(
             sampler=sampler,
             pruner=pruner,
             direction='maximize',
-            load_if_exists=True,
+            load_if_exists=not opt_reset,  # Don't load if resetting
         )
+        
+        # Show study info
+        completed_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+        tqdm.write(f"  Study: {study_name} (completed trials: {completed_trials}/{n_trials})")
         
         timeout_seconds = opt_timeout * 3600 if opt_timeout > 0 else None
         study.optimize(objective, n_trials=n_trials, timeout=timeout_seconds, show_progress_bar=True)
@@ -1111,15 +1125,18 @@ def run_level6_optimized(
             
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=batch_size, shuffle=True,
-                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=4, pin_memory=True,
+                persistent_workers=True, prefetch_factor=2
             )
             val_loader = torch.utils.data.DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=4, pin_memory=True,
+                persistent_workers=True, prefetch_factor=2
             )
             test_loader = torch.utils.data.DataLoader(
                 test_dataset, batch_size=batch_size, shuffle=False,
-                collate_fn=collate_matrix_batch, num_workers=2, pin_memory=True
+                collate_fn=collate_matrix_batch, num_workers=4, pin_memory=True,
+                persistent_workers=True, prefetch_factor=2
             )
             
             # Loss + optimizer
@@ -2175,6 +2192,7 @@ def main():
             opt_enabled=args.opt,
             n_trials=args.n_trials,
             opt_timeout=args.opt_timeout,
+            opt_reset=getattr(args, 'opt_reset', False),
             force=force,
         )
         if level6_results:

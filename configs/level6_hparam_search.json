@@ -10,7 +10,7 @@
     "protein_dim": "auto",
     "ligand_dim": 768,
     "max_epochs": 50,
-    "batch_size": 32,
+    "batch_size": 64,
     "early_stopping_patience": 7,
     "grad_clip": 1.0,
     "label_smoothing": 0.1
