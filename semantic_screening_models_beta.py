@@ -57,6 +57,7 @@ LEVEL_LABELS = {
     "level2_emb_mlp": "Level 2 (Emb+MLP)",
     "level3_cnn": "Level 3 (CNN)",
     "level4_cnn_ca": "Level 4 (CNN+CA)",
+    "level5_lite": "Level 5 (Lite)",
 }
 
 METRICS_ORDER = ["accuracy", "mcc", "f1", "precision", "recall", "auc"]
@@ -69,6 +70,7 @@ LEVEL_COLORS = {
     "level2_emb_mlp": "#a6a3d9",
     "level3_cnn": "#d95f02",
     "level4_cnn_ca": "#e7298a",
+    "level5_lite": "#ff7f0e",
 }
 
 
@@ -97,6 +99,8 @@ class BenchmarkProgress:
             self.steps.append("Step 3: Level 3 (CNN)")
         if 4 in levels:
             self.steps.append("Step 4: Level 4 (CNN+CA)")
+        if 5 in levels:
+            self.steps.append("Step 5: Level 5-Lite")
         self.steps.append("Report + Visualizations")
 
         self.total = len(self.steps)
@@ -173,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Level selection
     p.add_argument("--levels", default="1,2,3",
-                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA "
+                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA, 5=Level5-Lite "
                          "(default: 1,2,3)")
 
     # Output
@@ -214,8 +218,8 @@ def parse_levels(levels_str: str) -> List[int]:
     try:
         levels = sorted(set(int(x.strip()) for x in levels_str.split(",")))
         for lv in levels:
-            if lv not in (1, 2, 3, 4):
-                raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4")
+            if lv not in (1, 2, 3, 4, 5):
+                raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4,5")
         return levels
     except ValueError as e:
         print(f"ERROR: Invalid --levels value: {e}")
@@ -643,7 +647,69 @@ def _load_crossattention_results(
 
 
 # ---------------------------------------------------------------------------
-# Step 4: Aggregate metrics
+# Step 5: Level 5-Lite — Transformer + Cross-Attention
+# ---------------------------------------------------------------------------
+
+def run_level5_lite(
+    dataset: str,
+    embedding_name: str,
+    embedding_short: str,
+    output_dir: str,
+    scaffold_split_dir: str,
+    seeds: List[int],
+    force: bool,
+    epochs: int,
+    batch_size: int,
+    patience: Optional[int],
+    learning_rate: float,
+) -> Optional[Dict]:
+    """Run Level 5-Lite: Transformer encoders + Bidirectional Cross-Attention.
+    
+    This level uses:
+    - Pre-calculated ESM-2 protein matrices (per-residue)
+    - Pre-calculated MoLFormer ligand matrices (per-token)
+    - Transformer encoders for both modalities
+    - Bidirectional cross-attention for interaction modeling
+    - Attention pooling for sequence-to-vector aggregation
+    
+    Returns results dict or None.
+    """
+    from crossattention_split_analysis.experiment import run_single_analysis
+    
+    level_dir = os.path.join(output_dir, f"level5_lite_{embedding_short}")
+    tqdm.write(f"  Output: {level_dir}")
+    tqdm.write(f"  Architecture: Transformer + Cross-Attention (Level 5-Lite)")
+    
+    results = run_single_analysis(
+        embedding_name=embedding_name,
+        dataset_type=dataset,
+        output_dir=level_dir,
+        seeds=seeds,
+        force=force,
+        scenarios=["scaffold"],
+        num_epochs=epochs,
+        patience=patience,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        hidden_dim=512,
+        num_cross_attn_layers=1,
+        num_heads=8,
+        dropout=0.1,
+        classification_only=True,
+        use_molformer_ligand=True,
+        scaffold_split_dir=scaffold_split_dir,
+        model_variant="level5_lite",
+    )
+    
+    # If cached, try to load from disk
+    if results is None:
+        results = _load_crossattention_results(level_dir, dataset, embedding_short)
+    
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Step 6: Aggregate metrics
 # ---------------------------------------------------------------------------
 
 def _extract_metric(results_dict: Dict, model_key: str, metric: str) -> Optional[float]:
@@ -787,7 +853,7 @@ def print_comparison_table(
     for model_key in [
         "level1_fp_knn", "level1_fp_mlp",
         "level2_emb_knn", "level2_emb_mlp",
-        "level3_cnn", "level4_cnn_ca",
+        "level3_cnn", "level4_cnn_ca", "level5_lite",
     ]:
         if model_key not in aggregated:
             continue
@@ -863,7 +929,7 @@ def save_benchmark_json(
 def _available_models(aggregated: Dict) -> List[str]:
     """Return model keys that have at least one non-None metric."""
     order = ["level1_fp_knn", "level1_fp_mlp", "level2_emb_knn", "level2_emb_mlp",
-             "level3_cnn", "level4_cnn_ca"]
+             "level3_cnn", "level4_cnn_ca", "level5_lite"]
     available = []
     for k in order:
         if k in aggregated:
@@ -1395,6 +1461,34 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
+    # Step 5: Level 5-Lite — Transformer + Cross-Attention
+    # -----------------------------------------------------------------------
+    level5_results = None
+    if 5 in levels:
+        step_name = "Step 5: Level 5-Lite"
+        progress.begin_step(step_name)
+        tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
+        tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
+        level5_results = run_level5_lite(
+            dataset=dataset,
+            embedding_name=embedding_name,
+            embedding_short=embedding_short,
+            output_dir=output_dir,
+            scaffold_split_dir=scaffold_split_dir,
+            seeds=seeds,
+            force=force,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            patience=patience,
+            learning_rate=args.learning_rate,
+        )
+        if level5_results:
+            tqdm.write("  Level 5-Lite completed successfully.")
+        else:
+            tqdm.write("  WARNING: Level 5-Lite returned no results.")
+        progress.end_step(step_name)
+
+    # -----------------------------------------------------------------------
     # Report: Comparative report + visualizations
     # -----------------------------------------------------------------------
     step_name = "Report + Visualizations"
@@ -1409,6 +1503,13 @@ def main():
             None, None, level4_results, level3_key="level4_cnn_ca",
         )
         aggregated.update(l4_agg)
+    
+    # Merge Level 5-Lite if present
+    if level5_results:
+        l5_agg = aggregate_benchmark_metrics(
+            None, None, level5_results, level3_key="level5_lite",
+        )
+        aggregated.update(l5_agg)
 
     if not aggregated:
         tqdm.write("  No results to compare. At least one level must produce results.")
