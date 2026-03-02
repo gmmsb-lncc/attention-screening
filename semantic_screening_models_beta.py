@@ -920,9 +920,10 @@ def run_level6_optimized(
             )
             
             # Loss + optimizer
-            pos_count = sum(train_dataset.labels)
-            neg_count = len(train_dataset.labels) - pos_count
-            pos_weight = torch.tensor([neg_count / pos_count]).to(device)
+            labels = train_dataset.data_df['label'].values
+            pos_count = labels.sum()
+            neg_count = len(labels) - pos_count
+            pos_weight = torch.tensor([neg_count / max(pos_count, 1)]).to(device)
             criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             
             optimizer = torch.optim.AdamW(
@@ -1075,9 +1076,10 @@ def run_level6_optimized(
             )
             
             # Loss + optimizer
-            pos_count = sum(train_dataset.labels)
-            neg_count = len(train_dataset.labels) - pos_count
-            pos_weight = torch.tensor([neg_count / pos_count]).to(device)
+            labels = train_dataset.data_df['label'].values
+            pos_count = labels.sum()
+            neg_count = len(labels) - pos_count
+            pos_weight = torch.tensor([neg_count / max(pos_count, 1)]).to(device)
             criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             
             optimizer = torch.optim.AdamW(
