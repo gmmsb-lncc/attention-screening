@@ -354,11 +354,11 @@ def run_scenario(
             protein_input_dim=config.protein_dim,
             ligand_input_dim=config.ligand_dim,
             hidden_dim=config.hidden_dim,
-            num_encoder_layers=getattr(config, 'num_encoder_layers', 2),
+            num_encoder_layers=config.num_encoder_layers,
             num_cross_attn_layers=config.num_cross_attn_layers,
             num_heads=config.num_heads,
             dropout=config.dropout,
-            classifier_dropout=getattr(config, 'classifier_dropout', 0.3),
+            classifier_dropout=config.classifier_dropout,
         )
     elif encoder_type == "diffusion":
         model = DiffusionAffinityModel(

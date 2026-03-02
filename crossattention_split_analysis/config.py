@@ -128,10 +128,12 @@ class TrainingConfig:
     hidden_dim: int = 256
     model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
+    num_encoder_layers: int = 2  # For level5_lite: Transformer encoder layers per modality
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
     dropout: float = 0.1
+    classifier_dropout: float = 0.3  # For level5_lite: Higher dropout in classifier
 
     # Diffusion-specific (used only when model_variant='diffusion')
     diffusion_steps: int = 200
@@ -178,10 +180,12 @@ class TrainingConfig:
             'hidden_dim': self.hidden_dim,
             'model_variant': self.model_variant,
             'num_cnn_layers': self.num_cnn_layers,
+            'num_encoder_layers': self.num_encoder_layers,
             'num_cross_attn_layers': self.num_cross_attn_layers,
             'num_heads': self.num_heads,
             'ff_dim': self.ff_dim,
             'dropout': self.dropout,
+            'classifier_dropout': self.classifier_dropout,
             'diffusion_steps': self.diffusion_steps,
             'diffusion_beta_start': self.diffusion_beta_start,
             'diffusion_beta_end': self.diffusion_beta_end,
