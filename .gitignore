@@ -199,3 +199,4 @@ model_files/
 # macOS system files
 .DS_Store
 **/.DS_Store
+llm/models_cache/
