@@ -7,45 +7,35 @@ import torch.nn as nn
 class ClassifierHead(nn.Module):
     """MLP for binary classification.
     
-    Architecture with strong regularization:
-    - LayerNorm after each layer (stability)
-    - Dropout 0.3 (prevents overfitting)
-    - GELU activation (better than ReLU for transformers)
+    SIMPLIFIED: Reduced dropout and made shallower.
+    
+    Architecture:
+    - Single hidden layer (not two)
+    - Moderate dropout (0.2, not 0.3)
+    - ReLU activation (simpler, works well for final layers)
     """
     
     def __init__(
         self,
         input_dim: int = 1024,
-        hidden_dims: list = None,
-        dropout: float = 0.3,
+        hidden_dim: int = 256,
+        dropout: float = 0.2,
     ):
         """Initialize ClassifierHead.
         
         Args:
             input_dim: Input dimension (protein_dim + ligand_dim)
-            hidden_dims: List of hidden layer dimensions
+            hidden_dim: Hidden layer dimension (single layer)
             dropout: Dropout probability
         """
         super().__init__()
         
-        if hidden_dims is None:
-            hidden_dims = [512, 256]
-        
-        layers = []
-        prev_dim = input_dim
-        
-        for hidden_dim in hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.GELU(),
-                nn.LayerNorm(hidden_dim),
-                nn.Dropout(dropout),
-            ])
-            prev_dim = hidden_dim
-        
-        layers.append(nn.Linear(prev_dim, 1))
-        
-        self.classifier = nn.Sequential(*layers)
+        self.classifier = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
+        )
         
         self._init_weights()
         
