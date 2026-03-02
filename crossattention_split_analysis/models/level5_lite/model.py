@@ -24,12 +24,15 @@ class Level5LiteModel(nn.Module):
     This model combines:
     - Pre-calculated ESM-2 protein embeddings (per-residue)
     - Pre-calculated MoLFormer ligand embeddings (per-token)
-    - Transformer encoders for each modality
+    - Simple projection layers (no redundant Transformers!)
     - Bidirectional cross-attention for interaction modeling
     - Attention pooling for sequence-to-vector aggregation
     - MLP classifier for binary prediction
     
-    Target performance: MCC 0.48-0.54 (vs Level 1 baseline: 0.428)
+    FIXED: Removed redundant Transformer encoders after pre-trained models.
+    
+    Target performance: MCC 0.45-0.52 (vs Level 1 baseline: 0.428)
+    Reduced parameters: ~8M (vs previous 22M)
     """
     
     def __init__(
@@ -37,11 +40,10 @@ class Level5LiteModel(nn.Module):
         protein_input_dim: int = 320,
         ligand_input_dim: int = 768,
         hidden_dim: int = 512,
-        num_encoder_layers: int = 2,
-        num_cross_attn_layers: int = 1,
+        num_cross_attn_layers: int = 2,
         num_heads: int = 8,
         dropout: float = 0.1,
-        classifier_dropout: float = 0.3,
+        classifier_dropout: float = 0.2,
     ):
         """Initialize Level5LiteModel.
         
@@ -49,11 +51,10 @@ class Level5LiteModel(nn.Module):
             protein_input_dim: ESM-2 embedding dimension (320/640/1280)
             ligand_input_dim: MoLFormer embedding dimension (768)
             hidden_dim: Hidden dimension for all layers
-            num_encoder_layers: Number of transformer encoder layers per modality
             num_cross_attn_layers: Number of cross-attention blocks
             num_heads: Number of attention heads
-            dropout: Dropout for encoders and attention
-            classifier_dropout: Dropout for classifier head (higher)
+            dropout: Dropout for projections and attention
+            classifier_dropout: Dropout for classifier head
         """
         super().__init__()
         
@@ -61,20 +62,16 @@ class Level5LiteModel(nn.Module):
         self.ligand_input_dim = ligand_input_dim
         self.hidden_dim = hidden_dim
         
-        # Encoders
+        # Simple projection encoders (no redundant Transformers)
         self.protein_encoder = ProteinEncoder(
             input_dim=protein_input_dim,
             hidden_dim=hidden_dim,
-            num_layers=num_encoder_layers,
-            num_heads=num_heads,
             dropout=dropout,
         )
         
         self.ligand_encoder = LigandEncoder(
             input_dim=ligand_input_dim,
             hidden_dim=hidden_dim,
-            num_layers=num_encoder_layers,
-            num_heads=num_heads,
             dropout=dropout,
         )
         
@@ -92,10 +89,10 @@ class Level5LiteModel(nn.Module):
         self.protein_pool = AttentionPooling(hidden_dim, num_heads, dropout)
         self.ligand_pool = AttentionPooling(hidden_dim, num_heads, dropout)
         
-        # Classifier
+        # Classifier (simplified)
         self.classifier = ClassifierHead(
             input_dim=hidden_dim * 2,  # concat protein + ligand
-            hidden_dims=[hidden_dim, hidden_dim // 2],
+            hidden_dim=256,
             dropout=classifier_dropout,
         )
         
