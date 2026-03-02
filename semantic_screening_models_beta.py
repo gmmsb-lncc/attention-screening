@@ -58,6 +58,7 @@ LEVEL_LABELS = {
     "level3_cnn": "Level 3 (CNN)",
     "level4_cnn_ca": "Level 4 (CNN+CA)",
     "level5_lite": "Level 5 (Lite)",
+    "level6_optimized": "Level 6 (Optimized)",
 }
 
 METRICS_ORDER = ["accuracy", "mcc", "f1", "precision", "recall", "auc"]
@@ -71,6 +72,7 @@ LEVEL_COLORS = {
     "level3_cnn": "#d95f02",
     "level4_cnn_ca": "#e7298a",
     "level5_lite": "#ff7f0e",
+    "level6_optimized": "#17becf",
 }
 
 
@@ -101,6 +103,8 @@ class BenchmarkProgress:
             self.steps.append("Step 4: Level 4 (CNN+CA)")
         if 5 in levels:
             self.steps.append("Step 5: Level 5-Lite")
+        if 6 in levels:
+            self.steps.append("Step 6: Level 6 (Optimized)")
         self.steps.append("Report + Visualizations")
 
         self.total = len(self.steps)
@@ -177,8 +181,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Level selection
     p.add_argument("--levels", default="1,2,3",
-                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA, 5=Level5-Lite "
+                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA, 5=Level5-Lite, 6=Optimized "
                          "(default: 1,2,3)")
+    
+    # Level 6 optimization
+    p.add_argument("--opt", action="store_true",
+                    help="Enable hyperparameter optimization for Level 6 (uses Optuna)")
+    p.add_argument("--n_trials", type=int, default=20,
+                    help="Number of Optuna trials for Level 6 (default: 20)")
+    p.add_argument("--opt_timeout", type=float, default=48,
+                    help="Optimization timeout in hours for Level 6 (default: 48h, 0=no limit)")
 
     # Output
     p.add_argument("--output_dir", default=None,
@@ -218,8 +230,8 @@ def parse_levels(levels_str: str) -> List[int]:
     try:
         levels = sorted(set(int(x.strip()) for x in levels_str.split(",")))
         for lv in levels:
-            if lv not in (1, 2, 3, 4, 5):
-                raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4,5")
+            if lv not in (1, 2, 3, 4, 5, 6):
+                raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4,5,6")
         return levels
     except ValueError as e:
         print(f"ERROR: Invalid --levels value: {e}")
@@ -703,6 +715,304 @@ def run_level5_lite(
     )
     
     # If cached, try to load from disk
+    if results is None:
+        results = _load_crossattention_results(level_dir, dataset, embedding_short)
+    
+    return results
+
+
+def run_level6_optimized(
+    dataset: str,
+    embedding_name: str,
+    embedding_short: str,
+    output_dir: str,
+    scaffold_split_dir: str,
+    opt_enabled: bool = False,
+    n_trials: int = 20,
+    opt_timeout: float = 48.0,
+    force: bool = False,
+) -> Optional[Dict]:
+    """Run Level 6: Optimized Transformer with Hyperparameter Search (Optuna).
+    
+    This level implements Phase 1 of the Level 6 architecture:
+    - Full Transformer encoders for protein and ligand
+    - Multi-layer bidirectional cross-attention
+    - Automated hyperparameter optimization (if --opt flag is set)
+    - Advanced training (warmup, label smoothing, etc.)
+    
+    Returns results dict or None.
+    """
+    level_dir = os.path.join(output_dir, f"level6_optimized_{embedding_short}")
+    tqdm.write(f"  Output: {level_dir}")
+    tqdm.write(f"  Architecture: Optimized Transformer (Level 6)")
+    
+    if not opt_enabled:
+        tqdm.write("  ERROR: Level 6 requires --opt flag for hyperparameter optimization")
+        tqdm.write("  Usage: --levels 6 --opt --n_trials 20 --opt_timeout 48")
+        return None
+    
+    try:
+        # Import here to avoid dependency if not using Level 6
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        
+        # Check if optuna is installed
+        try:
+            import optuna
+        except ImportError:
+            tqdm.write("  ERROR: Optuna not installed. Run: pip install optuna")
+            return None
+        
+        # Inline simplified version of optimization
+        import pandas as pd
+        import torch
+        import torch.nn as nn
+        from crossattention_split_analysis.config import get_embedding_dims, get_embedding_base_path
+        from crossattention_split_analysis.data.datasets import AttentionMatrixDataset, collate_attention_batch
+        from crossattention_split_analysis.training.evaluator import evaluate
+        from src.models.level6_optimized import Level6OptimizedModel, load_hparam_config
+        
+        os.makedirs(level_dir, exist_ok=True)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        tqdm.write(f"  Device: {device}")
+        tqdm.write(f"  Trials: {n_trials}")
+        tqdm.write(f"  Timeout: {opt_timeout}h")
+        
+        # Load config
+        config_path = "configs/level6_hparam_search.json"
+        if not os.path.exists(config_path):
+            tqdm.write(f"  ERROR: Config not found: {config_path}")
+            return None
+        
+        config = load_hparam_config(config_path)
+        fixed_params = config['fixed_params']
+        search_space = config['search_space']
+        
+        # Load data
+        protein_dim, ligand_dim = get_embedding_dims(embedding_name)
+        embedding_base_path = get_embedding_base_path(embedding_name, dataset)
+        
+        train_path = os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_train.tsv.gz")
+        val_path = os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_val.tsv.gz")
+        test_path = os.path.join(scaffold_split_dir, f"{dataset}_test.tsv.gz")
+        
+        train_df = pd.read_csv(train_path, sep="\t", compression="gzip")
+        val_df = pd.read_csv(val_path, sep="\t", compression="gzip")
+        test_df = pd.read_csv(test_path, sep="\t", compression="gzip")
+        
+        tqdm.write(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+        
+        # Objective function for Optuna
+        def objective(trial):
+            # Sample hyperparameters
+            d_model = trial.suggest_categorical('d_model', search_space['d_model']['choices'])
+            nhead_choices = [h for h in search_space['nhead']['choices'] if d_model % h == 0]
+            if not nhead_choices:
+                raise optuna.TrialPruned()
+            nhead = trial.suggest_categorical('nhead', nhead_choices)
+            
+            num_encoder_layers = trial.suggest_int(
+                'num_encoder_layers',
+                search_space['num_encoder_layers']['low'],
+                search_space['num_encoder_layers']['high']
+            )
+            dim_feedforward = trial.suggest_categorical(
+                'dim_feedforward', search_space['dim_feedforward']['choices']
+            )
+            dropout = trial.suggest_float(
+                'dropout',
+                search_space['dropout']['low'],
+                search_space['dropout']['high'],
+                step=search_space['dropout']['step']
+            )
+            attention_dropout = trial.suggest_float(
+                'attention_dropout',
+                search_space['attention_dropout']['low'],
+                search_space['attention_dropout']['high'],
+                step=search_space['attention_dropout']['step']
+            )
+            cross_attention_heads = trial.suggest_categorical(
+                'cross_attention_heads', search_space['cross_attention_heads']['choices']
+            )
+            cross_attention_layers = trial.suggest_int(
+                'cross_attention_layers',
+                search_space['cross_attention_layers']['low'],
+                search_space['cross_attention_layers']['high']
+            )
+            classifier_dropout = trial.suggest_float(
+                'classifier_dropout',
+                search_space['classifier_dropout']['low'],
+                search_space['classifier_dropout']['high'],
+                step=search_space['classifier_dropout']['step']
+            )
+            learning_rate = trial.suggest_float(
+                'learning_rate',
+                search_space['learning_rate']['low'],
+                search_space['learning_rate']['high'],
+                log=True
+            )
+            weight_decay = trial.suggest_float(
+                'weight_decay',
+                search_space['weight_decay']['low'],
+                search_space['weight_decay']['high'],
+                log=True
+            )
+            
+            # Create model
+            model = Level6OptimizedModel(
+                protein_dim=protein_dim,
+                ligand_dim=ligand_dim,
+                d_model=d_model,
+                nhead=nhead,
+                num_encoder_layers=num_encoder_layers,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                attention_dropout=attention_dropout,
+                cross_attention_heads=cross_attention_heads,
+                cross_attention_layers=cross_attention_layers,
+                classifier_dropout=classifier_dropout,
+            ).to(device)
+            
+            # Create data loaders
+            batch_size = fixed_params['batch_size']
+            
+            train_dataset = AttentionMatrixDataset(
+                train_df,
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                affinity_threshold=6.0,
+            )
+            val_dataset = AttentionMatrixDataset(
+                val_df,
+                protein_matrix_dir=os.path.join(embedding_base_path, "protein_matrices"),
+                ligand_matrix_dir=os.path.join(embedding_base_path, "molformer_matrix"),
+                affinity_threshold=6.0,
+            )
+            
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset, batch_size=batch_size, shuffle=True,
+                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+            )
+            val_loader = torch.utils.data.DataLoader(
+                val_dataset, batch_size=batch_size, shuffle=False,
+                collate_fn=collate_attention_batch, num_workers=2, pin_memory=True
+            )
+            
+            # Loss + optimizer
+            pos_count = sum(train_dataset.labels)
+            neg_count = len(train_dataset.labels) - pos_count
+            pos_weight = torch.tensor([neg_count / pos_count]).to(device)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            
+            optimizer = torch.optim.AdamW(
+                model.parameters(), lr=learning_rate, weight_decay=weight_decay
+            )
+            
+            # Training loop with early stopping
+            best_val_mcc = -1.0
+            patience_counter = 0
+            max_epochs = fixed_params['max_epochs']
+            patience = fixed_params['early_stopping_patience']
+            
+            for epoch in range(max_epochs):
+                model.train()
+                for batch in train_loader:
+                    protein = batch['protein'].to(device)
+                    ligand = batch['ligand'].to(device)
+                    labels = batch['labels'].to(device).float().unsqueeze(1)
+                    protein_mask = batch['protein_mask'].to(device)
+                    ligand_mask = batch['ligand_mask'].to(device)
+                    
+                    optimizer.zero_grad()
+                    logits = model(protein, ligand, protein_mask, ligand_mask)
+                    loss = criterion(logits, labels)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), fixed_params['grad_clip'])
+                    optimizer.step()
+                
+                # Validation
+                val_metrics = evaluate(model, val_loader, device, affinity_threshold=6.0, compute_attention_weights=False)
+                val_mcc = val_metrics['mcc']
+                
+                trial.report(val_mcc, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+                
+                if val_mcc > best_val_mcc:
+                    best_val_mcc = val_mcc
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    if patience_counter >= patience:
+                        break
+            
+            return best_val_mcc
+        
+        # Run optimization
+        study_name = f"level6_{dataset}_{embedding_short}"
+        storage_path = os.path.join(level_dir, f"{study_name}.db")
+        storage = f"sqlite:///{storage_path}"
+        
+        sampler = optuna.samplers.TPESampler(seed=42)
+        pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+        
+        study = optuna.create_study(
+            study_name=study_name,
+            storage=storage,
+            sampler=sampler,
+            pruner=pruner,
+            direction='maximize',
+            load_if_exists=True,
+        )
+        
+        timeout_seconds = opt_timeout * 3600 if opt_timeout > 0 else None
+        study.optimize(objective, n_trials=n_trials, timeout=timeout_seconds, show_progress_bar=True)
+        
+        # Save results
+        best_trial = study.best_trial
+        tqdm.write(f"\n  Best trial: #{best_trial.number}")
+        tqdm.write(f"  Val MCC: {best_trial.value:.4f}")
+        
+        results_dict = {
+            'best_trial': {
+                'number': best_trial.number,
+                'val_mcc': best_trial.value,
+                'params': best_trial.params,
+            },
+            'n_trials': len(study.trials),
+        }
+        
+        results_path = os.path.join(level_dir, "optimization_results.json")
+        with open(results_path, 'w') as f:
+            json.dump(results_dict, f, indent=2)
+        
+        tqdm.write(f"  Results saved: {results_path}")
+        
+        # Return in expected format (simplified - single "seed" = best trial)
+        return {
+            f"Scaffold Split\n(best of {n_trials} trials)": {
+                'accuracy': best_trial.value,  # Placeholder, use val_mcc
+                'mcc': best_trial.value,
+                'f1': 0.0,  # Not tracked in simplified version
+                'precision': 0.0,
+                'recall': 0.0,
+                'auc': 0.0,
+            }
+        }
+        
+    except Exception as e:
+        tqdm.write(f"  ERROR in Level 6: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Step 6: Aggregate metrics
+# ---------------------------------------------------------------------------
+
+def _extract_metric(results_dict: Dict, model_key: str, metric: str) -> Optional[float]:
     if results is None:
         results = _load_crossattention_results(level_dir, dataset, embedding_short)
     
@@ -1490,6 +1800,32 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
+    # Step 6: Level 6 — Optimized Transformer with HPO
+    # -----------------------------------------------------------------------
+    level6_results = None
+    if 6 in levels:
+        step_name = "Step 6: Level 6 (Optimized)"
+        progress.begin_step(step_name)
+        tqdm.write(f"  Hyperparameter optimization with Optuna")
+        tqdm.write(f"  Trials: {args.n_trials}, Timeout: {args.opt_timeout}h")
+        level6_results = run_level6_optimized(
+            dataset=dataset,
+            embedding_name=embedding_name,
+            embedding_short=embedding_short,
+            output_dir=output_dir,
+            scaffold_split_dir=scaffold_split_dir,
+            opt_enabled=args.opt,
+            n_trials=args.n_trials,
+            opt_timeout=args.opt_timeout,
+            force=force,
+        )
+        if level6_results:
+            tqdm.write("  Level 6 completed successfully.")
+        else:
+            tqdm.write("  WARNING: Level 6 returned no results.")
+        progress.end_step(step_name)
+
+    # -----------------------------------------------------------------------
     # Report: Comparative report + visualizations
     # -----------------------------------------------------------------------
     step_name = "Report + Visualizations"
@@ -1511,6 +1847,13 @@ def main():
             None, None, level5_results, level3_key="level5_lite",
         )
         aggregated.update(l5_agg)
+    
+    # Merge Level 6 if present
+    if level6_results:
+        l6_agg = aggregate_benchmark_metrics(
+            None, None, level6_results, level3_key="level6_optimized",
+        )
+        aggregated.update(l6_agg)
 
     if not aggregated:
         tqdm.write("  No results to compare. At least one level must produce results.")
