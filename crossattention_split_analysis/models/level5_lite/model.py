@@ -169,15 +169,32 @@ class Level5LiteModel(nn.Module):
         
         Returns a dict with pooling attention weights for protein and ligand.
         Useful for visualizing which residues/atoms are most important.
+        
+        Args:
+            protein_matrix: [batch, protein_len, protein_input_dim] ESM-2 embeddings
+            ligand_matrix: [batch, ligand_len, ligand_input_dim] MoLFormer embeddings
+            protein_mask: [batch, protein_len] mask where 1=real token, 0=padding
+            ligand_mask: [batch, ligand_len] mask where 1=real token, 0=padding
         """
+        # Convert masks (same as forward())
+        if protein_mask is not None:
+            protein_attn_mask = (protein_mask == 0)
+        else:
+            protein_attn_mask = None
+            
+        if ligand_mask is not None:
+            ligand_attn_mask = (ligand_mask == 0)
+        else:
+            ligand_attn_mask = None
+        
         # Encode
-        protein = self.protein_encoder(protein_matrix, protein_mask)
-        ligand = self.ligand_encoder(ligand_matrix, ligand_mask)
+        protein = self.protein_encoder(protein_matrix, protein_attn_mask)
+        ligand = self.ligand_encoder(ligand_matrix, ligand_attn_mask)
         
         # Cross-attention
         for cross_attn in self.cross_attn_layers:
             protein, ligand = cross_attn(
-                protein, ligand, protein_mask, ligand_mask
+                protein, ligand, protein_attn_mask, ligand_attn_mask
             )
         
         # Get pooling attention weights
@@ -189,7 +206,7 @@ class Level5LiteModel(nn.Module):
             query=p_query,
             key=protein,
             value=protein,
-            key_padding_mask=protein_mask,
+            key_padding_mask=protein_attn_mask,
             average_attn_weights=True,
         )
         
@@ -199,7 +216,7 @@ class Level5LiteModel(nn.Module):
             query=l_query,
             key=ligand,
             value=ligand,
-            key_padding_mask=ligand_mask,
+            key_padding_mask=ligand_attn_mask,
             average_attn_weights=True,
         )
         
