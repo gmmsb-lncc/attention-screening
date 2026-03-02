@@ -831,6 +831,8 @@ def run_level6_optimized(
         # Objective function for Optuna
         def objective(trial):
             # Sample hyperparameters
+            tqdm.write(f"\n  === Starting Trial {trial.number} ===")
+            
             d_model = trial.suggest_categorical('d_model', search_space['d_model']['choices'])
             nhead_choices = [h for h in search_space['nhead']['choices'] if d_model % h == 0]
             if not nhead_choices:
@@ -899,6 +901,11 @@ def run_level6_optimized(
                 classifier_dropout=classifier_dropout,
             ).to(device)
             
+            # Show trial parameters
+            n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            tqdm.write(f"    d_model={d_model}, nhead={nhead}, layers={num_encoder_layers}, "
+                      f"ff={dim_feedforward}, lr={learning_rate:.2e}, params={n_params:,}")
+            
             # Create data loaders
             batch_size = fixed_params['batch_size']
             
@@ -955,9 +962,18 @@ def run_level6_optimized(
             max_epochs = fixed_params['max_epochs']
             patience = fixed_params['early_stopping_patience']
             
+            n_train_batches = len(train_loader)
+            n_val_batches = len(val_loader)
+            
             for epoch in range(max_epochs):
                 model.train()
-                for batch in train_loader:
+                epoch_pbar = tqdm(
+                    train_loader, 
+                    desc=f"  Trial {trial.number} | Epoch {epoch+1}/{max_epochs} [Train]",
+                    leave=False,
+                    total=n_train_batches
+                )
+                for batch in epoch_pbar:
                     protein = batch['protein_matrix'].to(device)
                     ligand = batch['ligand_matrix'].to(device)
                     batch_labels = batch['labels'].to(device).float()
@@ -975,8 +991,14 @@ def run_level6_optimized(
                 model.eval()
                 all_preds = []
                 all_labels = []
+                val_pbar = tqdm(
+                    val_loader,
+                    desc=f"  Trial {trial.number} | Epoch {epoch+1}/{max_epochs} [Val]",
+                    leave=False,
+                    total=n_val_batches
+                )
                 with torch.no_grad():
-                    for batch in val_loader:
+                    for batch in val_pbar:
                         protein = batch['protein_matrix'].to(device)
                         ligand = batch['ligand_matrix'].to(device)
                         batch_labels = batch['labels'].to(device)
@@ -991,6 +1013,9 @@ def run_level6_optimized(
                 preds_binary = [1 if p >= 0.5 else 0 for p in all_preds]
                 val_mcc = matthews_corrcoef(all_labels, preds_binary)
                 
+                # Print epoch progress
+                tqdm.write(f"    Trial {trial.number} | Epoch {epoch+1}/{max_epochs}: val_mcc={val_mcc:.4f} (best={best_val_mcc:.4f})")
+                
                 trial.report(val_mcc, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
@@ -1001,6 +1026,7 @@ def run_level6_optimized(
                 else:
                     patience_counter += 1
                     if patience_counter >= patience:
+                        tqdm.write(f"    Trial {trial.number} | Early stopping at epoch {epoch+1}")
                         break
             
             return best_val_mcc
