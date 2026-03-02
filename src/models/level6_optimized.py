@@ -114,6 +114,12 @@ class CrossAttentionBlock(nn.Module):
         Returns:
             (prot_out, lig_out): Updated representations
         """
+        # Ensure masks are boolean for ~ operator
+        if prot_mask is not None and prot_mask.dtype != torch.bool:
+            prot_mask = prot_mask.bool()
+        if lig_mask is not None and lig_mask.dtype != torch.bool:
+            lig_mask = lig_mask.bool()
+        
         # Protein attends to ligand
         prot_attn, _ = self.prot_to_lig(
             prot, lig, lig,
@@ -259,19 +265,21 @@ class Level6OptimizedModel(nn.Module):
         prot = torch.cat([prot_cls, prot], dim=1)  # [batch, prot_len+1, d_model]
         lig = torch.cat([lig_cls, lig], dim=1)      # [batch, lig_len+1, d_model]
         
-        # Update masks
+        # Update masks (ensure boolean type for ~ operator)
         if protein_mask is not None:
+            protein_mask_bool = protein_mask.bool() if protein_mask.dtype != torch.bool else protein_mask
             prot_mask_with_cls = torch.cat([
                 torch.ones(batch_size, 1, device=protein_mask.device, dtype=torch.bool),
-                protein_mask
+                protein_mask_bool
             ], dim=1)
         else:
             prot_mask_with_cls = None
         
         if ligand_mask is not None:
+            ligand_mask_bool = ligand_mask.bool() if ligand_mask.dtype != torch.bool else ligand_mask
             lig_mask_with_cls = torch.cat([
                 torch.ones(batch_size, 1, device=ligand_mask.device, dtype=torch.bool),
-                ligand_mask
+                ligand_mask_bool
             ], dim=1)
         else:
             lig_mask_with_cls = None
