@@ -102,14 +102,16 @@ class TrainingConfig:
 
     Attributes:
         protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
-        ligand_dim: Ligand embedding dimension (768 for SMI-TED)
+        ligand_dim: Ligand embedding dimension (768 for SMI-TED/MoLFormer)
         hidden_dim: Hidden dimension for all layers
-        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', or 'diffusion')
-        num_cnn_layers: Number of CNN encoder layers
+        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite')
+        num_cnn_layers: Number of CNN encoder layers (for cnn_crossattn)
+        num_encoder_layers: Number of Transformer encoder layers per modality (for level5_lite)
         num_cross_attn_layers: Number of cross-attention layers
         num_heads: Number of attention heads
         ff_dim: Feed-forward layer dimension
-        dropout: Dropout rate
+        dropout: Dropout rate for encoders and attention
+        classifier_dropout: Higher dropout for classifier head (for level5_lite)
         batch_size: Training batch size
         learning_rate: Initial learning rate
         weight_decay: AdamW weight decay
