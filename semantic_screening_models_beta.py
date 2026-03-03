@@ -1230,7 +1230,7 @@ def run_level3(
         patience=patience,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        hidden_dim=512,
+        hidden_dim=256,  # Reduced to 256 for 4.1M params (vs 512 = 15.5M)
         num_cross_attn_layers=2,
         num_heads=8,
         dropout=0.4,  # Strong encoder dropout (increased)
@@ -1241,7 +1241,7 @@ def run_level3(
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
-        model_variant="cross_attention_lite",
+        model_variant="level3_crossatt",  # Uses Level5LiteModel (4.1M params with hidden_dim=256)
         custom_protein_matrix_dir=custom_protein_matrix_dir,
         custom_ligand_matrix_dir=custom_ligand_matrix_dir,
         optimize_threshold=False,  # Use fixed threshold
