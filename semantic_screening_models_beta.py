@@ -4,6 +4,7 @@
 Coordinates the full pipeline:
   Step 0:  Verify / generate scaffold splits
   Step 0b: Verify / extract ligand vectors (if Level 2 requested)
+  Step 4:  ESM-2 Fine-tuning (if --finetune flag set) → regenerates embeddings
   Step 1:  Level 1 — Fingerprint + KNN/MLP  (baseline)
   Step 2:  Level 2 — Embedding vectors + KNN/MLP (with Attention Pooling)
   Step 3:  Level 3 — Transformer + Cross-Attention
@@ -12,6 +13,7 @@ Coordinates the full pipeline:
 
 Usage:
     python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3
+    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3 --finetune
     python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 6 --opt --n_trials 20
 """
 
@@ -636,6 +638,91 @@ def run_level4_finetune(
         import traceback
         traceback.print_exc()
         return None
+
+
+def regenerate_embeddings_with_finetuned_model(
+    dataset: str,
+    embedding_name: str,
+    finetuned_checkpoint: str,
+    scaffold_split_dir: str,
+    output_dir: str,
+) -> None:
+    """
+    Regenerate protein embeddings (matrices and vectors) using fine-tuned ESM-2 model.
+    
+    Creates new embedding directory with "_finetuned" suffix to avoid overwriting vanilla embeddings.
+    Processes only train/val/test splits to avoid data leakage.
+    """
+    from src.build.embeddings.strategies.esm_embedding import ESMEmbeddingStrategy
+    import torch
+    import pandas as pd
+    
+    tqdm.write(f"    Loading fine-tuned model from: {finetuned_checkpoint}")
+    
+    # Load fine-tuned model
+    checkpoint = torch.load(finetuned_checkpoint, map_location='cpu')
+    model = checkpoint['model']
+    model.eval()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
+    
+    # Setup output directories
+    base_path = EMBEDDING_BASE_PATH.format(dataset_type=dataset)
+    finetuned_base = Path(base_path) / f"{embedding_name}_finetuned" / "build"
+    protein_matrix_dir = finetuned_base / "protein_matrices"
+    protein_embedding_dir = finetuned_base / "protein_embeddings"
+    
+    protein_matrix_dir.mkdir(parents=True, exist_ok=True)
+    protein_embedding_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load all splits
+    splits = ['train', 'val', 'test']
+    all_sequences = {}
+    
+    for split in splits:
+        split_path = Path(scaffold_split_dir) / "scenarios" / "Sc" / f"{dataset}_{split}.tsv.gz"
+        if not split_path.exists():
+            split_path = split_path.with_suffix('')  # try without .gz
+        
+        if split_path.exists():
+            df = pd.read_csv(split_path, sep='\t', compression='gzip' if split_path.suffix == '.gz' else None)
+            for _, row in df.iterrows():
+                seq_id = row['seq_id']
+                seq = row['seq']
+                if seq_id not in all_sequences:
+                    all_sequences[seq_id] = seq
+    
+    tqdm.write(f"    Processing {len(all_sequences)} unique protein sequences...")
+    
+    # Generate embeddings
+    with torch.no_grad():
+        for seq_id, seq in tqdm(all_sequences.items(), desc="    Generating embeddings", leave=False):
+            # Skip if already exists
+            matrix_file = protein_matrix_dir / f"{seq_id}_matrix.npy"
+            vector_file = protein_embedding_dir / f"{seq_id}_vector.npy"
+            
+            if matrix_file.exists() and vector_file.exists():
+                continue
+            
+            # Tokenize
+            tokens = checkpoint['alphabet'].get_batch_converter()([("", seq)])[2]
+            tokens = tokens.to(device)
+            
+            # Get representations
+            results = model(tokens, repr_layers=[model.num_layers], return_contacts=False)
+            token_representations = results["representations"][model.num_layers][0]  # [seq_len, hidden_dim]
+            
+            # Remove <cls> and <eos> tokens
+            token_representations = token_representations[1:-1].cpu().numpy()  # [L, D]
+            
+            # Save per-token matrix
+            np.save(matrix_file, token_representations)
+            
+            # Save mean-pooled vector
+            mean_vector = token_representations.mean(axis=0)  # [D]
+            np.save(vector_file, mean_vector)
+    
+    tqdm.write(f"    ✓ Saved {len(all_sequences)} protein embeddings to {finetuned_base}")
 
 
 def run_level1(
@@ -2236,8 +2323,24 @@ def main():
             
             if finetuned_checkpoint:
                 tqdm.write(f"  ✓ Fine-tuning completed: {finetuned_checkpoint}")
-                tqdm.write(f"  NOTE: You must now regenerate embeddings using the fine-tuned model")
-                tqdm.write(f"        to see improvements in downstream tasks (Level 2 & 3).")
+                tqdm.write(f"  → Regenerating embeddings with fine-tuned model...")
+                
+                # Regenerate embeddings for train/val/test using fine-tuned model
+                # This will create new embedding directories with "_finetuned" suffix
+                try:
+                    regenerate_embeddings_with_finetuned_model(
+                        dataset=dataset,
+                        embedding_name=embedding_name,
+                        finetuned_checkpoint=finetuned_checkpoint,
+                        scaffold_split_dir=scaffold_split_dir,
+                        output_dir=output_dir,
+                    )
+                    tqdm.write(f"  ✓ Embeddings regenerated with fine-tuned model")
+                    # Update embedding_name to point to fine-tuned embeddings
+                    embedding_name = f"{embedding_name}_finetuned"
+                except Exception as e:
+                    tqdm.write(f"  ERROR regenerating embeddings: {e}")
+                    tqdm.write("  Continuing with vanilla embeddings...")
             else:
                 tqdm.write("  WARNING: Fine-tuning failed or was skipped.")
         
