@@ -1167,7 +1167,7 @@ def run_level3(
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
-        model_variant="level3_crossatt",
+        model_variant="cross_attention_lite",
         custom_protein_matrix_dir=custom_protein_matrix_dir,
         custom_ligand_matrix_dir=custom_ligand_matrix_dir,
     )
