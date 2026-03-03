@@ -134,6 +134,7 @@ class TrainingConfig:
     ff_dim: int = 1024
     dropout: float = 0.1
     classifier_dropout: float = 0.2  # For level5_lite: Moderate dropout in classifier
+    label_smoothing: float = 0.0  # Label smoothing for classification
 
     # Diffusion-specific (used only when model_variant='diffusion')
     diffusion_steps: int = 200

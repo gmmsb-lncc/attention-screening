@@ -176,9 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ESM-2 model shorthand (default: 8M)")
 
     # Level selection
-    p.add_argument("--levels", default="1,2,3", nargs='?',
-                    help="Levels to run (comma or space separated): 1=FP, 2=Emb, 3=CrossAtt, 4=FineTune, 5=Reserved, 6=Optimized "
-                         "(default: 1,2,3). Examples: --levels 1,2,3 OR --levels '1 2 3'")
+    p.add_argument("--levels", default="1,2,3", nargs='*',
+                    help="Levels to run: 1=FP, 2=Emb, 3=CrossAtt, 4=FineTune, 5=Reserved, 6=Optimized "
+                         "(default: 1,2,3). Examples: --levels 1 2 3 OR --levels 1,2,3")
     
     # Level 6 optimization
     p.add_argument("--opt", action="store_true",
@@ -235,17 +235,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def parse_levels(levels_str: str) -> List[int]:
-    """Parse '1,2,3' or '1 2 3' into [1, 2, 3]."""
+def parse_levels(levels_arg) -> List[int]:
+    """Parse levels from various formats: list ['1', '2', '3'], string '1,2,3', or '1 2 3'."""
     import re
     try:
-        # Accept both comma and space separated values
-        parts = re.split(r'[,\s]+', levels_str.strip())
+        # If it's a list (from nargs='*')
+        if isinstance(levels_arg, list):
+            if len(levels_arg) == 0:
+                # Default
+                return [1, 2, 3]
+            # Flatten in case of ['1,2,3'] or ['1', '2', '3']
+            parts = []
+            for item in levels_arg:
+                parts.extend(re.split(r'[,\s]+', str(item).strip()))
+        else:
+            # String format
+            parts = re.split(r'[,\s]+', str(levels_arg).strip())
+        
         levels = sorted(set(int(x.strip()) for x in parts if x.strip()))
         for lv in levels:
             if lv not in (1, 2, 3, 4, 5, 6):
                 raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4,5,6")
-        return levels
+        return levels if levels else [1, 2, 3]
     except ValueError as e:
         print(f"ERROR: Invalid --levels value: {e}")
         sys.exit(1)
@@ -1165,8 +1176,11 @@ def run_level3(
         hidden_dim=512,
         num_cross_attn_layers=2,
         num_heads=8,
-        dropout=0.1,
-        classifier_dropout=0.2,
+        dropout=0.3,  # Strong encoder dropout
+        classifier_dropout=0.5,  # Very strong classifier dropout
+        weight_decay=1e-4,  # Weight decay for L2 regularization
+        label_smoothing=0.1,  # Label smoothing to prevent overconfidence
+        max_grad_norm=1.0,  # Gradient clipping
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,

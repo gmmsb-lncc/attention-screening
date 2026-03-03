@@ -406,6 +406,7 @@ def run_scenario(
         classification_weight=config.classification_weight,
         regression_weight=config.regression_weight,
         classification_pos_weight=class_pos_weight,
+        label_smoothing=config.label_smoothing,
     )
 
     # Train
@@ -884,6 +885,7 @@ def run_single_analysis(
     ff_dim: int = 1024,
     dropout: float = 0.1,
     classifier_dropout: float = 0.2,
+    label_smoothing: float = 0.0,
     diffusion_steps: int = 200,
     diffusion_beta_start: float = 1e-4,
     diffusion_beta_end: float = 0.02,
@@ -1067,6 +1069,7 @@ def run_single_analysis(
         ff_dim=ff_dim,
         dropout=dropout,
         classifier_dropout=classifier_dropout,
+        label_smoothing=label_smoothing,
         diffusion_steps=diffusion_steps,
         diffusion_beta_start=diffusion_beta_start,
         diffusion_beta_end=diffusion_beta_end,
