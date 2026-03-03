@@ -50,7 +50,7 @@ Objetivo:            Prever A e R nas posições mascaradas
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  HUMAN Dataset                                                            │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Train:      269,715 pares │ 91,017 proteínas │ 91,016 ligantes únicos   │
+│  Train:      269,715 pares │ 480 proteínas │ 91,017 ligantes únicos      │
 │  Validation:  65,168 pares → EARLY STOPPING                               │
 │  Test:        40,470 pares → AVALIAÇÃO FINAL                              │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -58,18 +58,25 @@ Objetivo:            Prever A e R nas posições mascaradas
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  NON-HUMAN Dataset                                                        │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Train:        8,543 pares │  5,574 proteínas │  5,574 ligantes únicos   │
+│  Train:        8,543 pares │ 168 proteínas │  5,574 ligantes únicos      │
 │  Validation:   2,068 pares → EARLY STOPPING                               │
 │  Test:         1,285 pares → AVALIAÇÃO FINAL                              │
 └───────────────────────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  TOTAL para Fine-tuning                                                   │
+│  TOTAL para Fine-tuning (treino apenas)                                   │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Proteínas únicas:  ~96,591 (ESM-2)                                       │
-│  Ligantes únicos:   ~96,590 (MolFormer)                                   │
+│  Proteínas únicas:  648 (ESM-2) - 480 human + 168 non-human              │
+│  Ligantes únicos:   95,193 (MolFormer) - 91,017 human + 5,574 non-human  │
+│  Total de pares:    278,258                                               │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Observação importante**: Apesar de termos 278K pares proteína-ligante, temos apenas **648 sequências de proteínas únicas** para o fine-tuning do ESM-2. Isso é suficiente para MLM? **Sim**, porque:
+- O ESM-2 já está pré-treinado em 250M+ proteínas
+- Estamos fazendo **ajuste fino (fine-tuning)**, não treinamento do zero
+- 648 sequências de kinases diversas são suficientes para adaptar as representações
+- O objetivo não é aprender estrutura geral de proteínas (já aprendido), mas padrões específicos de kinases
 
 **Por que não usar Val/Test no fine-tuning?**
 - ❌ **Data leakage**: O modelo veria informações do teste antes da avaliação final
@@ -108,14 +115,14 @@ FASE 3: DOWNSTREAM TRAINING (Levels 1-3)
 
 ## 🧪 Fine-tuning de Ligantes (MolFormer)
 
-### 96K Ligantes é Suficiente?
+### 95K Ligantes é Suficiente?
 
 | Comparação | Quantidade | Suficiência |
 |------------|-----------|-------------|
 | MolFormer pré-treino | ~1.1 bilhão SMILES | — |
-| Nosso dataset | ~96K SMILES únicos | 0.01% do original |
+| Nosso dataset (treino) | 95,193 SMILES únicos | 0.009% do original |
 
-**Conclusão**: Para fine-tuning **completo** seria insuficiente, mas para **LoRA/Adapter fine-tuning** é viável.
+**Conclusão**: Para fine-tuning **completo** seria insuficiente, mas para **LoRA/Adapter fine-tuning** é viável e recomendado. Os 95K ligantes são todos compostos bioativos contra kinases, representando uma distribuição química focada e relevante para a tarefa.
 
 ### Estratégia Recomendada: LoRA Fine-tuning
 
@@ -157,11 +164,15 @@ model = esm.pretrained.esm2_t6_8M_UR50D()
 # 6 layers, 320 dim, 20 heads
 # ~8M parâmetros
 
+# Dados de fine-tuning
+# - 648 sequências únicas de kinases (human + non_human)
+# - 95,193 ligantes únicos
+
 # Configuração de fine-tuning
 mask_ratio = 0.15          # 15% dos tokens mascarados
 learning_rate = 1e-5       # LR baixo para não "destruir" pré-treino
 warmup_steps = 1000        # Warm-up para estabilidade
-max_epochs = 10            # Poucas épocas (já está pré-treinado)
+max_epochs = 100           # Com early stopping (patience=3)
 batch_size = 8             # Depende da GPU
 gradient_accumulation = 4  # Simula batch_size=32
 ```
