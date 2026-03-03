@@ -868,6 +868,70 @@ def regenerate_embeddings_with_finetuned_model(
     return str(finetuned_base)
 
 
+def regenerate_ligand_embeddings_with_finetuned_molformer(
+    dataset: str,
+    finetuned_checkpoint: str,
+    scaffold_split_dir: str,
+    output_dir: str,
+) -> str:
+    """
+    Regenerate ligand embeddings (matrices and vectors) using fine-tuned MolFormer.
+    
+    Creates new embedding directory with "_finetuned" suffix to avoid overwriting vanilla embeddings.
+    Processes train/val/test splits.
+    
+    Returns:
+        Path to fine-tuned embedding base directory
+    """
+    from src.finetuning.molformer_finetuner import MolFormerFinetuner
+    import torch
+    from pathlib import Path
+    
+    tqdm.write(f"\n    Regenerating ligand embeddings with fine-tuned MolFormer...")
+    tqdm.write(f"    Checkpoint: {finetuned_checkpoint}")
+    
+    # Initialize finetuner
+    finetuner = MolFormerFinetuner(
+        model_path=finetuned_checkpoint,  # Load from checkpoint
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        mask_prob=0.15
+    )
+    
+    # Setup output directories
+    base_path = EMBEDDING_BASE_PATH.format(dataset_type=dataset)
+    finetuned_base = Path(base_path) / "molformer_finetuned" / "build"
+    finetuned_base.mkdir(parents=True, exist_ok=True)
+    
+    tqdm.write(f"    Output directory: {finetuned_base}")
+    
+    # Extract embeddings for each split
+    splits = ['train', 'val', 'test']
+    for split in splits:
+        if split == 'test':
+            split_path = Path(scaffold_split_dir) / f"{dataset}_test.tsv.gz"
+        else:
+            split_path = Path(scaffold_split_dir) / "scenarios" / "Sc" / f"{dataset}_{split}.tsv.gz"
+        
+        if not split_path.exists():
+            split_path = split_path.with_suffix('')  # try without .gz
+        
+        if split_path.exists():
+            tqdm.write(f"    Extracting ligand embeddings for {split} split...")
+            finetuner.extract_embeddings(
+                tsv_file=str(split_path),
+                output_dir=str(finetuned_base),
+                batch_size=32,
+                save_matrices=True,
+                save_vectors=True
+            )
+        else:
+            tqdm.write(f"    WARNING: {split} split not found: {split_path}")
+    
+    tqdm.write(f"    ✓ Fine-tuned ligand embeddings saved to {finetuned_base}")
+    
+    return str(finetuned_base)
+
+
 def run_level1(
     dataset: str,
     output_dir: str,
@@ -2437,10 +2501,11 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 4: ESM-2 Fine-tuning (if --finetune flag is set)
+    # Step 4: ESM-2 + MolFormer Fine-tuning (if Level 4 in levels OR --finetune flag)
     # -----------------------------------------------------------------------
     finetuned_checkpoint = None
-    if args.finetune:
+    molformer_checkpoint = None
+    if 4 in levels or args.finetune:
         step_name = "Step 4: ESM-2 Fine-tuning"
         progress.begin_step(step_name)
         
@@ -2510,8 +2575,18 @@ def main():
             
             if molformer_checkpoint:
                 tqdm.write(f"  ✓ MolFormer fine-tuning completed: {molformer_checkpoint}")
-                # TODO: Regenerate ligand embeddings with fine-tuned MolFormer
-                # regenerate_ligand_embeddings_with_finetuned_molformer(...)
+                # Regenerate ligand embeddings with fine-tuned MolFormer
+                try:
+                    regenerate_ligand_embeddings_with_finetuned_molformer(
+                        dataset=dataset,
+                        finetuned_checkpoint=molformer_checkpoint,
+                        scaffold_split_dir=scaffold_split_dir,
+                        output_dir=output_dir,
+                    )
+                    tqdm.write(f"  ✓ Ligand embeddings regenerated with fine-tuned MolFormer")
+                except Exception as e:
+                    tqdm.write(f"  ERROR regenerating ligand embeddings: {e}")
+                    tqdm.write("  Continuing with vanilla embeddings...")
             else:
                 tqdm.write("  WARNING: MolFormer fine-tuning failed or was skipped.")
             
