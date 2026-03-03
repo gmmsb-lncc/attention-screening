@@ -584,11 +584,11 @@ class MolFormerFinetuner:
         unique_mols = df[['chembl_id', 'smiles']].drop_duplicates()
         
         if save_matrices:
-            matrix_dir = os.path.join(output_dir, "ligand_matrices_finetuned")
+            matrix_dir = os.path.join(output_dir, "ligand_matrices")
             os.makedirs(matrix_dir, exist_ok=True)
         
         if save_vectors:
-            vector_dir = os.path.join(output_dir, "ligand_embeddings_finetuned")
+            vector_dir = os.path.join(output_dir, "ligand_embeddings")
             os.makedirs(vector_dir, exist_ok=True)
         
         print(f"\n  Extracting embeddings for {len(unique_mols)} molecules...")
