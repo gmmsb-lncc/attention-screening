@@ -61,7 +61,7 @@ class LigandEncoder(nn.Module):
 class CrossAttentionLayer(nn.Module):
     """Bidirectional cross-attention between protein and ligand."""
     
-    def __init__(self, hidden_dim: int, num_heads: int = 2, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int, num_heads: int = 1, dropout: float = 0.1):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
