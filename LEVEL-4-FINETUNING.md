@@ -47,13 +47,28 @@ Objetivo:            Prever A e R nas posições mascaradas
 **CRÍTICO**: O fine-tuning deve usar **APENAS o conjunto de treino**!
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Dataset Original (375,353 pares proteína-ligante)         │
-├─────────────────────────────────────────────────────────────┤
-│  Train:      269,715 (71.8%) → FINE-TUNING + TRAINING     │
-│  Validation:  65,168 (17.4%) → EARLY STOPPING             │
-│  Test:        40,470 (10.8%) → AVALIAÇÃO FINAL            │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│  HUMAN Dataset                                                            │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Train:      269,715 pares │ 91,017 proteínas │ 91,016 ligantes únicos   │
+│  Validation:  65,168 pares → EARLY STOPPING                               │
+│  Test:        40,470 pares → AVALIAÇÃO FINAL                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  NON-HUMAN Dataset                                                        │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Train:        8,543 pares │  5,574 proteínas │  5,574 ligantes únicos   │
+│  Validation:   2,068 pares → EARLY STOPPING                               │
+│  Test:         1,285 pares → AVALIAÇÃO FINAL                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  TOTAL para Fine-tuning                                                   │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Proteínas únicas:  ~96,591 (ESM-2)                                       │
+│  Ligantes únicos:   ~96,590 (MolFormer)                                   │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Por que não usar Val/Test no fine-tuning?**
@@ -65,21 +80,70 @@ Objetivo:            Prever A e R nas posições mascaradas
 
 ```
 FASE 1: FINE-TUNING (Level 4)
-├─ Input:  Train sequences (unique kinases)
-├─ Task:   Masked Language Modeling (15% masking)
-├─ Output: ESM-2 fine-tuned checkpoint
-└─ Duração: ~8-12h (GPU V100/A100)
+├─ 1a. ESM-2 Fine-tuning (Proteínas)
+│   ├─ Input:  Train sequences (~96K proteínas únicas)
+│   ├─ Task:   Masked Language Modeling (15% masking)
+│   ├─ Output: ESM-2 fine-tuned checkpoint
+│   └─ Duração: ~4-8h (GPU V100/A100)
+│
+├─ 1b. MolFormer Fine-tuning (Ligantes) - OPCIONAL
+│   ├─ Input:  Train SMILES (~96K ligantes únicos)
+│   ├─ Task:   Masked Language Modeling (15% masking)
+│   ├─ Method: LoRA/Adapter (recomendado - evita overfitting)
+│   ├─ Output: MolFormer fine-tuned checkpoint
+│   └─ Duração: ~2-4h (GPU V100/A100)
 
 FASE 2: EMBEDDING EXTRACTION
-├─ Input:  Fine-tuned ESM-2 checkpoint
+├─ Input:  Fine-tuned checkpoints (ESM-2 + MolFormer)
 ├─ Process: Extract embeddings for Train/Val/Test
-└─ Output: protein_matrices/ (fine-tuned)
+└─ Output: protein_matrices/ + ligand_matrices/ (fine-tuned)
 
-FASE 3: DOWNSTREAM TRAINING (Levels 1-3, 6)
+FASE 3: DOWNSTREAM TRAINING (Levels 1-3)
 ├─ Input:  Fine-tuned embeddings
 ├─ Models: Level 1 (FP), Level 2 (Emb+AttPool), Level 3 (CrossAtt)
 └─ Output: Final predictions
 ```
+
+---
+
+## 🧪 Fine-tuning de Ligantes (MolFormer)
+
+### 96K Ligantes é Suficiente?
+
+| Comparação | Quantidade | Suficiência |
+|------------|-----------|-------------|
+| MolFormer pré-treino | ~1.1 bilhão SMILES | — |
+| Nosso dataset | ~96K SMILES únicos | 0.01% do original |
+
+**Conclusão**: Para fine-tuning **completo** seria insuficiente, mas para **LoRA/Adapter fine-tuning** é viável.
+
+### Estratégia Recomendada: LoRA Fine-tuning
+
+```python
+# LoRA: Low-Rank Adaptation
+# Congela todos os pesos originais, treina apenas adaptadores de baixo rank
+
+class LoRALayer(nn.Module):
+    def __init__(self, original_layer, rank=16, alpha=32):
+        super().__init__()
+        self.original = original_layer
+        self.original.requires_grad_(False)  # Congela
+        
+        # Adaptadores de baixo rank (~0.5% dos parâmetros)
+        d = original_layer.in_features
+        self.lora_A = nn.Linear(d, rank, bias=False)
+        self.lora_B = nn.Linear(rank, d, bias=False)
+        self.scale = alpha / rank
+    
+    def forward(self, x):
+        return self.original(x) + self.lora_B(self.lora_A(x)) * self.scale
+```
+
+**Vantagens do LoRA:**
+- ✅ Treina apenas ~0.5% dos parâmetros
+- ✅ Evita overfitting com poucos dados
+- ✅ Preserva conhecimento do pré-treino
+- ✅ Checkpoint muito menor (~2MB vs ~400MB)
 
 ---
 
