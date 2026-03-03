@@ -554,7 +554,8 @@ def run_level4_finetune(
     """
     from pathlib import Path
     import pandas as pd
-    from src.models.esm_finetuner import ESMFineTuner
+    import torch
+    from src.finetuning.esm_finetuner import ESMFinetuner
     
     tqdm.write("\n" + "=" * 70)
     tqdm.write(f"Level 4: ESM-2 Fine-tuning on {dataset} training set")
@@ -602,10 +603,9 @@ def run_level4_finetune(
     
     # Initialize fine-tuner
     try:
-        finetuner = ESMFineTuner(
+        finetuner = ESMFinetuner(
             model_name=embedding_name,
-            learning_rate=learning_rate,
-            max_len=1024,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
             mask_prob=0.15
         )
     except Exception as e:
@@ -614,21 +614,36 @@ def run_level4_finetune(
         traceback.print_exc()
         return None
     
+    # Prepare data loaders
+    try:
+        train_loader, val_loader = finetuner.prepare_data(
+            train_tsv=train_tsv,
+            val_tsv=None,  # No validation during fine-tuning
+            batch_size=batch_size,
+            max_length=1024
+        )
+    except Exception as e:
+        tqdm.write(f"  ERROR preparing data: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
     # Fine-tune
     try:
-        history = finetuner.finetune(
-            train_sequences=sequences,
-            train_seq_ids=seq_ids,
+        history = finetuner.train(
+            train_loader=train_loader,
+            val_loader=val_loader,
             epochs=epochs,
-            batch_size=batch_size,
+            learning_rate=learning_rate,
+            warmup_steps=100,
             gradient_accumulation_steps=4,
-            save_path=ft_dir,
-            save_every=1
+            save_path=str(checkpoint_path)
         )
         
         tqdm.write(f"\n  Fine-tuning completed!")
-        tqdm.write(f"  Final loss: {history['loss'][-1]:.4f}")
-        tqdm.write(f"  Final perplexity: {history['perplexity'][-1]:.2f}")
+        tqdm.write(f"  Final train loss: {history['train_loss'][-1]:.4f}")
+        if history['val_loss']:
+            tqdm.write(f"  Final val loss: {history['val_loss'][-1]:.4f}")
         tqdm.write(f"  Checkpoint saved: {checkpoint_path}")
         
         return str(checkpoint_path)
@@ -646,83 +661,67 @@ def regenerate_embeddings_with_finetuned_model(
     finetuned_checkpoint: str,
     scaffold_split_dir: str,
     output_dir: str,
-) -> None:
+) -> str:
     """
     Regenerate protein embeddings (matrices and vectors) using fine-tuned ESM-2 model.
     
     Creates new embedding directory with "_finetuned" suffix to avoid overwriting vanilla embeddings.
-    Processes only train/val/test splits to avoid data leakage.
+    Processes train/val/test splits.
+    
+    Returns:
+        Path to fine-tuned embedding base directory
     """
-    from src.build.embeddings.strategies.esm_embedding import ESMEmbeddingStrategy
+    from src.finetuning.esm_finetuner import ESMFinetuner
     import torch
-    import pandas as pd
+    from pathlib import Path
     
-    tqdm.write(f"    Loading fine-tuned model from: {finetuned_checkpoint}")
+    tqdm.write(f"\n    Regenerating embeddings with fine-tuned model...")
+    tqdm.write(f"    Checkpoint: {finetuned_checkpoint}")
     
-    # Load fine-tuned model
-    checkpoint = torch.load(finetuned_checkpoint, map_location='cpu')
-    model = checkpoint['model']
-    model.eval()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
+    # Initialize finetuner
+    finetuner = ESMFinetuner(
+        model_name=embedding_name,
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        mask_prob=0.15
+    )
+    
+    # Load fine-tuned weights
+    finetuner.load_model(finetuned_checkpoint)
     
     # Setup output directories
     base_path = EMBEDDING_BASE_PATH.format(dataset_type=dataset)
     finetuned_base = Path(base_path) / f"{embedding_name}_finetuned" / "build"
-    protein_matrix_dir = finetuned_base / "protein_matrices"
-    protein_embedding_dir = finetuned_base / "protein_embeddings"
+    finetuned_base.mkdir(parents=True, exist_ok=True)
     
-    protein_matrix_dir.mkdir(parents=True, exist_ok=True)
-    protein_embedding_dir.mkdir(parents=True, exist_ok=True)
+    tqdm.write(f"    Output directory: {finetuned_base}")
     
-    # Load all splits
+    # Extract embeddings for each split
     splits = ['train', 'val', 'test']
-    all_sequences = {}
-    
     for split in splits:
-        split_path = Path(scaffold_split_dir) / "scenarios" / "Sc" / f"{dataset}_{split}.tsv.gz"
+        if split == 'test':
+            split_path = Path(scaffold_split_dir) / f"{dataset}_test.tsv.gz"
+        else:
+            split_path = Path(scaffold_split_dir) / "scenarios" / "Sc" / f"{dataset}_{split}.tsv.gz"
+        
         if not split_path.exists():
             split_path = split_path.with_suffix('')  # try without .gz
         
         if split_path.exists():
-            df = pd.read_csv(split_path, sep='\t', compression='gzip' if split_path.suffix == '.gz' else None)
-            for _, row in df.iterrows():
-                seq_id = row['seq_id']
-                seq = row['seq']
-                if seq_id not in all_sequences:
-                    all_sequences[seq_id] = seq
+            tqdm.write(f"    Extracting embeddings for {split} split...")
+            finetuner.extract_embeddings(
+                tsv_file=str(split_path),
+                output_dir=str(finetuned_base),
+                batch_size=8,
+                repr_layer=-1,
+                save_matrices=True,
+                save_vectors=True
+            )
+        else:
+            tqdm.write(f"    WARNING: {split} split not found: {split_path}")
     
-    tqdm.write(f"    Processing {len(all_sequences)} unique protein sequences...")
+    tqdm.write(f"    ✓ Fine-tuned embeddings saved to {finetuned_base}")
     
-    # Generate embeddings
-    with torch.no_grad():
-        for seq_id, seq in tqdm(all_sequences.items(), desc="    Generating embeddings", leave=False):
-            # Skip if already exists
-            matrix_file = protein_matrix_dir / f"{seq_id}_matrix.npy"
-            vector_file = protein_embedding_dir / f"{seq_id}_vector.npy"
-            
-            if matrix_file.exists() and vector_file.exists():
-                continue
-            
-            # Tokenize
-            tokens = checkpoint['alphabet'].get_batch_converter()([("", seq)])[2]
-            tokens = tokens.to(device)
-            
-            # Get representations
-            results = model(tokens, repr_layers=[model.num_layers], return_contacts=False)
-            token_representations = results["representations"][model.num_layers][0]  # [seq_len, hidden_dim]
-            
-            # Remove <cls> and <eos> tokens
-            token_representations = token_representations[1:-1].cpu().numpy()  # [L, D]
-            
-            # Save per-token matrix
-            np.save(matrix_file, token_representations)
-            
-            # Save mean-pooled vector
-            mean_vector = token_representations.mean(axis=0)  # [D]
-            np.save(vector_file, mean_vector)
-    
-    tqdm.write(f"    ✓ Saved {len(all_sequences)} protein embeddings to {finetuned_base}")
+    return str(finetuned_base)
 
 
 def run_level1(
