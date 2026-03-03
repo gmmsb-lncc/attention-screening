@@ -221,3 +221,7 @@ class Level3CrossAttModel(nn.Module):
         logits = self.classifier(combined)  # [batch, 1]
         
         return logits
+
+
+# Alias for backward compatibility
+CrossAttnLite = Level3CrossAttModel
