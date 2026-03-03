@@ -2570,32 +2570,50 @@ def main():
     # -----------------------------------------------------------------------
     finetuned_checkpoint = None
     molformer_checkpoint = None
+    finetuned_checkpoints = {}  # Store checkpoints per dataset (for "all")
+    molformer_checkpoints = {}  # Store checkpoints per dataset (for "all")
+    
     if 4 in levels or args.finetune:
-        step_name = "Step 4: ESM-2 Fine-tuning"
+        step_name = "Step 4: ESM-2 + MolFormer Fine-tuning"
         progress.begin_step(step_name)
         
-        # Get training and validation TSV paths
-        train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_train.tsv.gz")
-        if not os.path.exists(train_tsv):
-            train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_train.tsv")
+        # For "all" dataset, fine-tune on BOTH human and non_human separately
+        # This creates separate fine-tuned models for each, avoiding data contamination
+        datasets_to_finetune = ["human", "non_human"] if dataset == "all" else [dataset]
         
-        val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_val.tsv.gz")
-        if not os.path.exists(val_tsv):
-            val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_val.tsv")
-        
-        if not os.path.exists(train_tsv):
-            tqdm.write(f"  ERROR: Training TSV not found at {train_tsv}")
-            tqdm.write("  Skipping fine-tuning.")
-        elif not os.path.exists(val_tsv):
-            tqdm.write(f"  ERROR: Validation TSV not found at {val_tsv}")
-            tqdm.write("  Skipping fine-tuning.")
-        else:
-            finetuned_checkpoint = run_level4_finetune(
-                dataset=dataset,
+        for ds in datasets_to_finetune:
+            tqdm.write(f"\n  {'='*60}")
+            tqdm.write(f"  Fine-tuning for dataset: {ds}")
+            tqdm.write(f"  {'='*60}")
+            
+            # Get training and validation TSV paths for this dataset
+            train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{ds}_train.tsv.gz")
+            if not os.path.exists(train_tsv):
+                train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{ds}_train.tsv")
+            
+            val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{ds}_val.tsv.gz")
+            if not os.path.exists(val_tsv):
+                val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{ds}_val.tsv")
+            
+            if not os.path.exists(train_tsv):
+                tqdm.write(f"    ERROR: Training TSV not found at {train_tsv}")
+                tqdm.write(f"    Skipping fine-tuning for {ds}.")
+                continue
+            elif not os.path.exists(val_tsv):
+                tqdm.write(f"    ERROR: Validation TSV not found at {val_tsv}")
+                tqdm.write(f"    Skipping fine-tuning for {ds}.")
+                continue
+            
+            # Output directory specific to this dataset
+            ds_output_dir = output_dir.replace(f"benchmark_{dataset}", f"benchmark_{ds}") if dataset == "all" else output_dir
+            
+            # ESM-2 Fine-tuning
+            ds_finetuned_checkpoint = run_level4_finetune(
+                dataset=ds,
                 embedding_name=embedding_name,
                 train_tsv=train_tsv,
                 val_tsv=val_tsv,
-                output_dir=output_dir,
+                output_dir=ds_output_dir,
                 epochs=args.finetune_epochs,
                 batch_size=args.finetune_batch_size,
                 learning_rate=args.finetune_lr,
@@ -2603,34 +2621,34 @@ def main():
                 force=force,
             )
             
-            if finetuned_checkpoint:
-                tqdm.write(f"  ✓ ESM-2 fine-tuning completed: {finetuned_checkpoint}")
-                tqdm.write(f"  → Regenerating protein embeddings with fine-tuned model...")
+            if ds_finetuned_checkpoint:
+                finetuned_checkpoints[ds] = ds_finetuned_checkpoint
+                tqdm.write(f"    ✓ ESM-2 fine-tuning completed for {ds}: {ds_finetuned_checkpoint}")
+                tqdm.write(f"    → Regenerating protein embeddings with fine-tuned model...")
                 
                 # Regenerate embeddings for train/val/test using fine-tuned model
-                # This will create new embedding directories with "_finetuned" suffix
                 try:
                     regenerate_embeddings_with_finetuned_model(
-                        dataset=dataset,
+                        dataset=ds,
                         embedding_name=embedding_name,
-                        finetuned_checkpoint=finetuned_checkpoint,
+                        finetuned_checkpoint=ds_finetuned_checkpoint,
                         scaffold_split_dir=scaffold_split_dir,
-                        output_dir=output_dir,
+                        output_dir=ds_output_dir,
                     )
-                    tqdm.write(f"  ✓ Protein embeddings regenerated with fine-tuned model")
+                    tqdm.write(f"    ✓ Protein embeddings regenerated for {ds}")
                 except Exception as e:
-                    tqdm.write(f"  ERROR regenerating protein embeddings: {e}")
-                    tqdm.write("  Continuing with vanilla embeddings...")
+                    tqdm.write(f"    ERROR regenerating protein embeddings for {ds}: {e}")
+                    tqdm.write("    Continuing with vanilla embeddings...")
             else:
-                tqdm.write("  WARNING: ESM-2 fine-tuning failed or was skipped.")
+                tqdm.write(f"    WARNING: ESM-2 fine-tuning failed for {ds}.")
             
-            # Fine-tune MolFormer on ligands
-            tqdm.write("\n  → Starting MolFormer fine-tuning on ligands...")
-            molformer_checkpoint = run_level4_finetune_molformer(
-                dataset=dataset,
+            # MolFormer Fine-tuning
+            tqdm.write(f"\n    → Starting MolFormer fine-tuning for {ds}...")
+            ds_molformer_checkpoint = run_level4_finetune_molformer(
+                dataset=ds,
                 train_tsv=train_tsv,
                 val_tsv=val_tsv,
-                output_dir=output_dir,
+                output_dir=ds_output_dir,
                 epochs=args.finetune_epochs,
                 batch_size=args.finetune_batch_size * 2,  # Larger batch for SMILES
                 learning_rate=args.finetune_lr * 2,  # Slightly higher LR for MolFormer
@@ -2638,26 +2656,37 @@ def main():
                 force=force,
             )
             
-            if molformer_checkpoint:
-                tqdm.write(f"  ✓ MolFormer fine-tuning completed: {molformer_checkpoint}")
+            if ds_molformer_checkpoint:
+                molformer_checkpoints[ds] = ds_molformer_checkpoint
+                tqdm.write(f"    ✓ MolFormer fine-tuning completed for {ds}: {ds_molformer_checkpoint}")
                 # Regenerate ligand embeddings with fine-tuned MolFormer
                 try:
                     regenerate_ligand_embeddings_with_finetuned_molformer(
-                        dataset=dataset,
-                        finetuned_checkpoint=molformer_checkpoint,
+                        dataset=ds,
+                        finetuned_checkpoint=ds_molformer_checkpoint,
                         scaffold_split_dir=scaffold_split_dir,
-                        output_dir=output_dir,
+                        output_dir=ds_output_dir,
                     )
-                    tqdm.write(f"  ✓ Ligand embeddings regenerated with fine-tuned MolFormer")
+                    tqdm.write(f"    ✓ Ligand embeddings regenerated for {ds}")
                 except Exception as e:
-                    tqdm.write(f"  ERROR regenerating ligand embeddings: {e}")
-                    tqdm.write("  Continuing with vanilla embeddings...")
+                    tqdm.write(f"    ERROR regenerating ligand embeddings for {ds}: {e}")
+                    tqdm.write("    Continuing with vanilla embeddings...")
             else:
-                tqdm.write("  WARNING: MolFormer fine-tuning failed or was skipped.")
-            
-            # Update embedding_name to point to fine-tuned embeddings for subsequent levels
-            if finetuned_checkpoint:
-                embedding_name = f"{embedding_name}_finetuned"
+                tqdm.write(f"    WARNING: MolFormer fine-tuning failed for {ds}.")
+        
+        # For single dataset, set the checkpoint variable for later use
+        if dataset != "all" and finetuned_checkpoints:
+            finetuned_checkpoint = finetuned_checkpoints.get(dataset)
+            molformer_checkpoint = molformer_checkpoints.get(dataset)
+        
+        # Summary
+        tqdm.write(f"\n  {'='*60}")
+        tqdm.write(f"  Fine-tuning Summary:")
+        tqdm.write(f"  {'='*60}")
+        for ds in datasets_to_finetune:
+            esm_status = "✓" if ds in finetuned_checkpoints else "✗"
+            mol_status = "✓" if ds in molformer_checkpoints else "✗"
+            tqdm.write(f"    {ds}: ESM-2 [{esm_status}] | MolFormer [{mol_status}]")
         
         progress.end_step(step_name)
 
