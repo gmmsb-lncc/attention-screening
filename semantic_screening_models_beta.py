@@ -218,7 +218,9 @@ def build_parser() -> argparse.ArgumentParser:
     
     # Level 4 fine-tuning
     p.add_argument("--finetune", action="store_true",
-                    help="Enable ESM-2 fine-tuning (Level 4) before embedding extraction")
+                    help="Enable ESM-2 + MolFormer fine-tuning (Level 4) before embedding extraction")
+    p.add_argument("--use_finetuned", action="store_true",
+                    help="Use pre-existing fine-tuned embeddings for Levels 1, 2, 3 (requires prior --finetune run)")
     p.add_argument("--finetune_epochs", type=int, default=100,
                     help="Fine-tuning epochs with early stopping (default: 100, patience=3)")
     p.add_argument("--finetune_lr", type=float, default=1e-5,
@@ -438,11 +440,17 @@ def _run_level_multiseed(
     force: bool,
     feature_type: str,
     embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ) -> Optional[Dict]:
     """Run Level 1 or 2 across multiple seeds, aggregate mean+std.
 
     Each seed re-trains KNN/MLP with different random init. The scaffold
     splits are fixed (precomputed), so only model randomness varies.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
     """
     from split_comparison_analysis import run_single_dataset
 
@@ -461,6 +469,8 @@ def _run_level_multiseed(
             scaffold_split_dir=scaffold_split_dir,
             feature_type=feature_type,
             embedding_name=embedding_name,
+            custom_protein_embedding_dir=custom_protein_embedding_dir,
+            custom_ligand_embedding_dir=custom_ligand_embedding_dir,
         )
 
         # If cached, load from disk
@@ -965,15 +975,23 @@ def run_level2(
     scaffold_split_dir: str,
     seeds: List[int],
     force: bool,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ) -> Optional[Dict]:
     """Run Level 2: Embedding vectors + KNN/MLP (multi-seed).
     
     Uses attention pooling to aggregate per-token embeddings into fixed-size vectors
     instead of simple mean pooling. This provides better context-aware representations.
     
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein vectors
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand vectors
+    
     Returns results dict or None.
     """
     level_dir = os.path.join(output_dir, f"level2_embedding_{embedding_short}", dataset)
+    if custom_protein_embedding_dir or custom_ligand_embedding_dir:
+        level_dir = os.path.join(output_dir, f"level2_embedding_{embedding_short}_finetuned", dataset)
     print(f"  Output: {level_dir}")
 
     return _run_level_multiseed(
@@ -984,6 +1002,8 @@ def run_level2(
         force=force,
         feature_type="embedding",
         embedding_name=embedding_name,
+        custom_protein_embedding_dir=custom_protein_embedding_dir,
+        custom_ligand_embedding_dir=custom_ligand_embedding_dir,
     )
 
 
@@ -1104,6 +1124,8 @@ def run_level3(
     batch_size: int,
     patience: Optional[int],
     learning_rate: float,
+    custom_protein_matrix_dir: str = None,
+    custom_ligand_matrix_dir: str = None,
 ) -> Optional[Dict]:
     """Run Level 3: Transformer encoders + Bidirectional Cross-Attention.
     
@@ -1114,11 +1136,17 @@ def run_level3(
     - Bidirectional cross-attention for interaction modeling
     - Attention pooling for sequence-to-vector aggregation
     
+    Args:
+        custom_protein_matrix_dir: Optional custom path for fine-tuned protein matrices
+        custom_ligand_matrix_dir: Optional custom path for fine-tuned ligand matrices
+    
     Returns results dict or None.
     """
     from crossattention_split_analysis.experiment import run_single_analysis
     
     level_dir = os.path.join(output_dir, f"level3_crossatt_{embedding_short}")
+    if custom_protein_matrix_dir or custom_ligand_matrix_dir:
+        level_dir = os.path.join(output_dir, f"level3_crossatt_{embedding_short}_finetuned")
     tqdm.write(f"  Output: {level_dir}")
     tqdm.write(f"  Architecture: Transformer + Cross-Attention (Level 3)")
     
@@ -1142,6 +1170,8 @@ def run_level3(
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
         model_variant="level3_crossatt",
+        custom_protein_matrix_dir=custom_protein_matrix_dir,
+        custom_ligand_matrix_dir=custom_ligand_matrix_dir,
     )
     
     # If cached, try to load from disk
@@ -2477,6 +2507,43 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     t_start = time.time()
 
+    # -----------------------------------------------------------------------
+    # Handle --use_finetuned: Check for pre-existing fine-tuned embeddings
+    # -----------------------------------------------------------------------
+    use_finetuned_embeddings = False
+    finetuned_protein_dir = None
+    finetuned_ligand_dir = None
+    finetuned_protein_vec_dir = None
+    finetuned_ligand_vec_dir = None
+    
+    if args.use_finetuned:
+        # Check if fine-tuned embeddings exist
+        finetuned_base = os.path.join(output_dir, "finetuned_embeddings", dataset)
+        finetuned_protein_dir = os.path.join(finetuned_base, "protein_matrices")
+        finetuned_ligand_dir = os.path.join(finetuned_base, "ligand_matrices")
+        finetuned_protein_vec_dir = os.path.join(finetuned_base, "protein_embeddings")
+        finetuned_ligand_vec_dir = os.path.join(finetuned_base, "ligand_embeddings")
+        
+        # Check existence
+        protein_matrices_exist = os.path.exists(finetuned_protein_dir) and len(os.listdir(finetuned_protein_dir)) > 0
+        ligand_matrices_exist = os.path.exists(finetuned_ligand_dir) and len(os.listdir(finetuned_ligand_dir)) > 0
+        
+        if protein_matrices_exist and ligand_matrices_exist:
+            use_finetuned_embeddings = True
+            print(f"\n  ✓ Using pre-existing fine-tuned embeddings from:")
+            print(f"    Protein matrices: {finetuned_protein_dir}")
+            print(f"    Ligand matrices:  {finetuned_ligand_dir}")
+            
+            # Count files
+            n_protein = len([f for f in os.listdir(finetuned_protein_dir) if f.endswith('.npy')])
+            n_ligand = len([f for f in os.listdir(finetuned_ligand_dir) if f.endswith('.npy')])
+            print(f"    Protein files: {n_protein}, Ligand files: {n_ligand}")
+        else:
+            print(f"\n  ⚠ WARNING: --use_finetuned specified but fine-tuned embeddings not found at:")
+            print(f"    {finetuned_base}")
+            print(f"    Run with --finetune first to generate fine-tuned embeddings.")
+            print(f"    Falling back to vanilla embeddings.\n")
+
     # Initialize global progress tracker
     progress = BenchmarkProgress(levels, dataset, embedding_short, finetune=args.finetune)
 
@@ -2623,6 +2690,8 @@ def main():
     if 2 in levels:
         step_name = "Step 2: Level 2 (Emb+KNN/MLP)"
         progress.begin_step(step_name)
+        if use_finetuned_embeddings:
+            tqdm.write(f"  Using FINE-TUNED embeddings")
         level2_results = run_level2(
             dataset=dataset,
             embedding_name=embedding_name,
@@ -2631,6 +2700,8 @@ def main():
             scaffold_split_dir=scaffold_split_dir,
             seeds=seeds,
             force=force,
+            custom_protein_embedding_dir=finetuned_protein_vec_dir if use_finetuned_embeddings else None,
+            custom_ligand_embedding_dir=finetuned_ligand_vec_dir if use_finetuned_embeddings else None,
         )
         if level2_results:
             tqdm.write("  Level 2 completed successfully.")
@@ -2647,6 +2718,8 @@ def main():
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
+        if use_finetuned_embeddings:
+            tqdm.write(f"  Using FINE-TUNED embeddings")
         level3_results = run_level3(
             dataset=dataset,
             embedding_name=embedding_name,
@@ -2659,6 +2732,8 @@ def main():
             batch_size=args.batch_size,
             patience=patience,
             learning_rate=args.learning_rate,
+            custom_protein_matrix_dir=finetuned_protein_dir if use_finetuned_embeddings else None,
+            custom_ligand_matrix_dir=finetuned_ligand_dir if use_finetuned_embeddings else None,
         )
         if level3_results:
             tqdm.write("  Level 3 completed successfully.")

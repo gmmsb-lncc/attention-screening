@@ -607,6 +607,14 @@ def run_crossattention_analysis(
             ligand_type = "Per-token Embeddings (SMI-TED)"
         ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
 
+    # Override with custom paths if provided (for fine-tuned embeddings)
+    if custom_protein_matrix_dir:
+        protein_matrix_dirs = [custom_protein_matrix_dir]
+        input_type = f"{input_type} (Fine-tuned)"
+    if custom_ligand_matrix_dir:
+        ligand_matrix_dirs = [custom_ligand_matrix_dir]
+        ligand_type = f"{ligand_type} (Fine-tuned)"
+
     # For backward compatibility, keep single dir references
     protein_matrix_dir = protein_matrix_dirs[0]
     ligand_matrix_dir = ligand_matrix_dirs[0]
@@ -898,6 +906,8 @@ def run_single_analysis(
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     external_test_mode: bool = False,
     model_variant: str = 'cnn_crossattn',
+    custom_protein_matrix_dir: str = None,
+    custom_ligand_matrix_dir: str = None,
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
