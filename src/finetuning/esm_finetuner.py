@@ -1,11 +1,13 @@
 """
 ESM-2 Fine-tuning Module for Level 4
 Fine-tunes ESM-2 models on kinase training data using masked language modeling.
+Implements memory-efficient training with gradient checkpointing and mixed precision.
 """
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.cuda.amp import autocast, GradScaler
 from typing import List, Tuple, Dict, Optional
 import pandas as pd
 from tqdm import tqdm
@@ -13,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 import numpy as np
+import gc
 
 # Add ESM to path
 esm_path = Path(__file__).parent.parent.parent / "llm" / "ESM"
@@ -81,24 +84,33 @@ def create_masked_batch(batch, alphabet, mask_prob=0.15):
 
 
 class ESMFinetuner:
-    """Fine-tunes ESM-2 models on kinase sequences using MLM."""
+    """Fine-tunes ESM-2 models on kinase sequences using MLM with memory-efficient training."""
     
     def __init__(
         self,
         model_name: str = "esm2_t6_8M_UR50D",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         mask_prob: float = 0.15,
+        use_amp: bool = True,  # Mixed precision for memory efficiency
     ):
         self.model_name = model_name
         self.device = device
         self.mask_prob = mask_prob
+        self.use_amp = use_amp and device == "cuda"
+        self.scaler = GradScaler() if self.use_amp else None
         
         print(f"  Loading ESM-2 model: {model_name}...")
         self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(model_name)
         self.model = self.model.to(device)
         self.batch_converter = self.alphabet.get_batch_converter()
         
+        # Enable gradient checkpointing for memory efficiency (if available)
+        if hasattr(self.model, 'set_grad_checkpointing'):
+            self.model.set_grad_checkpointing(True)
+            print("  ✓ Gradient checkpointing enabled")
+        
         print(f"  Model loaded on {device}")
+        print(f"  Mixed precision (AMP): {self.use_amp}")
         n_params = sum(p.numel() for p in self.model.parameters())
         print(f"  Total parameters: {n_params:,}")
     
@@ -166,11 +178,18 @@ class ESMFinetuner:
         epochs: int = 5,
         learning_rate: float = 1e-5,
         warmup_steps: int = 100,
-        gradient_accumulation_steps: int = 1,
+        gradient_accumulation_steps: int = 4,  # Higher for memory efficiency
         save_path: Optional[str] = None,
+        patience: int = 3,
+        max_grad_norm: float = 1.0,
     ) -> Dict[str, List[float]]:
         """
         Fine-tune the model using masked language modeling.
+        
+        Uses:
+        - Mixed precision training (FP16) for memory efficiency
+        - Gradient accumulation
+        - Gradient clipping
         
         Args:
             train_loader: Training data loader
@@ -180,6 +199,8 @@ class ESMFinetuner:
             warmup_steps: Number of warmup steps for learning rate scheduler
             gradient_accumulation_steps: Gradient accumulation steps
             save_path: Path to save the fine-tuned model
+            patience: Early stopping patience (epochs without improvement)
+            max_grad_norm: Max gradient norm for clipping
         
         Returns:
             Dictionary with training history
@@ -197,7 +218,7 @@ class ESMFinetuner:
         )
         
         # Learning rate scheduler with warmup
-        total_steps = len(train_loader) * epochs
+        total_steps = len(train_loader) * epochs // gradient_accumulation_steps
         
         def lr_lambda(current_step):
             if current_step < warmup_steps:
@@ -212,19 +233,29 @@ class ESMFinetuner:
         history = {
             'train_loss': [],
             'val_loss': [],
-            'learning_rate': []
+            'learning_rate': [],
+            'perplexity': []
         }
         
-        print(f"\n  Starting fine-tuning for {epochs} epochs...")
+        print(f"\n  Starting ESM-2 fine-tuning for {epochs} epochs (patience={patience})...")
         print(f"  Learning rate: {learning_rate}, Warmup steps: {warmup_steps}")
         print(f"  Gradient accumulation: {gradient_accumulation_steps} steps")
+        print(f"  Mixed precision (AMP): {self.use_amp}")
         
         global_step = 0
         best_val_loss = float('inf')
+        best_train_loss = float('inf')
+        epochs_without_improvement = 0
         
         for epoch in range(epochs):
             epoch_loss = 0.0
+            num_batches = 0
             optimizer.zero_grad()
+            
+            # Clear cache before each epoch
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+                gc.collect()
             
             pbar = tqdm(
                 train_loader,
@@ -242,26 +273,64 @@ class ESMFinetuner:
                 masked_tokens = masked_tokens.to(self.device)
                 mask = mask.to(self.device)
                 
-                # Forward pass
-                results = self.model(masked_tokens, repr_layers=[])
-                logits = results["logits"]
-                
-                # Compute loss only on masked tokens
-                masked_logits = logits[mask]
-                masked_labels = original_tokens[mask]
-                
-                loss = criterion(masked_logits, masked_labels)
-                loss = loss / gradient_accumulation_steps
-                
-                # Backward pass
-                loss.backward()
-                
-                epoch_loss += loss.item() * gradient_accumulation_steps
+                try:
+                    # Mixed precision forward pass
+                    if self.use_amp:
+                        with autocast():
+                            results = self.model(masked_tokens, repr_layers=[])
+                            logits = results["logits"]
+                            
+                            # Compute loss only on masked tokens
+                            masked_logits = logits[mask]
+                            masked_labels = original_tokens[mask]
+                            
+                            if masked_logits.numel() > 0:
+                                loss = criterion(masked_logits, masked_labels)
+                            else:
+                                continue
+                        
+                        # Scaled backward
+                        loss = loss / gradient_accumulation_steps
+                        self.scaler.scale(loss).backward()
+                    else:
+                        results = self.model(masked_tokens, repr_layers=[])
+                        logits = results["logits"]
+                        
+                        masked_logits = logits[mask]
+                        masked_labels = original_tokens[mask]
+                        
+                        if masked_logits.numel() > 0:
+                            loss = criterion(masked_logits, masked_labels)
+                        else:
+                            continue
+                        
+                        loss = loss / gradient_accumulation_steps
+                        loss.backward()
+                    
+                    epoch_loss += loss.item() * gradient_accumulation_steps
+                    num_batches += 1
+                    
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        print(f"\n  WARNING: OOM at batch {batch_idx}, skipping...")
+                        if self.device == "cuda":
+                            torch.cuda.empty_cache()
+                        optimizer.zero_grad()
+                        continue
+                    else:
+                        raise e
                 
                 # Update weights
                 if (batch_idx + 1) % gradient_accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                    optimizer.step()
+                    if self.use_amp:
+                        self.scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                        self.scaler.step(optimizer)
+                        self.scaler.update()
+                    else:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                        optimizer.step()
+                    
                     scheduler.step()
                     optimizer.zero_grad()
                     global_step += 1
@@ -272,35 +341,57 @@ class ESMFinetuner:
                     'lr': f"{current_lr:.2e}"
                 })
             
-            avg_train_loss = epoch_loss / len(train_loader)
+            avg_train_loss = epoch_loss / max(num_batches, 1)
+            train_perplexity = np.exp(min(avg_train_loss, 10))  # Cap to prevent overflow
+            
             history['train_loss'].append(avg_train_loss)
             history['learning_rate'].append(current_lr)
+            history['perplexity'].append(train_perplexity)
             
-            print(f"  Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f}")
-            
-            # Validation
+            # Validation or use train loss for early stopping
             if val_loader:
                 val_loss = self.evaluate(val_loader, criterion)
                 history['val_loss'].append(val_loss)
-                print(f"  Epoch {epoch+1}/{epochs} - Val Loss: {val_loss:.4f}")
+                val_perplexity = np.exp(min(val_loss, 10))
+                print(f"  Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f} (PPL: {train_perplexity:.2f}), "
+                      f"Val Loss: {val_loss:.4f} (PPL: {val_perplexity:.2f})")
                 
-                # Save best model
-                if save_path and val_loss < best_val_loss:
+                # Early stopping based on validation loss
+                if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    self.save_model(save_path)
-                    print(f"  → Best model saved to {save_path}")
-        
-        # Save final model if no validation
-        if save_path and not val_loader:
-            self.save_model(save_path)
-            print(f"  → Final model saved to {save_path}")
+                    epochs_without_improvement = 0
+                    if save_path:
+                        self.save_model(save_path)
+                        print(f"  → Best model saved (val_loss={val_loss:.4f})")
+                else:
+                    epochs_without_improvement += 1
+                    print(f"  → No improvement for {epochs_without_improvement}/{patience} epochs")
+            else:
+                print(f"  Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f} (PPL: {train_perplexity:.2f})")
+                
+                # Early stopping based on train loss when no validation
+                if avg_train_loss < best_train_loss:
+                    best_train_loss = avg_train_loss
+                    epochs_without_improvement = 0
+                    if save_path:
+                        self.save_model(save_path)
+                        print(f"  → Best model saved (train_loss={avg_train_loss:.4f})")
+                else:
+                    epochs_without_improvement += 1
+                    print(f"  → No improvement for {epochs_without_improvement}/{patience} epochs")
+            
+            # Check early stopping
+            if epochs_without_improvement >= patience:
+                print(f"\n  Early stopping triggered after {epoch+1} epochs")
+                break
         
         return history
     
     def evaluate(self, data_loader: DataLoader, criterion) -> float:
-        """Evaluate the model on validation set."""
+        """Evaluate the model on validation set with mixed precision."""
         self.model.eval()
         total_loss = 0.0
+        num_batches = 0
         
         with torch.no_grad():
             for batch in tqdm(data_loader, desc="  Evaluating", leave=False):
@@ -312,17 +403,39 @@ class ESMFinetuner:
                 masked_tokens = masked_tokens.to(self.device)
                 mask = mask.to(self.device)
                 
-                results = self.model(masked_tokens, repr_layers=[])
-                logits = results["logits"]
-                
-                masked_logits = logits[mask]
-                masked_labels = original_tokens[mask]
-                
-                loss = criterion(masked_logits, masked_labels)
-                total_loss += loss.item()
+                try:
+                    if self.use_amp:
+                        with autocast():
+                            results = self.model(masked_tokens, repr_layers=[])
+                            logits = results["logits"]
+                            
+                            masked_logits = logits[mask]
+                            masked_labels = original_tokens[mask]
+                            
+                            if masked_logits.numel() > 0:
+                                loss = criterion(masked_logits, masked_labels)
+                                total_loss += loss.item()
+                                num_batches += 1
+                    else:
+                        results = self.model(masked_tokens, repr_layers=[])
+                        logits = results["logits"]
+                        
+                        masked_logits = logits[mask]
+                        masked_labels = original_tokens[mask]
+                        
+                        if masked_logits.numel() > 0:
+                            loss = criterion(masked_logits, masked_labels)
+                            total_loss += loss.item()
+                            num_batches += 1
+                            
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        torch.cuda.empty_cache()
+                        continue
+                    raise e
         
         self.model.train()
-        return total_loss / len(data_loader)
+        return total_loss / max(num_batches, 1)
     
     def save_model(self, path: str):
         """Save the fine-tuned model."""
