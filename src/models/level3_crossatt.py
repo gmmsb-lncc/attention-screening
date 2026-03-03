@@ -220,7 +220,11 @@ class Level3CrossAttModel(nn.Module):
         combined = torch.cat([prot_pooled, lig_pooled], dim=-1)  # [batch, hidden*2]
         logits = self.classifier(combined)  # [batch, 1]
         
-        return logits
+        # Return in expected format for trainer
+        return {
+            'classification': logits,
+            'regression': None  # Level 3 doesn't have regression head
+        }
 
 
 # Alias for backward compatibility
