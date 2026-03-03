@@ -216,6 +216,7 @@ MODEL_VARIANT_TO_ENCODER = {
     'cross_attention_lite': 'linear',
     'diffusion': 'diffusion',
     'level5_lite': 'level5_lite',
+    'level3_crossatt': 'level5_lite',  # Alias: Level 3 uses Level5-Lite architecture
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -223,6 +224,7 @@ MODEL_VARIANT_TO_LABEL = {
     'cross_attention_lite': 'CrossAttnLite',
     'diffusion': 'Diffusion',
     'level5_lite': 'Level5-Lite',
+    'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
 }
 
 
