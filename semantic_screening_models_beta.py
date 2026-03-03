@@ -6,13 +6,13 @@ Coordinates the full pipeline:
   Step 0b: Verify / extract ligand vectors (if Level 2 requested)
   Step 1:  Level 1 — Fingerprint + KNN/MLP  (baseline)
   Step 2:  Level 2 — Embedding vectors + KNN/MLP
-  Step 3:  Level 3 — Matrices + CNN+CrossAttention  (DT-Kinase)
-  Step 4:  Comparative report and visualizations
+  Step 3:  Level 3 — Transformer + Cross-Attention
+  Step 6:  Level 6 — Optimized Transformer (HPO)
+  Report:  Comparative report and visualizations
 
 Usage:
-    python semantic_screening_models_beta.py --dataset non_human --embedding 8M
-    python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
-    python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 --epochs 100
+    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3
+    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 6 --opt --n_trials 20
 """
 
 from __future__ import annotations
@@ -55,9 +55,7 @@ LEVEL_LABELS = {
     "level1_fp_mlp": "Level 1 (FP+MLP)",
     "level2_emb_knn": "Level 2 (Emb+KNN)",
     "level2_emb_mlp": "Level 2 (Emb+MLP)",
-    "level3_cnn": "Level 3 (CNN)",
-    "level4_cnn_ca": "Level 4 (CNN+CA)",
-    "level5_lite": "Level 5 (Lite)",
+    "level3_crossatt": "Level 3 (CrossAtt)",
     "level6_optimized": "Level 6 (Optimized)",
 }
 
@@ -69,9 +67,7 @@ LEVEL_COLORS = {
     "level1_fp_mlp": "#66c2a5",
     "level2_emb_knn": "#7570b3",
     "level2_emb_mlp": "#a6a3d9",
-    "level3_cnn": "#d95f02",
-    "level4_cnn_ca": "#e7298a",
-    "level5_lite": "#ff7f0e",
+    "level3_crossatt": "#ff7f0e",
     "level6_optimized": "#17becf",
 }
 
@@ -101,8 +97,8 @@ class BenchmarkProgress:
             self.steps.append("Step 3: Level 3 (CNN)")
         if 4 in levels:
             self.steps.append("Step 4: Level 4 (CNN+CA)")
-        if 5 in levels:
-            self.steps.append("Step 5: Level 5-Lite")
+        if 3 in levels:
+            self.steps.append("Step 3: Level 3 (CrossAtt)")
         if 6 in levels:
             self.steps.append("Step 6: Level 6 (Optimized)")
         self.steps.append("Report + Visualizations")
@@ -661,10 +657,10 @@ def _load_crossattention_results(
 
 
 # ---------------------------------------------------------------------------
-# Step 5: Level 5-Lite — Transformer + Cross-Attention
+# Step 3: Level 3 — Cross-Attention
 # ---------------------------------------------------------------------------
 
-def run_level5_lite(
+def run_level3_crossatt(
     dataset: str,
     embedding_name: str,
     embedding_short: str,
@@ -677,7 +673,7 @@ def run_level5_lite(
     patience: Optional[int],
     learning_rate: float,
 ) -> Optional[Dict]:
-    """Run Level 5-Lite: Transformer encoders + Bidirectional Cross-Attention.
+    """Run Level 3: Transformer encoders + Bidirectional Cross-Attention.
     
     This level uses:
     - Pre-calculated ESM-2 protein matrices (per-residue)
@@ -690,9 +686,9 @@ def run_level5_lite(
     """
     from crossattention_split_analysis.experiment import run_single_analysis
     
-    level_dir = os.path.join(output_dir, f"level5_lite_{embedding_short}")
+    level_dir = os.path.join(output_dir, f"level3_crossatt_{embedding_short}")
     tqdm.write(f"  Output: {level_dir}")
-    tqdm.write(f"  Architecture: Transformer + Cross-Attention (Level 5-Lite)")
+    tqdm.write(f"  Architecture: Transformer + Cross-Attention (Level 3)")
     
     results = run_single_analysis(
         embedding_name=embedding_name,
@@ -713,7 +709,7 @@ def run_level5_lite(
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
-        model_variant="level5_lite",
+        model_variant="level3_crossatt",
     )
     
     # If cached, try to load from disk
@@ -1565,7 +1561,7 @@ def print_comparison_table(
     for model_key in [
         "level1_fp_knn", "level1_fp_mlp",
         "level2_emb_knn", "level2_emb_mlp",
-        "level3_cnn", "level4_cnn_ca", "level5_lite",
+        "level3_crossatt", "level6_optimized",
     ]:
         if model_key not in aggregated:
             continue
@@ -1641,7 +1637,7 @@ def save_benchmark_json(
 def _available_models(aggregated: Dict) -> List[str]:
     """Return model keys that have at least one non-None metric."""
     order = ["level1_fp_knn", "level1_fp_mlp", "level2_emb_knn", "level2_emb_mlp",
-             "level3_cnn", "level4_cnn_ca", "level5_lite"]
+             "level3_crossatt", "level6_optimized"]
     available = []
     for k in order:
         if k in aggregated:
@@ -2143,45 +2139,17 @@ def main():
             tqdm.write("  WARNING: Level 3 returned no results.")
         progress.end_step(step_name)
 
-    # -----------------------------------------------------------------------
-    # Step 4: Level 4 — CNN + CrossAttention
-    # -----------------------------------------------------------------------
-    level4_results = None
-    if 4 in levels:
-        step_name = "Step 4: Level 4 (CNN+CA)"
-        progress.begin_step(step_name)
-        tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
-        tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
-        level4_results = run_level3(
-            dataset=dataset,
-            embedding_name=embedding_name,
-            embedding_short=embedding_short,
-            output_dir=output_dir,
-            scaffold_split_dir=scaffold_split_dir,
-            seeds=seeds,
-            force=force,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            patience=patience,
-            learning_rate=args.learning_rate,
-            num_cross_attn_layers=2,
-        )
-        if level4_results:
-            tqdm.write("  Level 4 completed successfully.")
-        else:
-            tqdm.write("  WARNING: Level 4 returned no results.")
-        progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 5: Level 5-Lite — Transformer + Cross-Attention
+    # Step 3: Level 3 — Cross-Attention
     # -----------------------------------------------------------------------
-    level5_results = None
-    if 5 in levels:
-        step_name = "Step 5: Level 5-Lite"
+    level3_results = None
+    if 3 in levels:
+        step_name = "Step 3: Level 3 (CrossAtt)"
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
-        level5_results = run_level5_lite(
+        level3_results = run_level3_crossatt(
             dataset=dataset,
             embedding_name=embedding_name,
             embedding_short=embedding_short,
@@ -2194,10 +2162,10 @@ def main():
             patience=patience,
             learning_rate=args.learning_rate,
         )
-        if level5_results:
-            tqdm.write("  Level 5-Lite completed successfully.")
+        if level3_results:
+            tqdm.write("  Level 3 completed successfully.")
         else:
-            tqdm.write("  WARNING: Level 5-Lite returned no results.")
+            tqdm.write("  WARNING: Level 3 returned no results.")
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
@@ -2234,21 +2202,15 @@ def main():
     progress.begin_step(step_name)
 
     aggregated = aggregate_benchmark_metrics(
-        level1_results, level2_results, level3_results, level3_key="level3_cnn",
+        level1_results, level2_results, None, level3_key=None,
     )
-    # Merge Level 4 if present
-    if level4_results:
-        l4_agg = aggregate_benchmark_metrics(
-            None, None, level4_results, level3_key="level4_cnn_ca",
-        )
-        aggregated.update(l4_agg)
     
-    # Merge Level 5-Lite if present
-    if level5_results:
-        l5_agg = aggregate_benchmark_metrics(
-            None, None, level5_results, level3_key="level5_lite",
+    # Merge Level 3 (CrossAtt) if present
+    if level3_results:
+        l3_agg = aggregate_benchmark_metrics(
+            None, None, level3_results, level3_key="level3_crossatt",
         )
-        aggregated.update(l5_agg)
+        aggregated.update(l3_agg)
     
     # Merge Level 6 if present
     if level6_results:
