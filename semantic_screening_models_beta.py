@@ -842,9 +842,8 @@ def regenerate_embeddings_with_finetuned_model(
     # Load fine-tuned weights
     finetuner.load_model(finetuned_checkpoint)
     
-    # Setup output directories
-    base_path = EMBEDDING_BASE_PATH.format(dataset_type=dataset)
-    finetuned_base = Path(base_path) / f"{embedding_name}_finetuned" / "build"
+    # Setup output directories - use consistent path that --use_finetuned expects
+    finetuned_base = Path(output_dir) / "finetuned_embeddings" / dataset
     finetuned_base.mkdir(parents=True, exist_ok=True)
     
     tqdm.write(f"    Output directory: {finetuned_base}")
@@ -907,9 +906,8 @@ def regenerate_ligand_embeddings_with_finetuned_molformer(
         mask_prob=0.15
     )
     
-    # Setup output directories
-    base_path = EMBEDDING_BASE_PATH.format(dataset_type=dataset)
-    finetuned_base = Path(base_path) / "molformer_finetuned" / "build"
+    # Setup output directories - use consistent path that --use_finetuned expects
+    finetuned_base = Path(output_dir) / "finetuned_embeddings" / dataset
     finetuned_base.mkdir(parents=True, exist_ok=True)
     
     tqdm.write(f"    Output directory: {finetuned_base}")
