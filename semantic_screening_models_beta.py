@@ -5,7 +5,7 @@ Coordinates the full pipeline:
   Step 0:  Verify / generate scaffold splits
   Step 0b: Verify / extract ligand vectors (if Level 2 requested)
   Step 1:  Level 1 — Fingerprint + KNN/MLP  (baseline)
-  Step 2:  Level 2 — Embedding vectors + KNN/MLP
+  Step 2:  Level 2 — Embedding vectors + KNN/MLP (with Attention Pooling)
   Step 3:  Level 3 — Transformer + Cross-Attention
   Step 6:  Level 6 — Optimized Transformer (HPO)
   Report:  Comparative report and visualizations
@@ -93,10 +93,6 @@ class BenchmarkProgress:
             self.steps.append("Step 1: Level 1 (FP+KNN/MLP)")
         if 2 in levels:
             self.steps.append("Step 2: Level 2 (Emb+KNN/MLP)")
-        if 3 in levels:
-            self.steps.append("Step 3: Level 3 (CNN)")
-        if 4 in levels:
-            self.steps.append("Step 4: Level 4 (CNN+CA)")
         if 3 in levels:
             self.steps.append("Step 3: Level 3 (CrossAtt)")
         if 6 in levels:
@@ -371,7 +367,14 @@ def ensure_ligand_vectors(
     embedding_name: str,
     force: bool,
 ) -> bool:
-    """Verify or extract ligand vectors. Returns True on success."""
+    """Verify or extract ligand vectors using Attention Pooling.
+    
+    Level 2 uses attention pooling to aggregate per-token MoLFormer embeddings
+    into fixed-size vectors, providing context-aware representations instead of
+    simple mean pooling.
+    
+    Returns True on success.
+    """
     # For "all", process both human and non_human
     datasets_to_process = ["human", "non_human"] if dataset == "all" else [dataset]
     all_ok = True
@@ -541,7 +544,13 @@ def run_level2(
     seeds: List[int],
     force: bool,
 ) -> Optional[Dict]:
-    """Run Level 2: Embedding vectors + KNN/MLP (multi-seed). Returns results dict or None."""
+    """Run Level 2: Embedding vectors + KNN/MLP (multi-seed).
+    
+    Uses attention pooling to aggregate per-token embeddings into fixed-size vectors
+    instead of simple mean pooling. This provides better context-aware representations.
+    
+    Returns results dict or None.
+    """
     level_dir = os.path.join(output_dir, f"level2_embedding_{embedding_short}", dataset)
     print(f"  Output: {level_dir}")
 
@@ -571,62 +580,63 @@ def _load_split_comparison_results(level_dir: str) -> Optional[Dict]:
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Level 3 — CNN (optionally + CrossAttention)
+# DEPRECATED: Old Level 3/4 — CNN (optionally + CrossAttention)
+# These levels have been commented out in favor of the new Level 3 (Cross-Attention)
 # ---------------------------------------------------------------------------
 
-def run_level3(
-    dataset: str,
-    embedding_name: str,
-    embedding_short: str,
-    output_dir: str,
-    scaffold_split_dir: str,
-    seeds: List[int],
-    force: bool,
-    epochs: int,
-    batch_size: int,
-    patience: Optional[int],
-    learning_rate: float,
-    num_cross_attn_layers: int = 0,
-) -> Optional[Dict]:
-    """Run Level 3: CNN on embedding matrices (optionally + CrossAttention).
-
-    Args:
-        num_cross_attn_layers: 0 = CNN-only (default), >=1 = add cross-attention.
-    """
-    from crossattention_split_analysis.experiment import run_single_analysis
-
-    if num_cross_attn_layers > 0:
-        tag = "level4_cnn_ca"
-    else:
-        tag = "level3_cnn"
-    level_dir = os.path.join(output_dir, f"{tag}_{embedding_short}")
-    print(f"  Output: {level_dir}")
-    print(f"  Cross-attention layers: {num_cross_attn_layers}"
-          f" ({'CNN+CA' if num_cross_attn_layers > 0 else 'CNN-only'})")
-
-    results = run_single_analysis(
-        embedding_name=embedding_name,
-        dataset_type=dataset,
-        output_dir=level_dir,
-        seeds=seeds,
-        force=force,
-        scenarios=["scaffold"],
-        num_epochs=epochs,
-        patience=patience,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        num_cross_attn_layers=num_cross_attn_layers,
-        classification_only=True,
-        use_molformer_ligand=True,
-        scaffold_split_dir=scaffold_split_dir,
-        model_variant="cnn_crossattn",
-    )
-
-    # If cached, try to load from disk
-    if results is None:
-        results = _load_crossattention_results(level_dir, dataset, embedding_short)
-
-    return results
+# def run_level3_cnn_deprecated(
+#     dataset: str,
+#     embedding_name: str,
+#     embedding_short: str,
+#     output_dir: str,
+#     scaffold_split_dir: str,
+#     seeds: List[int],
+#     force: bool,
+#     epochs: int,
+#     batch_size: int,
+#     patience: Optional[int],
+#     learning_rate: float,
+#     num_cross_attn_layers: int = 0,
+# ) -> Optional[Dict]:
+#     """DEPRECATED: Run Level 3: CNN on embedding matrices (optionally + CrossAttention).
+# 
+#     Args:
+#         num_cross_attn_layers: 0 = CNN-only (default), >=1 = add cross-attention.
+#     """
+#     from crossattention_split_analysis.experiment import run_single_analysis
+# 
+#     if num_cross_attn_layers > 0:
+#         tag = "level4_cnn_ca"
+#     else:
+#         tag = "level3_cnn"
+#     level_dir = os.path.join(output_dir, f"{tag}_{embedding_short}")
+#     print(f"  Output: {level_dir}")
+#     print(f"  Cross-attention layers: {num_cross_attn_layers}"
+#           f" ({'CNN+CA' if num_cross_attn_layers > 0 else 'CNN-only'})")
+# 
+#     results = run_single_analysis(
+#         embedding_name=embedding_name,
+#         dataset_type=dataset,
+#         output_dir=level_dir,
+#         seeds=seeds,
+#         force=force,
+#         scenarios=["scaffold"],
+#         num_epochs=epochs,
+#         patience=patience,
+#         batch_size=batch_size,
+#         learning_rate=learning_rate,
+#         num_cross_attn_layers=num_cross_attn_layers,
+#         classification_only=True,
+#         use_molformer_ligand=True,
+#         scaffold_split_dir=scaffold_split_dir,
+#         model_variant="cnn_crossattn",
+#     )
+# 
+#     # If cached, try to load from disk
+#     if results is None:
+#         results = _load_crossattention_results(level_dir, dataset, embedding_short)
+# 
+#     return results
 
 
 def _load_crossattention_results(
@@ -657,10 +667,10 @@ def _load_crossattention_results(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Level 3 — Cross-Attention
+# Step 3: Level 3 — Transformer + Cross-Attention (formerly Level 5-Lite)
 # ---------------------------------------------------------------------------
 
-def run_level3_crossatt(
+def run_level3(
     dataset: str,
     embedding_name: str,
     embedding_short: str,
@@ -2035,7 +2045,7 @@ def main():
     print(f"  Output dir:       {output_dir}")
     print(f"  Scaffold splits:  {scaffold_split_dir}")
     print(f"  Force:            {force}")
-    if 3 in levels or 4 in levels:
+    if 3 in levels or 6 in levels:
         print(f"  DL epochs:        {args.epochs}")
         print(f"  DL batch_size:    {args.batch_size}")
         print(f"  DL patience:      {patience}")
@@ -2111,37 +2121,7 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 3: Level 3 — CNN-only
-    # -----------------------------------------------------------------------
-    level3_results = None
-    if 3 in levels:
-        step_name = "Step 3: Level 3 (CNN)"
-        progress.begin_step(step_name)
-        tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
-        tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
-        level3_results = run_level3(
-            dataset=dataset,
-            embedding_name=embedding_name,
-            embedding_short=embedding_short,
-            output_dir=output_dir,
-            scaffold_split_dir=scaffold_split_dir,
-            seeds=seeds,
-            force=force,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            patience=patience,
-            learning_rate=args.learning_rate,
-            num_cross_attn_layers=0,
-        )
-        if level3_results:
-            tqdm.write("  Level 3 completed successfully.")
-        else:
-            tqdm.write("  WARNING: Level 3 returned no results.")
-        progress.end_step(step_name)
-
-
-    # -----------------------------------------------------------------------
-    # Step 3: Level 3 — Cross-Attention
+    # Step 3: Level 3 — Transformer + Cross-Attention
     # -----------------------------------------------------------------------
     level3_results = None
     if 3 in levels:
@@ -2149,7 +2129,7 @@ def main():
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
-        level3_results = run_level3_crossatt(
+        level3_results = run_level3(
             dataset=dataset,
             embedding_name=embedding_name,
             embedding_short=embedding_short,
