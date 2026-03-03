@@ -54,7 +54,7 @@ class Level5LiteConfig:
     use_focal_loss: bool = False
     focal_gamma: float = 2.0
     focal_alpha: float = 0.25
-    optimize_threshold: bool = True
+    optimize_threshold: bool = False  # Use fixed 0.5 to avoid validation overfitting
     
     # DataLoader
     num_workers: int = 0
