@@ -2515,32 +2515,65 @@ def main():
     finetuned_ligand_vec_dir = None
     
     if args.use_finetuned:
-        # Check if fine-tuned embeddings exist
-        finetuned_base = os.path.join(output_dir, "finetuned_embeddings", dataset)
-        finetuned_protein_dir = os.path.join(finetuned_base, "protein_matrices")
-        finetuned_ligand_dir = os.path.join(finetuned_base, "ligand_matrices")
-        finetuned_protein_vec_dir = os.path.join(finetuned_base, "protein_embeddings")
-        finetuned_ligand_vec_dir = os.path.join(finetuned_base, "ligand_embeddings")
-        
-        # Check existence
-        protein_matrices_exist = os.path.exists(finetuned_protein_dir) and len(os.listdir(finetuned_protein_dir)) > 0
-        ligand_matrices_exist = os.path.exists(finetuned_ligand_dir) and len(os.listdir(finetuned_ligand_dir)) > 0
-        
-        if protein_matrices_exist and ligand_matrices_exist:
-            use_finetuned_embeddings = True
-            print(f"\n  ✓ Using pre-existing fine-tuned embeddings from:")
-            print(f"    Protein matrices: {finetuned_protein_dir}")
-            print(f"    Ligand matrices:  {finetuned_ligand_dir}")
+        # For dataset "all", we need to handle human and non_human separately
+        # The fine-tuned embeddings are stored in benchmark_human_8M/ and benchmark_non_human_8M/
+        if dataset == "all":
+            print(f"\n  ⚠ NOTE: --use_finetuned with --dataset all")
+            print(f"    Fine-tuned embeddings are stored separately per dataset.")
+            print(f"    The script will use the correct embeddings for each dataset.")
+            print(f"    Checking existence of fine-tuned embeddings...")
             
-            # Count files
-            n_protein = len([f for f in os.listdir(finetuned_protein_dir) if f.endswith('.npy')])
-            n_ligand = len([f for f in os.listdir(finetuned_ligand_dir) if f.endswith('.npy')])
-            print(f"    Protein files: {n_protein}, Ligand files: {n_ligand}")
+            all_exist = True
+            for ds in ["human", "non_human"]:
+                ds_output_dir = output_dir.replace("benchmark_all", f"benchmark_{ds}")
+                ds_finetuned_base = os.path.join(ds_output_dir, "finetuned_embeddings", ds)
+                ds_protein_dir = os.path.join(ds_finetuned_base, "protein_matrices")
+                ds_ligand_dir = os.path.join(ds_finetuned_base, "ligand_matrices")
+                
+                protein_ok = os.path.exists(ds_protein_dir) and len(os.listdir(ds_protein_dir)) > 0 if os.path.exists(ds_protein_dir) else False
+                ligand_ok = os.path.exists(ds_ligand_dir) and len(os.listdir(ds_ligand_dir)) > 0 if os.path.exists(ds_ligand_dir) else False
+                
+                if protein_ok and ligand_ok:
+                    n_protein = len([f for f in os.listdir(ds_protein_dir) if f.endswith('.npy')])
+                    n_ligand = len([f for f in os.listdir(ds_ligand_dir) if f.endswith('.npy')])
+                    print(f"    ✓ {ds}: {n_protein} protein matrices, {n_ligand} ligand matrices")
+                else:
+                    print(f"    ✗ {ds}: Fine-tuned embeddings NOT found at {ds_finetuned_base}")
+                    all_exist = False
+            
+            if all_exist:
+                use_finetuned_embeddings = True
+                print(f"    → All fine-tuned embeddings found. Will use per-dataset paths.")
+            else:
+                print(f"    → Some embeddings missing. Run --finetune --dataset all first.")
+                print(f"    → Falling back to vanilla embeddings.\n")
         else:
-            print(f"\n  ⚠ WARNING: --use_finetuned specified but fine-tuned embeddings not found at:")
-            print(f"    {finetuned_base}")
-            print(f"    Run with --finetune first to generate fine-tuned embeddings.")
-            print(f"    Falling back to vanilla embeddings.\n")
+            # Single dataset - standard check
+            finetuned_base = os.path.join(output_dir, "finetuned_embeddings", dataset)
+            finetuned_protein_dir = os.path.join(finetuned_base, "protein_matrices")
+            finetuned_ligand_dir = os.path.join(finetuned_base, "ligand_matrices")
+            finetuned_protein_vec_dir = os.path.join(finetuned_base, "protein_embeddings")
+            finetuned_ligand_vec_dir = os.path.join(finetuned_base, "ligand_embeddings")
+            
+            # Check existence
+            protein_matrices_exist = os.path.exists(finetuned_protein_dir) and len(os.listdir(finetuned_protein_dir)) > 0 if os.path.exists(finetuned_protein_dir) else False
+            ligand_matrices_exist = os.path.exists(finetuned_ligand_dir) and len(os.listdir(finetuned_ligand_dir)) > 0 if os.path.exists(finetuned_ligand_dir) else False
+            
+            if protein_matrices_exist and ligand_matrices_exist:
+                use_finetuned_embeddings = True
+                print(f"\n  ✓ Using pre-existing fine-tuned embeddings from:")
+                print(f"    Protein matrices: {finetuned_protein_dir}")
+                print(f"    Ligand matrices:  {finetuned_ligand_dir}")
+                
+                # Count files
+                n_protein = len([f for f in os.listdir(finetuned_protein_dir) if f.endswith('.npy')])
+                n_ligand = len([f for f in os.listdir(finetuned_ligand_dir) if f.endswith('.npy')])
+                print(f"    Protein files: {n_protein}, Ligand files: {n_ligand}")
+            else:
+                print(f"\n  ⚠ WARNING: --use_finetuned specified but fine-tuned embeddings not found at:")
+                print(f"    {finetuned_base}")
+                print(f"    Run with --finetune first to generate fine-tuned embeddings.")
+                print(f"    Falling back to vanilla embeddings.\n")
 
     # Initialize global progress tracker
     progress = BenchmarkProgress(levels, dataset, embedding_short, finetune=args.finetune)
@@ -2719,17 +2752,44 @@ def main():
         progress.begin_step(step_name)
         if use_finetuned_embeddings:
             tqdm.write(f"  Using FINE-TUNED embeddings")
-        level2_results = run_level2(
-            dataset=dataset,
-            embedding_name=embedding_name,
-            embedding_short=embedding_short,
-            output_dir=output_dir,
-            scaffold_split_dir=scaffold_split_dir,
-            seeds=seeds,
-            force=force,
-            custom_protein_embedding_dir=finetuned_protein_vec_dir if use_finetuned_embeddings else None,
-            custom_ligand_embedding_dir=finetuned_ligand_vec_dir if use_finetuned_embeddings else None,
-        )
+        
+        # Handle dataset="all" with fine-tuned embeddings (need separate paths)
+        if dataset == "all" and use_finetuned_embeddings:
+            # Process each dataset with its own fine-tuned paths
+            all_level2_results = {}
+            for ds in ["human", "non_human"]:
+                ds_output_dir = output_dir.replace("benchmark_all", f"benchmark_{ds}")
+                ds_finetuned_base = os.path.join(ds_output_dir, "finetuned_embeddings", ds)
+                ds_protein_vec_dir = os.path.join(ds_finetuned_base, "protein_embeddings")
+                ds_ligand_vec_dir = os.path.join(ds_finetuned_base, "ligand_embeddings")
+                
+                tqdm.write(f"  Processing {ds} with fine-tuned embeddings...")
+                ds_results = run_level2(
+                    dataset=ds,
+                    embedding_name=embedding_name,
+                    embedding_short=embedding_short,
+                    output_dir=ds_output_dir,
+                    scaffold_split_dir=scaffold_split_dir,
+                    seeds=seeds,
+                    force=force,
+                    custom_protein_embedding_dir=ds_protein_vec_dir,
+                    custom_ligand_embedding_dir=ds_ligand_vec_dir,
+                )
+                if ds_results:
+                    all_level2_results[ds] = ds_results
+            level2_results = all_level2_results if all_level2_results else None
+        else:
+            level2_results = run_level2(
+                dataset=dataset,
+                embedding_name=embedding_name,
+                embedding_short=embedding_short,
+                output_dir=output_dir,
+                scaffold_split_dir=scaffold_split_dir,
+                seeds=seeds,
+                force=force,
+                custom_protein_embedding_dir=finetuned_protein_vec_dir if use_finetuned_embeddings else None,
+                custom_ligand_embedding_dir=finetuned_ligand_vec_dir if use_finetuned_embeddings else None,
+            )
         if level2_results:
             tqdm.write("  Level 2 completed successfully.")
         else:
@@ -2747,21 +2807,52 @@ def main():
         tqdm.write(f"  Max epochs per seed: {args.epochs}, patience: {patience}")
         if use_finetuned_embeddings:
             tqdm.write(f"  Using FINE-TUNED embeddings")
-        level3_results = run_level3(
-            dataset=dataset,
-            embedding_name=embedding_name,
-            embedding_short=embedding_short,
-            output_dir=output_dir,
-            scaffold_split_dir=scaffold_split_dir,
-            seeds=seeds,
-            force=force,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            patience=patience,
-            learning_rate=args.learning_rate,
-            custom_protein_matrix_dir=finetuned_protein_dir if use_finetuned_embeddings else None,
-            custom_ligand_matrix_dir=finetuned_ligand_dir if use_finetuned_embeddings else None,
-        )
+        
+        # Handle dataset="all" with fine-tuned embeddings (need separate paths)
+        if dataset == "all" and use_finetuned_embeddings:
+            # Process each dataset with its own fine-tuned paths
+            all_level3_results = {}
+            for ds in ["human", "non_human"]:
+                ds_output_dir = output_dir.replace("benchmark_all", f"benchmark_{ds}")
+                ds_finetuned_base = os.path.join(ds_output_dir, "finetuned_embeddings", ds)
+                ds_protein_dir = os.path.join(ds_finetuned_base, "protein_matrices")
+                ds_ligand_dir = os.path.join(ds_finetuned_base, "ligand_matrices")
+                
+                tqdm.write(f"  Processing {ds} with fine-tuned embeddings...")
+                ds_results = run_level3(
+                    dataset=ds,
+                    embedding_name=embedding_name,
+                    embedding_short=embedding_short,
+                    output_dir=ds_output_dir,
+                    scaffold_split_dir=scaffold_split_dir,
+                    seeds=seeds,
+                    force=force,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    patience=patience,
+                    learning_rate=args.learning_rate,
+                    custom_protein_matrix_dir=ds_protein_dir,
+                    custom_ligand_matrix_dir=ds_ligand_dir,
+                )
+                if ds_results:
+                    all_level3_results[ds] = ds_results
+            level3_results = all_level3_results if all_level3_results else None
+        else:
+            level3_results = run_level3(
+                dataset=dataset,
+                embedding_name=embedding_name,
+                embedding_short=embedding_short,
+                output_dir=output_dir,
+                scaffold_split_dir=scaffold_split_dir,
+                seeds=seeds,
+                force=force,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                patience=patience,
+                learning_rate=args.learning_rate,
+                custom_protein_matrix_dir=finetuned_protein_dir if use_finetuned_embeddings else None,
+                custom_ligand_matrix_dir=finetuned_ligand_dir if use_finetuned_embeddings else None,
+            )
         if level3_results:
             tqdm.write("  Level 3 completed successfully.")
         else:
