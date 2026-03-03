@@ -68,9 +68,10 @@ def train_epoch(
         if model_output['regression'] is None:
             # Use simple BCE loss for classification only
             classification_logits = model_output['classification'].squeeze(-1)
+            classification_labels_squeezed = classification_labels.squeeze(-1).float()
             classification_loss = F.binary_cross_entropy_with_logits(
                 classification_logits, 
-                classification_labels.float(), 
+                classification_labels_squeezed, 
                 pos_weight=loss_fn.pos_weight if hasattr(loss_fn, 'pos_weight') else None
             )
             losses = {
