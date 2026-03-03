@@ -1244,6 +1244,8 @@ def run_level3(
         model_variant="cross_attention_lite",
         custom_protein_matrix_dir=custom_protein_matrix_dir,
         custom_ligand_matrix_dir=custom_ligand_matrix_dir,
+        optimize_threshold=False,  # Use fixed threshold
+        fixed_threshold=0.5,  # Fixed threshold at 0.5
     )
     
     # If cached, try to load from disk

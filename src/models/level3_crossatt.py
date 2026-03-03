@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 
 
 class ProteinEncoder(nn.Module):
-    """Encoder for protein embeddings with strong regularization."""
+    """Simplified encoder for protein embeddings - single layer."""
     
     def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.4):
         super().__init__()
@@ -23,10 +23,7 @@ class ProteinEncoder(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.Dropout(dropout * 0.5)  # Additional dropout
+            nn.Dropout(dropout)
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -40,7 +37,7 @@ class ProteinEncoder(nn.Module):
 
 
 class LigandEncoder(nn.Module):
-    """Encoder for ligand embeddings with strong regularization."""
+    """Simplified encoder for ligand embeddings - single layer."""
     
     def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.4):
         super().__init__()
@@ -48,10 +45,7 @@ class LigandEncoder(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.Dropout(dropout * 0.5)  # Additional dropout
+            nn.Dropout(dropout)
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -147,10 +141,10 @@ class Level3CrossAttModel(nn.Module):
         self,
         protein_dim: int = 320,
         ligand_dim: int = 768,
-        hidden_dim: int = 512,
+        hidden_dim: int = 256,  # Reduced from 512
         num_heads: int = 8,
-        encoder_dropout: float = 0.3,
-        attention_dropout: float = 0.1,
+        encoder_dropout: float = 0.4,  # Increased from 0.3
+        attention_dropout: float = 0.2,  # Increased from 0.1
         classifier_dropout: float = 0.5
     ):
         super().__init__()

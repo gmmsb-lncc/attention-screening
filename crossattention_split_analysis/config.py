@@ -132,8 +132,8 @@ class TrainingConfig:
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
-    dropout: float = 0.1
-    classifier_dropout: float = 0.2  # For level5_lite: Moderate dropout in classifier
+    dropout: float = 0.4  # Increased to combat overfitting
+    classifier_dropout: float = 0.5  # For level5_lite: High dropout in classifier
     label_smoothing: float = 0.0  # Label smoothing for classification
 
     # Diffusion-specific (used only when model_variant='diffusion')
