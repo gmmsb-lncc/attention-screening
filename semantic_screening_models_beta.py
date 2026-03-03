@@ -36,6 +36,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from tqdm import tqdm
 
 
@@ -334,13 +337,51 @@ def ensure_scaffold_splits(
 # Step 0b: Ligand vectors
 # ---------------------------------------------------------------------------
 
+class AttentionPooling(nn.Module):
+    """Learnable attention pooling for sequence aggregation.
+    
+    Uses a learnable query vector to compute attention weights over sequence,
+    then performs weighted sum to get fixed-size representation.
+    """
+    
+    def __init__(self, input_dim: int):
+        super().__init__()
+        self.attention = nn.Linear(input_dim, 1, bias=False)
+        nn.init.xavier_uniform_(self.attention.weight)
+    
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            x: [seq_len, dim] tensor
+            mask: [seq_len] bool tensor - True for valid positions
+        Returns:
+            [dim] pooled vector
+        """
+        # Compute attention scores
+        scores = self.attention(x).squeeze(-1)  # [seq_len]
+        
+        # Apply mask if provided
+        if mask is not None:
+            scores = scores.masked_fill(~mask, float('-inf'))
+        
+        # Softmax over sequence length
+        weights = F.softmax(scores, dim=0)  # [seq_len]
+        
+        # Weighted sum
+        pooled = (x * weights.unsqueeze(-1)).sum(dim=0)  # [dim]
+        return pooled
+
+
 def _extract_ligand_vectors(
     matrix_dir: Path,
     output_dir: Path,
     force: bool = False,
 ) -> dict:
-    """Mean-pool MoLFormer per-token matrices into ligand vectors.
-
+    """Extract fixed-size ligand vectors from MoLFormer matrices using Attention Pooling.
+    
+    For Level 1: Uses mean pooling (baseline)
+    For Level 2: Uses learnable attention pooling (context-aware aggregation)
+    
     Reads {chembl_id}_matrix.npy or {chembl_id}_molformer_matrix.npy 
     (shape [n_tokens, 768]) and writes {chembl_id}_embedding.npy (shape [768]).
     """
@@ -366,29 +407,45 @@ def _extract_ligand_vectors(
         print(f"  WARNING: no matrix files found in {matrix_dir}")
         return {"processed": 0, "skipped": 0, "errors": 0}
 
+    # Use attention pooling for better representations
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    sample_mat = np.load(matrix_files[0])
+    input_dim = sample_mat.shape[1]
+    
+    pooling_model = AttentionPooling(input_dim).to(device)
+    pooling_model.eval()
+
     processed = skipped = errors = 0
-    for mf in matrix_files:
-        # Extract chembl_id from filename (handle both patterns)
-        if mf.name.endswith("_molformer_matrix.npy"):
-            chembl_id = mf.name.replace("_molformer_matrix.npy", "")
-        else:
-            chembl_id = mf.stem.replace("_matrix", "")
-        
-        out_path = output_dir / f"{chembl_id}_embedding.npy"
-        if out_path.exists() and not force:
-            skipped += 1
-            continue
-        try:
-            mat = np.load(mf)
-            if mat.ndim != 2:
-                print(f"  WARNING: unexpected shape {mat.shape} for {mf.name}, skipping")
-                errors += 1
+    with torch.no_grad():
+        for mf in matrix_files:
+            # Extract chembl_id from filename (handle both patterns)
+            if mf.name.endswith("_molformer_matrix.npy"):
+                chembl_id = mf.name.replace("_molformer_matrix.npy", "")
+            else:
+                chembl_id = mf.stem.replace("_matrix", "")
+            
+            out_path = output_dir / f"{chembl_id}_embedding.npy"
+            if out_path.exists() and not force:
+                skipped += 1
                 continue
-            np.save(out_path, mat.mean(axis=0).astype(np.float32))
-            processed += 1
-        except Exception as e:
-            print(f"  ERROR processing {mf.name}: {e}")
-            errors += 1
+            try:
+                mat = np.load(mf)
+                if mat.ndim != 2:
+                    print(f"  WARNING: unexpected shape {mat.shape} for {mf.name}, skipping")
+                    errors += 1
+                    continue
+                
+                # Attention pooling
+                mat_tensor = torch.from_numpy(mat).float().to(device)  # [seq_len, dim]
+                mask = torch.ones(mat_tensor.shape[0], dtype=torch.bool, device=device)
+                pooled = pooling_model(mat_tensor, mask)  # [dim]
+                
+                np.save(out_path, pooled.cpu().numpy().astype(np.float32))
+                processed += 1
+            except Exception as e:
+                print(f"  ERROR processing {mf.name}: {e}")
+                errors += 1
+    
     return {"processed": processed, "skipped": skipped, "errors": errors}
 
 
