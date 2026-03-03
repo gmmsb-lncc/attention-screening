@@ -108,8 +108,8 @@ class CrossAttentionLayer(nn.Module):
             lig_out: [batch, lig_len, hidden_dim]
         """
         # Convert masks for MultiheadAttention (expects key_padding_mask: True=ignore)
-        prot_key_mask = ~prot_mask if prot_mask is not None else None
-        lig_key_mask = ~lig_mask if lig_mask is not None else None
+        prot_key_mask = ~prot_mask.bool() if prot_mask is not None else None
+        lig_key_mask = ~lig_mask.bool() if lig_mask is not None else None
         
         # Protein attends to ligand (query=prot, key/value=lig)
         prot_attn, _ = self.prot_to_lig(
