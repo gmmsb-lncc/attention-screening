@@ -176,9 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ESM-2 model shorthand (default: 8M)")
 
     # Level selection
-    p.add_argument("--levels", default="1,2,3",
-                    help="Comma-separated levels to run: 1=FP, 2=Emb, 3=CNN, 4=CNN+CA, 5=Level5-Lite, 6=Optimized "
-                         "(default: 1,2,3)")
+    p.add_argument("--levels", default="1,2,3", nargs='?',
+                    help="Levels to run (comma or space separated): 1=FP, 2=Emb, 3=CrossAtt, 4=FineTune, 5=Reserved, 6=Optimized "
+                         "(default: 1,2,3). Examples: --levels 1,2,3 OR --levels '1 2 3'")
     
     # Level 6 optimization
     p.add_argument("--opt", action="store_true",
@@ -236,9 +236,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_levels(levels_str: str) -> List[int]:
-    """Parse '1,2,3' into [1, 2, 3]."""
+    """Parse '1,2,3' or '1 2 3' into [1, 2, 3]."""
+    import re
     try:
-        levels = sorted(set(int(x.strip()) for x in levels_str.split(",")))
+        # Accept both comma and space separated values
+        parts = re.split(r'[,\s]+', levels_str.strip())
+        levels = sorted(set(int(x.strip()) for x in parts if x.strip()))
         for lv in levels:
             if lv not in (1, 2, 3, 4, 5, 6):
                 raise ValueError(f"Invalid level: {lv}. Valid: 1,2,3,4,5,6")
