@@ -217,8 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
     # Level 4 fine-tuning
     p.add_argument("--finetune", action="store_true",
                     help="Enable ESM-2 fine-tuning (Level 4) before embedding extraction")
-    p.add_argument("--finetune_epochs", type=int, default=10,
-                    help="Fine-tuning epochs (default: 10)")
+    p.add_argument("--finetune_epochs", type=int, default=100,
+                    help="Fine-tuning epochs with early stopping (default: 100, patience=3)")
     p.add_argument("--finetune_lr", type=float, default=1e-5,
                     help="Fine-tuning learning rate (default: 1e-5)")
     p.add_argument("--finetune_batch_size", type=int, default=8,
