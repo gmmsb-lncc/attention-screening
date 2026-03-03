@@ -61,7 +61,7 @@ class LigandEncoder(nn.Module):
 class CrossAttentionLayer(nn.Module):
     """Bidirectional cross-attention between protein and ligand."""
     
-    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int, num_heads: int = 2, dropout: float = 0.1):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
@@ -142,9 +142,9 @@ class Level3CrossAttModel(nn.Module):
         protein_dim: int = 320,
         ligand_dim: int = 768,
         hidden_dim: int = 256,  # Reduced from 512
-        num_heads: int = 8,
+        num_heads: int = 4,  # Reduced from 8 to 4 for better generalization
         encoder_dropout: float = 0.4,  # Increased from 0.3
-        attention_dropout: float = 0.2,  # Increased from 0.1
+        attention_dropout: float = 0.3,  # Increased from 0.2
         classifier_dropout: float = 0.5
     ):
         super().__init__()
