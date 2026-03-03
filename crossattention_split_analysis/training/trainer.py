@@ -5,6 +5,7 @@ import warnings
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -48,44 +49,49 @@ def train_epoch(
     total_aux_loss = 0
     num_batches = 0
 
-    pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', leave=False)
+    progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', leave=False)
 
-    for batch in pbar:
-        protein_matrix = batch['protein_matrix'].to(device)
-        ligand_matrix = batch['ligand_matrix'].to(device)
-        protein_mask = batch['protein_mask'].to(device)
-        ligand_mask = batch['ligand_mask'].to(device)
-        labels = batch['labels'].to(device)
-        reg_targets = batch['regression_targets'].to(device)
-        reg_mask = batch['regression_mask'].to(device)
+    for batch in progress_bar:
+        protein_embeddings = batch['protein_matrix'].to(device)
+        ligand_embeddings = batch['ligand_matrix'].to(device)
+        protein_padding_mask = batch['protein_mask'].to(device)
+        ligand_padding_mask = batch['ligand_mask'].to(device)
+        classification_labels = batch['labels'].to(device)
+        regression_targets = batch['regression_targets'].to(device)
+        regression_mask = batch['regression_mask'].to(device)
 
         optimizer.zero_grad()
 
-        output = model(protein_matrix, ligand_matrix, protein_mask, ligand_mask)
+        model_output = model(protein_embeddings, ligand_embeddings, protein_padding_mask, ligand_padding_mask)
 
         # Handle classification-only models (Level 3)
-        if output['regression'] is None:
+        if model_output['regression'] is None:
             # Use simple BCE loss for classification only
-            cls_logits = output['classification'].squeeze(-1)
-            loss = F.binary_cross_entropy_with_logits(
-                cls_logits, labels.float(), 
+            classification_logits = model_output['classification'].squeeze(-1)
+            classification_loss = F.binary_cross_entropy_with_logits(
+                classification_logits, 
+                classification_labels.float(), 
                 pos_weight=loss_fn.pos_weight if hasattr(loss_fn, 'pos_weight') else None
             )
-            losses = {'total': loss, 'classification': loss, 'regression': torch.tensor(0.0, device=device)}
+            losses = {
+                'total': classification_loss, 
+                'classification': classification_loss, 
+                'regression': torch.tensor(0.0, device=device)
+            }
         else:
             # Multi-task loss (for other levels)
             losses = loss_fn(
-                output['classification'],
-                output['regression'],
-                labels,
-                reg_targets,
-                reg_mask
+                model_output['classification'],
+                model_output['regression'],
+                classification_labels,
+                regression_targets,
+                regression_mask
             )
-        aux_loss = output.get('aux_loss')
-        if aux_loss is not None:
-            scaled_aux = aux_loss * float(aux_loss_scale)
-            losses['total'] = losses['total'] + scaled_aux
-            losses['aux'] = scaled_aux.detach().item()
+        auxiliary_loss = model_output.get('aux_loss')
+        if auxiliary_loss is not None:
+            scaled_auxiliary_loss = auxiliary_loss * float(aux_loss_scale)
+            losses['total'] = losses['total'] + scaled_auxiliary_loss
+            losses['aux'] = scaled_auxiliary_loss.detach().item()
 
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
@@ -103,25 +109,25 @@ def train_epoch(
             total_aux_loss += losses['aux']
         num_batches += 1
 
-        postfix = {
+        progress_info = {
             'loss': f"{losses['total'].item():.4f}",
             'cls': f"{losses['classification'].item():.4f}"
         }
         if 'aux' in losses:
-            postfix['aux'] = f"{losses['aux']:.4f}"
-        pbar.set_postfix(postfix)
+            progress_info['aux'] = f"{losses['aux']:.4f}"
+        progress_bar.set_postfix(progress_info)
 
     if num_batches == 0:
         raise RuntimeError("All batches were skipped due to NaN/Inf values")
 
-    metrics = {
+    avg_metrics = {
         'total': total_loss / num_batches,
         'classification': total_cls_loss / num_batches,
         'regression': total_reg_loss / num_batches
     }
     if total_aux_loss > 0:
-        metrics['aux'] = total_aux_loss / num_batches
-    return metrics
+        avg_metrics['aux'] = total_aux_loss / num_batches
+    return avg_metrics
 
 
 def train_model(
