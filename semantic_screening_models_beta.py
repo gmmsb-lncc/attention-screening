@@ -81,7 +81,7 @@ LEVEL_COLORS = {
 class BenchmarkProgress:
     """Global progress tracker with nested step/substep display."""
 
-    def __init__(self, levels: List[int], dataset: str, embedding: str):
+    def __init__(self, levels: List[int], dataset: str, embedding: str, finetune: bool = False):
         self.dataset = dataset
         self.embedding = embedding
         self.step_timings: Dict[str, float] = {}
@@ -91,6 +91,8 @@ class BenchmarkProgress:
         self.steps = ["Step 0: Scaffold Splits"]
         if 2 in levels:
             self.steps.append("Step 0b: Ligand Vectors")
+        if finetune:
+            self.steps.append("Step 4: ESM-2 Fine-tuning")
         if 1 in levels:
             self.steps.append("Step 1: Level 1 (FP+KNN/MLP)")
         if 2 in levels:
@@ -530,10 +532,12 @@ def run_level4_finetune(
     dataset: str,
     embedding_name: str,
     train_tsv: str,
+    val_tsv: str,
     output_dir: str,
-    epochs: int = 3,
+    epochs: int = 100,
     batch_size: int = 8,
     learning_rate: float = 1e-5,
+    patience: int = 3,
     force: bool = False,
 ) -> Optional[str]:
     """
@@ -543,10 +547,12 @@ def run_level4_finetune(
         dataset: Dataset name (human, non_human, all)
         embedding_name: ESM-2 model name (e.g., esm2_t6_8M_UR50D)
         train_tsv: Path to training TSV file
+        val_tsv: Path to validation TSV file (for early stopping)
         output_dir: Output directory for checkpoints
-        epochs: Number of fine-tuning epochs
+        epochs: Maximum number of fine-tuning epochs (default: 100)
         batch_size: Batch size for fine-tuning
         learning_rate: Learning rate for fine-tuning
+        patience: Early stopping patience (default: 3)
         force: Force re-training even if checkpoint exists
         
     Returns:
@@ -565,7 +571,7 @@ def run_level4_finetune(
     ft_dir = Path(output_dir) / f"level4_finetuned_{embedding_name}"
     ft_dir.mkdir(parents=True, exist_ok=True)
     
-    checkpoint_path = ft_dir / "final_model.pt"
+    checkpoint_path = ft_dir / "best_model.pt"
     
     # Check if already fine-tuned
     if checkpoint_path.exists() and not force:
@@ -575,6 +581,7 @@ def run_level4_finetune(
     
     # Load training sequences
     tqdm.write(f"  Loading training sequences from: {train_tsv}")
+    tqdm.write(f"  Validation sequences from: {val_tsv}")
     try:
         if train_tsv.endswith('.gz'):
             import gzip
@@ -614,11 +621,11 @@ def run_level4_finetune(
         traceback.print_exc()
         return None
     
-    # Prepare data loaders
+    # Prepare data loaders (with validation for early stopping)
     try:
         train_loader, val_loader = finetuner.prepare_data(
             train_tsv=train_tsv,
-            val_tsv=None,  # No validation during fine-tuning
+            val_tsv=val_tsv,
             batch_size=batch_size,
             max_length=1024
         )
@@ -628,7 +635,7 @@ def run_level4_finetune(
         traceback.print_exc()
         return None
     
-    # Fine-tune
+    # Fine-tune with early stopping
     try:
         history = finetuner.train(
             train_loader=train_loader,
@@ -637,19 +644,156 @@ def run_level4_finetune(
             learning_rate=learning_rate,
             warmup_steps=100,
             gradient_accumulation_steps=4,
-            save_path=str(checkpoint_path)
+            save_path=str(checkpoint_path),
+            patience=patience,
         )
         
         tqdm.write(f"\n  Fine-tuning completed!")
+        tqdm.write(f"  Epochs trained: {len(history['train_loss'])}")
         tqdm.write(f"  Final train loss: {history['train_loss'][-1]:.4f}")
         if history['val_loss']:
-            tqdm.write(f"  Final val loss: {history['val_loss'][-1]:.4f}")
-        tqdm.write(f"  Checkpoint saved: {checkpoint_path}")
+            tqdm.write(f"  Best val loss: {min(history['val_loss']):.4f}")
+        tqdm.write(f"  Best model saved: {checkpoint_path}")
         
         return str(checkpoint_path)
         
     except Exception as e:
         tqdm.write(f"  ERROR during fine-tuning: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def run_level4_finetune_molformer(
+    dataset: str,
+    train_tsv: str,
+    val_tsv: str,
+    output_dir: str,
+    epochs: int = 100,
+    batch_size: int = 16,
+    learning_rate: float = 2e-5,
+    patience: int = 3,
+    force: bool = False,
+) -> Optional[str]:
+    """
+    Fine-tune MolFormer model on kinase ligand training data.
+    
+    Args:
+        dataset: Dataset name (human, non_human, all)
+        train_tsv: Path to training TSV file
+        val_tsv: Path to validation TSV file (for early stopping)
+        output_dir: Output directory for checkpoints
+        epochs: Maximum number of fine-tuning epochs (default: 100)
+        batch_size: Batch size for fine-tuning (larger than ESM, SMILES are shorter)
+        learning_rate: Learning rate for fine-tuning
+        patience: Early stopping patience (default: 3)
+        force: Force re-training even if checkpoint exists
+        
+    Returns:
+        Path to fine-tuned model checkpoint or None if failed
+    """
+    from pathlib import Path
+    import pandas as pd
+    import torch
+    from src.finetuning.molformer_finetuner import MolFormerFinetuner
+    
+    tqdm.write("\n" + "-" * 70)
+    tqdm.write(f"Level 4b: MolFormer Fine-tuning on {dataset} training set")
+    tqdm.write("-" * 70)
+    
+    # Setup paths
+    ft_dir = Path(output_dir) / f"level4_finetuned_molformer"
+    ft_dir.mkdir(parents=True, exist_ok=True)
+    
+    checkpoint_path = ft_dir / "best_model"
+    
+    # Check if already fine-tuned
+    if checkpoint_path.exists() and not force:
+        tqdm.write(f"  [OK] Fine-tuned MolFormer already exists: {checkpoint_path}")
+        tqdm.write("       Use --force to retrain")
+        return str(checkpoint_path)
+    
+    # Load training SMILES
+    tqdm.write(f"  Loading training ligands from: {train_tsv}")
+    tqdm.write(f"  Validation ligands from: {val_tsv}")
+    try:
+        if train_tsv.endswith('.gz'):
+            import gzip
+            with gzip.open(train_tsv, 'rt') as f:
+                df_train = pd.read_csv(f, sep='\t')
+        else:
+            df_train = pd.read_csv(train_tsv, sep='\t')
+    except Exception as e:
+        tqdm.write(f"  ERROR loading training data: {e}")
+        return None
+    
+    # Extract unique ligands
+    if 'smiles' not in df_train.columns or 'chembl_id' not in df_train.columns:
+        tqdm.write("  ERROR: Training TSV must have 'smiles' and 'chembl_id' columns")
+        return None
+    
+    # Get unique ligands (one SMILES per chembl_id)
+    df_unique = df_train[['chembl_id', 'smiles']].drop_duplicates(subset=['chembl_id'])
+    smiles_list = df_unique['smiles'].tolist()
+    chembl_ids = df_unique['chembl_id'].tolist()
+    
+    tqdm.write(f"  Training ligands: {len(smiles_list)} unique molecules")
+    tqdm.write(f"  Model: MolFormer-XL")
+    tqdm.write(f"  Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
+    tqdm.write(f"  Output: {ft_dir}")
+    
+    # Initialize fine-tuner
+    try:
+        finetuner = MolFormerFinetuner(
+            model_path="ibm/MoLFormer-XL-both-10pct",
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+            mask_prob=0.15,
+            use_amp=True
+        )
+    except Exception as e:
+        tqdm.write(f"  ERROR initializing MolFormer fine-tuner: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    # Prepare data loaders (with validation for early stopping)
+    try:
+        train_loader, val_loader = finetuner.prepare_data(
+            train_tsv=train_tsv,
+            val_tsv=val_tsv,
+            batch_size=batch_size,
+            max_length=202
+        )
+    except Exception as e:
+        tqdm.write(f"  ERROR preparing data: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    # Fine-tune with early stopping
+    try:
+        history = finetuner.train(
+            train_loader=train_loader,
+            val_loader=val_loader,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            warmup_ratio=0.1,
+            gradient_accumulation_steps=4,
+            save_path=str(checkpoint_path),
+            patience=patience,
+        )
+        
+        tqdm.write(f"\n  MolFormer fine-tuning completed!")
+        tqdm.write(f"  Epochs trained: {len(history['train_loss'])}")
+        tqdm.write(f"  Final train loss: {history['train_loss'][-1]:.4f}")
+        if history['val_loss']:
+            tqdm.write(f"  Best val loss: {min(history['val_loss']):.4f}")
+        tqdm.write(f"  Best model saved: {checkpoint_path}")
+        
+        return str(checkpoint_path)
+        
+    except Exception as e:
+        tqdm.write(f"  ERROR during MolFormer fine-tuning: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -2270,7 +2414,7 @@ def main():
     t_start = time.time()
 
     # Initialize global progress tracker
-    progress = BenchmarkProgress(levels, dataset, embedding_short)
+    progress = BenchmarkProgress(levels, dataset, embedding_short, finetune=args.finetune)
 
     # -----------------------------------------------------------------------
     # Step 0: Scaffold splits
@@ -2300,29 +2444,38 @@ def main():
         step_name = "Step 4: ESM-2 Fine-tuning"
         progress.begin_step(step_name)
         
-        # Get training TSV path
+        # Get training and validation TSV paths
         train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_train.tsv.gz")
         if not os.path.exists(train_tsv):
             train_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_train.tsv")
         
+        val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_val.tsv.gz")
+        if not os.path.exists(val_tsv):
+            val_tsv = os.path.join(scaffold_split_dir, "scenarios", "Sc", f"{dataset}_val.tsv")
+        
         if not os.path.exists(train_tsv):
             tqdm.write(f"  ERROR: Training TSV not found at {train_tsv}")
+            tqdm.write("  Skipping fine-tuning.")
+        elif not os.path.exists(val_tsv):
+            tqdm.write(f"  ERROR: Validation TSV not found at {val_tsv}")
             tqdm.write("  Skipping fine-tuning.")
         else:
             finetuned_checkpoint = run_level4_finetune(
                 dataset=dataset,
                 embedding_name=embedding_name,
                 train_tsv=train_tsv,
+                val_tsv=val_tsv,
                 output_dir=output_dir,
                 epochs=args.finetune_epochs,
                 batch_size=args.finetune_batch_size,
                 learning_rate=args.finetune_lr,
+                patience=args.patience,
                 force=force,
             )
             
             if finetuned_checkpoint:
-                tqdm.write(f"  ✓ Fine-tuning completed: {finetuned_checkpoint}")
-                tqdm.write(f"  → Regenerating embeddings with fine-tuned model...")
+                tqdm.write(f"  ✓ ESM-2 fine-tuning completed: {finetuned_checkpoint}")
+                tqdm.write(f"  → Regenerating protein embeddings with fine-tuned model...")
                 
                 # Regenerate embeddings for train/val/test using fine-tuned model
                 # This will create new embedding directories with "_finetuned" suffix
@@ -2334,14 +2487,37 @@ def main():
                         scaffold_split_dir=scaffold_split_dir,
                         output_dir=output_dir,
                     )
-                    tqdm.write(f"  ✓ Embeddings regenerated with fine-tuned model")
-                    # Update embedding_name to point to fine-tuned embeddings
-                    embedding_name = f"{embedding_name}_finetuned"
+                    tqdm.write(f"  ✓ Protein embeddings regenerated with fine-tuned model")
                 except Exception as e:
-                    tqdm.write(f"  ERROR regenerating embeddings: {e}")
+                    tqdm.write(f"  ERROR regenerating protein embeddings: {e}")
                     tqdm.write("  Continuing with vanilla embeddings...")
             else:
-                tqdm.write("  WARNING: Fine-tuning failed or was skipped.")
+                tqdm.write("  WARNING: ESM-2 fine-tuning failed or was skipped.")
+            
+            # Fine-tune MolFormer on ligands
+            tqdm.write("\n  → Starting MolFormer fine-tuning on ligands...")
+            molformer_checkpoint = run_level4_finetune_molformer(
+                dataset=dataset,
+                train_tsv=train_tsv,
+                val_tsv=val_tsv,
+                output_dir=output_dir,
+                epochs=args.finetune_epochs,
+                batch_size=args.finetune_batch_size * 2,  # Larger batch for SMILES
+                learning_rate=args.finetune_lr * 2,  # Slightly higher LR for MolFormer
+                patience=args.patience,
+                force=force,
+            )
+            
+            if molformer_checkpoint:
+                tqdm.write(f"  ✓ MolFormer fine-tuning completed: {molformer_checkpoint}")
+                # TODO: Regenerate ligand embeddings with fine-tuned MolFormer
+                # regenerate_ligand_embeddings_with_finetuned_molformer(...)
+            else:
+                tqdm.write("  WARNING: MolFormer fine-tuning failed or was skipped.")
+            
+            # Update embedding_name to point to fine-tuned embeddings for subsequent levels
+            if finetuned_checkpoint:
+                embedding_name = f"{embedding_name}_finetuned"
         
         progress.end_step(step_name)
 
