@@ -7,7 +7,13 @@ Implements memory-efficient training with gradient checkpointing and mixed preci
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torch.cuda.amp import autocast, GradScaler
+# PyTorch 2.0+ uses torch.amp instead of torch.cuda.amp
+try:
+    from torch.amp import autocast, GradScaler
+    AMP_DEVICE_TYPE = "cuda"
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler
+    AMP_DEVICE_TYPE = None
 from typing import List, Tuple, Dict, Optional
 import pandas as pd
 from tqdm import tqdm
@@ -97,7 +103,7 @@ class ESMFinetuner:
         self.device = device
         self.mask_prob = mask_prob
         self.use_amp = use_amp and device == "cuda"
-        self.scaler = GradScaler() if self.use_amp else None
+        self.scaler = GradScaler("cuda") if self.use_amp else None
         
         print(f"  Loading ESM-2 model: {model_name}...")
         self.model, self.alphabet = esm.pretrained.load_model_and_alphabet(model_name)
@@ -276,7 +282,7 @@ class ESMFinetuner:
                 try:
                     # Mixed precision forward pass
                     if self.use_amp:
-                        with autocast():
+                        with autocast(device_type="cuda"):
                             results = self.model(masked_tokens, repr_layers=[])
                             logits = results["logits"]
                             
@@ -405,7 +411,7 @@ class ESMFinetuner:
                 
                 try:
                     if self.use_amp:
-                        with autocast():
+                        with autocast(device_type="cuda"):
                             results = self.model(masked_tokens, repr_layers=[])
                             logits = results["logits"]
                             
