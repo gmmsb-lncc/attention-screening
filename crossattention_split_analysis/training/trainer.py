@@ -63,13 +63,24 @@ def train_epoch(
 
         output = model(protein_matrix, ligand_matrix, protein_mask, ligand_mask)
 
-        losses = loss_fn(
-            output['classification'],
-            output['regression'],
-            labels,
-            reg_targets,
-            reg_mask
-        )
+        # Handle classification-only models (Level 3)
+        if output['regression'] is None:
+            # Use simple BCE loss for classification only
+            cls_logits = output['classification'].squeeze(-1)
+            loss = F.binary_cross_entropy_with_logits(
+                cls_logits, labels.float(), 
+                pos_weight=loss_fn.pos_weight if hasattr(loss_fn, 'pos_weight') else None
+            )
+            losses = {'total': loss, 'classification': loss, 'regression': torch.tensor(0.0, device=device)}
+        else:
+            # Multi-task loss (for other levels)
+            losses = loss_fn(
+                output['classification'],
+                output['regression'],
+                labels,
+                reg_targets,
+                reg_mask
+            )
         aux_loss = output.get('aux_loss')
         if aux_loss is not None:
             scaled_aux = aux_loss * float(aux_loss_scale)
