@@ -421,11 +421,12 @@ class MultiTaskHead(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # Classification head
+        # Classification head with aggressive regularization
         self.classifier = nn.Sequential(
+            nn.Dropout(dropout * 1.5),  # Pre-dropout for extra regularization
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.GELU(),
-            nn.Dropout(dropout),
+            nn.Dropout(dropout * 1.5),  # Increased dropout
             nn.Linear(hidden_dim // 2, 1)  # Binary classification
         )
         
