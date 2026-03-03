@@ -213,10 +213,10 @@ def _load_external_test_dataframe(
 
 MODEL_VARIANT_TO_ENCODER = {
     'cnn_crossattn': 'cnn',
-    'cross_attention_lite': 'linear',
+    'cross_attention_lite': 'level3_crossatt',  # Use simplified Level 3 model
     'diffusion': 'diffusion',
     'level5_lite': 'level5_lite',
-    'level3_crossatt': 'level5_lite',  # Alias: Level 3 uses Level5-Lite architecture
+    'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -359,6 +359,17 @@ def run_scenario(
             num_cross_attn_layers=config.num_cross_attn_layers,
             num_heads=config.num_heads,
             dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+        )
+    elif encoder_type == "level3_crossatt":
+        from src.models.level3_crossatt import Level3CrossAttModel
+        model = Level3CrossAttModel(
+            protein_dim=config.protein_dim,
+            ligand_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_heads=config.num_heads,
+            encoder_dropout=config.dropout,
+            attention_dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
         )
     elif encoder_type == "diffusion":
