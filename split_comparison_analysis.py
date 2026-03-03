@@ -1122,11 +1122,17 @@ def run_comparison(
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     feature_type: str = "fingerprint",
     embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
     """Run comparison across split scenarios.
 
     split_mode="single_90_10": one train/test split per scenario.
     split_mode="kfold_cv": legacy k-fold protocol with train/val/test folds.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
     """
 
     valid_modes = {"single_90_10", "kfold_cv"}
@@ -1272,25 +1278,33 @@ def run_comparison(
                 prot_vec_dir = None
                 lig_vec_dir = None
                 if feature_type == "embedding" and embedding_name:
-                    from crossattention_split_analysis.config import (
-                        SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
-                    )
-                    esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
-                    if dataset_type == "all":
-                        build_dirs = [
-                            os.path.join(bp, esm_model, "build")
-                            for bp in EMBEDDING_BASE_PATHS_ALL
-                        ]
+                    # Use custom fine-tuned paths if provided
+                    if custom_protein_embedding_dir and custom_ligand_embedding_dir:
+                        prot_vec_dir = [custom_protein_embedding_dir]
+                        lig_vec_dir = [custom_ligand_embedding_dir]
+                        print(f"    Embedding features: FINE-TUNED")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
                     else:
-                        build_dirs = [os.path.join(
-                            EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
-                            esm_model, "build",
-                        )]
-                    prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
-                    lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
-                    print(f"    Embedding features: {esm_model}")
-                    print(f"      Protein vectors: {prot_vec_dir}")
-                    print(f"      Ligand vectors:  {lig_vec_dir}")
+                        from crossattention_split_analysis.config import (
+                            SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
+                        )
+                        esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
+                        if dataset_type == "all":
+                            build_dirs = [
+                                os.path.join(bp, esm_model, "build")
+                                for bp in EMBEDDING_BASE_PATHS_ALL
+                            ]
+                        else:
+                            build_dirs = [os.path.join(
+                                EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
+                                esm_model, "build",
+                            )]
+                        prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
+                        lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
+                        print(f"    Embedding features: {esm_model}")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
 
                 results = train_and_evaluate_with_val(
                     sc_train_df, sc_val_df, sc_test_df,
@@ -1682,8 +1696,15 @@ def run_single_dataset(
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     feature_type: str = "fingerprint",
     embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
-    """Run analysis for a single dataset type."""
+    """Run analysis for a single dataset type.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
+    """
     data_path = resolve_dataset_input_path(
         dataset_type=dataset_type,
         input_path=input_path,
@@ -1837,6 +1858,8 @@ def run_single_dataset(
         scaffold_split_dir=scaffold_split_dir,
         feature_type=feature_type,
         embedding_name=embedding_name,
+        custom_protein_embedding_dir=custom_protein_embedding_dir,
+        custom_ligand_embedding_dir=custom_ligand_embedding_dir,
     )
     if not all_results:
         print("  No results generated.")
