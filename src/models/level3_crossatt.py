@@ -141,8 +141,8 @@ class Level3CrossAttModel(nn.Module):
         self,
         protein_dim: int = 320,
         ligand_dim: int = 768,
-        hidden_dim: int = 256,  # Reduced from 512
-        num_heads: int = 4,  # Reduced from 8 to 4 for better generalization
+        hidden_dim: int = 128,  # Further reduced to combat overfitting
+        num_heads: int = 1,  # Single head to reduce overfitting
         encoder_dropout: float = 0.4,  # Increased from 0.3
         attention_dropout: float = 0.3,  # Increased from 0.2
         classifier_dropout: float = 0.5
