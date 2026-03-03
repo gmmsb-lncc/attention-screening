@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 class ProteinEncoder(nn.Module):
     """Encoder for protein embeddings with strong regularization."""
     
-    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.3):
+    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.4):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -25,7 +25,8 @@ class ProteinEncoder(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim)
+            nn.LayerNorm(hidden_dim),
+            nn.Dropout(dropout * 0.5)  # Additional dropout
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -41,7 +42,7 @@ class ProteinEncoder(nn.Module):
 class LigandEncoder(nn.Module):
     """Encoder for ligand embeddings with strong regularization."""
     
-    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.3):
+    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.4):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -49,7 +50,8 @@ class LigandEncoder(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim)
+            nn.LayerNorm(hidden_dim),
+            nn.Dropout(dropout * 0.5)  # Additional dropout
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -1233,9 +1233,9 @@ def run_level3(
         hidden_dim=512,
         num_cross_attn_layers=2,
         num_heads=8,
-        dropout=0.3,  # Strong encoder dropout
-        classifier_dropout=0.5,  # Very strong classifier dropout
-        weight_decay=1e-4,  # Weight decay for L2 regularization
+        dropout=0.4,  # Strong encoder dropout (increased)
+        classifier_dropout=0.6,  # Very strong classifier dropout (increased)
+        weight_decay=5e-4,  # Weight decay for L2 regularization (increased)
         label_smoothing=0.1,  # Label smoothing to prevent overconfidence
         max_grad_norm=1.0,  # Gradient clipping
         classification_only=True,
