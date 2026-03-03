@@ -284,56 +284,54 @@ class ESMFineTuner:
 
 ## 🚀 Uso via CLI
 
-### 1. Fine-tuning do ESM-2
+### Comando Simples: Fine-tuning Automático
 
 ```bash
-# Fine-tune ESM-2 8M com kinases humanas (apenas train set)
+# Fine-tune ESM-2 8M e execute o pipeline completo
 python semantic_screening_models_beta.py \
     --dataset human \
     --embedding 8M \
-    --levels 4 \
-    --finetune_epochs 10 \
-    --finetune_lr 1e-5 \
-    --finetune_batch_size 8
-
-# Output esperado:
-# results/benchmark_human_8M/finetuned_esm2_8M/
-#   ├── checkpoint_epoch_10.pt
-#   ├── training_log.json
-#   └── config.json
+    --finetune \
+    --levels 1 2 3
 ```
 
-### 2. Extrair Embeddings Fine-tuned
+**O que acontece:**
+1. Step 4 executa fine-tuning do ESM-2 em sequências de treino (MLM)
+2. Salva checkpoint em `results/benchmark_human_8M/level4_finetuned_esm2_t6_8M_UR50D/final_model.pt`
+3. **AVISO**: Você deve regenerar embeddings manualmente após o fine-tuning!
+
+### Parâmetros de Fine-tuning
+
+| Argumento | Padrão | Descrição |
+|-----------|--------|-----------|
+| `--finetune` | False | Ativa o fine-tuning ESM-2 (Step 4) |
+| `--finetune_epochs` | 3 | Número de épocas de fine-tuning |
+| `--finetune_lr` | 1e-5 | Learning rate (baixo para evitar catastrophic forgetting) |
+| `--finetune_batch_size` | 8 | Batch size (depende da GPU disponível) |
+
+### Exemplo com Customização
 
 ```bash
-# Extrai embeddings usando o modelo fine-tuned
+# Fine-tuning com hiperparâmetros customizados
 python semantic_screening_models_beta.py \
     --dataset human \
     --embedding 8M \
-    --levels 0 \
-    --use_finetuned \
-    --finetuned_checkpoint results/benchmark_human_8M/finetuned_esm2_8M/checkpoint_epoch_10.pt
-
-# Output:
-# results/benchmark_human_8M/build_finetuned/
-#   ├── protein_matrices/
-#   └── ligand_matrices/
+    --finetune \
+    --finetune_epochs 5 \
+    --finetune_lr 2e-5 \
+    --finetune_batch_size 16 \
+    --force
 ```
 
-### 3. Treinar Níveis 2-3 com Embeddings Fine-tuned
+### Pipeline Completo: Fine-tuning → Embeddings → Downstream
 
-```bash
-# Pipeline completo com embeddings fine-tuned
-python semantic_screening_models_beta.py \
-    --dataset human \
-    --embedding 8M \
-    --levels 2 3 \
-    --use_finetuned \
-    --finetuned_checkpoint results/benchmark_human_8M/finetuned_esm2_8M/checkpoint_epoch_10.pt \
-    --epochs 50 \
-    --batch_size 32 \
-    --seeds 42 123 456 789 1024
-```
+**⚠️ IMPORTANTE**: O fine-tuning ainda NÃO regenera embeddings automaticamente. Você precisa:
+
+1. **Executar fine-tuning** (cria checkpoint)
+2. **Regenerar embeddings** usando o checkpoint
+3. **Treinar modelos downstream** (Level 1-3) com novos embeddings
+
+**TODO**: Implementar regeneração automática de embeddings após fine-tuning.
 
 ---
 
