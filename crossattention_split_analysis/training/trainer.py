@@ -165,9 +165,15 @@ def train_model(
         weight_decay=config.weight_decay
     )
 
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config.num_epochs, eta_min=1e-6
-    )
+    # 3-epoch warmup + cosine annealing
+    warmup_epochs = 3
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs
+        progress = (epoch - warmup_epochs) / max(1, config.num_epochs - warmup_epochs)
+        return 0.5 * (1 + __import__('math').cos(__import__('math').pi * progress))
+    
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     best_val_mcc = -1
     best_model_state = None

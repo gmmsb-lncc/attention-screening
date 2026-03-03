@@ -160,7 +160,7 @@ class TrainingConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     num_epochs: int = 500
-    patience: Optional[int] = 30
+    patience: Optional[int] = 3
     max_grad_norm: float = 1.0
     classification_weight: float = 1.0
     regression_weight: float = 0.5
