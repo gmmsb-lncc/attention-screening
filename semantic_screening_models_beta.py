@@ -1638,7 +1638,7 @@ def _run_level4_single_seed(
         patience=patience,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        hidden_dim=256,
+        hidden_dim=512,
         num_cross_attn_layers=1,
         num_heads=8,
         dropout=0.2,
