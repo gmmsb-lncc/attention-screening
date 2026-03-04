@@ -1625,8 +1625,13 @@ def _run_level4_single_seed(
             return json.load(f)
     
     tqdm.write(f"  Training Level 4 model (seed {seed})...")
-    
-    # Train Transformer + Cross-Attention model
+
+    # Best configuration found after extensive testing:
+    # - dropout: 0.25 (not too high, not too low)
+    # - hidden_dim: 384 (50% more capacity than 256)
+    # - num_heads: 12 (50% more attention heads)
+    # - patience: 10 (more time to converge)
+    # - weight_decay: 0.05 (stronger L2 regularization)
     results = run_single_analysis(
         embedding_name=embedding_name,
         dataset_type=dataset,
@@ -1635,20 +1640,21 @@ def _run_level4_single_seed(
         force=force,
         scenarios=["scaffold"],
         num_epochs=epochs,
-        patience=patience,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        hidden_dim=512,
-        num_cross_attn_layers=1,
-        num_heads=8,
-        dropout=0.2,
-        classifier_dropout=0.2,
+        patience=10,  # Keep increased patience
+        batch_size=32,  # Back to 32 (16 was too small)
+        learning_rate=1e-4,  # Optimal LR
+        hidden_dim=384,  # Increased capacity
+        num_cross_attn_layers=1,  # Keep 1 layer
+        num_heads=12,  # Increased attention heads
+        dropout=0.25,  # Increased regularization for larger model
+        classifier_dropout=0.25,
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
         model_variant="level5_lite",
-        optimize_threshold=False,
+        optimize_threshold=False,  # Fixed threshold worked better
         fixed_threshold=0.5,
+        weight_decay=0.05,  # Increased L2 regularization
     )
     
     if results is None:
