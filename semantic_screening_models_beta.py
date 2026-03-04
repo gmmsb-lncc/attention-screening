@@ -1182,49 +1182,22 @@ def _extract_matrix_features_with_attention_pooling(
     output_dir: str,
     force: bool = False,
 ) -> Dict[str, np.ndarray]:
-    """Extract features from protein/ligand matrices using Attention Pooling.
+    """Extract features from protein/ligand matrices using Mean Pooling.
     
-    This is a simple feature extraction (no Transformer training):
+    This is a simple feature extraction (no training required):
     1. Load per-residue protein matrices (ESM-2)
     2. Load per-token ligand matrices (MoLFormer)
-    3. Apply Attention Pooling to get fixed-size vectors
+    3. Apply Mean Pooling to get fixed-size vectors
     4. Concatenate protein + ligand features
+    
+    Note: For trained attention pooling, use Level 4.
     
     Returns dict with 'train', 'val', 'test' splits containing features and labels.
     """
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import Dataset, DataLoader
     import pandas as pd
     from pathlib import Path
-    
-    # Attention pooling module (simple version)
-    class SimpleAttentionPooling(nn.Module):
-        def __init__(self, input_dim: int, hidden_dim: int = 256):
-            super().__init__()
-            self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.02)
-            self.proj = nn.Linear(input_dim, hidden_dim)
-            self.attention = nn.MultiheadAttention(
-                embed_dim=hidden_dim,
-                num_heads=8,
-                dropout=0.1,
-                batch_first=True,
-            )
-            self.norm = nn.LayerNorm(hidden_dim)
-        
-        def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
-            # x: [batch, seq_len, input_dim]
-            x = self.proj(x)  # [batch, seq_len, hidden_dim]
-            batch_size = x.size(0)
-            query = self.query.expand(batch_size, -1, -1)  # [B, 1, D]
-            pooled, _ = self.attention(
-                query=query,
-                key=x,
-                value=x,
-                key_padding_mask=mask,
-            )
-            pooled = self.norm(pooled)
-            return pooled.squeeze(1)  # [B, D]
+    import numpy as np
+    from torch.utils.data import Dataset, DataLoader
     
     class MatrixDataset(Dataset):
         def __init__(self, df: pd.DataFrame, protein_matrix_dir: Path, ligand_matrix_dir: Path):
@@ -1316,44 +1289,59 @@ def _extract_matrix_features_with_attention_pooling(
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn)
     
-    # Initialize attention pooling models
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    protein_pooler = SimpleAttentionPooling(320, 256).to(device)  # ESM-2 8M
-    ligand_pooler = SimpleAttentionPooling(768, 256).to(device)   # MoLFormer
-    protein_pooler.eval()
-    ligand_pooler.eval()
+    # Initialize feature extraction (using mean pooling - no training required)
+    # Note: Mean pooling is used instead of attention pooling because attention
+    # pooling requires training. For a trained version, use Level 4.
+    tqdm.write(f"  Extracting features with Mean Pooling (no training required)...")
     
-    def extract_features(loader):
+    def mean_pool(matrices, masks):
+        """Mean pooling over sequence dimension."""
+        pooled = []
+        for mat, mask in zip(matrices, masks):
+            # Get valid positions (where mask is True)
+            valid = mask.cpu().numpy()
+            if valid.sum() > 0:
+                # Mean over valid positions only
+                mat_valid = mat.cpu().numpy()[valid]
+                pooled.append(mat_valid.mean(axis=0))
+            else:
+                # Fallback for empty sequences
+                pooled.append(np.zeros(mat.shape[-1], dtype=np.float32))
+        return np.stack(pooled)
+    
+    # Extract features for all splits
+    def extract_features_with_mean_pooling(loader):
+        """Extract features using mean pooling (no training required)."""
         all_features = []
         all_labels = []
-        with torch.no_grad():
-            for batch in loader:
-                protein = batch['protein_matrix'].to(device)
-                ligand = batch['ligand_matrix'].to(device)
-                protein_mask = batch['protein_mask'].to(device)
-                ligand_mask = batch['ligand_mask'].to(device)
-                labels = batch['label'].cpu().numpy()
-                
-                # Apply attention pooling
-                protein_vec = protein_pooler(protein, protein_mask)  # [B, 256]
-                ligand_vec = ligand_pooler(ligand, ligand_mask)      # [B, 256]
-                
-                # Concatenate
-                combined = torch.cat([protein_vec, ligand_vec], dim=-1)  # [B, 512]
-                
-                # Handle NaN/Inf values
-                combined = torch.nan_to_num(combined, nan=0.0, posinf=0.0, neginf=0.0)
-                
-                all_features.append(combined.cpu().numpy())
-                all_labels.append(labels)
+        
+        for batch in loader:
+            protein = batch['protein_matrix']  # [B, seq_len, dim]
+            ligand = batch['ligand_matrix']    # [B, tokens, dim]
+            protein_mask = batch['protein_mask']
+            ligand_mask = batch['ligand_mask']
+            labels = batch['label'].numpy()
+            
+            # Mean pooling for protein
+            protein_pooled = mean_pool(protein, protein_mask)
+            # Mean pooling for ligand
+            ligand_pooled = mean_pool(ligand, ligand_mask)
+            
+            # Concatenate
+            combined = np.concatenate([protein_pooled, ligand_pooled], axis=-1)
+            
+            # Handle NaN/Inf
+            combined = np.nan_to_num(combined, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            all_features.append(combined)
+            all_labels.append(labels)
         
         return np.concatenate(all_features), np.concatenate(all_labels)
     
-    # Extract features for all splits
-    tqdm.write(f"  Extracting features with Attention Pooling...")
-    train_features, train_labels = extract_features(train_loader)
-    val_features, val_labels = extract_features(val_loader)
-    test_features, test_labels = extract_features(test_loader)
+    tqdm.write(f"  Extracting features...")
+    train_features, train_labels = extract_features_with_mean_pooling(train_loader)
+    val_features, val_labels = extract_features_with_mean_pooling(val_loader)
+    test_features, test_labels = extract_features_with_mean_pooling(test_loader)
     
     return {
         'train': {'features': train_features, 'labels': train_labels},
