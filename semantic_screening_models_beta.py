@@ -60,8 +60,8 @@ LEVEL_LABELS = {
     "level1_fp_mlp": "Level 1 (FP+MLP)",
     "level2_emb_knn": "Level 2 (Emb+KNN)",
     "level2_emb_mlp": "Level 2 (Emb+MLP)",
-    "level3_mat_knn": "Level 3 (Mat+Attention+KNN)",
-    "level3_mat_mlp": "Level 3 (Mat+Attention+MLP)",
+    "level3_mat_knn": "Level 3 (Mat+MeanPool+KNN)",
+    "level3_mat_mlp": "Level 3 (Mat+MeanPool+MLP)",
     "level4_crossatt_knn": "Level 4 (CrossAtt+KNN)",
     "level4_crossatt_mlp": "Level 4 (CrossAtt+MLP)",
 }
@@ -105,7 +105,7 @@ class BenchmarkProgress:
         if 2 in levels:
             self.steps.append("Step 2: Level 2 (Emb+KNN/MLP)")
         if 3 in levels:
-            self.steps.append("Step 3: Level 3 (Mat+Attention+KNN/MLP)")
+            self.steps.append("Step 3: Level 3 (Mat+MeanPool+KNN/MLP)")
         if 4 in levels:
             self.steps.append("Step 4: Level 4 (CrossAtt+KNN/MLP)")
         self.steps.append("Report + Visualizations")
@@ -2702,14 +2702,14 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 3: Level 3 — Matrices + Attention Pooling + KNN/MLP
+    # Step 3: Level 3 — Matrices + Mean Pooling + KNN/MLP
     # -----------------------------------------------------------------------
     level3_results = None
     if 3 in levels:
-        step_name = "Step 3: Level 3 (Mat+Attention+KNN/MLP)"
+        step_name = "Step 3: Level 3 (Mat+MeanPool+KNN/MLP)"
         progress.begin_step(step_name)
         tqdm.write(f"  Seeds to run: {seeds} ({len(seeds)} total)")
-        tqdm.write(f"  Architecture: Matrices + Attention Pooling + KNN/MLP")
+        tqdm.write(f"  Architecture: Matrices + Mean Pooling + KNN/MLP")
         
         level3_results = run_level3(
             dataset=dataset,
