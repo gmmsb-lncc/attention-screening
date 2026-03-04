@@ -327,23 +327,11 @@ class Level5LiteTrainer:
         Returns:
             Training history dict
         """
-        # Warmup + Cosine Annealing for better convergence
-        warmup_epochs = 5
-        warmup_scheduler = LinearLR(
+        # Simple constant learning rate scheduler (no warmup/cosine)
+        from torch.optim.lr_scheduler import LambdaLR
+        self.scheduler = LambdaLR(
             self.optimizer,
-            start_factor=0.1,
-            end_factor=1.0,
-            total_iters=warmup_epochs,
-        )
-        cosine_scheduler = CosineAnnealingLR(
-            self.optimizer,
-            T_max=self.config.num_epochs - warmup_epochs,
-            eta_min=1e-6,
-        )
-        self.scheduler = SequentialLR(
-            self.optimizer,
-            schedulers=[warmup_scheduler, cosine_scheduler],
-            milestones=[warmup_epochs],
+            lr_lambda=lambda epoch: 1.0,  # Constant LR
         )
         
         # Create checkpoint dir
