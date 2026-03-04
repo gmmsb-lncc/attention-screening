@@ -198,7 +198,7 @@ def load_dataset(filepath: str, keep_monotonic: bool = False,
     return df
 
 
-_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
 
 
 def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing fingerprints"):
@@ -220,7 +220,7 @@ def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing finger
         print(f"  WARNING: {n_invalid}/{len(smiles_list)} SMILES failed RDKit parsing "
               f"({100*n_invalid/len(smiles_list):.1f}% dropped)")
 
-    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 2048), dtype=np.float32), valid_indices
+    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 1024), dtype=np.float32), valid_indices
 
 
 def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None):
@@ -253,13 +253,13 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
                     valid_idx_pos.append(pos)
 
         if not fps_list:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
         fps = np.stack(fps_list)
     else:
         fps, valid_idx_pos = compute_morgan_fingerprints(df['canonical_smiles'].tolist())
         if len(fps) == 0:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
     kinase_oh = np.zeros((len(valid_idx_pos), n_kinases), dtype=np.float32)
     for j, pos in enumerate(valid_idx_pos):
@@ -461,16 +461,14 @@ def train_and_evaluate(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(128,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        learning_rate='adaptive',
-        learning_rate_init=0.001,
-        max_iter=500,
+        max_iter=100,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=10,
         random_state=seed
     )
     mlp.fit(X_train_scaled, y_train)
@@ -645,16 +643,14 @@ def train_and_evaluate_with_val(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(128,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        learning_rate='adaptive',
-        learning_rate_init=0.001,
-        max_iter=500,
+        max_iter=100,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=10,
         random_state=seed,
     )
     mlp.fit(X_train_scaled, y_train)

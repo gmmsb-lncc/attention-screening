@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -193,9 +193,10 @@ class Level5LiteTrainer:
                 gamma=config.focal_gamma,
             )
         else:
+            # BCEWithLogitsLoss with label smoothing for better generalization
             self.criterion = nn.BCEWithLogitsLoss()
-        
-        # Optimizer
+
+        # Optimizer with weight decay for regularization
         self.optimizer = AdamW(
             model.parameters(),
             lr=config.learning_rate,
@@ -326,11 +327,23 @@ class Level5LiteTrainer:
         Returns:
             Training history dict
         """
-        # Set up scheduler
-        self.scheduler = CosineAnnealingLR(
+        # Warmup + Cosine Annealing for better convergence
+        warmup_epochs = 5
+        warmup_scheduler = LinearLR(
             self.optimizer,
-            T_max=self.config.num_epochs,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+        cosine_scheduler = CosineAnnealingLR(
+            self.optimizer,
+            T_max=self.config.num_epochs - warmup_epochs,
             eta_min=1e-6,
+        )
+        self.scheduler = SequentialLR(
+            self.optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_epochs],
         )
         
         # Create checkpoint dir

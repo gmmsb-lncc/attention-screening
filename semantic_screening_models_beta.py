@@ -705,15 +705,16 @@ def run_level5_lite(
         patience=patience,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        hidden_dim=512,
-        num_cross_attn_layers=2,
+        hidden_dim=256,
+        num_cross_attn_layers=1,
         num_heads=8,
-        dropout=0.1,
+        dropout=0.2,
         classifier_dropout=0.2,
         classification_only=True,
         use_molformer_ligand=True,
         scaffold_split_dir=scaffold_split_dir,
         model_variant="level5_lite",
+        optimize_threshold=False,
     )
     
     # If cached, try to load from disk
