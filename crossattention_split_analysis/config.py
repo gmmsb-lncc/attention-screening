@@ -132,8 +132,9 @@ class TrainingConfig:
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
-    dropout: float = 0.1
-    classifier_dropout: float = 0.2  # For level5_lite: Moderate dropout in classifier
+    dropout: float = 0.4  # Increased to combat overfitting
+    classifier_dropout: float = 0.5  # For level5_lite: High dropout in classifier
+    label_smoothing: float = 0.0  # Label smoothing for classification
 
     # Diffusion-specific (used only when model_variant='diffusion')
     diffusion_steps: int = 200
@@ -159,7 +160,7 @@ class TrainingConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     num_epochs: int = 500
-    patience: Optional[int] = 30
+    patience: Optional[int] = 3
     max_grad_norm: float = 1.0
     classification_weight: float = 1.0
     regression_weight: float = 0.5

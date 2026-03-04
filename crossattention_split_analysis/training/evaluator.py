@@ -167,6 +167,7 @@ def optimize_threshold_from_predictions(
     all_labels: np.ndarray,
     all_probs: np.ndarray,
     metric: str = "mcc",
+    strategy: str = "validation",
 ) -> Dict[str, float]:
     """
     Optimize decision threshold on provided predictions.
@@ -174,6 +175,9 @@ def optimize_threshold_from_predictions(
     Uses all unique prediction values as candidate thresholds plus one sentinel
     threshold above max(prob), and selects the threshold that maximizes the
     chosen metric. Ties are broken by choosing the threshold closest to 0.5.
+    
+    Args:
+        strategy: "validation" (default) or "combined" (train+val average)
     """
     if len(all_labels) == 0:
         raise EvaluationError("Cannot optimize threshold on empty predictions.")
