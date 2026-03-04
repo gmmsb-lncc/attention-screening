@@ -1340,6 +1340,10 @@ def _extract_matrix_features_with_attention_pooling(
                 
                 # Concatenate
                 combined = torch.cat([protein_vec, ligand_vec], dim=-1)  # [B, 512]
+                
+                # Handle NaN/Inf values
+                combined = torch.nan_to_num(combined, nan=0.0, posinf=0.0, neginf=0.0)
+                
                 all_features.append(combined.cpu().numpy())
                 all_labels.append(labels)
         
@@ -1415,6 +1419,15 @@ def _run_level3_single_seed(
     X_train, y_train = features['train']['features'], features['train']['labels']
     X_val, y_val = features['val']['features'], features['val']['labels']
     X_test, y_test = features['test']['features'], features['test']['labels']
+    
+    # Check for NaN/Inf in features
+    for name, X in [('train', X_train), ('val', X_val), ('test', X_test)]:
+        if np.any(np.isnan(X)):
+            tqdm.write(f"  WARNING: {name} features contain NaN ({np.isnan(X).sum()} values), replacing with 0")
+            X[:] = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        if np.any(np.isinf(X)):
+            tqdm.write(f"  WARNING: {name} features contain Inf ({np.isinf(X).sum()} values), replacing with 0")
+            X[:] = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
     
     # Step 2: Scale features
     scaler = StandardScaler()
