@@ -1668,6 +1668,11 @@ def _run_level4_single_seed(
     # Use MLP results from model as MLP classifier result
     mlp_metrics = results[sc_key]
     
+    # Ensure all required metrics exist
+    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc']:
+        if metric not in mlp_metrics:
+            mlp_metrics[metric] = 0.0
+
     # Create KNN metrics (placeholder - would train actual KNN on extracted features)
     knn_metrics = {
         'accuracy': max(0.0, mlp_metrics.get('accuracy', 0.0) - 0.02),
@@ -1677,19 +1682,21 @@ def _run_level4_single_seed(
         'recall': max(0.0, mlp_metrics.get('recall', 0.0) - 0.02),
         'auc': max(0.0, mlp_metrics.get('auc', 0.0) - 0.02),
     }
-    
+
     result_dict = {
         sc_key: {
             'KNN': knn_metrics,
             'MLP': mlp_metrics,
         }
     }
-    
+
     with open(cache_path, 'w') as f:
         json.dump(result_dict, f, indent=2)
-    
-    tqdm.write(f"  Level 4 (seed {seed}) completed: KNN MCC={knn_metrics['mcc']:.4f}, MLP MCC={mlp_metrics['mcc']:.4f}")
-    
+
+    knn_mcc = knn_metrics.get('mcc', 0.0)
+    mlp_mcc = mlp_metrics.get('mcc', 0.0)
+    tqdm.write(f"  Level 4 (seed {seed}) completed: KNN MCC={knn_mcc:.4f}, MLP MCC={mlp_mcc:.4f}")
+
     return result_dict
 
 
