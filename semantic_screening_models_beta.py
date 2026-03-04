@@ -1291,10 +1291,15 @@ def _extract_matrix_features_with_attention_pooling(
     protein_matrix_dir = build_dir / "protein_matrices"
     ligand_matrix_dir = build_dir / "molformer_matrix"
     
-    # Load splits
-    train_df = pd.read_csv(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_train.tsv"), sep="\t")
-    val_df = pd.read_csv(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_val.tsv"), sep="\t")
-    test_df = pd.read_csv(os.path.join(scaffold_split_dir, f"{dataset}_test.tsv"), sep="\t")
+    # Load splits (handle both .tsv and .tsv.gz)
+    def read_split(path):
+        if os.path.exists(path + '.gz'):
+            return pd.read_csv(path + '.gz', sep="\t", compression="gzip")
+        return pd.read_csv(path, sep="\t")
+    
+    train_df = read_split(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_train.tsv"))
+    val_df = read_split(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset}_val.tsv"))
+    test_df = read_split(os.path.join(scaffold_split_dir, f"{dataset}_test.tsv"))
     
     # Add label column if missing
     for df in [train_df, val_df, test_df]:
