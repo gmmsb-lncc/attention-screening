@@ -1924,7 +1924,8 @@ def print_comparison_table(
     for model_key in [
         "level1_fp_knn", "level1_fp_mlp",
         "level2_emb_knn", "level2_emb_mlp",
-        "level3_crossatt", "level6_optimized",
+        "level3_mat_knn", "level3_mat_mlp",
+        "level4_crossatt_knn", "level4_crossatt_mlp",
     ]:
         if model_key not in aggregated:
             continue
