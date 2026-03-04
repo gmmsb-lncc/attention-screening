@@ -1500,8 +1500,6 @@ def run_level3(
     
     Returns results dict with both 'KNN' and 'MLP' keys.
     """
-    from split_comparison_analysis import _load_split_comparison_results
-    
     level_dir = os.path.join(output_dir, f"level3_mat_{embedding_short}", dataset)
     tqdm.write(f"  Output: {level_dir}")
     tqdm.write(f"  Architecture: Matrices + Attention Pooling + KNN/MLP")
