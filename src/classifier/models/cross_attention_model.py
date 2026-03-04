@@ -421,11 +421,12 @@ class MultiTaskHead(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # Classification head
+        # Classification head with aggressive regularization
         self.classifier = nn.Sequential(
+            nn.Dropout(dropout * 1.5),  # Pre-dropout for extra regularization
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.GELU(),
-            nn.Dropout(dropout),
+            nn.Dropout(dropout * 1.5),  # Increased dropout
             nn.Linear(hidden_dim // 2, 1)  # Binary classification
         )
         
@@ -777,13 +778,15 @@ class MultiTaskLoss(nn.Module):
         classification_weight: float = 1.0,
         regression_weight: float = 1.0,
         classification_pos_weight: Optional[float] = None,
-        use_uncertainty_weighting: bool = False
+        use_uncertainty_weighting: bool = False,
+        label_smoothing: float = 0.0
     ):
         super().__init__()
         self.classification_weight = classification_weight
         self.regression_weight = regression_weight
         self.use_uncertainty_weighting = use_uncertainty_weighting
         self.classification_pos_weight = classification_pos_weight
+        self.label_smoothing = label_smoothing
         
         if use_uncertainty_weighting:
             # Learnable log variance parameters
@@ -820,14 +823,22 @@ class MultiTaskLoss(nn.Module):
         Returns:
             Dict with 'total', 'classification', 'regression' losses
         """
-        # Classification loss
+        # Classification loss with label smoothing
         if self.pos_weight_tensor is not None:
             pos_weight = self.pos_weight_tensor.to(device=cls_logits.device, dtype=cls_logits.dtype)
         else:
             pos_weight = None
+        
+        # Apply label smoothing if enabled
+        if self.label_smoothing > 0:
+            # Smooth targets: y_smooth = y * (1 - ε) + 0.5 * ε
+            cls_target_smooth = cls_target.float() * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
+        else:
+            cls_target_smooth = cls_target.float()
+        
         cls_loss = F.binary_cross_entropy_with_logits(
             cls_logits,
-            cls_target.float(),
+            cls_target_smooth,
             pos_weight=pos_weight
         )
         
