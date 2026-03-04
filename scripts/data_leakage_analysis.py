@@ -190,7 +190,7 @@ def plot_leakage_analysis(leakage_info: dict, output_dir: str = '.'):
 # 3. MODELO LOOKUP BASELINE
 # =============================================================================
 
-def compute_morgan_fingerprints(smiles_list: list, radius: int = 2, n_bits: int = 2048):
+def compute_morgan_fingerprints(smiles_list: list, radius: int = 2, n_bits: int = 1024):
     """Computa Morgan fingerprints para lista de SMILES."""
     fingerprints = []
     valid_indices = []
@@ -740,7 +740,7 @@ def analyze_chemical_similarity(df: pd.DataFrame, train_idx, test_idx, sample_si
     for _, row in train_compounds.iterrows():
         mol = Chem.MolFromSmiles(row['canonical_smiles'])
         if mol:
-            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024)
             train_fps[row['chembl_id']] = fp
 
     print(f"Fingerprints de treino válidas: {len(train_fps)}")
@@ -754,7 +754,7 @@ def analyze_chemical_similarity(df: pd.DataFrame, train_idx, test_idx, sample_si
         if mol is None:
             continue
 
-        test_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+        test_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024)
 
         # Similaridade máxima
         max_sim = 0

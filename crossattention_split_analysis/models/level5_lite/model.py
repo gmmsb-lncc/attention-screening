@@ -34,19 +34,19 @@ class Level5LiteModel(nn.Module):
     Target performance: MCC 0.45-0.52 (vs Level 1 baseline: 0.428)
     Reduced parameters: ~8M (vs previous 22M)
     """
-    
+
     def __init__(
         self,
         protein_input_dim: int = 320,
         ligand_input_dim: int = 768,
-        hidden_dim: int = 512,
-        num_cross_attn_layers: int = 2,
+        hidden_dim: int = 256,
+        num_cross_attn_layers: int = 1,
         num_heads: int = 8,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
         classifier_dropout: float = 0.2,
     ):
         """Initialize Level5LiteModel.
-        
+
         Args:
             protein_input_dim: ESM-2 embedding dimension (320/640/1280)
             ligand_input_dim: MoLFormer embedding dimension (768)
@@ -88,14 +88,14 @@ class Level5LiteModel(nn.Module):
         # Attention pooling
         self.protein_pool = AttentionPooling(hidden_dim, num_heads, dropout)
         self.ligand_pool = AttentionPooling(hidden_dim, num_heads, dropout)
-        
-        # Classifier (simplified)
+
+        # Classifier (optimized 2-layer MLP with BatchNorm)
         self.classifier = ClassifierHead(
-            input_dim=hidden_dim * 2,  # concat protein + ligand
-            hidden_dim=256,
+            input_dim=hidden_dim * 2,  # concat protein + ligand (256 + 256 = 512)
+            hidden_dim=128,
             dropout=classifier_dropout,
         )
-        
+
         # Regression head (for compatibility with existing training loop)
         self.regression_head = nn.Linear(hidden_dim * 2, 1)
         

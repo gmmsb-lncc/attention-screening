@@ -21,7 +21,7 @@ plt.rcParams["font.size"] = 12
 plt.rcParams["axes.titlesize"] = 14
 plt.rcParams["axes.labelsize"] = 12
 
-_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
 
 
 def create_stratified_split(
@@ -167,7 +167,7 @@ def _compute_morgan_fingerprints(smiles_list: list) -> Tuple[np.ndarray, list]:
             fps.append(_MORGAN_GEN.GetFingerprintAsNumPy(mol).astype(np.float32))
             valid_idx.append(i)
     if not fps:
-        return np.empty((0, 2048), dtype=np.float32), []
+        return np.empty((0, 1024), dtype=np.float32), []
     return np.stack(fps), valid_idx
 
 
