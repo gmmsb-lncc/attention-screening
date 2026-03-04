@@ -98,8 +98,6 @@ class BenchmarkProgress:
         self.steps = ["Step 0: Scaffold Splits"]
         if 2 in levels:
             self.steps.append("Step 0b: Ligand Vectors")
-        if finetune:
-            self.steps.append("Step 4: ESM-2 Fine-tuning")
         if 1 in levels:
             self.steps.append("Step 1: Level 1 (FP+KNN/MLP)")
         if 2 in levels:
@@ -108,6 +106,8 @@ class BenchmarkProgress:
             self.steps.append("Step 3: Level 3 (Mat+MeanPool+KNN/MLP)")
         if 4 in levels:
             self.steps.append("Step 4: Level 4 (CrossAtt+KNN/MLP)")
+        if finetune:
+            self.steps.append("Step 5: ESM-2 Fine-tuning (optional)")
         self.steps.append("Report + Visualizations")
 
         self.total = len(self.steps)
@@ -1710,8 +1710,6 @@ def run_level4(
     
     This is the sophisticated version with full model training.
     """
-    from split_comparison_analysis import _load_split_comparison_results
-    
     level_dir = os.path.join(output_dir, f"level4_crossatt_{embedding_short}", dataset)
     tqdm.write(f"  Output: {level_dir}")
     tqdm.write(f"  Architecture: Transformer + Cross-Attention + KNN/MLP")
@@ -2505,15 +2503,15 @@ def main():
         progress.end_step(step_name)
 
     # -----------------------------------------------------------------------
-    # Step 4: ESM-2 + MolFormer Fine-tuning (if Level 4 in levels OR --finetune flag)
+    # Step 4: ESM-2 + MolFormer Fine-tuning (ONLY with --finetune flag)
     # -----------------------------------------------------------------------
     finetuned_checkpoint = None
     molformer_checkpoint = None
     finetuned_checkpoints = {}  # Store checkpoints per dataset (for "all")
     molformer_checkpoints = {}  # Store checkpoints per dataset (for "all")
-    
-    if 4 in levels or args.finetune:
-        step_name = "Step 4: ESM-2 + MolFormer Fine-tuning"
+
+    if args.finetune:
+        step_name = "Step 5: ESM-2 + MolFormer Fine-tuning"
         progress.begin_step(step_name)
         
         # For "all" dataset, fine-tune on BOTH human and non_human separately
