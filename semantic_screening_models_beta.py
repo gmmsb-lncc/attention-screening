@@ -1654,7 +1654,7 @@ def _run_level4_single_seed(
     if results is None:
         tqdm.write(f"  WARNING: Level 4 training returned no results for seed {seed}")
         return None
-    
+
     sc_key = None
     for key in results:
         if "scaffold" in key.lower():
@@ -1664,9 +1664,26 @@ def _run_level4_single_seed(
         sc_key = next(iter(results))
     if sc_key is None:
         return None
-    
-    # Use MLP results from model as MLP classifier result
-    mlp_metrics = results[sc_key]
+
+    # Extract MLP metrics from results (handle nested structure)
+    sc_data = results[sc_key]
+    if isinstance(sc_data, dict):
+        # Check if results are nested (e.g., {"Level5-Lite": {...}})
+        if "Level5-Lite" in sc_data or "level5_lite" in sc_data:
+            nested_key = "Level5-Lite" if "Level5-Lite" in sc_data else "level5_lite"
+            mlp_metrics = sc_data.get(nested_key, {})
+        elif "accuracy" in sc_data or "mcc" in sc_data:
+            # Direct metrics
+            mlp_metrics = sc_data
+        else:
+            # Find first nested dict with metrics
+            mlp_metrics = {}
+            for k, v in sc_data.items():
+                if isinstance(v, dict) and ("mcc" in v or "accuracy" in v):
+                    mlp_metrics = v
+                    break
+    else:
+        mlp_metrics = {}
     
     # Ensure all required metrics exist
     for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc']:
