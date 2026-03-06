@@ -5,7 +5,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, matthews_corrcoef, log_loss
+from sklearn.metrics import (
+    accuracy_score, f1_score, precision_score, recall_score,
+    roc_auc_score, matthews_corrcoef, log_loss,
+)
 
 
 class EvaluationError(Exception):
@@ -97,6 +100,8 @@ def _invalid_result(
             "accuracy": np.nan,
             "f1": np.nan,
             "mcc": np.nan,
+            "precision": np.nan,
+            "recall": np.nan,
             "auc": np.nan,
             "loss": np.nan,
             "decision_threshold": np.nan,
@@ -121,6 +126,8 @@ def _compute_metrics_from_probs(
         "accuracy": float(accuracy_score(all_labels, preds)),
         "f1": float(f1_score(all_labels, preds, zero_division=0)),
         "mcc": float(matthews_corrcoef(all_labels, preds)),
+        "precision": float(precision_score(all_labels, preds, zero_division=0)),
+        "recall": float(recall_score(all_labels, preds, zero_division=0)),
         "auc": float(
             roc_auc_score(all_labels, all_probs)
             if len(np.unique(all_labels)) > 1
@@ -160,6 +167,7 @@ def optimize_threshold_from_predictions(
     all_labels: np.ndarray,
     all_probs: np.ndarray,
     metric: str = "mcc",
+    strategy: str = "validation",
 ) -> Dict[str, float]:
     """
     Optimize decision threshold on provided predictions.
@@ -167,6 +175,9 @@ def optimize_threshold_from_predictions(
     Uses all unique prediction values as candidate thresholds plus one sentinel
     threshold above max(prob), and selects the threshold that maximizes the
     chosen metric. Ties are broken by choosing the threshold closest to 0.5.
+    
+    Args:
+        strategy: "validation" (default) or "combined" (train+val average)
     """
     if len(all_labels) == 0:
         raise EvaluationError("Cannot optimize threshold on empty predictions.")

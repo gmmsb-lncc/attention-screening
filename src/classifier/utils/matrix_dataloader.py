@@ -46,13 +46,15 @@ class MatrixEmbeddingDataset(Dataset):
         data_df: pd.DataFrame,
         protein_matrix_dir: Union[str, Path, List[Union[str, Path]]],
         ligand_matrix_dir: Union[str, Path, List[Union[str, Path]]],
-        protein_vector_dir: Optional[Union[str, Path]] = None,
-        ligand_vector_dir: Optional[Union[str, Path]] = None,
+        protein_vector_dir: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
+        ligand_vector_dir: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
         label_column: str = 'label',
         regression_column: Optional[str] = 'pchembl_value',
         protein_id_column: str = 'seq_id',
         ligand_id_column: str = 'chembl_id',
         use_matrices: bool = True,
+        use_protein_matrices: Optional[bool] = None,
+        use_ligand_matrices: Optional[bool] = None,
         cache_in_memory: bool = False
     ):
         """
@@ -86,14 +88,22 @@ class MatrixEmbeddingDataset(Dataset):
         self.protein_matrix_dir = self.protein_matrix_dirs[0]
         self.ligand_matrix_dir = self.ligand_matrix_dirs[0]
 
-        self.protein_vector_dir = Path(protein_vector_dir) if protein_vector_dir else None
-        self.ligand_vector_dir = Path(ligand_vector_dir) if ligand_vector_dir else None
+        if isinstance(protein_vector_dir, (str, Path)) or protein_vector_dir is None:
+            self.protein_vector_dirs = [Path(protein_vector_dir)] if protein_vector_dir else []
+        else:
+            self.protein_vector_dirs = [Path(d) for d in protein_vector_dir]
+
+        if isinstance(ligand_vector_dir, (str, Path)) or ligand_vector_dir is None:
+            self.ligand_vector_dirs = [Path(ligand_vector_dir)] if ligand_vector_dir else []
+        else:
+            self.ligand_vector_dirs = [Path(d) for d in ligand_vector_dir]
         
         self.label_column = label_column
         self.regression_column = regression_column
         self.protein_id_column = protein_id_column
         self.ligand_id_column = ligand_id_column
-        self.use_matrices = use_matrices
+        self.use_protein_matrices = use_matrices if use_protein_matrices is None else use_protein_matrices
+        self.use_ligand_matrices = use_matrices if use_ligand_matrices is None else use_ligand_matrices
         self.cache_in_memory = cache_in_memory
         
         # Cache
@@ -116,7 +126,7 @@ class MatrixEmbeddingDataset(Dataset):
                 raise ValueError(f"Required column '{col}' not found in DataFrame")
 
         # Check directories exist (at least one must exist for each type)
-        if self.use_matrices:
+        if self.use_protein_matrices or self.use_ligand_matrices:
             protein_dirs_exist = [d.exists() for d in self.protein_matrix_dirs]
             ligand_dirs_exist = [d.exists() for d in self.ligand_matrix_dirs]
 
@@ -124,6 +134,10 @@ class MatrixEmbeddingDataset(Dataset):
                 logger.warning(f"No protein matrix dirs found: {self.protein_matrix_dirs}")
             if not any(ligand_dirs_exist):
                 logger.warning(f"No ligand matrix dirs found: {self.ligand_matrix_dirs}")
+        if not self.use_protein_matrices and not self.protein_vector_dirs:
+            logger.warning("Protein vectors requested but no protein vector dirs provided.")
+        if not self.use_ligand_matrices and not self.ligand_vector_dirs:
+            logger.warning("Ligand vectors requested but no ligand vector dirs provided.")
     
     def _load_embedding(
         self,
@@ -165,7 +179,7 @@ class MatrixEmbeddingDataset(Dataset):
 
         # Try loading matrix from each directory with each pattern
         checked_paths = []
-        if self.use_matrices:
+        if (self.use_protein_matrices and is_protein) or (self.use_ligand_matrices and not is_protein):
             for matrix_dir in matrix_dirs:
                 for pattern in file_patterns:
                     matrix_file = matrix_dir / pattern
@@ -177,8 +191,9 @@ class MatrixEmbeddingDataset(Dataset):
                         return embedding
 
         # Fallback to vector
-        if vector_dir is not None:
-            vector_file = vector_dir / f"{embed_id}_embedding.npy"
+        vector_dirs = self.protein_vector_dirs if is_protein else self.ligand_vector_dirs
+        for vdir in vector_dirs:
+            vector_file = vdir / f"{embed_id}_embedding.npy"
             if vector_file.exists():
                 embedding = np.load(vector_file)
                 # Expand to [1, dim] for consistency
@@ -221,7 +236,7 @@ class MatrixEmbeddingDataset(Dataset):
         protein_matrix = self._load_embedding(
             protein_id,
             self.protein_matrix_dirs,
-            self.protein_vector_dir,
+            None,
             self._protein_cache,
             is_protein=True
         )
@@ -229,7 +244,7 @@ class MatrixEmbeddingDataset(Dataset):
         ligand_matrix = self._load_embedding(
             ligand_id,
             self.ligand_matrix_dirs,
-            self.ligand_vector_dir,
+            None,
             self._ligand_cache,
             is_protein=False
         )
@@ -340,10 +355,16 @@ def create_matrix_dataloader(
     data_df: pd.DataFrame,
     protein_matrix_dir: Union[str, Path],
     ligand_matrix_dir: Union[str, Path],
+    protein_vector_dir: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
+    ligand_vector_dir: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
     batch_size: int = 32,
     shuffle: bool = True,
     num_workers: int = 0,
     pin_memory: bool = True,
+    prefetch_factor: int = 2,
+    persistent_workers: bool = False,
+    use_protein_matrices: Optional[bool] = None,
+    use_ligand_matrices: Optional[bool] = None,
     **dataset_kwargs
 ) -> DataLoader:
     """
@@ -366,17 +387,25 @@ def create_matrix_dataloader(
         data_df=data_df,
         protein_matrix_dir=protein_matrix_dir,
         ligand_matrix_dir=ligand_matrix_dir,
+        protein_vector_dir=protein_vector_dir,
+        ligand_vector_dir=ligand_vector_dir,
+        use_protein_matrices=use_protein_matrices,
+        use_ligand_matrices=use_ligand_matrices,
         **dataset_kwargs
     )
     
-    return DataLoader(
-        dataset,
+    dataloader_kwargs = dict(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=pin_memory,
         collate_fn=collate_matrix_batch
     )
+    if num_workers > 0:
+        dataloader_kwargs["prefetch_factor"] = prefetch_factor
+        dataloader_kwargs["persistent_workers"] = persistent_workers
+
+    return DataLoader(dataset, **dataloader_kwargs)
 
 
 class VectorEmbeddingDataset(Dataset):

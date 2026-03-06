@@ -1,6 +1,17 @@
 # CrossAttention Split Analysis
 
-This module evaluates the CNN + Cross-Attention model for protein-ligand affinity prediction using three rigorous evaluation scenarios that progressively test generalization capabilities.
+This module evaluates the CNN + Cross-Attention model for protein-ligand affinity prediction using rigorous evaluation scenarios that test generalization capabilities.
+
+**Part of the 4-Level Benchmark:**
+- **Level 1**: Fingerprint (ECFP 1024) + KNN/MLP
+- **Level 2**: Embedding Vectors + KNN/MLP
+- **Level 3**: Matrices + Attention Pooling + KNN/MLP
+- **Level 4**: Matrices + Transformer + Cross-Attention + KNN/MLP (this module)
+
+## Model Guides
+
+- [CrossAttention Lite: Detailed Visual Guide](./CROSS_ATTENTION_LITE.md)
+- [Diffusion Variant: Detailed Guide](./DIFFUSION.md)
 
 ## Overview
 

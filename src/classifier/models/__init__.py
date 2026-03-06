@@ -4,12 +4,16 @@
 from .mlp_classifier import MLPEmbeddingClassifier, create_mlp_model
 from .cross_attention_model import (
     CrossAttentionAffinityModel,
+    CrossAttentionLiteAffinityModel,
     MultiTaskLoss,
     create_cross_attention_model,
+    create_cross_attention_lite_model,
     CNNEncoder,
+    LinearEncoder,
     CrossAttention,
     CrossAttentionBlock
 )
+from .diffusion_model import DiffusionAffinityModel
 from .matrix_embedding_extractor import (
     MatrixEmbeddingExtractor,
     create_synthetic_embeddings,
@@ -43,11 +47,15 @@ __all__ = [
     "create_mlp_model",
     # Cross-Attention models
     "CrossAttentionAffinityModel",
+    "CrossAttentionLiteAffinityModel",
     "MultiTaskLoss",
     "create_cross_attention_model",
+    "create_cross_attention_lite_model",
     "CNNEncoder",
+    "LinearEncoder",
     "CrossAttention",
     "CrossAttentionBlock",
+    "DiffusionAffinityModel",
     # CNN building blocks (modular)
     "SqueezeExcitation",
     "DepthwiseSeparableConv1d",

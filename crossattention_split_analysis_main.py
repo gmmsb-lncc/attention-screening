@@ -11,6 +11,7 @@ in the crossattention_split_analysis package directory.
 """
 
 import argparse
+import socket
 import os
 import sys
 import time
@@ -63,13 +64,20 @@ def print_comparative_summary(all_embedding_results: dict):
 
     scenarios = list(first_result.keys())
 
+    def _primary_metrics(scenario_block: dict) -> dict:
+        if not scenario_block:
+            return {}
+        if 'CNN+CrossAttn' in scenario_block:
+            return scenario_block['CNN+CrossAttn']
+        return next(iter(scenario_block.values()))
+
     for scenario in scenarios:
         scenario_clean = scenario.replace('\n', ' ')
         print(f"{scenario_clean:<30} ", end="")
 
         for emb, results in all_embedding_results.items():
             if results and scenario in results:
-                metrics = results[scenario].get('CNN+CrossAttn', {})
+                metrics = _primary_metrics(results[scenario])
                 mcc = metrics.get('mcc', 0)
                 mcc_std = metrics.get('mcc_std', 0)
                 if mcc_std > 0:
@@ -235,6 +243,83 @@ Available scenarios:
         help='Feed-forward dimension inside attention blocks (default: 1024)'
     )
 
+    # Diffusion-specific parameters
+    parser.add_argument(
+        '--diffusion_steps',
+        type=int,
+        default=200,
+        help='Number of diffusion timesteps (default: 200)'
+    )
+
+    parser.add_argument(
+        '--diffusion_beta_start',
+        type=float,
+        default=1e-4,
+        help='Diffusion beta start value (default: 1e-4)'
+    )
+
+    parser.add_argument(
+        '--diffusion_beta_end',
+        type=float,
+        default=0.02,
+        help='Diffusion beta end value (default: 0.02)'
+    )
+
+    parser.add_argument(
+        '--diffusion_layers',
+        type=int,
+        default=4,
+        help='Number of diffusion denoiser layers (default: 4)'
+    )
+
+    parser.add_argument(
+        '--diffusion_cross_attn_layers',
+        type=int,
+        default=1,
+        help='Number of cross-attention blocks after diffusion (default: 1)'
+    )
+
+    parser.add_argument(
+        '--diffusion_loss_weight',
+        type=float,
+        default=0.1,
+        help='Weight for diffusion auxiliary loss (default: 0.1)'
+    )
+
+    parser.add_argument(
+        '--diffusion_loss_anneal',
+        choices=['none', 'linear'],
+        default='none',
+        help='Anneal diffusion loss weight over epochs (default: none)'
+    )
+
+    parser.add_argument(
+        '--diffusion_pool_queries',
+        type=int,
+        default=4,
+        help='Number of attention pooling queries per modality (default: 4)'
+    )
+
+    parser.add_argument(
+        '--diffusion_snr_sampling_gamma',
+        type=float,
+        default=0.5,
+        help='Exponent for SNR-based timestep sampling (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--diffusion_snr_sampling_mix',
+        type=float,
+        default=0.2,
+        help='Mix ratio with uniform timestep sampling (default: 0.2)'
+    )
+
+    parser.add_argument(
+        '--diffusion_joint_denoise',
+        action='store_true',
+        help='Jointly denoise protein+ligand tokens (default: separate)'
+    )
+
     parser.add_argument(
         '--dropout',
         type=float,
@@ -261,6 +346,65 @@ Available scenarios:
         type=float,
         default=0.5,
         help='Regression loss weight beta (default: 0.5)'
+    )
+
+    parser.add_argument(
+        '--classification_only',
+        action='store_true',
+        help='Train only classification loss (sets regression_weight=0)'
+    )
+
+    parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=None,
+        help='DataLoader worker processes (default: auto)'
+    )
+
+    parser.add_argument(
+        '--cache_in_memory',
+        action='store_true',
+        default=None,
+        help='Cache all matrices in memory (use only if RAM allows)'
+    )
+
+    parser.add_argument(
+        '--no-cache_in_memory',
+        action='store_true',
+        help='Disable in-memory caching of matrices'
+    )
+
+    parser.add_argument(
+        '--pin_memory',
+        action='store_true',
+        default=None,
+        help='Enable pinned memory for faster GPU transfer (default: auto)'
+    )
+
+    parser.add_argument(
+        '--no-pin_memory',
+        action='store_true',
+        help='Disable pinned memory for data loading'
+    )
+
+    parser.add_argument(
+        '--prefetch_factor',
+        type=int,
+        default=None,
+        help='DataLoader prefetch factor when num_workers > 0 (default: auto)'
+    )
+
+    parser.add_argument(
+        '--persistent_workers',
+        action='store_true',
+        default=None,
+        help='Keep DataLoader workers alive between epochs (default: auto)'
+    )
+
+    parser.add_argument(
+        '--no-persistent_workers',
+        action='store_true',
+        help='Disable persistent DataLoader workers'
     )
 
     parser.add_argument(
@@ -308,7 +452,27 @@ Available scenarios:
     parser.add_argument(
         '--molformer_ligand',
         action='store_true',
-        help='Use MoLFormer matrices instead of SMI-TED for ligand representation'
+        default=None,
+        help='Use MoLFormer matrices for ligand representation (default: enabled)'
+    )
+
+    parser.add_argument(
+        '--smited_ligand',
+        action='store_true',
+        help='Use SMI-TED ligand matrices (disables MoLFormer)'
+    )
+
+    parser.add_argument(
+        '--ligand_vectors',
+        action='store_true',
+        help='Use ligand vectors instead of ligand matrices (overrides --molformer_ligand)'
+    )
+
+    parser.add_argument(
+        '--model_variant',
+        choices=['cnn_crossattn', 'cross_attention_lite', 'diffusion'],
+        default='cnn_crossattn',
+        help='Model variant: CNN+CrossAttention, CrossAttention Lite, or Diffusion'
     )
 
     parser.add_argument(
@@ -318,12 +482,142 @@ Available scenarios:
     )
 
     parser.add_argument(
+        '--print_suggested_commands',
+        action='store_true',
+        help='Print suggested command presets and exit'
+    )
+
+    parser.add_argument(
         '--debug',
         action='store_true',
         help='Enable debug mode with full error tracebacks'
     )
 
     args = parser.parse_args()
+
+    hostname = socket.gethostname()
+    if hostname in {"diamante-01", "diamante-02", "diamante-03"}:
+        if args.num_workers is None:
+            args.num_workers = 12
+        if args.prefetch_factor is None:
+            args.prefetch_factor = 4
+        if args.cache_in_memory is None:
+            args.cache_in_memory = True
+        if args.pin_memory is None:
+            args.pin_memory = True
+        if args.persistent_workers is None:
+            args.persistent_workers = True
+    else:
+        if args.num_workers is None:
+            args.num_workers = 0
+        if args.prefetch_factor is None:
+            args.prefetch_factor = 2
+        if args.cache_in_memory is None:
+            args.cache_in_memory = False
+        if args.pin_memory is None:
+            args.pin_memory = True
+        if args.persistent_workers is None:
+            args.persistent_workers = False
+
+    if args.no_cache_in_memory:
+        args.cache_in_memory = False
+    if args.no_pin_memory:
+        args.pin_memory = False
+    if args.no_persistent_workers:
+        args.persistent_workers = False
+
+    if args.ligand_vectors:
+        args.molformer_ligand = False
+    elif args.smited_ligand:
+        args.molformer_ligand = False
+    elif args.molformer_ligand is None:
+        args.molformer_ligand = True
+
+    if args.classification_only:
+        args.regression_weight = 0.0
+
+    if args.print_suggested_commands:
+        print("Suggested command presets (classification-only):\n")
+        print("# cnn-ca default")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant cnn_crossattn \\\n"
+            "  --molformer_ligand \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_cnn_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --num_cnn_layers 3 \\\n"
+            "  --num_cross_attn_layers 2 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --classification_only \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --no-early-stopping \\\n"
+            "  --force\n"
+        )
+        print("# cnn-ca-lite")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant cross_attention_lite \\\n"
+            "  --molformer_ligand \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_lite_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --classification_only \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --no-early-stopping \\\n"
+            "  --force\n"
+        )
+        print("# diffusion")
+        print(
+            "python crossattention_split_analysis_main.py \\\n"
+            "  --embedding 8M \\\n"
+            "  --dataset non_human \\\n"
+            "  --model_variant diffusion \\\n"
+            "  --diffusion_steps 200 \\\n"
+            "  --diffusion_layers 4 \\\n"
+            "  --diffusion_cross_attn_layers 1 \\\n"
+            "  --diffusion_pool_queries 4 \\\n"
+            "  --diffusion_snr_sampling_gamma 0.5 \\\n"
+            "  --diffusion_snr_sampling_mix 0.2 \\\n"
+            "  --diffusion_loss_weight 0.05 \\\n"
+            "  --diffusion_loss_anneal linear \\\n"
+            "  --diffusion_joint_denoise \\\n"
+            "  --classification_only \\\n"
+            "  --scaffold_split_dir scaffolds_splits/output \\\n"
+            "  --output_dir results/non_human_crossattention_analysis_diffusion_v3_24_02_2026 \\\n"
+            "  --epochs 500 \\\n"
+            "  --batch_size 32 \\\n"
+            "  --learning_rate 1e-4 \\\n"
+            "  --weight_decay 0.01 \\\n"
+            "  --hidden_dim 256 \\\n"
+            "  --num_heads 8 \\\n"
+            "  --ff_dim 1024 \\\n"
+            "  --dropout 0.1 \\\n"
+            "  --classification_weight 1.0 \\\n"
+            "  --threshold_metric mcc \\\n"
+            "  --molformer_ligand \\\n"
+            "  --force\n"
+        )
+        return
 
     # Validate arguments
     if not args.run_all and args.embedding is None:
@@ -365,7 +659,12 @@ Available scenarios:
     print(f"Scaffold split dir:{args.scaffold_split_dir}")
     print(f"External test mode: {args.external_test_mode}")
     print(f"Protein input:    {'Attention matrices' if args.use_attention else 'Per-token embeddings'}")
-    print(f"Ligand input:     {'Per-token embeddings (MoLFormer)' if args.molformer_ligand else 'Per-token embeddings (SMI-TED)'}")
+    if args.ligand_vectors:
+        ligand_input = "Vector embeddings"
+    else:
+        ligand_input = "Per-token embeddings (MoLFormer)" if args.molformer_ligand else "Per-token embeddings (SMI-TED)"
+    print(f"Ligand input:     {ligand_input}")
+    print(f"Model variant:    {args.model_variant}")
     print(f"Seeds:            {args.seeds} (n={len(args.seeds)})")
     print("-" * 70)
     print("Training Parameters:")
@@ -382,9 +681,23 @@ Available scenarios:
     print(f"  CrossAttn layers:{args.num_cross_attn_layers}")
     print(f"  Heads:          {args.num_heads}")
     print(f"  FF dim:         {args.ff_dim}")
+    if args.model_variant == 'diffusion':
+        print(f"  Diffusion steps:{args.diffusion_steps}")
+        print(f"  Diff beta:      {args.diffusion_beta_start} -> {args.diffusion_beta_end}")
+        print(f"  Diff layers:    {args.diffusion_layers}")
+        print(f"  Diff XAttn:     {args.diffusion_cross_attn_layers}")
+        print(f"  Diff loss wt:   {args.diffusion_loss_weight}")
+        print(f"  Diff anneal:    {args.diffusion_loss_anneal}")
+        print(f"  Diff pool q:    {args.diffusion_pool_queries}")
+        print(f"  Diff SNR gamma: {args.diffusion_snr_sampling_gamma}")
+        print(f"  Diff SNR mix:   {args.diffusion_snr_sampling_mix}")
+        print(f"  Diff joint:     {args.diffusion_joint_denoise}")
     print(f"  Dropout:        {args.dropout}")
     print(f"  Max grad norm:  {args.max_grad_norm}")
     print(f"  Loss weights:   cls={args.classification_weight}, reg={args.regression_weight}")
+    print(f"  DataLoader:     workers={args.num_workers}, cache={args.cache_in_memory}, "
+          f"pin_memory={args.pin_memory}, prefetch={args.prefetch_factor}, "
+          f"persistent={args.persistent_workers}")
     if args.disable_threshold_optimization:
         print(f"  Threshold:      FIXED ({args.fixed_threshold})")
     else:
@@ -431,15 +744,34 @@ Available scenarios:
                 num_heads=args.num_heads,
                 ff_dim=args.ff_dim,
                 dropout=args.dropout,
+                diffusion_steps=args.diffusion_steps,
+                diffusion_beta_start=args.diffusion_beta_start,
+                diffusion_beta_end=args.diffusion_beta_end,
+                diffusion_layers=args.diffusion_layers,
+                diffusion_cross_attn_layers=args.diffusion_cross_attn_layers,
+                diffusion_loss_weight=args.diffusion_loss_weight,
+                diffusion_loss_anneal=args.diffusion_loss_anneal,
+                diffusion_pool_queries=args.diffusion_pool_queries,
+                diffusion_snr_sampling_gamma=args.diffusion_snr_sampling_gamma,
+                diffusion_snr_sampling_mix=args.diffusion_snr_sampling_mix,
+                diffusion_joint_denoise=args.diffusion_joint_denoise,
                 max_grad_norm=args.max_grad_norm,
                 classification_weight=args.classification_weight,
                 regression_weight=args.regression_weight,
+                classification_only=args.classification_only,
+                dataloader_num_workers=args.num_workers,
+                dataloader_cache_in_memory=args.cache_in_memory,
+                dataloader_pin_memory=args.pin_memory,
+                dataloader_prefetch_factor=args.prefetch_factor,
+                dataloader_persistent_workers=args.persistent_workers,
                 optimize_threshold=not args.disable_threshold_optimization,
                 threshold_metric=args.threshold_metric,
                 fixed_threshold=args.fixed_threshold,
                 use_molformer_ligand=args.molformer_ligand,
+                use_ligand_vectors=args.ligand_vectors,
                 scaffold_split_dir=args.scaffold_split_dir,
-                external_test_mode=args.external_test_mode
+                model_variant=args.model_variant,
+                external_test_mode=args.external_test_mode,
             )
 
             embedding_time = time.time() - embedding_start_time

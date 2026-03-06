@@ -73,15 +73,15 @@ class MolecularClusterer(BaseAnalyzer):
     def smiles_to_fingerprint(smiles: str):
         """
         Convert SMILES string to Morgan fingerprint.
-        
+
         Args:
             smiles: SMILES string
-            
+
         Returns:
             Morgan fingerprint or None if conversion fails
         """
         mol = Chem.MolFromSmiles(smiles)
-        return AllChem.GetMorganFingerprintAsBitVect(mol, 2) if mol else None
+        return AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024) if mol else None
 
     def generate_fingerprints(self, smile_column: str = 'canonical_smiles', 
                             use_parallel: bool = True, batch_size: int = None) -> list:
