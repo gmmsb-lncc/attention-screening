@@ -17,6 +17,15 @@ Difference from other levels:
 This level isolates the contribution of *learned aggregation* without
 the inter-modality interaction that cross-attention provides.
 
+Training protocol (consistent with all levels):
+  - Attention pooling model trained on the **training** split
+    (validation split for early stopping).
+  - Features extracted from the **validation** split — the model was
+    *not* directly trained on val, only used it for model selection,
+    so val features are free of train-set optimism.
+  - KNN/MLP classifiers trained on val features.
+  - Evaluation on the hold-out **test** split.
+
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
 to guarantee identical hyperparameters across all four levels.
 """
@@ -353,21 +362,21 @@ class Level3Runner(BaseLevelRunner):
 
         device = next(model.parameters()).device
 
-        # Extract features
-        tqdm.write("  Extracting attention-pooled features...")
-        x_train, y_train = _extract_features(model, train_loader, device)
+        # Extract features from val (not train — avoids train-set optimism)
+        tqdm.write("  Extracting attention-pooled features (val + test)...")
+        x_val, y_val = _extract_features(model, val_loader, device)
         x_test, y_test = _extract_features(model, test_loader, device)
 
         # Sanitize
-        for name, arr in [("train", x_train), ("test", x_test)]:
+        for name, arr in [("val", x_val), ("test", x_test)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Train canonical KNN/MLP on extracted features
+        # Train canonical KNN/MLP on val features (same as all levels)
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_train, y_train, x_test, y_test, seed)
+        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

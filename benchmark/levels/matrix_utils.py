@@ -300,6 +300,7 @@ def _make_loader(
     batch_size: int,
     shuffle: bool,
 ) -> DataLoader:
+    _validate_matrix_coverage(df, protein_dirs, ligand_dirs)
     return DataLoader(
         MatrixDataset(df, protein_dirs, ligand_dirs),
         batch_size=batch_size,
@@ -307,3 +308,38 @@ def _make_loader(
         collate_fn=collate_matrices,
         num_workers=0,
     )
+
+
+def _validate_matrix_coverage(
+    df: pd.DataFrame,
+    protein_dirs: list[Path],
+    ligand_dirs: list[Path],
+) -> None:
+    """Check that matrix files exist for all unique IDs in the DataFrame.
+
+    Emits a ``tqdm.write`` warning with counts when files are missing.
+    Runs on unique IDs only, not per-row, for efficiency.
+    """
+    unique_seqs = df["seq_id"].unique()
+    unique_chembls = df["chembl_id"].unique()
+
+    missing_prot = sum(
+        1
+        for sid in unique_seqs
+        if not any((d / f"{sid}_matrix.npy").exists() for d in protein_dirs)
+    )
+    missing_lig = sum(
+        1
+        for cid in unique_chembls
+        if not any((d / f"{cid}_molformer_matrix.npy").exists() for d in ligand_dirs)
+    )
+
+    if missing_prot or missing_lig:
+        from tqdm import tqdm
+
+        tqdm.write(
+            f"  WARNING: matrix coverage gap — "
+            f"{missing_prot}/{len(unique_seqs)} protein matrices and "
+            f"{missing_lig}/{len(unique_chembls)} ligand matrices not found. "
+            f"Zero-fallback will be used for missing files."
+        )

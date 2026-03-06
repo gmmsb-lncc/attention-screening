@@ -13,6 +13,11 @@ The only difference is the pooling strategy:
   - Level 3: learned attention pooling
   - Level 4: full cross-attention encoder
 
+Training protocol (consistent with all levels):
+  - Features extracted from the **validation** split.
+  - KNN/MLP classifiers trained on val features.
+  - Evaluation on the hold-out **test** split.
+
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
 to guarantee identical hyperparameters across all four levels.
 """
@@ -91,25 +96,25 @@ class Level2Runner(BaseLevelRunner):
 
         tqdm.write(f"  Extracting Level 2 features (seed {seed})...")
 
-        train_loader, _val_loader, test_loader = build_matrix_dataloaders(
+        _train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
         )
 
-        tqdm.write("  Mean-pooling protein + ligand matrices...")
-        x_train, y_train = _extract_features(train_loader)
+        tqdm.write("  Mean-pooling protein + ligand matrices (val + test)...")
+        x_val, y_val = _extract_features(val_loader)
         x_test, y_test = _extract_features(test_loader)
 
         # Sanitize features
-        for name, arr in [("train", x_train), ("test", x_test)]:
+        for name, arr in [("val", x_val), ("test", x_test)]:
             bad = np.isnan(arr).sum() + np.isinf(arr).sum()
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_train, y_train, x_test, y_test, seed)
+        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
