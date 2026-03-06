@@ -25,6 +25,8 @@ from benchmark.config import BenchmarkConfig
 from benchmark.finetuning import run_finetuning_pipeline
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.level1 import Level1Runner
+from benchmark.levels.level1b import Level1bRunner
+from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner
 from benchmark.levels.level4 import Level4Runner
@@ -46,7 +48,7 @@ class BenchmarkOrchestrator:
 
     def __init__(self, config: BenchmarkConfig) -> None:
         self._config = config
-        self._level_results: Dict[int, Optional[Dict]] = {}
+        self._level_results: Dict[str, Optional[Dict]] = {}
         self._finetuned_dirs: Dict[str, Dict[str, Optional[str]]] = {}
         self._t_start: float = 0.0
 
@@ -105,7 +107,7 @@ class BenchmarkOrchestrator:
     def _run_finetuning(self) -> None:
         self._finetuned_dirs = run_finetuning_pipeline(self._config)
 
-    def _run_level(self, runner: BaseLevelRunner, level: int) -> None:
+    def _run_level(self, runner: BaseLevelRunner, level: str) -> None:
         result = runner.run()
         self._level_results[level] = result
         if result:
@@ -117,10 +119,12 @@ class BenchmarkOrchestrator:
         config = self._config
 
         self._aggregated = aggregate_benchmark_metrics(
-            level1_results=self._level_results.get(1),
-            level2_results=self._level_results.get(2),
-            level3_results=self._level_results.get(3),
-            level4_results=self._level_results.get(4),
+            level1a_results=self._level_results.get("1a"),
+            level1b_results=self._level_results.get("1b"),
+            level1c_results=self._level_results.get("1c"),
+            level2_results=self._level_results.get("2"),
+            level3_results=self._level_results.get("3"),
+            level4_results=self._level_results.get("4"),
         )
 
         if not self._aggregated:
@@ -139,22 +143,28 @@ class BenchmarkOrchestrator:
 
     def _build_runners(
         self,
-    ) -> List[tuple[int, BaseLevelRunner, str]]:
+    ) -> List[tuple[str, BaseLevelRunner, str]]:
         """Instantiate level runners for the configured levels."""
         config = self._config
-        runners: List[tuple[int, BaseLevelRunner, str]] = []
+        runners: List[tuple[str, BaseLevelRunner, str]] = []
 
-        if 1 in config.levels:
-            runners.append((1, Level1Runner(config), "Step 1: Level 1 (FP+KNN/MLP)"))
+        if "1a" in config.levels:
+            runners.append(("1a", Level1Runner(config), "Step 1a: Level 1a (FP+KNN/MLP)"))
 
-        if 2 in config.levels:
-            runners.append((2, Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
+        if "1b" in config.levels:
+            runners.append(("1b", Level1bRunner(config), "Step 1b: Level 1b (LigandMeanPool+KNN/MLP)"))
 
-        if 3 in config.levels:
-            runners.append((3, Level3Runner(config), "Step 3: Level 3 (AttnPool+KNN/MLP)"))
+        if "1c" in config.levels:
+            runners.append(("1c", Level1cRunner(config), "Step 1c: Level 1c (LigandAttnPool+KNN/MLP)"))
 
-        if 4 in config.levels:
-            runners.append((4, Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
+        if "2" in config.levels:
+            runners.append(("2", Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
+
+        if "3" in config.levels:
+            runners.append(("3", Level3Runner(config), "Step 3: Level 3 (AttnPool+KNN/MLP)"))
+
+        if "4" in config.levels:
+            runners.append(("4", Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
 
         return runners
 
@@ -236,7 +246,7 @@ class BenchmarkOrchestrator:
         print(f"  Output dir:       {config.resolved_output_dir}")
         print(f"  Scaffold splits:  {config.scaffold_split_dir}")
         print(f"  Force:            {config.force}")
-        if 4 in config.levels:
+        if any(lv in config.levels for lv in ("1c", "3", "4")):
             print(f"  DL epochs:        {config.epochs}")
             print(f"  DL batch_size:    {config.batch_size}")
             print(f"  DL patience:      {config.resolved_patience}")

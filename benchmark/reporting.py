@@ -23,8 +23,12 @@ from benchmark.config import (
 # ---------------------------------------------------------------------------
 
 MODEL_DISPLAY_ORDER = [
-    "level1_fp_knn",
-    "level1_fp_mlp",
+    "level1a_fp_knn",
+    "level1a_fp_mlp",
+    "level1b_ligmean_knn",
+    "level1b_ligmean_mlp",
+    "level1c_ligattn_knn",
+    "level1c_ligattn_mlp",
     "level2_meanpool_knn",
     "level2_meanpool_mlp",
     "level3_attnpool_knn",
