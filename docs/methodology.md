@@ -776,13 +776,13 @@ This hierarchy answers a fundamental scientific question: **how much does each l
 
 ```bash
 # Full benchmark (all 3 levels)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M
+python semantic_screening_models.py --dataset non_human --embedding 8M
 
 # Specific levels
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1,2
 
 # Level 3 with custom hyperparameters
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 --epochs 100
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 3 --epochs 100
 ```
 
 ### 8.3 Benchmark Pipeline Flow

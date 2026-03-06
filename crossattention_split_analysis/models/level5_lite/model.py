@@ -105,6 +105,7 @@ class Level5LiteModel(nn.Module):
         ligand_matrix: torch.Tensor,
         protein_mask: torch.Tensor = None,
         ligand_mask: torch.Tensor = None,
+        return_features: bool = False,
     ) -> dict:
         """Forward pass.
         
@@ -113,11 +114,15 @@ class Level5LiteModel(nn.Module):
             ligand_matrix: [batch, ligand_len, ligand_input_dim] MoLFormer embeddings
             protein_mask: [batch, protein_len] mask where 1=real token, 0=padding
             ligand_mask: [batch, ligand_len] mask where 1=real token, 0=padding
+            return_features: If True, include the pre-head representation vector
+                in the output dict under key ``'features'``
+                (shape ``[batch, 2 * hidden_dim]``).
         
         Returns:
             dict with:
                 - 'classification': [batch, 1] classification logits
                 - 'regression': [batch, 1] regression predictions (for compatibility)
+                - 'features': [batch, 2*hidden_dim] (only when return_features=True)
         """
         # Convert masks: PyTorch attention expects True for padding, False for real tokens
         # Input masks are 1=real, 0=padding, so we need to invert
@@ -153,10 +158,13 @@ class Level5LiteModel(nn.Module):
         logits = self.classifier(combined)
         regression = self.regression_head(combined)
         
-        return {
+        result = {
             'classification': logits,
             'regression': regression,
         }
+        if return_features:
+            result['features'] = combined
+        return result
     
     def get_attention_weights(
         self,

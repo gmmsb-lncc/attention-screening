@@ -3,17 +3,29 @@
 
 Coordinates the full pipeline:
   Step 0:  Verify / generate scaffold splits
-  Step 0b: Verify / extract ligand vectors (if Level 2 requested)
   Step FT: ESM-2 + MolFormer Fine-tuning (if --finetune flag set)
-  Step 1:  Level 1 — Fingerprint + KNN/MLP  (baseline)
-  Step 2:  Level 2 — Embedding vectors + KNN/MLP (with Attention Pooling)
-  Step 3:  Level 3 — Embedding matrices + Mean Pooling + KNN/MLP
-  Step 4:  Level 4 — Transformer + Cross-Attention + KNN/MLP
+  Step 1a: Level 1a — Fingerprint + KNN/MLP (compound-only baseline)
+  Step 1b: Level 1b — Ligand MoLFormer mean pooling + KNN/MLP
+  Step 1c: Level 1c — Ligand MoLFormer attention pooling + KNN/MLP
+  Step 2:  Level 2  — Protein+Ligand mean pooling + KNN/MLP
+  Step 3:  Level 3  — Protein+Ligand attention pooling + KNN/MLP
+  Step 4:  Level 4  — Cross-Attention + KNN/MLP (DT-Kinase)
   Report:  Comparative report and visualizations
 
+Monotonic complexity hierarchy:
+  1a (FP) < 1b (lig mean) < 1c (lig attn) < 2 (prot+lig mean)
+  < 3 (prot+lig attn) < 4 (cross-attention)
+
+Evaluation protocol:
+  - All six levels use the **exact same** canonical KNN and MLP classifiers
+    (benchmark.classifiers), ensuring the only variable is the representation.
+  - Classifiers are trained on **validation-split** features and evaluated
+    on the **test** split, eliminating train-set optimism for levels with
+    learned feature extractors (1c, 3, 4).
+
 Usage:
-    python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 4
-    python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 --finetune
+    python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3 4
+    python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune
 """
 
 from benchmark.cli import build_parser, config_from_args

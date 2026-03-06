@@ -168,7 +168,7 @@ embeddings = embedder.generate_embeddings(
 
 ```bash
 # Run full pipeline with Boltz-2
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/boltz2_run \
     --esm-model boltz2 \

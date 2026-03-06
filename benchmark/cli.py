@@ -47,12 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1,2,3,4",
+        default="1a,1b,1c,2,3,4",
         nargs="*",
         help=(
-            "Levels to run: 1=FP+KNN/MLP, 2=Emb+KNN/MLP, "
-            "3=Mat+MeanPool+KNN/MLP, 4=CrossAtt+KNN/MLP "
-            "(default: 1,2,3,4). Examples: --levels 1 2 3 4 OR --levels 1,2,3"
+            "Levels to run: 1a=FP, 1b=LigandMeanPool, 1c=LigandAttnPool, "
+            "2=MeanPool, 3=AttnPool, 4=CrossAtt "
+            "(default: 1a,1b,1c,2,3,4). "
+            "Examples: --levels 1a 1b 1c 2 3 4 OR --levels 1a,2,4"
         ),
     )
 
@@ -83,10 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
 
     # --- deep-learning hyper-parameters ---
-    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 3/4 (default: 500)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 3/4 (default: 32)")
+    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 3/4 (default: 1e-4)")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")
@@ -98,10 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_levels(levels_arg: object) -> List[int]:
-    """Parse levels from various formats: ``['1', '2']``, ``'1,2,3'``, etc.
+def parse_levels(levels_arg: object) -> List[str]:
+    """Parse levels from various formats: ``['1a', '2']``, ``'1a,2,3'``, etc.
 
-    Returns a sorted, deduplicated list of valid level integers.
+    Returns a sorted, deduplicated list of valid level strings.
 
     Raises:
         SystemExit: When an invalid level is provided.
@@ -116,7 +117,7 @@ def parse_levels(levels_arg: object) -> List[int]:
         else:
             parts = re.split(r"[,\s]+", str(levels_arg).strip())
 
-        levels = sorted({int(x.strip()) for x in parts if x.strip()})
+        levels = sorted({x.strip().lower() for x in parts if x.strip()})
 
         for level in levels:
             if level not in VALID_LEVELS:

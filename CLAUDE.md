@@ -47,9 +47,9 @@ Markers defined: `slow`, `integration`, `unit`, `regression`, `classifier`, `bui
 
 | Command | Purpose |
 |---------|---------|
-| `python run_complete_pipeline.py --input data.tsv --output results/ --protein-model esm2_t33_650M_UR50D` | Full pipeline: embeddings → stratification → classification → regression |
+| `python scripts/run_complete_pipeline.py --input data.tsv --output results/ --protein-model esm2_t33_650M_UR50D` | Full pipeline: embeddings → stratification → classification → regression |
 | `python scripts/attention_matrix.py --attention-matrix on --input data.tsv --build results/` | Cross-Attention model training |
-| `python crossattention_split_analysis_main.py --embedding 150M --dataset non_human` | Split analysis (data leakage evaluation) |
+| `python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a 1b 1c 2 3 4` | Benchmark: 6-level model comparison |
 
 ## Architecture
 
@@ -137,6 +137,6 @@ This is the most actively developed module. Key files:
 
 ## Adding a New Protein Model
 
-1. Add model name to choices in `run_complete_pipeline.py`
+1. Add model name to choices in `scripts/run_complete_pipeline.py`
 2. Add dimension mapping in `protein_dims` dict
 3. Implement embedding strategy in `src/build/embeddings/strategies/`

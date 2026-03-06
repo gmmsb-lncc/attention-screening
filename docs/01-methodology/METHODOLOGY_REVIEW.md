@@ -875,7 +875,7 @@ config = IntegratedConfig(
 
 ```bash
 # Benchmark completo com todos os 3 níveis e 5 seeds
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset non_human --embedding 650M \
     --seeds 42 123 456 789 1024
 ```
@@ -884,7 +884,7 @@ python semantic_screening_models_beta.py \
 
 ```bash
 # Apenas Level 1 e 2 (sem GPU, rápido)
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset non_human --embedding 8M --levels 1,2
     
     classification_models=['RandomForest', 'XGBoost'],

@@ -243,7 +243,7 @@ def run_pipeline(args):
     # Construir comando
     cmd = [
         'python',
-        'run_complete_pipeline.py',
+        'scripts/run_complete_pipeline.py',
         '--input', str(input_path),
         '--output', output_path,
         '--esm-model', args.esm_model,

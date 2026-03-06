@@ -252,7 +252,7 @@ Após identificar o melhor modelo:
 
 1. **Retreinar com dataset completo** (Classification):
    ```bash
-   python run_complete_pipeline.py \
+   python scripts/run_complete_pipeline.py \
        --dataset human \
        --model esm2_t36_3B_UR50D \
        --device cuda

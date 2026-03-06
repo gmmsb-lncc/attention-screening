@@ -363,7 +363,7 @@ class ESMFineTuner:
 
 ```bash
 # Fine-tune ESM-2 8M e execute o pipeline completo
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --finetune \
@@ -388,7 +388,7 @@ python semantic_screening_models_beta.py \
 
 ```bash
 # Fine-tuning com hiperparâmetros customizados
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --finetune \
@@ -499,13 +499,13 @@ Para comparar vanilla vs fine-tuned:
 
 ```bash
 # PASSO 1: Fine-tune ESM-2 (Level 4)
-python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 4 --finetune_epochs 10
+python semantic_screening_models.py --dataset human --embedding 8M --levels 4 --finetune_epochs 10
 
 # PASSO 2: Extrair embeddings fine-tuned (Level 0)
-python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 0 --use_finetuned
+python semantic_screening_models.py --dataset human --embedding 8M --levels 0 --use_finetuned
 
 # PASSO 3: Treinar downstream (Levels 2-3)
-python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 2 3 --use_finetuned
+python semantic_screening_models.py --dataset human --embedding 8M --levels 2 3 --use_finetuned
 
 # PASSO 4: Comparar resultados
 python scripts/compare_vanilla_vs_finetuned.py --results results/benchmark_human_8M/

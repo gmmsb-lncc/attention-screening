@@ -289,12 +289,12 @@ print('✅ Principais bibliotecas OK!')
 
 2. ✅ **Testar com dataset pequeno**
    ```bash
-   python run_complete_pipeline.py --test-mode
+   python scripts/run_complete_pipeline.py --test-mode
    ```
 
 3. ✅ **Executar pipeline completo**
    ```bash
-   python run_complete_pipeline.py      # Classificação
+   python scripts/run_complete_pipeline.py      # Classificação
    python run_regression_pipeline.py    # Regressão
    ```
 

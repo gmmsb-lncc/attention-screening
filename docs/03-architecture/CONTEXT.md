@@ -46,13 +46,13 @@ Each level answers a scientific question:
 
 ```bash
 # Default: Levels 1, 2, 3
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M
+python semantic_screening_models.py --dataset non_human --embedding 8M
 
 # All 4 levels
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2,3,4
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1,2,3,4
 
 # Quick test (only baseline levels)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1,2
 ```
 
 ### CLI arguments
@@ -358,21 +358,21 @@ and concatenates them. Embeddings are loaded from both
 ### Regenerate scaffold splits
 
 ```bash
-python scaffold_split.py --output-dir scaffolds_splits/output --scenarios Sc
+python scripts/scaffold_split.py --output-dir scaffolds_splits/output --scenarios Sc
 ```
 
 ### Run a single level
 
 ```bash
 # Level 1 only
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1
 
 # Level 3 with custom epochs
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 --epochs 100
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 3 --epochs 100
 ```
 
 ### Force recalculation
 
 ```bash
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --force
+python semantic_screening_models.py --dataset non_human --embedding 8M --force
 ```

@@ -582,7 +582,7 @@ config = BuildConfig({
 ### **Classification Pipeline**
 ```bash
 # CLI
-python run_complete_pipeline.py --dataset human --max-samples 1000
+python scripts/run_complete_pipeline.py --dataset human --max-samples 1000
 
 # Python API
 from build.pipeline import BuildPipeline

@@ -103,7 +103,7 @@ So it is lighter in encoder parameters and compute, while preserving token-level
 CLI example:
 
 ```bash
-python crossattention_split_analysis_main.py \
+python legacy/crossattention_split_analysis_main.py \
   --embedding 150M \
   --dataset non_human \
   --model_variant cross_attention_lite
