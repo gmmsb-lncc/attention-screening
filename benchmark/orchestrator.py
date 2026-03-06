@@ -22,7 +22,6 @@ from typing import Dict, List, Optional
 from tqdm import tqdm
 
 from benchmark.config import BenchmarkConfig
-from benchmark.embeddings import ensure_ligand_vectors
 from benchmark.finetuning import run_finetuning_pipeline
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.level1 import Level1Runner
@@ -67,10 +66,6 @@ class BenchmarkOrchestrator:
         # --- Step 0: Scaffold splits --------------------------------
         self._run_step(progress, "Step 0: Scaffold Splits", self._ensure_splits)
 
-        # --- Step 0b: Ligand vectors (needed for Level 3 attention pooling) ---
-        if 3 in config.levels:
-            self._run_step(progress, "Step 0b: Ligand Vectors", self._ensure_ligand_vectors)
-
         # --- Fine-tuning (optional) ---------------------------------
         if config.finetune:
             self._run_step(
@@ -79,11 +74,8 @@ class BenchmarkOrchestrator:
                 self._run_finetuning,
             )
 
-        # --- Resolve fine-tuned embedding dirs for --use_finetuned ---
-        finetuned_protein_dir, finetuned_ligand_dir = self._resolve_finetuned_dirs()
-
         # --- Level runners ------------------------------------------
-        runners = self._build_runners(finetuned_protein_dir, finetuned_ligand_dir)
+        runners = self._build_runners()
 
         for level, runner, step_name in runners:
             self._run_step(
@@ -109,9 +101,6 @@ class BenchmarkOrchestrator:
         if not ensure_scaffold_splits(self._config):
             tqdm.write("FATAL: Cannot proceed without scaffold splits.")
             sys.exit(1)
-
-    def _ensure_ligand_vectors(self) -> None:
-        ensure_ligand_vectors(self._config)
 
     def _run_finetuning(self) -> None:
         self._finetuned_dirs = run_finetuning_pipeline(self._config)
@@ -150,8 +139,6 @@ class BenchmarkOrchestrator:
 
     def _build_runners(
         self,
-        finetuned_protein_dir: Optional[str],
-        finetuned_ligand_dir: Optional[str],
     ) -> List[tuple[int, BaseLevelRunner, str]]:
         """Instantiate level runners for the configured levels."""
         config = self._config
@@ -164,15 +151,7 @@ class BenchmarkOrchestrator:
             runners.append((2, Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
 
         if 3 in config.levels:
-            runners.append((
-                3,
-                Level3Runner(
-                    config,
-                    custom_protein_embedding_dir=finetuned_protein_dir,
-                    custom_ligand_embedding_dir=finetuned_ligand_dir,
-                ),
-                "Step 3: Level 3 (AttnPool+KNN/MLP)",
-            ))
+            runners.append((3, Level3Runner(config), "Step 3: Level 3 (AttnPool+KNN/MLP)"))
 
         if 4 in config.levels:
             runners.append((4, Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
@@ -180,7 +159,7 @@ class BenchmarkOrchestrator:
         return runners
 
     # ------------------------------------------------------------------
-    # Fine-tuned embedding resolution
+    # Fine-tuned embedding resolution (reserved for future use)
     # ------------------------------------------------------------------
 
     def _resolve_finetuned_dirs(self) -> tuple[Optional[str], Optional[str]]:
