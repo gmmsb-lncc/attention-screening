@@ -47,12 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1,2,3,4",
+        default="1a,1b,1c,2,3,4",
         nargs="*",
         help=(
-            "Levels to run: 1=FP+KNN/MLP, 2=MeanPool+KNN/MLP, "
-            "3=AttnPool+KNN/MLP, 4=CrossAtt+KNN/MLP "
-            "(default: 1,2,3,4). Examples: --levels 1 2 3 4 OR --levels 1,2,3"
+            "Levels to run: 1a=FP, 1b=LigandMeanPool, 1c=LigandAttnPool, "
+            "2=MeanPool, 3=AttnPool, 4=CrossAtt "
+            "(default: 1a,1b,1c,2,3,4). "
+            "Examples: --levels 1a 1b 1c 2 3 4 OR --levels 1a,2,4"
         ),
     )
 
@@ -98,10 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_levels(levels_arg: object) -> List[int]:
-    """Parse levels from various formats: ``['1', '2']``, ``'1,2,3'``, etc.
+def parse_levels(levels_arg: object) -> List[str]:
+    """Parse levels from various formats: ``['1a', '2']``, ``'1a,2,3'``, etc.
 
-    Returns a sorted, deduplicated list of valid level integers.
+    Returns a sorted, deduplicated list of valid level strings.
 
     Raises:
         SystemExit: When an invalid level is provided.
@@ -116,7 +117,7 @@ def parse_levels(levels_arg: object) -> List[int]:
         else:
             parts = re.split(r"[,\s]+", str(levels_arg).strip())
 
-        levels = sorted({int(x.strip()) for x in parts if x.strip()})
+        levels = sorted({x.strip().lower() for x in parts if x.strip()})
 
         for level in levels:
             if level not in VALID_LEVELS:

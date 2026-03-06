@@ -99,7 +99,7 @@ class Level1Runner(BaseLevelRunner):
 
     @property
     def level_tag(self) -> str:
-        return "level1_fingerprint"
+        return "level1a_fingerprint"
 
     def _uses_embedding(self) -> bool:
         """Level 1 uses fingerprints, not embeddings."""
@@ -121,13 +121,13 @@ class Level1Runner(BaseLevelRunner):
         """Compute fingerprints from val/test splits, train canonical KNN/MLP."""
         os.makedirs(output_dir, exist_ok=True)
 
-        cache_path = os.path.join(output_dir, "level1_knn_mlp_results.json")
+        cache_path = os.path.join(output_dir, "level1a_knn_mlp_results.json")
         if os.path.exists(cache_path) and not self.force:
-            tqdm.write(f"  Loading cached Level 1 results (seed {seed})")
+            tqdm.write(f"  Loading cached Level 1a results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
 
-        tqdm.write(f"  Computing Level 1 fingerprint features (seed {seed})...")
+        tqdm.write(f"  Computing Level 1a fingerprint features (seed {seed})...")
 
         val_df, test_df = self._load_val_test_splits()
 
@@ -155,7 +155,7 @@ class Level1Runner(BaseLevelRunner):
             json.dump(result, fh, indent=2)
 
         tqdm.write(
-            f"  Level 1 (seed {seed}): "
+            f"  Level 1a (seed {seed}): "
             f"KNN MCC={models['KNN']['mcc']:.4f}, "
             f"MLP MCC={models['MLP']['mcc']:.4f}"
         )
