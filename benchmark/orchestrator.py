@@ -67,8 +67,8 @@ class BenchmarkOrchestrator:
         # --- Step 0: Scaffold splits --------------------------------
         self._run_step(progress, "Step 0: Scaffold Splits", self._ensure_splits)
 
-        # --- Step 0b: Ligand vectors --------------------------------
-        if 2 in config.levels:
+        # --- Step 0b: Ligand vectors (needed for Level 3 attention pooling) ---
+        if 3 in config.levels:
             self._run_step(progress, "Step 0b: Ligand Vectors", self._ensure_ligand_vectors)
 
         # --- Fine-tuning (optional) ---------------------------------
@@ -161,18 +161,18 @@ class BenchmarkOrchestrator:
             runners.append((1, Level1Runner(config), "Step 1: Level 1 (FP+KNN/MLP)"))
 
         if 2 in config.levels:
+            runners.append((2, Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
+
+        if 3 in config.levels:
             runners.append((
-                2,
-                Level2Runner(
+                3,
+                Level3Runner(
                     config,
                     custom_protein_embedding_dir=finetuned_protein_dir,
                     custom_ligand_embedding_dir=finetuned_ligand_dir,
                 ),
-                "Step 2: Level 2 (Emb+KNN/MLP)",
+                "Step 3: Level 3 (AttnPool+KNN/MLP)",
             ))
-
-        if 3 in config.levels:
-            runners.append((3, Level3Runner(config), "Step 3: Level 3 (Mat+MeanPool+KNN/MLP)"))
 
         if 4 in config.levels:
             runners.append((4, Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
@@ -257,7 +257,7 @@ class BenchmarkOrchestrator:
         print(f"  Output dir:       {config.resolved_output_dir}")
         print(f"  Scaffold splits:  {config.scaffold_split_dir}")
         print(f"  Force:            {config.force}")
-        if 3 in config.levels or 4 in config.levels:
+        if 4 in config.levels:
             print(f"  DL epochs:        {config.epochs}")
             print(f"  DL batch_size:    {config.batch_size}")
             print(f"  DL patience:      {config.resolved_patience}")
