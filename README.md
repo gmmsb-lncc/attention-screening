@@ -49,7 +49,11 @@ For detailed information:
 - **Ligand input modes**: MoLFormer matrices are default; use `--smited_ligand` or `--ligand_vectors` to override.
 - **External test protocol**: Use `--external_test_mode` to train on train/val only and automatically evaluate on `scaffolds_splits/output/{dataset}_test.tsv` (or `.tsv.gz`) after training.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Scaffold-based splitting methodology (Murcko scaffolds).
-- **[Unified Benchmark](docs/methodology.md#chapter-11-unified-benchmark-pipeline)** - 3-level model comparison: Fingerprint vs Embedding Vectors vs DT-Kinase.
+- **[Unified Benchmark](docs/methodology.md#chapter-11-unified-benchmark-pipeline)** - 4-level model comparison with KNN/MLP for each level:
+  - **Level 1**: Fingerprint (ECFP 1024) + KNN/MLP
+  - **Level 2**: Embedding Vectors + KNN/MLP  
+  - **Level 3**: Matrices + Attention Pooling + KNN/MLP
+  - **Level 4**: Matrices + Transformer + Cross-Attention + KNN/MLP
 
 ---
 
@@ -65,7 +69,7 @@ For detailed information:
 | 📊 **ML Classifiers** | XGBoost, LightGBM, CatBoost, Random Forest, SVM, etc. |
 | 📈 **ML Regressors** | Gradient Boosting, Ridge, Lasso, Neural Networks |
 | 🔀 **Scaffold-Based Splits** | Murcko scaffold decomposition prevents chemical series leakage |
-| 📋 **3-Level Benchmark** | Unified pipeline: Fingerprint → Embedding Vectors → DT-Kinase with progress tracking |
+| 📋 **4-Level Benchmark** | Unified pipeline: Fingerprint → Embedding Vectors → Matrices+Attention → Cross-Attention with KNN/MLP comparison |
 | ⚡ **GPU Acceleration** | CUDA, MPS (Apple Silicon), or CPU |
 
 ## Supported Models
@@ -288,20 +292,23 @@ python scripts/post_install.py
 ### Running the Unified Benchmark
 
 ```bash
-# Full benchmark: all 3 levels (non-human dataset, ESM-2 8M)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M
+# Full benchmark: all 4 levels (non-human dataset, ESM-2 8M)
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2,3,4
 
 # Human dataset
-python semantic_screening_models_beta.py --dataset human --embedding 8M
+python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1,2,3,4
 
 # Combined (human + non_human)
-python semantic_screening_models_beta.py --dataset all --embedding 8M
+python semantic_screening_models_beta.py --dataset all --embedding 8M --levels 1,2,3,4
 
-# Only Level 1 and 2 (quick baseline, no GPU needed)
+# Quick baseline: Levels 1 & 2 only (no GPU needed)
 python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
 
-# Only Level 3 with custom hyperparameters
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3 \
+# Level 3 only: Matrices + Attention Pooling + KNN/MLP
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3
+
+# Level 4 only: Matrices + Cross-Attention + KNN/MLP (requires GPU)
+python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 4 \
     --epochs 100 --batch_size 32 --patience 15
 ```
 
@@ -325,10 +332,10 @@ python crossattention_split_analysis_main.py --embedding 8M --dataset non_human
 
 | Script | Description | Key Arguments |
 |--------|-------------|---------------|
-| `semantic_screening_models_beta.py` | **Unified 3-level benchmark** | `--dataset`, `--embedding`, `--levels`, `--epochs` |
+| `semantic_screening_models_beta.py` | **Unified 4-level benchmark** with KNN/MLP comparison | `--dataset`, `--embedding`, `--levels`, `--epochs` |
 | `scaffold_split.py` | Generate scaffold splits | `--output-dir`, `--scenarios`, `--seed` |
-| `split_comparison_analysis.py` | Baseline models (KNN/MLP) | `--dataset`, `--feature_type`, `--scaffold_split_dir` |
-| `crossattention_split_analysis_main.py` | DT-Kinase training | `--embedding`, `--dataset`, `--seeds` |
+| `split_comparison_analysis.py` | Baseline models (KNN/MLP) for Levels 1-2 | `--dataset`, `--feature_type`, `--scaffold_split_dir` |
+| `crossattention_split_analysis_main.py` | DT-Kinase training (alternative) | `--embedding`, `--dataset`, `--seeds` |
 
 See [User Guide](docs/02-user-guide/) for full parameter lists.
 

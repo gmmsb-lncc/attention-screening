@@ -1,0 +1,560 @@
+\documentclass[11pt,a4paper]{article}
+
+% Pacotes
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[portuguese]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+
+% Cores
+\definecolor{lnccblue}{RGB}{52, 152, 219}
+\definecolor{alertred}{RGB}{231, 76, 60}
+\definecolor{successgreen}{RGB}{39, 174, 96}
+
+% Configurações
+\hypersetup{
+    colorlinks=true,
+    linkcolor=lnccblue,
+    urlcolor=lnccblue
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textcolor{lnccblue}{Roteiro da Apresentação}}
+\fancyhead[R]{\textcolor{lnccblue}{LNCC}}
+\fancyfoot[C]{\thepage}
+
+\titleformat{\section}{\Large\bfseries\color{lnccblue}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{lnccblue!80}}{\thesubsection}{1em}{}
+
+% Caixas customizadas
+\newtcolorbox{analogia}{
+    colback=successgreen!10,
+    colframe=successgreen,
+    title={\textbf{Analogia para Leigos}},
+    fonttitle=\bfseries
+}
+
+\newtcolorbox{oquedizer}{
+    colback=lnccblue!10,
+    colframe=lnccblue,
+    title={\textbf{O que dizer}},
+    fonttitle=\bfseries
+}
+
+\title{
+    \textcolor{lnccblue}{\textbf{Roteiro da Apresentação}}\\[0.5cm]
+    \Large Análise de Vazamento de Dados em\\Predição de Atividade Quinase-Composto\\[0.5cm]
+    \large Guia Completo para Apresentadores e Leigos
+}
+\author{LNCC - Laboratório Nacional de Computação Científica}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Glossário de Termos Essenciais}
+% =============================================================================
+
+Antes de começar, vamos definir alguns termos que aparecerão frequentemente:
+
+\begin{longtable}{p{3.5cm}p{10cm}}
+\toprule
+\textbf{Termo} & \textbf{Definição Simples} \\
+\midrule
+\endhead
+\textbf{Quinase} & Uma proteína do corpo humano que funciona como um ``interruptor'' celular. Quando está defeituosa, pode causar doenças como câncer. \\
+\midrule
+\textbf{Composto químico} & Uma molécula criada em laboratório que pode virar um medicamento. \\
+\midrule
+\textbf{Ativo} & Um composto que consegue ``desligar'' ou ``modificar'' a quinase (potencial medicamento). \\
+\midrule
+\textbf{Inativo} & Um composto que não tem efeito sobre a quinase. \\
+\midrule
+\textbf{Dataset} & Conjunto de dados usado para treinar o modelo. \\
+\midrule
+\textbf{Treino/Teste} & Dividimos os dados em duas partes: uma para ``ensinar'' o modelo (treino) e outra para verificar se ele aprendeu de verdade (teste). \\
+\midrule
+\textbf{Accuracy (Acurácia)} & Porcentagem de acertos do modelo. Se acerta 87 de 100, tem 87\% de acurácia. \\
+\midrule
+\textbf{MCC} & Matthews Correlation Coefficient - uma métrica mais rigorosa que a acurácia. Vai de -1 (péssimo) a +1 (perfeito), onde 0 é aleatório. \\
+\midrule
+\textbf{Fingerprint molecular} & Uma ``impressão digital'' do composto - um código numérico que representa sua estrutura química. \\
+\midrule
+\textbf{One-hot encoding} & Uma forma de representar categorias como números. Ex: se temos 3 quinases (A, B, C), a quinase B seria representada como [0, 1, 0]. \\
+\bottomrule
+\end{longtable}
+
+\newpage
+
+% =============================================================================
+\section{Slides 1-2: Abertura}
+% =============================================================================
+
+\subsection{SLIDE 1: Capa}
+
+\begin{oquedizer}
+``Boa tarde a todos. Hoje vou apresentar uma análise crítica sobre por que modelos de machine learning aparentemente simples conseguem resultados extraordinários na predição de atividade entre compostos químicos e quinases. Spoiler: a resposta não é que os modelos são geniais - é que há problemas sérios nos dados.''
+\end{oquedizer}
+
+\subsection{SLIDE 2: Sumário}
+
+\begin{oquedizer}
+``Vamos passar por 8 tópicos principais. Começaremos entendendo o contexto do problema, depois vamos investigar diversos tipos de `vazamentos' e vieses nos dados, e finalmente veremos o impacto real disso na performance dos modelos.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Slides 3-4: Contexto e Problema}
+% =============================================================================
+
+\subsection{SLIDE 3: Contexto - Predição de Atividade Quinase-Composto}
+
+\begin{oquedizer}
+``Primeiro, vamos entender o problema que estamos tentando resolver. Quinases são proteínas muito importantes no nosso corpo - elas funcionam como `interruptores' que controlam processos celulares. Quando uma quinase está defeituosa, pode causar doenças como câncer.
+
+O objetivo é descobrir quais compostos químicos conseguem `desligar' ou modificar essas quinases defeituosas. Se conseguirmos, temos um potencial medicamento.
+
+Na prática, temos um problema de classificação binária: dado um composto e uma quinase, queremos predizer se o composto é ATIVO (funciona contra a quinase) ou INATIVO (não funciona).
+
+Usamos representações simples:
+\begin{itemize}
+    \item Para quinases: one-hot encoding (basicamente um código de identificação)
+    \item Para compostos: Morgan Fingerprints, que são como uma `impressão digital' da molécula com 2048 números
+\end{itemize}
+
+Nosso dataset tem cerca de 15 mil pares composto-quinase, com 8 mil compostos diferentes testados contra 231 quinases diferentes.''
+\end{oquedizer}
+
+\begin{analogia}
+``Imagine que você tem 8 mil chaves diferentes (compostos) e 231 fechaduras (quinases). Queremos descobrir quais chaves abrem quais fechaduras, sem ter que testar todas as combinações no laboratório.''
+\end{analogia}
+
+\subsection{SLIDE 4: O Problema - Performance Inesperadamente Alta}
+
+\begin{oquedizer}
+``Aqui está o mistério que nos motivou a fazer essa análise. Quando treinamos modelos simples como KNN e MLP com essas representações básicas, obtivemos resultados surpreendentemente bons:
+\begin{itemize}
+    \item KNN: 87,6\% de acurácia e 0,747 de MCC
+    \item MLP: 88,7\% de acurácia e 0,768 de MCC
+\end{itemize}
+
+Isso parece ótimo, certo? Mas há um problema: esse é um problema de biologia molecular extremamente complexo! Como é possível que representações tão simples resolvam um problema tão difícil?
+
+Nossa hipótese: os modelos não estão realmente `aprendendo' padrões biológicos - eles estão `trapaceando' de alguma forma.''
+\end{oquedizer}
+
+\begin{analogia}
+``É como se um aluno tirasse 90\% na prova sem estudar. Você desconfiaria que ele colou, certo? É exatamente isso que estamos investigando.''
+\end{analogia}
+
+% =============================================================================
+\section{Slide 5: Vazamento de Dados}
+% =============================================================================
+
+\subsection{SLIDE 5: Problema Crítico - Vazamento de Compostos}
+
+\textbf{Gráfico:} \texttt{01\_leakage\_analysis.png}
+
+\begin{oquedizer}
+``E encontramos a primeira `cola': vazamento de dados!
+
+Quando dividimos os dados em treino e teste, o ideal é que o teste contenha situações NOVAS que o modelo nunca viu. Mas descobrimos que:
+\begin{itemize}
+    \item 64,7\% das linhas de teste contêm compostos que JÁ APARECERAM no treino
+    \item 36,6\% são duplicatas EXATAS - o mesmo composto testado contra a mesma quinase!
+\end{itemize}
+
+Para ser mais preciso: dos 1.355 compostos únicos no teste, 820 deles (60,5\%) também estão no treino. E como alguns compostos aparecem várias vezes, isso representa 64,7\% das linhas.''
+\end{oquedizer}
+
+\begin{analogia}
+``Imagine uma prova de matemática onde 65\% das questões são IDÊNTICAS às que o aluno já resolveu no dever de casa. Claro que ele vai tirar nota alta! Mas isso não significa que ele sabe matemática - significa que ele tem boa memória.
+
+O mesmo acontece aqui: o modelo não está aprendendo a prever se um composto novo vai funcionar - ele está apenas `lembrando' a resposta de compostos que já viu.''
+\end{analogia}
+
+% =============================================================================
+\section{Slides 6-8: Modelo Lookup}
+% =============================================================================
+
+\subsection{SLIDE 6: Hipótese - Modelo Simples de ``Lookup''}
+
+\begin{oquedizer}
+``Para provar que os modelos estão memorizando, criamos modelos extremamente simples chamados `Lookup' (que significa `consulta' ou `olhar na tabela').
+
+Esses modelos não fazem nenhum cálculo sofisticado. Eles simplesmente:
+\begin{enumerate}
+    \item \textbf{Lookup por Composto}: Olha qual foi a classe mais comum desse composto no treino e repete
+    \item \textbf{Lookup por Quinase}: Olha qual foi a classe mais comum dessa quinase no treino e repete
+    \item \textbf{Lookup Combinado}: Combina as duas estratégias
+\end{enumerate}
+
+Se o modelo KNN/MLP estivesse realmente aprendendo padrões complexos, ele deveria ser MUITO melhor que esses modelos triviais.''
+\end{oquedizer}
+
+\begin{analogia}
+``É como se, em vez de resolver a conta de matemática, você apenas olhasse: `Hmm, toda vez que apareceu o número 7 na prova, a resposta foi B. Vou marcar B.' Isso é o Lookup.''
+\end{analogia}
+
+\subsection{SLIDE 7: Resultados - Lookup vs KNN}
+
+\textbf{Gráfico:} \texttt{02\_baseline\_comparison.png}
+
+\begin{oquedizer}
+``E aqui está o resultado chocante. Olhem o gráfico:
+\begin{itemize}
+    \item O modelo Lookup Composto+Quinase, que APENAS consulta a classe majoritária, consegue 86,2\% de acurácia e 0,717 de MCC
+    \item O KNN, com todo seu algoritmo de vizinhos mais próximos, consegue 87,6\% de acurácia e 0,747 de MCC
+\end{itemize}
+
+A diferença é mínima! Um modelo que simplesmente `lembra' a resposta tem quase a mesma performance que o KNN.''
+\end{oquedizer}
+
+\subsection{SLIDE 8: Análise dos Resultados Lookup}
+
+\begin{oquedizer}
+``Vamos analisar os números com calma:
+
+O Lookup por Composto sozinho já consegue quase 79\% de acurácia. Isso significa que, só de saber qual é o composto, já conseguimos acertar quase 80\% das vezes!
+
+Quando combinamos Composto + Quinase, chegamos a 86,2\% - apenas 1,4 pontos percentuais abaixo do KNN.
+
+A conclusão é clara: o KNN não está aprendendo interações complexas entre compostos e quinases. Ele está, essencialmente, memorizando.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Slides 9-10: Desbalanceamento por Quinase}
+% =============================================================================
+
+\subsection{SLIDE 9: Distribuição de Classes por Quinase}
+
+\textbf{Gráfico:} \texttt{03\_kinase\_imbalance.png}
+
+\begin{oquedizer}
+``Agora vamos entender OUTRO problema: o desbalanceamento por quinase.
+
+O gráfico da esquerda mostra a distribuição de classes para cada quinase. Cada barra representa quantas quinases têm uma determinada proporção de ativos.
+
+Vejam os extremos:
+\begin{itemize}
+    \item Muitas quinases têm 0\% de ativos (todas as interações são inativas)
+    \item Outras têm 100\% de ativos (todas as interações são ativas)
+\end{itemize}
+
+O gráfico de pizza à direita resume: 70,6\% das quinases são extremamente desbalanceadas!''
+\end{oquedizer}
+
+\subsection{SLIDE 10: Quinases Trivialmente Previsíveis}
+
+\begin{oquedizer}
+``O que isso significa na prática? Significa que, para a maioria das quinases, o modelo não precisa aprender nada - basta chutar a classe majoritária!
+
+Por exemplo:
+\begin{itemize}
+    \item Para a Glycogen synthase kinase-3 beta, 100\% dos compostos são ativos. O modelo só precisa aprender: `se for essa quinase, responda ATIVO'
+    \item Para muitas outras quinases, 100\% são inativos. O modelo só precisa responder INATIVO
+\end{itemize}
+
+Isso explica por que o Lookup por Quinase sozinho já consegue 75\% de acurácia!''
+\end{oquedizer}
+
+\begin{analogia}
+``Imagine uma prova de múltipla escolha onde, em 70\% das questões, a resposta correta é sempre a letra A. Se você marcar A em tudo, já garante 70\%!''
+\end{analogia}
+
+% =============================================================================
+\section{Slides 11-12: Consistência dos Compostos}
+% =============================================================================
+
+\subsection{SLIDE 11: Comportamento dos Compostos através de Quinases}
+
+\textbf{Gráfico:} \texttt{04\_compound\_consistency.png}
+
+\begin{oquedizer}
+``Agora vamos analisar o comportamento dos COMPOSTOS. O gráfico mostra a `consistência' de cada composto.''
+\end{oquedizer}
+
+\begin{tcolorbox}[colback=yellow!10, colframe=yellow!50!black, title=\textbf{O que significa consistência?}]
+Um composto é ``consistente'' quando ele se comporta da mesma forma contra TODAS as quinases que foi testado.
+\begin{itemize}
+    \item Se um composto é SEMPRE ativo (contra todas as quinases testadas), ele é \textbf{consistente}
+    \item Se um composto é SEMPRE inativo, também é \textbf{consistente}
+    \item Se um composto é ativo contra algumas quinases e inativo contra outras, ele é \textbf{INCONSISTENTE}
+\end{itemize}
+\end{tcolorbox}
+
+\begin{oquedizer}
+``O gráfico de pizza mostra:
+\begin{itemize}
+    \item 80,2\% dos compostos foram testados contra apenas UMA quinase
+    \item 15,2\% são perfeitamente consistentes (sempre ativo OU sempre inativo)
+    \item Apenas 4,6\% são inconsistentes
+\end{itemize}''
+\end{oquedizer}
+
+\begin{analogia}
+``Pense em medicamentos do dia a dia:
+\begin{itemize}
+    \item O paracetamol funciona para dor de cabeça, dor muscular, febre... É `consistente' - funciona para várias coisas
+    \item Alguns medicamentos são muito específicos - só funcionam para uma doença
+    \item Raramente um medicamento funciona para gripe mas piora dor de cabeça - isso seria `inconsistente'
+\end{itemize}
+
+Nossos dados mostram que a maioria dos compostos é consistente: se funciona para uma quinase, provavelmente funciona para outras.''
+\end{analogia}
+
+\subsection{SLIDE 12: Análise de Consistência}
+
+\begin{oquedizer}
+``Vamos aos números dos compostos testados contra MÚLTIPLAS quinases: 76,7\% deles são perfeitamente consistentes!
+
+\textbf{O que isso implica?}
+
+Se um composto se comporta da mesma forma contra todas as quinases, então a informação mais importante está no COMPOSTO, não na quinase específica.
+
+Ou seja: só de olhar o fingerprint do composto, já conseguimos prever se ele será ativo ou inativo - independente de qual quinase estamos testando!
+
+Isso é problemático porque significa que o modelo não está aprendendo INTERAÇÕES específicas entre composto e quinase. Ele está apenas categorizando compostos como `bons' ou `ruins'.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Slides 13-14: Similaridade Química}
+% =============================================================================
+
+\subsection{SLIDE 13: Similaridade Tanimoto - Teste vs Treino}
+
+\textbf{Gráfico:} \texttt{05\_similarity\_analysis.png}
+
+\begin{oquedizer}
+``Mesmo para os compostos `novos' no teste (aqueles que não aparecem no treino), existe outro problema: eles são MUITO SIMILARES aos compostos do treino.
+
+O gráfico mostra a distribuição de similaridade de Tanimoto, que mede quão parecidos dois compostos são quimicamente (0 = totalmente diferentes, 1 = idênticos).
+
+Para cada composto novo no teste, calculamos: qual o composto mais parecido no treino?
+
+Resultados:
+\begin{itemize}
+    \item 43\% têm similaridade $>$ 0,8 (muito similares)
+    \item 46,8\% têm similaridade entre 0,6 e 0,8 (similares)
+    \item Apenas 4,4\% têm similaridade $<$ 0,4 (realmente diferentes)
+\end{itemize}''
+\end{oquedizer}
+
+\begin{analogia}
+``Imagine que você treina um modelo para reconhecer fotos de gatos. No teste, você coloca fotos dos MESMOS gatos, só que de ângulos ligeiramente diferentes. Claro que o modelo vai acertar! Mas ele realmente aprendeu a reconhecer gatos em geral?''
+\end{analogia}
+
+\subsection{SLIDE 14: Por que o KNN Funciona?}
+
+\begin{oquedizer}
+``Agora entendemos por que o KNN (K-Nearest Neighbors, ou K-Vizinhos Mais Próximos) funciona tão bem!
+
+O KNN funciona assim: quando recebe um composto novo, ele procura os compostos mais PARECIDOS no treino e copia a resposta deles.
+
+Se 90\% dos compostos de teste têm um `vizinho' muito similar no treino, então o KNN quase sempre vai encontrar a resposta correta - não porque entendeu a biologia, mas porque o composto de teste é quase idêntico a algo que ele já viu.
+
+É como ter uma prova onde 90\% das questões são reformulações de exercícios do livro. Se você decorou o livro, vai bem - mas não significa que entendeu a matéria.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Slides 15-18: Comparação de Cenários}
+% =============================================================================
+
+\subsection{SLIDE 15: Três Cenários de Split}
+
+\begin{oquedizer}
+``Para provar definitivamente nosso ponto, criamos três cenários de avaliação:
+
+\textbf{Cenário 1 - Split Aleatório (Original):}\\
+Dividimos os dados aleatoriamente - é o que foi feito originalmente. Tem todos os problemas de vazamento que discutimos.
+
+\textbf{Cenário 2 - Split por Composto:}\\
+Garantimos que NENHUM composto do teste aparece no treino. Todos os compostos no teste são `novos'.
+
+\textbf{Cenário 3 - Novo Composto + Nova Quinase:}\\
+O cenário mais rigoroso: os compostos E as quinases do teste NUNCA foram vistos no treino. Isso simula o caso de uso REAL - quando queremos prever atividade para um medicamento totalmente novo contra uma quinase nunca estudada.''
+\end{oquedizer}
+
+\subsection{SLIDE 16: Resultados por Cenário de Avaliação}
+
+\textbf{Gráfico:} \texttt{06\_split\_comparison.png}
+
+\begin{oquedizer}
+``E aqui está a prova definitiva. Olhem como a performance DESPENCA quando eliminamos o vazamento:
+
+No split aleatório, tínhamos $\sim$87\% de acurácia e $\sim$0,75 de MCC.
+
+No split de generalização verdadeira (Cenário 3):
+\begin{itemize}
+    \item KNN cai para 68\% de acurácia e 0,41 de MCC
+    \item MLP cai para 60\% de acurácia e 0,27 de MCC
+\end{itemize}
+
+Notem também os tamanhos dos conjuntos de teste abaixo de cada barra - no Cenário 3 temos menos dados porque é mais restritivo.''
+\end{oquedizer}
+
+\subsection{SLIDE 17: Performance Inflada vs Performance Real}
+
+\textbf{Gráfico:} \texttt{07\_inflated\_vs\_real\_performance.png}
+
+\begin{oquedizer}
+``Este gráfico resume tudo. À esquerda, o MCC; à direita, a acurácia.
+
+As barras azuis mostram a performance `reportada' (com vazamento).\\
+As barras vermelhas mostram a performance `real' (generalização verdadeira).
+
+Vejam as setas com as porcentagens de queda:
+\begin{itemize}
+    \item MCC do KNN cai 45\%
+    \item MCC do MLP cai 64\%!
+\end{itemize}
+
+O MLP, que parecia ser o melhor modelo, sofre a maior queda! Isso sugere que ele era o mais dependente do vazamento.''
+\end{oquedizer}
+
+\subsection{SLIDE 18: Queda Dramática de Performance}
+
+\begin{oquedizer}
+``Vamos aos números exatos:
+
+\textbf{MCC (métrica mais importante):}
+\begin{itemize}
+    \item KNN: 0,747 $\rightarrow$ 0,407 (queda de 45\%)
+    \item MLP: 0,768 $\rightarrow$ 0,275 (queda de 64\%)
+\end{itemize}
+
+\textbf{Acurácia:}
+\begin{itemize}
+    \item KNN: 87,6\% $\rightarrow$ 68,0\% (queda de 22\%)
+    \item MLP: 88,7\% $\rightarrow$ 60,7\% (queda de 32\%)
+\end{itemize}
+
+Um MCC de 0,275 é muito próximo de aleatório! Significa que o MLP, no cenário real, praticamente não consegue distinguir ativos de inativos.
+
+Isso confirma nossa hipótese: os modelos estavam MEMORIZANDO, não aprendendo.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Slides 19-22: Conclusões}
+% =============================================================================
+
+\subsection{SLIDE 19: Resumo das Descobertas}
+
+\begin{oquedizer}
+``Vamos resumir as cinco descobertas principais:
+
+\begin{enumerate}
+    \item \textbf{Vazamento Massivo}: 60\% dos compostos de teste estão no treino
+    \item \textbf{Desbalanceamento Extremo}: 70\% das quinases são trivialmente previsíveis
+    \item \textbf{Consistência de Compostos}: O fingerprint sozinho carrega o sinal preditivo
+    \item \textbf{Alta Similaridade}: 90\% dos compostos de teste são muito similares ao treino
+    \item \textbf{Performance Inflada}: MCC cai de 0,77 para 0,27 em cenário real
+\end{enumerate}
+
+Cada um desses problemas contribui para inflar artificialmente a performance.''
+\end{oquedizer}
+
+\subsection{SLIDE 20: Implicações para a Área}
+
+\begin{oquedizer}
+``E aqui está a crítica central deste trabalho:
+
+\textbf{Modelos de triagem de quinases publicados na literatura, que não fizeram essa curadoria cuidadosa dos dados, podem estar DRASTICAMENTE superestimando sua capacidade de generalização!}
+
+Isso é grave porque esses modelos são usados para:
+\begin{itemize}
+    \item Priorizar compostos para testes em laboratório
+    \item Economizar tempo e dinheiro em pesquisa farmacêutica
+    \item Tomar decisões sobre desenvolvimento de medicamentos
+\end{itemize}
+
+Se os modelos não generalizam de verdade, essas decisões podem estar erradas.
+
+\textbf{Recomendações:}
+\begin{enumerate}
+    \item Sempre verificar vazamento de compostos entre splits
+    \item Avaliar desbalanceamento por quinase
+    \item Usar splits que garantam generalização verdadeira
+    \item Reportar métricas em cenários de compostos E quinases novos
+    \item Sempre comparar com baselines simples como o Lookup
+\end{enumerate}''
+\end{oquedizer}
+
+\subsection{SLIDE 21: Conclusão Final}
+
+\begin{oquedizer}
+``Para concluir:
+
+Os modelos KNN e MLP NÃO estão aprendendo padrões complexos de interação entre quinases e compostos.
+
+Eles estão MEMORIZANDO devido a quatro fatores:
+\begin{enumerate}
+    \item Vazamento massivo de compostos
+    \item Desbalanceamento extremo por quinase
+    \item Comportamento consistente dos compostos
+    \item Alta similaridade química ao treino
+\end{enumerate}
+
+Esta análise é FUNDAMENTAL para validar qualquer modelo de predição de atividade quinase-composto. Antes de confiar em métricas impressionantes, precisamos garantir que o modelo está realmente generalizando.''
+\end{oquedizer}
+
+\subsection{SLIDE 22: Obrigado / Perguntas}
+
+\begin{oquedizer}
+``Obrigado pela atenção. Estou à disposição para perguntas.
+
+Se quiserem explorar mais, todos os códigos e dados estão disponíveis, assim como os gráficos detalhados de cada análise.''
+\end{oquedizer}
+
+% =============================================================================
+\section{Perguntas Frequentes (FAQ)}
+% =============================================================================
+
+\subsection{``Por que o MCC é mais importante que a acurácia?''}
+A acurácia pode ser enganosa quando os dados são desbalanceados. Se 90\% dos dados são de uma classe, um modelo que sempre responde essa classe tem 90\% de acurácia mas não aprendeu nada. O MCC considera isso e só dá valores altos quando o modelo realmente distingue as classes.
+
+\subsection{``O que é o KNN exatamente?''}
+K-Nearest Neighbors (K-Vizinhos Mais Próximos) é um algoritmo simples: quando recebe um dado novo, ele procura os K dados mais parecidos no treino e usa a resposta da maioria. É como perguntar para seus vizinhos o que acharam de um restaurante - você confia na opinião de quem é mais parecido com você.
+
+\subsection{``O que é um MLP?''}
+Multi-Layer Perceptron é uma rede neural simples com algumas camadas de neurônios. É mais sofisticado que o KNN, mas ainda assim básico para os padrões atuais de deep learning.
+
+\subsection{``Isso significa que machine learning não funciona para descoberta de medicamentos?''}
+Não! Significa que precisamos ser MUITO cuidadosos com como preparamos os dados e avaliamos os modelos. Com curadoria adequada e splits corretos, podemos ter modelos que realmente generalizam - mas as métricas serão mais modestas e honestas.
+
+\subsection{``Como deveríamos fazer o split correto?''}
+O ideal é garantir que compostos e quinases no teste nunca apareçam no treino. Além disso, devemos garantir que compostos quimicamente similares também não apareçam em splits diferentes (cluster-based split). Isso simula o cenário real de uso.
+
+% =============================================================================
+\section{Referências Visuais}
+% =============================================================================
+
+\begin{itemize}
+    \item \textbf{Slide 5}: Gráfico \texttt{01\_leakage\_analysis.png}
+    \item \textbf{Slide 7}: Gráfico \texttt{02\_baseline\_comparison.png}
+    \item \textbf{Slide 9}: Gráfico \texttt{03\_kinase\_imbalance.png}
+    \item \textbf{Slide 11}: Gráfico \texttt{04\_compound\_consistency.png}
+    \item \textbf{Slide 13}: Gráfico \texttt{05\_similarity\_analysis.png}
+    \item \textbf{Slide 16}: Gráfico \texttt{06\_split\_comparison.png}
+    \item \textbf{Slide 17}: Gráfico \texttt{07\_inflated\_vs\_real\_performance.png}
+\end{itemize}
+
+\vspace{1cm}
+\begin{center}
+\textit{Roteiro preparado para a apresentação ``Por que Representações Simples Apresentam Performance Elevada?'' - LNCC}
+\end{center}
+
+\end{document}

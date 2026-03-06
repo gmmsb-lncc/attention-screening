@@ -102,14 +102,15 @@ class TrainingConfig:
 
     Attributes:
         protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
-        ligand_dim: Ligand embedding dimension (768 for SMI-TED)
+        ligand_dim: Ligand embedding dimension (768 for SMI-TED/MoLFormer)
         hidden_dim: Hidden dimension for all layers
-        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', or 'diffusion')
-        num_cnn_layers: Number of CNN encoder layers
+        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite')
+        num_cnn_layers: Number of CNN encoder layers (for cnn_crossattn)
         num_cross_attn_layers: Number of cross-attention layers
         num_heads: Number of attention heads
         ff_dim: Feed-forward layer dimension
-        dropout: Dropout rate
+        dropout: Dropout rate for encoders and attention
+        classifier_dropout: Dropout for classifier head (for level5_lite)
         batch_size: Training batch size
         learning_rate: Initial learning rate
         weight_decay: AdamW weight decay
@@ -126,12 +127,14 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
-    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion'] = 'cnn_crossattn'
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
-    dropout: float = 0.1
+    dropout: float = 0.4  # Increased to combat overfitting
+    classifier_dropout: float = 0.5  # For level5_lite: High dropout in classifier
+    label_smoothing: float = 0.0  # Label smoothing for classification
 
     # Diffusion-specific (used only when model_variant='diffusion')
     diffusion_steps: int = 200
@@ -157,7 +160,7 @@ class TrainingConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     num_epochs: int = 500
-    patience: Optional[int] = 30
+    patience: Optional[int] = 3
     max_grad_norm: float = 1.0
     classification_weight: float = 1.0
     regression_weight: float = 0.5
@@ -182,6 +185,7 @@ class TrainingConfig:
             'num_heads': self.num_heads,
             'ff_dim': self.ff_dim,
             'dropout': self.dropout,
+            'classifier_dropout': self.classifier_dropout,
             'diffusion_steps': self.diffusion_steps,
             'diffusion_beta_start': self.diffusion_beta_start,
             'diffusion_beta_end': self.diffusion_beta_end,

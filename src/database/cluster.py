@@ -59,7 +59,7 @@ class MoleculeClusterer:
     @staticmethod
     def smiles_to_fingerprint(smiles):
         mol = Chem.MolFromSmiles(smiles)
-        return AllChem.GetMorganFingerprintAsBitVect(mol, 2) if mol else None
+        return AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024) if mol else None
 
     def parallel_generate_fingerprints(self, smile_column, batch_size):
         num_cpus = os.cpu_count() // 2  # Adjust to use half of available CPUs to avoid overload

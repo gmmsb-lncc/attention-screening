@@ -1,0 +1,29 @@
+======================================================================
+RELATORIO: ANALISE DE VIES NO DATASET DE QUINASES
+======================================================================
+
+Total de linhas: 14080
+Compostos unicos: 7428
+Quinases unicas: 114
+
+VAZAMENTO
+Linhas de teste com composto vazado: 66.5%
+Duplicatas exatas (composto+quinase): 41.8%
+
+BASELINES
+Lookup: Composto: Acc=0.7947, MCC=0.5978
+Lookup: Quinase: Acc=0.7457, MCC=0.5055
+Lookup: Comp+Quin: Acc=0.8672, MCC=0.7318
+KNN (Original): Acc=0.8913, MCC=0.7811
+
+DESBALANCEAMENTO
+Quinases desbalanceadas (>80% ou <20%): 49 (43.0%)
+
+CONSISTENCIA
+Uma quinase apenas: 5591 (80.2%)
+Perfeitamente consistente: 1004 (14.4%)
+Inconsistente: 373 (5.4%)
+
+SIMILARIDADE
+Muito similar (>0.8): 48.7%
+Similar (0.6-0.8): 42.8%

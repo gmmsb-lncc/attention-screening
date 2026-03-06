@@ -13,7 +13,7 @@ class PlotCluster:
         self.filepath = filepath
         self.data = pd.read_csv(self.filepath, sep='\t')
 
-    def smiles_to_fp(self, smiles, radius=2, nBits=2048):
+    def smiles_to_fp(self, smiles, radius=2, nBits=1024):
         mol = Chem.MolFromSmiles(smiles)
         return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits) if mol else None
 
