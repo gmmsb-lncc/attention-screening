@@ -84,11 +84,20 @@ class MatrixDataset(Dataset):
         filename: str,
         fallback_shape: tuple[int, int],
     ) -> np.ndarray:
-        """Search across multiple directories for a ``.npy`` file."""
+        """Search across multiple directories for a ``.npy`` file.
+
+        Tries both ``{id}_matrix.npy`` and ``{id}_molformer_matrix.npy``
+        naming conventions to handle cross-machine inconsistencies.
+        """
+        # Build alternate filename: foo_matrix.npy -> foo_molformer_matrix.npy
+        alt_filename = filename.replace("_matrix.npy", "_molformer_matrix.npy")
         for d in dirs:
             path = d / filename
             if path.exists():
                 return np.load(path).astype(np.float32)
+            alt_path = d / alt_filename
+            if alt_path.exists():
+                return np.load(alt_path).astype(np.float32)
         return np.zeros(fallback_shape, dtype=np.float32)
 
 
@@ -208,7 +217,11 @@ def _resolve_matrix_dirs(
     dataset_type: str,
     embedding_name: str,
 ) -> tuple[list[Path], list[Path]]:
-    """Return lists of protein and ligand matrix directories."""
+    """Return lists of protein and ligand matrix directories.
+
+    For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
+    because naming conventions vary across machines and datasets.
+    """
     if dataset_type == "all":
         base_paths = _EMBEDDING_BASE_PATHS_ALL
     else:
@@ -218,10 +231,11 @@ def _resolve_matrix_dirs(
         Path(bp) / embedding_name / "build" / "protein_matrices"
         for bp in base_paths
     ]
-    ligand_dirs = [
-        Path(bp) / embedding_name / "build" / "molformer_matrix"
-        for bp in base_paths
-    ]
+    ligand_dirs = []
+    for bp in base_paths:
+        build = Path(bp) / embedding_name / "build"
+        ligand_dirs.append(build / "ligand_matrices")
+        ligand_dirs.append(build / "molformer_matrix")
     return protein_dirs, ligand_dirs
 
 
@@ -331,7 +345,10 @@ def _validate_matrix_coverage(
     missing_lig = sum(
         1
         for cid in unique_chembls
-        if not any((d / f"{cid}_matrix.npy").exists() for d in ligand_dirs)
+        if not any(
+            (d / f"{cid}_matrix.npy").exists() or (d / f"{cid}_molformer_matrix.npy").exists()
+            for d in ligand_dirs
+        )
     )
 
     if missing_prot or missing_lig:
