@@ -11,8 +11,8 @@ Classifier specifications:
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
  * **MLP** — ``sklearn.neural_network.MLPClassifier`` with a single hidden
    layer of 128 units, ReLU activation, Adam solver, α = 1 × 10⁻⁴,
-   max 100 iterations, early stopping with 10 % validation fraction and
-   patience of 10 iterations.
+   max 100 iterations.  Early stopping is **disabled** so that the MLP
+   trains on 100 % of the input features — the same proportion as KNN.
  * Both classifiers receive features after ``StandardScaler``.
 
 Evaluation protocol:
@@ -178,9 +178,7 @@ def train_knn_mlp(
         solver="adam",
         alpha=1e-4,
         max_iter=100,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=10,
+        early_stopping=False,
         random_state=seed,
     )
     mlp.fit(x_train_sc, y_train)
