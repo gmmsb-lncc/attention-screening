@@ -1,0 +1,59 @@
+======================================================================
+RELATÓRIO: ANÁLISE DE VIÉS NO DATASET DE QUINASES
+======================================================================
+
+1. ESTATÍSTICAS DO DATASET
+----------------------------------------
+   Total de linhas: 15616
+   Compostos únicos: 8131
+   Quinases únicas: 231
+   Ativos: 8874 (56.8%)
+   Inativos: 6742 (43.2%)
+
+2. PROBLEMA CRÍTICO: VAZAMENTO DE DADOS
+----------------------------------------
+   Compostos vazados: 820 (60.5% do teste)
+   Linhas de teste com composto vazado: 64.7%
+   Duplicatas exatas (composto+quinase): 36.6%
+   >>> CONSEQUÊNCIA: Modelo pode estar MEMORIZANDO!
+
+3. COMPARAÇÃO: LOOKUP BASELINES vs KNN
+----------------------------------------
+   Lookup: Composto: Acc=0.7868, MCC=0.5767
+   Lookup: Quinase: Acc=0.7503, MCC=0.5098
+   Lookup: Comp+Quin: Acc=0.8617, MCC=0.7172
+   KNN (Original): Acc=0.8764, MCC=0.7475
+   >>> CONCLUSÃO: Lookup simples tem performance COMPARÁVEL ao KNN!
+
+4. DESBALANCEAMENTO POR QUINASE
+----------------------------------------
+   Quinases desbalanceadas (>80% uma classe): 154 (70.6%)
+   >>> MUITAS QUINASES SÃO TRIVIALMENTE PREVISÍVEIS!
+
+5. CONSISTÊNCIA DOS COMPOSTOS
+----------------------------------------
+   Uma quinase apenas: 5665 (80.2%)
+   Perfeitamente consistente: 1074 (15.2%)
+   Inconsistente: 327 (4.6%)
+   >>> FINGERPRINT DO COMPOSTO CARREGA MAIOR PARTE DO SINAL!
+
+6. SIMILARIDADE QUÍMICA
+----------------------------------------
+   Muito similar (>0.8): 43.0%
+   Similar (0.6-0.8): 46.8%
+   >>> POR ISSO O KNN FUNCIONA! Vizinhos muito próximos no treino.
+
+======================================================================
+CONCLUSÃO GERAL
+======================================================================
+
+Os modelos (KNN, MLP) NÃO estão aprendendo padrões complexos.
+Eles estão MEMORIZANDO devido a:
+  1. Vazamento massivo de compostos entre treino e teste
+  2. Desbalanceamento extremo por quinase
+  3. Comportamento consistente dos compostos
+  4. Alta similaridade química ao treino
+
+>>> IMPLICAÇÃO: Modelos de triagem de quinases sem curadoria
+    adequada podem estar superestimando sua capacidade de
+    generalização!

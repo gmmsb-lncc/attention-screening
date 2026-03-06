@@ -2,7 +2,7 @@
 """
 Generate Morgan fingerprints for ligands.
 
-This script generates 2048-bit Morgan fingerprints (radius=2) from SMILES strings
+This script generates 1024-bit Morgan fingerprints (radius=2) from SMILES strings
 using RDKit, following the same approach as SMI-TED but with simpler features.
 
 SOLID Principles:
@@ -25,7 +25,7 @@ class MorganFingerprintGenerator:
     def __init__(
         self,
         radius: int = 2,
-        n_bits: int = 2048,
+        n_bits: int = 1024,
         use_features: bool = False
     ):
         """
@@ -33,7 +33,7 @@ class MorganFingerprintGenerator:
 
         Args:
             radius: Radius for Morgan algorithm (default: 2)
-            n_bits: Number of bits in fingerprint (default: 2048)
+            n_bits: Number of bits in fingerprint (default: 1024)
             use_features: Use feature-based fingerprints (default: False)
         """
         self.radius = radius
@@ -107,7 +107,7 @@ class LigandRepresentationPipeline:
         """
         self.input_path = input_path
         self.output_path = output_path
-        self.generator = MorganFingerprintGenerator(radius=2, n_bits=2048)
+        self.generator = MorganFingerprintGenerator(radius=2, n_bits=1024)
 
     def load_ligands(self) -> pd.DataFrame:
         """Load ligands from CSV."""

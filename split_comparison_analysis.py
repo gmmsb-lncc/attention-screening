@@ -198,7 +198,7 @@ def load_dataset(filepath: str, keep_monotonic: bool = False,
     return df
 
 
-_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
 
 
 def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing fingerprints"):
@@ -220,7 +220,7 @@ def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing finger
         print(f"  WARNING: {n_invalid}/{len(smiles_list)} SMILES failed RDKit parsing "
               f"({100*n_invalid/len(smiles_list):.1f}% dropped)")
 
-    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 2048), dtype=np.float32), valid_indices
+    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 1024), dtype=np.float32), valid_indices
 
 
 def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None):
@@ -253,13 +253,13 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
                     valid_idx_pos.append(pos)
 
         if not fps_list:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
         fps = np.stack(fps_list)
     else:
         fps, valid_idx_pos = compute_morgan_fingerprints(df['canonical_smiles'].tolist())
         if len(fps) == 0:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
     kinase_oh = np.zeros((len(valid_idx_pos), n_kinases), dtype=np.float32)
     for j, pos in enumerate(valid_idx_pos):
@@ -308,11 +308,23 @@ def prepare_embedding_features(
     else:
         lig_dirs = [Path(d) for d in ligand_vector_dir]
 
-    def _find_file(dirs, filename):
+    def _find_file(dirs, filenames):
+        """Find a file trying multiple possible filenames.
+        
+        Args:
+            dirs: List of directories to search
+            filenames: List of possible filenames to try
+            
+        Returns:
+            Path to the first existing file, or None
+        """
+        if isinstance(filenames, str):
+            filenames = [filenames]
         for d in dirs:
-            p = d / filename
-            if p.exists():
-                return p
+            for filename in filenames:
+                p = d / filename
+                if p.exists():
+                    return p
         return None
 
     seq_ids = df['seq_id'].astype(str).values
@@ -324,8 +336,18 @@ def prepare_embedding_features(
     valid_idx = []
 
     for i in range(len(df)):
-        prot_path = _find_file(prot_dirs, f"{seq_ids[i]}_embedding.npy")
-        lig_path = _find_file(lig_dirs, f"{chembl_ids[i]}_embedding.npy")
+        # Try multiple protein embedding filename patterns
+        prot_path = _find_file(prot_dirs, [
+            f"{seq_ids[i]}_embedding.npy",
+            f"{seq_ids[i]}.npy",
+        ])
+        
+        # Try multiple ligand embedding filename patterns (including molformer)
+        lig_path = _find_file(lig_dirs, [
+            f"{chembl_ids[i]}_embedding.npy",
+            f"{chembl_ids[i]}_molformer_embedding.npy",
+            f"{chembl_ids[i]}.npy",
+        ])
 
         if prot_path is None or lig_path is None:
             continue
@@ -439,16 +461,14 @@ def train_and_evaluate(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(128,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        learning_rate='adaptive',
-        learning_rate_init=0.001,
-        max_iter=500,
+        max_iter=100,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=10,
         random_state=seed
     )
     mlp.fit(X_train_scaled, y_train)
@@ -623,16 +643,14 @@ def train_and_evaluate_with_val(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(128,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        learning_rate='adaptive',
-        learning_rate_init=0.001,
-        max_iter=500,
+        max_iter=100,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=10,
         random_state=seed,
     )
     mlp.fit(X_train_scaled, y_train)
@@ -1100,11 +1118,17 @@ def run_comparison(
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     feature_type: str = "fingerprint",
     embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
     """Run comparison across split scenarios.
 
     split_mode="single_90_10": one train/test split per scenario.
     split_mode="kfold_cv": legacy k-fold protocol with train/val/test folds.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
     """
 
     valid_modes = {"single_90_10", "kfold_cv"}
@@ -1250,25 +1274,33 @@ def run_comparison(
                 prot_vec_dir = None
                 lig_vec_dir = None
                 if feature_type == "embedding" and embedding_name:
-                    from crossattention_split_analysis.config import (
-                        SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
-                    )
-                    esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
-                    if dataset_type == "all":
-                        build_dirs = [
-                            os.path.join(bp, esm_model, "build")
-                            for bp in EMBEDDING_BASE_PATHS_ALL
-                        ]
+                    # Use custom fine-tuned paths if provided
+                    if custom_protein_embedding_dir and custom_ligand_embedding_dir:
+                        prot_vec_dir = [custom_protein_embedding_dir]
+                        lig_vec_dir = [custom_ligand_embedding_dir]
+                        print(f"    Embedding features: FINE-TUNED")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
                     else:
-                        build_dirs = [os.path.join(
-                            EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
-                            esm_model, "build",
-                        )]
-                    prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
-                    lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
-                    print(f"    Embedding features: {esm_model}")
-                    print(f"      Protein vectors: {prot_vec_dir}")
-                    print(f"      Ligand vectors:  {lig_vec_dir}")
+                        from crossattention_split_analysis.config import (
+                            SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
+                        )
+                        esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
+                        if dataset_type == "all":
+                            build_dirs = [
+                                os.path.join(bp, esm_model, "build")
+                                for bp in EMBEDDING_BASE_PATHS_ALL
+                            ]
+                        else:
+                            build_dirs = [os.path.join(
+                                EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
+                                esm_model, "build",
+                            )]
+                        prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
+                        lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
+                        print(f"    Embedding features: {esm_model}")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
 
                 results = train_and_evaluate_with_val(
                     sc_train_df, sc_val_df, sc_test_df,
@@ -1660,8 +1692,15 @@ def run_single_dataset(
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     feature_type: str = "fingerprint",
     embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
-    """Run analysis for a single dataset type."""
+    """Run analysis for a single dataset type.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
+    """
     data_path = resolve_dataset_input_path(
         dataset_type=dataset_type,
         input_path=input_path,
@@ -1815,6 +1854,8 @@ def run_single_dataset(
         scaffold_split_dir=scaffold_split_dir,
         feature_type=feature_type,
         embedding_name=embedding_name,
+        custom_protein_embedding_dir=custom_protein_embedding_dir,
+        custom_ligand_embedding_dir=custom_ligand_embedding_dir,
     )
     if not all_results:
         print("  No results generated.")
