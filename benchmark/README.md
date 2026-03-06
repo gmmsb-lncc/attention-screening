@@ -2,17 +2,42 @@
 
 Modular framework for comparing protein–ligand interaction prediction models across four representation levels, using scaffold-based data splits for rigorous evaluation.
 
-This package is a SOLID-compliant rewrite of the monolithic `semantic_screening_models_beta.py` (2 837 lines) into 18 focused modules totalling ~3 100 lines.
+This package is a SOLID-compliant rewrite of the monolithic `semantic_screening_models_beta.py` (2 837 lines) into 19 focused modules totalling ~3 400 lines.
 
 ## Scientific Design
 
-**Key principle:** The only variable across levels is the **molecular representation**. All four levels use the **exact same KNN and MLP classifiers** (`benchmark/classifiers.py`) so that performance differences are attributable solely to the representation, not the classifier.
+### Key Principles
+
+1. **Single independent variable.** The only factor that varies across levels is the **molecular representation**. All four levels use the exact same canonical KNN and MLP classifiers (`benchmark/classifiers.py`), the same scaffold split, the same activity threshold, and the same evaluation metrics.
+
+2. **Validation-based classifier training.** To prevent train-set optimism in levels with learned feature extractors (Levels 3 and 4), **all four levels** train their KNN/MLP classifiers on features extracted from the **validation split** and evaluate on the **test split**. The feature extractor (when present) is trained on the training split with early stopping on the validation split. Since the feature extractor was not directly trained on validation data (only used for model selection), validation features are honest representations.
+
+3. **No information leakage in features.** Level 1 uses only Morgan fingerprints (1024-bit, radius 2) — no one-hot kinase encoding. This ensures that no level receives explicit target identity information, making the comparison symmetric.
+
+### Evaluation Protocol
+
+```
+Scaffold Split:  train (~80%)  /  val (~10%)  /  test (~10%)
+                       │               │               │
+  Level 1:             │     FP(val) ──┤    FP(test) ──┤
+  Level 2:             │  MeanPool(val)─┤ MeanPool(test)┤
+  Level 3:  train AttnPool  AttnPool(val)├ AttnPool(test)┤
+  Level 4:  train CrossAttn CrossAttn(val)┤CrossAttn(test)┤
+                       │               │               │
+                       │         ┌─────┘        ┌──────┘
+                       │         ▼              ▼
+                       │    KNN/MLP.fit()   KNN/MLP.predict()
+                       │    (on val feats)  (on test feats)
+```
+
+### Classifier Specifications
 
 | Component | Specification |
 |---|---|
 | **KNN** | FAISS inner-product on L2-normalised features (cosine similarity), *k* = 5, distance-weighted voting |
 | **MLP** | sklearn `MLPClassifier(hidden_layer_sizes=(128,), activation='relu', solver='adam', alpha=1e-4, max_iter=100, early_stopping=True, validation_fraction=0.1, n_iter_no_change=10)` |
 | **Scaler** | `StandardScaler` applied before both classifiers |
+| **Threshold** | Fixed at 0.5 (no per-model threshold optimisation) |
 
 ## Quick Start
 
@@ -35,16 +60,23 @@ python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 
 Each level represents a progressively richer molecular representation.  
 The classifier (**KNN + MLP**) is held constant — only the input changes.
 
-| Level | Input Representation | Pooling / Encoding | Module |
-|-------|---------------------|-------------------|--------|
-| **1** | Morgan fingerprints (no PLM) | — | `levels/level1.py` |
-| **2** | Per-residue ESM-2 protein + per-token MoLFormer ligand **matrices** | **Mean pooling** (zero parameters) | `levels/level2.py` |
-| **3** | Same matrices as Levels 2/4 → linear projection + **attention pooling** | **Attention pooling** (learned query) | `levels/level3.py` |
-| **4** | Same matrices → projection + bidirectional **cross-attention** + attention pooling (DT-Kinase) | **Cross-attention** (full encoder) | `levels/level4.py` |
+| Level | Input Representation | Pooling / Encoding | Trainable Params | Module |
+|-------|---------------------|-------------------|-----------------|--------|
+| **1** | Morgan fingerprints (1024-bit, radius 2) — compound only | — | 0 | `levels/level1.py` |
+| **2** | Per-residue ESM-2 protein + per-token MoLFormer ligand **matrices** | **Mean pooling** (zero parameters) | 0 | `levels/level2.py` |
+| **3** | Same matrices as Levels 2/4 → linear projection + **attention pooling** | **Attention pooling** (learned query) | ~808K | `levels/level3.py` |
+| **4** | Same matrices → projection + bidirectional **cross-attention** + attention pooling (DT-Kinase) | **Cross-attention** (full encoder) | ~2.5M | `levels/level4.py` |
 
-**Complexity increases monotonically:** fingerprints → mean pooling → attention pooling → cross-attention.
+**Complexity increases monotonically:** fingerprints (0 params) → mean pooling (0 params) → attention pooling (~808K params) → cross-attention (~2.5M params).
 
 All levels use **scaffold splits** (structurally dissimilar compounds in test set) and run across **5 seeds** by default (`[42, 123, 456, 789, 1024]`) for robust mean ± std reporting.
+
+### Data Flow per Level
+
+- **Level 1**: Scaffold val/test TSV → Morgan FP → StandardScaler → KNN/MLP
+- **Level 2**: Scaffold val/test TSV → load protein/ligand matrices → mean pool → concat → StandardScaler → KNN/MLP
+- **Level 3**: Train attention pooling on train (early stop on val) → extract features from val/test → StandardScaler → KNN/MLP
+- **Level 4**: Train cross-attention on train (early stop on val MCC) → extract features from val/test → StandardScaler → KNN/MLP
 
 ## Architecture
 
@@ -66,8 +98,8 @@ semantic_screening_models.py          ← Thin CLI entry point (33 lines)
     └── levels/
         ├── __init__.py               ← Re-exports all runners
         ├── base.py                   ← BaseLevelRunner ABC (Template Method)
-        ├── matrix_utils.py           ← Shared matrix loading, padding, mean-pool
-        ├── level1.py                 ← Fingerprint baseline
+        ├── matrix_utils.py           ← Shared matrix loading, padding, mean-pool, coverage validation
+        ├── level1.py                 ← Fingerprint baseline (compound-only, canonical classifiers)
         ├── level2.py                 ← Matrix mean-pooling → KNN/MLP
         ├── level3.py                 ← Projection + attention pooling → KNN/MLP
         └── level4.py                 ← Cross-attention encoder → KNN/MLP
@@ -100,9 +132,9 @@ Defines `BenchmarkConfig` (frozen dataclass) and all shared constants:
 - `PCHEMBL_ACTIVITY_THRESHOLD` — 6.0 (IC₅₀ ≤ 1000 nM → active).
 
 ### `classifiers.py`
-Provides the canonical KNN and MLP classifiers used by all four levels.
-- `train_knn_mlp(x_train, y_train, x_test, y_test, seed)` — Trains both classifiers and returns `{"KNN": {...}, "MLP": {...}}`.
-- `_faiss_knn_predict()` — FAISS-based KNN matching `split_comparison_analysis.faiss_knn_predict()`.
+Provides the canonical KNN and MLP classifiers used by **all four levels**.
+- `train_knn_mlp(x_train, y_train, x_test, y_test, seed)` — Trains both classifiers and returns `{"KNN": {...}, "MLP": {...}}`. In the benchmark protocol, `x_train` / `y_train` are validation-split features (not training-split) to avoid train-set optimism.
+- `_faiss_knn_predict()` — FAISS-based KNN with cosine similarity and distance-weighted voting.
 - `_compute_metrics()` — Standard metric suite (accuracy, mcc, f1, precision, recall, auc).
 
 ### `cli.py`
@@ -128,10 +160,10 @@ Abstract base class with:
 ### `levels/level1.py` – `level4.py`
 Concrete runners implementing `run_single_seed()`. Each one produces a different molecular representation, then feeds it into the **same canonical KNN/MLP classifiers** (`benchmark.classifiers.train_knn_mlp`):
 
-- **Level 1**: Morgan fingerprints via `split_comparison_analysis.run_single_dataset(feature_type="fingerprint")`.
-- **Level 2**: Same matrices as Level 4 → mean pooling (no parameters) → `train_knn_mlp()`.
-- **Level 3**: Same matrices as Level 4 → projection + attention pooling (learned) → `train_knn_mlp()`.
-- **Level 4**: Same matrices → trains cross-attention encoder → extracts pre-head features → `train_knn_mlp()`.
+- **Level 1**: Morgan fingerprints (compound-only, no one-hot kinase) via internal `_prepare_fp_features()` → `train_knn_mlp()` on val features.
+- **Level 2**: Same matrices as Level 4 → mean pooling (no parameters) → `train_knn_mlp()` on val features.
+- **Level 3**: Same matrices as Level 4 → trains projection + attention pooling on train → extracts val features → `train_knn_mlp()`.
+- **Level 4**: Same matrices → trains cross-attention encoder on train → extracts val features → `train_knn_mlp()`.
 
 ### `finetuning.py`
 Optional step that:
@@ -241,6 +273,6 @@ Core dependencies (must be installed in `env`):
 - `faiss-cpu` (or `faiss-gpu`) — for KNN classification
 
 Level-specific (imported lazily):
-- `split_comparison_analysis` — Levels 1 & 3
-- `crossattention_split_analysis` — Level 4
+- `rdkit` — Level 1 (Morgan fingerprints)
+- `crossattention_split_analysis` — Levels 3 (attention pool architecture) & 4 (cross-attention training)
 - `src.finetuning` — Fine-tuning step

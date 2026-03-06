@@ -11,11 +11,20 @@ The difference is the encoding strategy:
   - Level 3: projection + attention pooling (learned query)
   - Level 4: projection + cross-attention + attention pooling (full DT-Kinase)
 
+Training protocol (consistent with all levels):
+  - Cross-attention model trained on the **training** split
+    (validation split for early stopping on MCC).
+  - Features extracted from the **validation** split — the model was
+    *not* directly trained on val, only used it for model selection,
+    so val features are free of train-set optimism.
+  - KNN/MLP classifiers trained on val features.
+  - Evaluation on the hold-out **test** split.
+
 Pipeline:
   1. Train cross-attention model via ``run_single_analysis``
      (saves checkpoint).
   2. Load the best-model checkpoint.
-  3. Run inference with ``return_features=True`` on train / test data
+  3. Run inference with ``return_features=True`` on val / test data
      to obtain the pre-head representation vectors.
   4. Feed those vectors into ``benchmark.classifiers.train_knn_mlp``.
 
@@ -111,7 +120,7 @@ class Level4Runner(BaseLevelRunner):
         tqdm.write("  Extracting cross-attention representations...")
 
         try:
-            x_train, y_train, x_test, y_test = self._extract_features(
+            x_val, y_val, x_test, y_test = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
             )
@@ -121,15 +130,15 @@ class Level4Runner(BaseLevelRunner):
             return self._fallback_from_training_results(_training_results)
 
         # Sanitise features
-        for name, arr in [("train", x_train), ("test", x_test)]:
+        for name, arr in [("val", x_val), ("test", x_test)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # --- Step 3: Train canonical KNN/MLP on extracted features -------
+        # --- Step 3: Train canonical KNN/MLP on val features -------------
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_train, y_train, x_test, y_test, seed)
+        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -159,9 +168,13 @@ class Level4Runner(BaseLevelRunner):
         **same** data pipeline as Levels 2 and 3, ensuring that all
         matrix-based levels receive identical inputs.
 
+        Features are extracted from the **validation** split (not training)
+        to avoid train-set optimism — the model was only exposed to val
+        for early stopping, not for gradient updates.
+
         Returns
         -------
-        x_train, y_train, x_test, y_test : np.ndarray
+        x_val, y_val, x_test, y_test : np.ndarray
             Feature arrays from the cross-attention encoder.
         """
         from crossattention_split_analysis.config import (
@@ -206,18 +219,19 @@ class Level4Runner(BaseLevelRunner):
         # --- Build dataloaders (same as L2/L3 — shared matrix_utils) ---
         # For dataset="all" this correctly concatenates human + non_human
         # splits and searches matrices in both directories.
-        train_loader, _val_loader, test_loader = build_matrix_dataloaders(
+        _train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
         )
 
-        # --- Forward pass to collect features ---
-        x_train, y_train = self._collect_features(model, train_loader, device)
+        # --- Forward pass to collect features (val + test only) ---
+        # Val features are used for KNN/MLP training (no train-set optimism).
+        x_val, y_val = self._collect_features(model, val_loader, device)
         x_test, y_test = self._collect_features(model, test_loader, device)
 
-        return x_train, y_train, x_test, y_test
+        return x_val, y_val, x_test, y_test
 
     @staticmethod
     @torch.no_grad()

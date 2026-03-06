@@ -3,9 +3,9 @@
 Every level in the benchmark must use the **exact same** classifier
 configuration so that the only independent variable across levels is
 the molecular representation.  This module provides a single
-``train_knn_mlp`` function that both Level 2 and Level 4 call.
+``train_knn_mlp`` function that **all four levels** call.
 
-Classifier specifications (must match ``split_comparison_analysis.py``):
+Classifier specifications:
 
  * **KNN** — FAISS inner-product index on L2-normalised features
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
@@ -15,8 +15,13 @@ Classifier specifications (must match ``split_comparison_analysis.py``):
    patience of 10 iterations.
  * Both classifiers receive features after ``StandardScaler``.
 
-Levels 1 and 3 delegate to ``split_comparison_analysis.run_single_dataset``
-which uses identical hyperparameters (see ``train_and_evaluate`` there).
+Evaluation protocol:
+
+ * All levels pass **validation-split** features as ``x_train`` / ``y_train``
+   and **test-split** features as ``x_test`` / ``y_test``.
+ * This eliminates train-set optimism for levels with learned feature
+   extractors (Levels 3 and 4) and ensures a consistent protocol across
+   all four levels.
 """
 
 from __future__ import annotations
@@ -132,16 +137,18 @@ def train_knn_mlp(
 ) -> Dict[str, Dict[str, float]]:
     """Train canonical KNN and MLP classifiers and return metric dicts.
 
-    **Both classifiers use the exact same hyperparameters** as
-    ``split_comparison_analysis.train_and_evaluate`` so that the
-    benchmark comparison is scientifically valid.
+    **Both classifiers use the exact same hyperparameters** across all
+    four benchmark levels so that the comparison is scientifically valid.
 
     Parameters
     ----------
     x_train, y_train : array-like
-        Training features and labels.
+        Features and labels for classifier training.  In the benchmark
+        protocol these come from the **validation** split — not the
+        training split — to avoid train-set optimism when the upstream
+        feature extractor was trained on the training data.
     x_test, y_test : array-like
-        Test features and labels.
+        Hold-out test features and labels for evaluation.
     seed : int
         Random seed for MLP reproducibility.
 
