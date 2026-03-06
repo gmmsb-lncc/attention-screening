@@ -57,13 +57,13 @@ The module is part of the DockTKinase project. No additional installation requir
 
 ```bash
 # Run attention matrix analysis with default settings
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/my_experiment \
     --attention-matrix
 
 # With custom settings
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/my_experiment \
     --attention-matrix \

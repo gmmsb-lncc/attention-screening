@@ -23,6 +23,18 @@ SUPPORTED_EMBEDDINGS: Dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Embedding dimensions
+# ---------------------------------------------------------------------------
+
+PROTEIN_DIMS: Dict[str, int] = {
+    "esm2_t6_8M_UR50D": 320,
+    "esm2_t30_150M_UR50D": 640,
+    "esm2_t33_650M_UR50D": 1280,
+}
+
+MOLFORMER_DIM: int = 768  # MoLFormer per-token embeddings
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
@@ -40,14 +52,18 @@ METRICS_ORDER: List[str] = ["accuracy", "mcc", "f1", "precision", "recall", "auc
 # ---------------------------------------------------------------------------
 
 LEVEL_LABELS: Dict[str, str] = {
-    "level1_fp_knn": "Level 1 (FP+KNN)",
-    "level1_fp_mlp": "Level 1 (FP+MLP)",
-    "level2_emb_knn": "Level 2 (Emb+KNN)",
-    "level2_emb_mlp": "Level 2 (Emb+MLP)",
-    "level3_mat_knn": "Level 3 (Mat+MeanPool+KNN)",
-    "level3_mat_mlp": "Level 3 (Mat+MeanPool+MLP)",
-    "level4_crossatt_knn": "Level 4 (CrossAtt+KNN)",
-    "level4_crossatt_mlp": "Level 4 (CrossAtt+MLP)",
+    "level1a_fp_knn": "L1a (FP+KNN)",
+    "level1a_fp_mlp": "L1a (FP+MLP)",
+    "level1b_ligmean_knn": "L1b (LigMean+KNN)",
+    "level1b_ligmean_mlp": "L1b (LigMean+MLP)",
+    "level1c_ligattn_knn": "L1c (LigAttn+KNN)",
+    "level1c_ligattn_mlp": "L1c (LigAttn+MLP)",
+    "level2_meanpool_knn": "L2 (MeanPool+KNN)",
+    "level2_meanpool_mlp": "L2 (MeanPool+MLP)",
+    "level3_attnpool_knn": "L3 (AttnPool+KNN)",
+    "level3_attnpool_mlp": "L3 (AttnPool+MLP)",
+    "level4_crossatt_knn": "L4 (CrossAtt+KNN)",
+    "level4_crossatt_mlp": "L4 (CrossAtt+MLP)",
 }
 
 # ---------------------------------------------------------------------------
@@ -55,12 +71,16 @@ LEVEL_LABELS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 LEVEL_COLORS: Dict[str, str] = {
-    "level1_fp_knn": "#1b9e77",
-    "level1_fp_mlp": "#66c2a5",
-    "level2_emb_knn": "#7570b3",
-    "level2_emb_mlp": "#a6a3d9",
-    "level3_mat_knn": "#d95f02",
-    "level3_mat_mlp": "#e78e3f",
+    "level1a_fp_knn": "#1b9e77",
+    "level1a_fp_mlp": "#66c2a5",
+    "level1b_ligmean_knn": "#4daf4a",
+    "level1b_ligmean_mlp": "#a6d854",
+    "level1c_ligattn_knn": "#377eb8",
+    "level1c_ligattn_mlp": "#7eb8da",
+    "level2_meanpool_knn": "#7570b3",
+    "level2_meanpool_mlp": "#a6a3d9",
+    "level3_attnpool_knn": "#d95f02",
+    "level3_attnpool_mlp": "#e78e3f",
     "level4_crossatt_knn": "#e7298a",
     "level4_crossatt_mlp": "#f06ab6",
 }
@@ -69,7 +89,7 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({1, 2, 3, 4})
+VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4"})
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -96,7 +116,7 @@ class BenchmarkConfig:
     embedding: str  # shorthand: "8M", "150M", "650M"
 
     # --- level selection ---
-    levels: List[int] = field(default_factory=lambda: [1, 2, 3, 4])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4"])
 
     # --- output ---
     output_dir: Optional[str] = None
@@ -110,7 +130,7 @@ class BenchmarkConfig:
     force_split: bool = False
     debug: bool = False
 
-    # --- deep-learning hyper-parameters (Level 3/4) ---
+    # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
     patience: int = 5
@@ -180,5 +200,5 @@ class BenchmarkConfig:
             raise ValueError(msg)
         for level in self.levels:
             if level not in VALID_LEVELS:
-                msg = f"Invalid level {level}. Valid levels: {sorted(VALID_LEVELS)}"
+                msg = f"Invalid level '{level}'. Valid levels: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)

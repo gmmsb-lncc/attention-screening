@@ -231,7 +231,7 @@ So the parameter count is expected and mainly comes from the diffusion denoiser.
 ### Example: Non-human dataset with 8M ESM-2 and MoLFormer ligand matrices
 
 ```bash
-python crossattention_split_analysis_main.py \
+python legacy/crossattention_split_analysis_main.py \
   --embedding 8M \
   --dataset non_human \
   --model_variant diffusion \

@@ -209,7 +209,7 @@ print(f"Embedding shape: {embedding.shape}")  # (384,)
 ### 4. Uso no Pipeline
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
   --input tests/datasets/kinase_non_human_compounds.tsv \
   --output results/openfold3_test \
   --esm-model openfold3 \

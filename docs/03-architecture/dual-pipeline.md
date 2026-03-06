@@ -76,7 +76,7 @@ Predict binary classification (active/inactive) for kinase families.
 
 ### Usage
 ```bash
-python run_complete_pipeline.py
+python scripts/run_complete_pipeline.py
 ```
 
 ---
@@ -146,7 +146,7 @@ python run_regression_pipeline.py
 ### Sequential Execution
 ```bash
 # Run both pipelines in sequence
-python run_complete_pipeline.py      # Classification
+python scripts/run_complete_pipeline.py      # Classification
 python run_regression_pipeline.py    # Regression
 ```
 

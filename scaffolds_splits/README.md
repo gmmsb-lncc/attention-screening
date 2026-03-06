@@ -173,7 +173,7 @@ are backward-compatible aliases of the canonical scenario (default: `Sc` if requ
 
 ```bash
 source env/bin/activate
-python scaffold_split.py --output-dir scaffolds_splits/output
+python scripts/scaffold_split.py --output-dir scaffolds_splits/output
 ```
 
 Useful flags:
@@ -199,7 +199,7 @@ After running:
 
 ```bash
 source env/bin/activate
-python scaffold_split.py --output-dir scaffolds_splits/output
+python scripts/scaffold_split.py --output-dir scaffolds_splits/output
 ```
 
 validate:

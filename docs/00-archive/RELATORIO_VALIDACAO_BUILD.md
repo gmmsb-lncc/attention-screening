@@ -257,7 +257,7 @@ pytest tests/ -v
 ### 4. Executar Pipelines:
 ```bash
 # Classification Pipeline
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset data/test_dataset_1000.tsv \
     --output-dir results/test_classification
 

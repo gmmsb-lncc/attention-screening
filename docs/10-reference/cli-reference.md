@@ -13,7 +13,7 @@ The main entry point for executing the end-to-end pipeline.
 
 ### Usage
 ```bash
-python run_complete_pipeline.py --input <FILE> [OPTIONS]
+python scripts/run_complete_pipeline.py --input <FILE> [OPTIONS]
 ```
 
 ### Required Arguments

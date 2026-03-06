@@ -256,7 +256,7 @@ def _build_main_command(
     output_dir: str,
 ) -> str:
     cmd = [
-        "python crossattention_split_analysis_main.py",
+        "python legacy/crossattention_split_analysis_main.py",
         f"--dataset {args.dataset}",
         f"--embedding {args.embedding}",
         "--scenarios scaffold",

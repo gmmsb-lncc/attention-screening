@@ -492,7 +492,7 @@ python scripts/ensemble_predict.py \
 # Editar crossattention_split_analysis/training/trainer.py
 # Substituir BCEWithLogitsLoss por FocalLoss(alpha=0.435, gamma=2.0)
 
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 5 \

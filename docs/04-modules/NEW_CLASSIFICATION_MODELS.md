@@ -361,7 +361,7 @@ print('✅ All models available!')
 
 3. **Run complete pipeline**:
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/sample.tsv \
     --output results/test_13_models \
     --protein-model esm2_t33_650M_UR50D

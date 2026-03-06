@@ -592,14 +592,14 @@ def prepare_boltz_features(sequence: str, use_msa: bool = False):
 
 ```bash
 # Basic usage (no MSA, fastest)
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/boltz2_test \
     --esm-model boltz2 \
     --seed 42
 
 # With MSA (higher accuracy, slower)
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/boltz2_msa_test \
     --esm-model boltz2 \

@@ -74,7 +74,7 @@ def _build_matrix(self) -> np.ndarray:
 ```bash
 cd /home/leon/docktkinase
 
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/boltz_test \
     --protein-model boltz2 \
@@ -271,13 +271,13 @@ FM4M (posições 384:1152):
 
 ```bash
 # Teste 1: COM BOLTZ
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_boltz \
     --protein-model boltz2
 
 # Teste 2: COM ESM-2 t33
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_esm2_t33 \
     --protein-model esm2_t33_650M_UR50D
@@ -346,7 +346,7 @@ ESM-2 dimensões: 2048
 Ao rodar o pipeline, observe a saída:
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --protein-model boltz2 2>&1 | grep -E "(Protein Model|Total Embedding|embedding_dim)"
 ```

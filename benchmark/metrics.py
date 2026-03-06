@@ -68,7 +68,9 @@ def find_scaffold_key(results: Dict) -> Optional[str]:
 
 def aggregate_benchmark_metrics(
     *,
-    level1_results: Optional[Dict] = None,
+    level1a_results: Optional[Dict] = None,
+    level1b_results: Optional[Dict] = None,
+    level1c_results: Optional[Dict] = None,
     level2_results: Optional[Dict] = None,
     level3_results: Optional[Dict] = None,
     level4_results: Optional[Dict] = None,
@@ -78,17 +80,19 @@ def aggregate_benchmark_metrics(
     Returns::
 
         {
-            "level1_fp_knn": {"accuracy": 0.85, "accuracy_std": 0.02, ...},
-            "level1_fp_mlp": {...},
+            "level1a_fp_knn": {"accuracy": 0.85, "accuracy_std": 0.02, ...},
+            "level1a_fp_mlp": {...},
             ...
         }
     """
     aggregated: Dict[str, Dict[str, Optional[float]]] = {}
 
     _level_mapping = [
-        (level1_results, [("KNN", "level1_fp_knn"), ("MLP", "level1_fp_mlp")]),
-        (level2_results, [("KNN", "level2_emb_knn"), ("MLP", "level2_emb_mlp")]),
-        (level3_results, [("KNN", "level3_mat_knn"), ("MLP", "level3_mat_mlp")]),
+        (level1a_results, [("KNN", "level1a_fp_knn"), ("MLP", "level1a_fp_mlp")]),
+        (level1b_results, [("KNN", "level1b_ligmean_knn"), ("MLP", "level1b_ligmean_mlp")]),
+        (level1c_results, [("KNN", "level1c_ligattn_knn"), ("MLP", "level1c_ligattn_mlp")]),
+        (level2_results, [("KNN", "level2_meanpool_knn"), ("MLP", "level2_meanpool_mlp")]),
+        (level3_results, [("KNN", "level3_attnpool_knn"), ("MLP", "level3_attnpool_mlp")]),
         (level4_results, [("KNN", "level4_crossatt_knn"), ("MLP", "level4_crossatt_mlp")]),
     ]
 

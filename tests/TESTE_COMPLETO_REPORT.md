@@ -247,7 +247,7 @@ python tests/test_classification_and_regression.py
 
 ```bash
 # Classificação
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
   --dataset data/kinase_data.tsv \
   --protein-model esm2_t6_8M_UR50D \
   --label-method pchembl \

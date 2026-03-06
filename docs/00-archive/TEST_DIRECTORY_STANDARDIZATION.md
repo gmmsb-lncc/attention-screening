@@ -93,10 +93,10 @@ docktkinase/
 
 ```bash
 # Teste rápido (usa padrão: tests/pipeline_output)
-python run_complete_pipeline.py --dataset human --max-samples 50
+python scripts/run_complete_pipeline.py --dataset human --max-samples 50
 
 # Teste customizado
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset human \
     --max-samples 100 \
     --output-dir tests/my_custom_test

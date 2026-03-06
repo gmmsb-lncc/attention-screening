@@ -112,7 +112,7 @@ Cada pasta de cenário contém `*_train.tsv`, `*_val.tsv` e opcionalmente `*_dro
 
 ```bash
 source env/bin/activate
-python scaffold_split.py --output-dir scaffolds_splits/output
+python scripts/scaffold_split.py --output-dir scaffolds_splits/output
 ```
 
 ## 9) Observação importante

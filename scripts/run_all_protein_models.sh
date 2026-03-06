@@ -298,7 +298,7 @@ for i in "${!MODELS_TO_RUN[@]}"; do
     echo ""
     
     # Build the command
-    CMD="python run_complete_pipeline.py"
+    CMD="python scripts/run_complete_pipeline.py"
     CMD+=" --input ${INPUT_FILE}"
     CMD+=" --output ${OUTPUT_DIR}"
     CMD+=" --protein-model ${MODEL}"

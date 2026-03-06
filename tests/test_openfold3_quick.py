@@ -164,7 +164,7 @@ def main():
     print("✅ ALL TESTS PASSED - OpenFold-3 is working correctly!")
     print("=" * 70)
     print("\nOpenFold-3 is now ready to be used in the pipeline:")
-    print("  python run_complete_pipeline.py \\")
+    print("  python scripts/run_complete_pipeline.py \\")
     print("    --input tests/datasets/kinase_non_human_compounds.tsv \\")
     print("    --output results/openfold3_test \\")
     print("    --protein-model openfold3")

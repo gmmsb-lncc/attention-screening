@@ -86,7 +86,7 @@ info = ProteinModelFactory.get_model_info('openfold3')
 
 **CLI Support:**
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
   --input tests/datasets/kinase_non_human_compounds.tsv \
   --output results/openfold3_test \
   --protein-model openfold3

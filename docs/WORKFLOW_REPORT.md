@@ -340,18 +340,18 @@ x_rotated = x · cos(mθ) + rotate_half(x) · sin(mθ)
 
 ```bash
 # Benchmark completo (3 níveis)
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset non_human \
     --embedding 8M
 
 # Apenas Level 1 e 2 (baseline rápido)
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset non_human \
     --embedding 8M \
     --levels 1,2
 
 # Apenas Level 3 com hiperparâmetros customizados
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset non_human \
     --embedding 8M \
     --levels 3 \
