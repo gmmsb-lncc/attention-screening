@@ -73,7 +73,7 @@ class MatrixDataset(Dataset):
         )
         ligand_mat = self._load_from_dirs(
             self._ligand_dirs,
-            f"{chembl_id}_molformer_matrix.npy",
+            f"{chembl_id}_matrix.npy",
             fallback_shape=(50, 768),
         )
         return protein_mat, ligand_mat, label, seq_id, chembl_id
@@ -331,7 +331,7 @@ def _validate_matrix_coverage(
     missing_lig = sum(
         1
         for cid in unique_chembls
-        if not any((d / f"{cid}_molformer_matrix.npy").exists() for d in ligand_dirs)
+        if not any((d / f"{cid}_matrix.npy").exists() for d in ligand_dirs)
     )
 
     if missing_prot or missing_lig:
