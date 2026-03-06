@@ -563,7 +563,7 @@ def main():
 
 ```bash
 # Using ESM-2 650M model
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/esm2_650m_test \
     --esm-model esm2_t33_650M_UR50D \
@@ -588,7 +588,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Using ESM-C 600M model
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/esmc_600m_test \
     --esm-model esmc-600m-2024-12 \

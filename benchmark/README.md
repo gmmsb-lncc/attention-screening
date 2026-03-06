@@ -2,7 +2,7 @@
 
 Modular framework for comparing protein–ligand interaction prediction models across four representation levels, using scaffold-based data splits for rigorous evaluation.
 
-This package is a SOLID-compliant rewrite of the monolithic `semantic_screening_models_beta.py` (2 837 lines) into 19 focused modules totalling ~3 400 lines.
+This package is a SOLID-compliant rewrite of the monolithic `legacy/semantic_screening_models_beta.py` (2 837 lines) into 19 focused modules totalling ~3 400 lines.
 
 ## Scientific Design
 
@@ -187,7 +187,7 @@ Five plot functions plus `generate_all()`:
 - `plot_strip()` — Strip plot showing per-seed variance.
 
 ### `splits.py`
-`ensure_scaffold_splits()` — Checks for pre-existing scaffold split TSVs; falls back to running `scaffold_split.py` if missing.
+`ensure_scaffold_splits()` — Checks for pre-existing scaffold split TSVs; falls back to running `scripts/scaffold_split.py` if missing.
 
 ### `embeddings.py`
 - `AttentionPooling` — A learned attention-based pooling layer (`nn.Module`).

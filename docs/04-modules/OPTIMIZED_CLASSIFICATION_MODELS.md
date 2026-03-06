@@ -313,7 +313,7 @@ model = ClassificationModels.get_model('LinearSVC')
 ### Test 3: Complete Pipeline
 ```bash
 # Run complete pipeline
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/test_sample_1000.tsv \
     --output results/test_classification \
     --protein-model esm2_t33_650M_UR50D

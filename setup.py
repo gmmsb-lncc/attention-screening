@@ -829,8 +829,8 @@ try:
     print("✅ Basic libraries: OK")
     
     # Test run_complete_pipeline import
-    import run_complete_pipeline
-    print("✅ run_complete_pipeline: OK")
+    import scripts.run_complete_pipeline
+    print("✅ scripts/run_complete_pipeline: OK")
     
     # Test compare_classifiers import
     import compare_classifiers
@@ -961,10 +961,10 @@ if __name__ == "__main__":
         sys.exit(1)
 '''
     
-    with open("launch_docktkinase.py", "w") as f:
+    with open("scripts/launch_docktkinase.py", "w") as f:
         f.write(launcher_script)
     
-    print("✅ launch_docktkinase.py created")
+    print("✅ scripts/launch_docktkinase.py created")
 
 def validate_build_dependencies() -> bool:
     """Validate build script specific dependencies."""
@@ -1049,7 +1049,7 @@ def main() -> int:
     print_header("DOCKTKINASE AUTOMATED SETUP")
     
     # Check correct directory (using files that actually exist)
-    required_markers = ["run_complete_pipeline.py", "src", "requirements.txt"]
+    required_markers = ["scripts/run_complete_pipeline.py", "src", "requirements.txt"]
     missing_markers = [m for m in required_markers if not Path(m).exists()]
     
     if missing_markers:
@@ -1101,7 +1101,7 @@ def main() -> int:
     
     if platform.system() != "Windows":
         print("   1. source activate_env.sh")
-    print("   2. python launch_docktkinase.py")
+    print("   2. python scripts/launch_docktkinase.py")
     print("   3. jupyter lab (for notebooks)")
     
     print("\n📖 To use the system:")
@@ -1111,8 +1111,8 @@ def main() -> int:
     print("   python src/classifier/modular_classifier.py --help")
     
     print("\n🚀 To run the complete pipeline:")
-    print("   python run_complete_pipeline.py --help")
-    print("   python run_complete_pipeline.py \\")
+    print("   python scripts/run_complete_pipeline.py --help")
+    print("   python scripts/run_complete_pipeline.py \\")
     print("       --input tests/datasets/kinase_non_human_compounds.tsv \\")
     print("       --output results/test_run \\")
     print("       --esm-model esm2_t33_650M_UR50D \\")

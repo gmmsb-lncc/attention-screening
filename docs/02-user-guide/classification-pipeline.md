@@ -56,7 +56,7 @@ The classification pipeline predicts kinase families using 6 different machine l
 
 ```bash
 # Run complete classification pipeline
-python run_complete_pipeline.py
+python scripts/run_complete_pipeline.py
 ```
 
 ### Programmatic Usage

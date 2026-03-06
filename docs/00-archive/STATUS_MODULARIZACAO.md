@@ -394,7 +394,7 @@ BaseBuilder (core/)
 ### **1. Classification Pipeline**
 ```bash
 # Via CLI
-python run_complete_pipeline.py --dataset human --max-samples 1000
+python scripts/run_complete_pipeline.py --dataset human --max-samples 1000
 
 # Via Python API
 from build.pipeline import BuildPipeline

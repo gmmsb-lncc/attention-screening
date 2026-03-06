@@ -45,7 +45,7 @@ python setup.py
 
 ```bash
 # Pipeline completo: embeddings + build + classificação
-python run_complete_pipeline.py
+python scripts/run_complete_pipeline.py
 
 # Ou apenas classificação (se embeddings já existem)
 python -m src.classifier.train
@@ -57,7 +57,7 @@ python -m src.classifier.train
 # Pipeline completo: preparação + treinamento + avaliação
 # Nota: O pipeline de regressão é executado automaticamente pelo run_complete_pipeline.py
 # Para executar apenas a parte de regressão (se a classificação já foi feita):
-python run_complete_pipeline.py --no-classification
+python scripts/run_complete_pipeline.py --no-classification
 
 # Ou modular
 from src.regression import RegressionTrainer
@@ -77,7 +77,7 @@ python setup.py
 source env/bin/activate
 
 # 3. Pipeline COMPLETO (classificação + regressão)
-python run_complete_pipeline.py
+python scripts/run_complete_pipeline.py
 
 # Resultados salvos em:
 # - results/<dataset_name>/embeddings/

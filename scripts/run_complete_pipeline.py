@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# ESM-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
-# ESM-C (local): python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
-# ESM-C 6B (API): ESM_API_KEY="your_key" python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
-# Boltz-2: python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
+# ESM-2: python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esm2_15B_test --protein-model esm2_t48_15B_UR50D --seed 42
+# ESM-C (local): python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_600m_test --protein-model esmc-600m-2024-12 --seed 42
+# ESM-C 6B (API): ESM_API_KEY="your_key" python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/esmc_6b_test --protein-model esmc-6b-2024-12 --seed 42
+# Boltz-2: python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv --output results/boltz2_test --protein-model boltz2 --seed 42
 
 """
 DockTKinase - Complete Integrated Pipeline
@@ -15,23 +15,23 @@ End-to-end pipeline with automatic checkpoints:
 
 Usage:
     # Basic
-    python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
+    python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
     
     # With options
-    python run_complete_pipeline.py \\
+    python scripts/run_complete_pipeline.py \\
         --input tests/datasets/kinase_human_compounds.tsv \\
         --output results/my_experiment \\
         --device cuda \\
         --no-checkpoints
     
     # Regression only (skip classification)
-    python run_complete_pipeline.py \\
+    python scripts/run_complete_pipeline.py \\
         --input data.tsv \\
         --no-classification
     
     # ESM-C 6B (requires EvolutionaryScale Forge API key)
     export ESM_API_KEY="your_api_key"
-    python run_complete_pipeline.py \\
+    python scripts/run_complete_pipeline.py \\
         --input data.tsv \\
         --protein-model esmc-6b-2024-12
 
@@ -148,21 +148,21 @@ def parse_args():
         epilog="""
 Examples:
   # Quick test with small dataset
-  python run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
+  python scripts/run_complete_pipeline.py --input tests/datasets/kinase_non_human_compounds.tsv
   
   # Production with full dataset
-  python run_complete_pipeline.py \\
+  python scripts/run_complete_pipeline.py \\
       --input tests/datasets/kinase_all_compounds.tsv \\
       --output results/production_run \\
       --device cuda
   
   # Regression only (skip classification)
-  python run_complete_pipeline.py \\
+  python scripts/run_complete_pipeline.py \\
       --input data.tsv \\
       --no-classification
   
   # Specific models
-  python run_complete_pipeline.py \\
+  python scripts/run_complete_pipeline.py \\
       --input data.tsv \\
       --classification-models RandomForest GradientBoosting \\
       --regression-models RandomForest XGBoost

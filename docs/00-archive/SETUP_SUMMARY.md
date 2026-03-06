@@ -197,7 +197,7 @@ python setup.py  # Setup automático completo
 ### **Executar Classification Pipeline:**
 ```bash
 source env/bin/activate
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset data/test_dataset_1000.tsv \
     --output-dir results/classification
 ```

@@ -41,7 +41,7 @@ def run_pipeline_with_molformer():
         print(f"   Output: {output_dir}")
         
         cmd = [
-            "python", "run_complete_pipeline.py",
+            "python", "scripts/run_complete_pipeline.py",
             "--input", str(temp_input),
             "--output", output_dir,
             "--ligand-model", "MOLFORMER",  # Use MoLFormer

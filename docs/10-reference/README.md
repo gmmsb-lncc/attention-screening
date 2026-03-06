@@ -65,7 +65,7 @@ predictions = reg.predict(data)
 
 ```bash
 # Run classification pipeline
-python run_complete_pipeline.py --mode classify
+python scripts/run_complete_pipeline.py --mode classify
 
 # Run regression pipeline
 python run_regression_pipeline.py

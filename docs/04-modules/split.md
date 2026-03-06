@@ -84,13 +84,13 @@ O JSON final inclui:
 Execução padrão:
 
 ```bash
-python split_comparison_analysis.py --dataset non_human --seed 42 --n_rounds 5
+python scripts/split_comparison_analysis.py --dataset non_human --seed 42 --n_rounds 5
 ```
 
 Execução mais rigorosa (mais candidatos):
 
 ```bash
-python split_comparison_analysis.py --dataset non_human --seed 42 --n_rounds 5 --n_split_candidates 40 --test_fraction 0.20
+python scripts/split_comparison_analysis.py --dataset non_human --seed 42 --n_rounds 5 --n_split_candidates 40 --test_fraction 0.20
 ```
 
 ## Observações

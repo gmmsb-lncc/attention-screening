@@ -279,7 +279,7 @@ python -c "from src.build.embeddings.strategies.openfold_strategy import OpenFol
 
 ### 4. Extrair Embeddings
 ```bash
-python run_complete_pipeline.py --esm-model openfold3 --input <file>
+python scripts/run_complete_pipeline.py --esm-model openfold3 --input <file>
 ```
 
 ## 📖 Referências

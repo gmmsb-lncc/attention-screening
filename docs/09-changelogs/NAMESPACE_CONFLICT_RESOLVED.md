@@ -165,7 +165,7 @@ print(f"✅ Embedding shape: {embedding.shape}")  # (960,)
 
 ```bash
 # Usar ESM-C no pipeline completo
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --model esmc-300m-2024-12 \
     --sequences input.fasta \
     --output results/

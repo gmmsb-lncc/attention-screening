@@ -126,7 +126,7 @@ Plots inertia vs. number of clusters and finds the "elbow" point where adding mo
 **Use user-specified threshold with validation warnings.**
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data.tsv \
     --stratifier-threshold 0.95
 ```
@@ -202,7 +202,7 @@ splits = manager.stratify(
 
 ```bash
 # Uses 'target' method by default
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/auto_strat
 ```
@@ -211,13 +211,13 @@ python run_complete_pipeline.py \
 
 ```bash
 # Use silhouette optimization
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/silhouette_strat \
     --stratifier-method silhouette
 
 # Use elbow method
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/elbow_strat \
     --stratifier-method elbow
@@ -227,7 +227,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Specify exact threshold
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/manual_strat \
     --stratifier-threshold 0.95
