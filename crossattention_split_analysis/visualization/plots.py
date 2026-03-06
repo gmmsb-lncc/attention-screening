@@ -11,6 +11,16 @@ plt.rcParams['figure.figsize'] = (14, 6)
 plt.rcParams['font.size'] = 12
 
 
+def _get_primary_model_metrics(scenario_results: Dict) -> tuple[str, Dict]:
+    """Return model name and metrics from a scenario result block."""
+    if not scenario_results:
+        return "UnknownModel", {}
+    if 'CNN+CrossAttn' in scenario_results:
+        return 'CNN+CrossAttn', scenario_results['CNN+CrossAttn']
+    model_name, metrics = next(iter(scenario_results.items()))
+    return model_name, metrics
+
+
 def plot_results(
     all_results: Dict,
     split_stats: Dict,
@@ -36,10 +46,15 @@ def plot_results(
         Path to saved plot
     """
     scenarios = list(all_results.keys())
+    model_name, _ = _get_primary_model_metrics(all_results[scenarios[0]])
 
     # Extract metrics
-    accs = [all_results[s]['CNN+CrossAttn']['accuracy'] for s in scenarios]
-    mccs = [all_results[s]['CNN+CrossAttn']['mcc'] for s in scenarios]
+    accs = []
+    mccs = []
+    for scenario in scenarios:
+        _, metrics = _get_primary_model_metrics(all_results[scenario])
+        accs.append(metrics.get('accuracy', 0.0))
+        mccs.append(metrics.get('mcc', 0.0))
     test_sizes = [split_stats[s]['test_size'] for s in scenarios]
 
     # Create figure
@@ -53,7 +68,7 @@ def plot_results(
     bars1 = ax1.bar(x, accs, width, color='#2ecc71', edgecolor='black', linewidth=1.5)
 
     ax1.set_ylabel('Accuracy', fontsize=12)
-    ax1.set_title(f'CNN+CrossAttention Accuracy\n({embedding_name})',
+    ax1.set_title(f'{model_name} Accuracy\n({embedding_name})',
                   fontsize=14, fontweight='bold')
     ax1.set_xticks(x)
     ax1.set_xticklabels(scenarios, fontsize=10)
@@ -87,7 +102,7 @@ def plot_results(
     bars2 = ax2.bar(x, mccs, width, color='#9b59b6', edgecolor='black', linewidth=1.5)
 
     ax2.set_ylabel('MCC', fontsize=12)
-    ax2.set_title(f'CNN+CrossAttention MCC\n({embedding_name})',
+    ax2.set_title(f'{model_name} MCC\n({embedding_name})',
                   fontsize=14, fontweight='bold')
     ax2.set_xticks(x)
     ax2.set_xticklabels(scenarios, fontsize=10)

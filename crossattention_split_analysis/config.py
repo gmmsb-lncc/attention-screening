@@ -1,7 +1,7 @@
 """Configuration and constants for CrossAttention split analysis."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 # =============================================================================
 # EMBEDDINGS
@@ -28,6 +28,7 @@ LIGAND_MATRIX_DIRS = {
     'smited': 'ligand_matrices',      # Original SMI-TED matrices
     'molformer': 'molformer_matrix',  # MoLFormer matrices
 }
+LIGAND_VECTOR_DIR = 'ligand_embeddings'
 
 # Max sequence length for attention matrices
 MAX_SEQ_LEN = 1024
@@ -101,13 +102,15 @@ class TrainingConfig:
 
     Attributes:
         protein_dim: Protein embedding dimension (or MAX_SEQ_LEN for attention)
-        ligand_dim: Ligand embedding dimension (768 for SMI-TED)
+        ligand_dim: Ligand embedding dimension (768 for SMI-TED/MoLFormer)
         hidden_dim: Hidden dimension for all layers
-        num_cnn_layers: Number of CNN encoder layers
+        model_variant: Model variant ('cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite')
+        num_cnn_layers: Number of CNN encoder layers (for cnn_crossattn)
         num_cross_attn_layers: Number of cross-attention layers
         num_heads: Number of attention heads
         ff_dim: Feed-forward layer dimension
-        dropout: Dropout rate
+        dropout: Dropout rate for encoders and attention
+        classifier_dropout: Dropout for classifier head (for level5_lite)
         batch_size: Training batch size
         learning_rate: Initial learning rate
         weight_decay: AdamW weight decay
@@ -124,18 +127,40 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8
     ff_dim: int = 1024
-    dropout: float = 0.1
+    dropout: float = 0.4  # Increased to combat overfitting
+    classifier_dropout: float = 0.5  # For level5_lite: High dropout in classifier
+    label_smoothing: float = 0.0  # Label smoothing for classification
+
+    # Diffusion-specific (used only when model_variant='diffusion')
+    diffusion_steps: int = 200
+    diffusion_beta_start: float = 1e-4
+    diffusion_beta_end: float = 0.02
+    diffusion_layers: int = 4
+    diffusion_cross_attn_layers: int = 1
+    diffusion_loss_weight: float = 0.1
+    diffusion_loss_anneal: Literal['none', 'linear'] = 'none'
+    classification_only: bool = False
+    diffusion_pool_queries: int = 4
+    diffusion_snr_sampling_gamma: float = 0.5
+    diffusion_snr_sampling_mix: float = 0.2
+    diffusion_joint_denoise: bool = False
+    dataloader_num_workers: int = 0
+    dataloader_cache_in_memory: bool = False
+    dataloader_pin_memory: bool = True
+    dataloader_prefetch_factor: int = 2
+    dataloader_persistent_workers: bool = True
 
     # Training
     batch_size: int = 32
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     num_epochs: int = 500
-    patience: Optional[int] = 30
+    patience: Optional[int] = 3
     max_grad_norm: float = 1.0
     classification_weight: float = 1.0
     regression_weight: float = 0.5
@@ -154,11 +179,30 @@ class TrainingConfig:
             'protein_dim': self.protein_dim,
             'ligand_dim': self.ligand_dim,
             'hidden_dim': self.hidden_dim,
+            'model_variant': self.model_variant,
             'num_cnn_layers': self.num_cnn_layers,
             'num_cross_attn_layers': self.num_cross_attn_layers,
             'num_heads': self.num_heads,
             'ff_dim': self.ff_dim,
             'dropout': self.dropout,
+            'classifier_dropout': self.classifier_dropout,
+            'diffusion_steps': self.diffusion_steps,
+            'diffusion_beta_start': self.diffusion_beta_start,
+            'diffusion_beta_end': self.diffusion_beta_end,
+            'diffusion_layers': self.diffusion_layers,
+            'diffusion_cross_attn_layers': self.diffusion_cross_attn_layers,
+            'diffusion_loss_weight': self.diffusion_loss_weight,
+            'diffusion_loss_anneal': self.diffusion_loss_anneal,
+            'classification_only': self.classification_only,
+            'diffusion_pool_queries': self.diffusion_pool_queries,
+            'diffusion_snr_sampling_gamma': self.diffusion_snr_sampling_gamma,
+            'diffusion_snr_sampling_mix': self.diffusion_snr_sampling_mix,
+            'diffusion_joint_denoise': self.diffusion_joint_denoise,
+            'dataloader_num_workers': self.dataloader_num_workers,
+            'dataloader_cache_in_memory': self.dataloader_cache_in_memory,
+            'dataloader_pin_memory': self.dataloader_pin_memory,
+            'dataloader_prefetch_factor': self.dataloader_prefetch_factor,
+            'dataloader_persistent_workers': self.dataloader_persistent_workers,
             'batch_size': self.batch_size,
             'learning_rate': self.learning_rate,
             'weight_decay': self.weight_decay,

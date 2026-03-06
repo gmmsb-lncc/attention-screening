@@ -34,7 +34,7 @@ class Histogram:
     @staticmethod
     def smiles_to_fingerprint(smiles, radius=2):
         mol = Chem.MolFromSmiles(smiles)
-        return AllChem.GetMorganFingerprintAsBitVect(mol, radius) if mol else None
+        return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=1024) if mol else None
 
     def process_batch(self, batch, process_function, metric):
         results = []

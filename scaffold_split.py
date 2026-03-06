@@ -27,7 +27,7 @@ from scaffolds_splits.scenario_splitter import (
 )
 from scaffolds_splits.selection import UniversalSelectionConfig, select_universal_test_scaffolds
 from scaffolds_splits.splitter import ValidationSelectionConfig, select_test_scaffolds
-from scaffolds_splits.validation import validate_universal_test_scaffolds
+from scaffolds_splits.validation import validate_universal_test_scaffolds, warn_split_quality
 from scaffolds_splits.writer import (
     write_combined_test,
     write_distribution_summary,
@@ -138,6 +138,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.1,
         help="Weight for human/non-human proportionality term in shared_scaffold mode",
+    )
+    parser.add_argument(
+        "--min-val-scaffolds",
+        type=int,
+        default=15,
+        help="Minimum number of scaffolds in validation set (diversity penalty below this)",
+    )
+    parser.add_argument(
+        "--monotonic-scaffold-penalty",
+        type=float,
+        default=1.0,
+        help="Penalty weight for monotonic scaffolds (all-positive or all-negative) in validation",
     )
     parser.add_argument(
         "--keep-monotonic-kinases",
@@ -303,6 +315,8 @@ def _run_dataset_scenarios(
             s4_restarts=args.s4_restarts,
             class_penalty=args.class_penalty,
             class_rate_weight=args.class_rate_weight,
+            min_val_groups=args.min_val_scaffolds,
+            monotonic_group_penalty=args.monotonic_scaffold_penalty,
         )
         split_result = split_train_val_by_scenario(
             remainder_df=pool_df,
@@ -311,6 +325,12 @@ def _run_dataset_scenarios(
         )
 
         validate_scenario_split(scenario_code, split_result.train_df, split_result.val_df)
+
+        # Quality warnings for this scenario split.
+        warn_split_quality(
+            f"{dataset_name}/{scenario_code}",
+            {"train": split_result.train_df, "val": split_result.val_df, "test": test_df},
+        )
 
         paths = write_scenario_splits(
             scenario_code=scenario_code,
@@ -467,6 +487,7 @@ def main() -> None:
             weight_non_human=args.weight_non_human,
             weight_ratio=args.weight_ratio,
             class_penalty=args.class_penalty,
+            class_rate_weight=args.class_rate_weight,
         )
         shared = select_universal_test_scaffolds(
             human_stats=human_stats,

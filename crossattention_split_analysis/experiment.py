@@ -10,6 +10,7 @@ from src.classifier.models.cross_attention_model import (
     CrossAttentionAffinityModel,
     MultiTaskLoss
 )
+from src.classifier.models.diffusion_model import DiffusionAffinityModel
 from src.classifier.utils.matrix_dataloader import create_matrix_dataloader
 
 from .config import (
@@ -20,6 +21,7 @@ from .config import (
     MAX_SEQ_LEN,
     DEFAULT_SEEDS,
     LIGAND_MATRIX_DIRS,
+    LIGAND_VECTOR_DIR,
     MOLFORMER_DIM
 )
 from .data import (
@@ -101,9 +103,9 @@ def _load_precomputed_scaffold_splits(
     Load fixed scaffold splits produced by scaffold_split.py.
 
     Expected files:
-      - {dir}/scenarios/Sc/{dataset}_train.tsv
-      - {dir}/scenarios/Sc/{dataset}_val.tsv
-      - {dir}/{dataset}_test.tsv
+      - {dir}/scenarios/Sc/{dataset}_train.tsv (or .tsv.gz)
+      - {dir}/scenarios/Sc/{dataset}_val.tsv (or .tsv.gz)
+      - {dir}/{dataset}_test.tsv (or .tsv.gz)
     where dataset is human/non_human, or both concatenated when dataset_type=all.
     """
     base = Path(scaffold_split_dir)
@@ -168,6 +170,71 @@ def _load_precomputed_scaffold_splits(
     raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
 
 
+def _load_external_test_dataframe(
+    dataset_type: str,
+    scaffold_split_dir: str,
+    threshold: float,
+) -> Tuple[Optional[pd.DataFrame], Dict[str, str]]:
+    """Load external test split(s) from scaffold output, accepting .tsv or .tsv.gz."""
+    base = Path(scaffold_split_dir)
+
+    def _load_one(ds: str) -> Tuple[pd.DataFrame, Path]:
+        raw_df, used_path = _read_split_tsv(base / f"{ds}_test.tsv", f"{ds} external test")
+        test_df = _ensure_label_column(raw_df, threshold, f"{ds} external test")
+        _ensure_required_columns(test_df, f"{ds} external test")
+        return test_df, used_path
+
+    loaded_paths: Dict[str, str] = {}
+
+    if dataset_type in {"human", "non_human"}:
+        try:
+            df, used = _load_one(dataset_type)
+        except FileNotFoundError:
+            return None, loaded_paths
+        loaded_paths[dataset_type] = str(used)
+        return df, loaded_paths
+
+    if dataset_type == "all":
+        frames: List[pd.DataFrame] = []
+        for ds in ("human", "non_human"):
+            try:
+                frame, used = _load_one(ds)
+            except FileNotFoundError:
+                continue
+            if "dataset_source" not in frame.columns:
+                frame["dataset_source"] = ds
+            frames.append(frame)
+            loaded_paths[ds] = str(used)
+        if not frames:
+            return None, loaded_paths
+        return pd.concat(frames, axis=0, ignore_index=True), loaded_paths
+
+    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+
+MODEL_VARIANT_TO_ENCODER = {
+    'cnn_crossattn': 'cnn',
+    'cross_attention_lite': 'level3_crossatt',  # Use simplified Level 3 model
+    'diffusion': 'diffusion',
+    'level5_lite': 'level5_lite',
+    'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
+}
+
+MODEL_VARIANT_TO_LABEL = {
+    'cnn_crossattn': 'CNN+CrossAttn',
+    'cross_attention_lite': 'CrossAttnLite',
+    'diffusion': 'Diffusion',
+    'level5_lite': 'Level5-Lite',
+    'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
+}
+
+
+def _resolve_model_variant(model_variant: str) -> Tuple[str, str]:
+    if model_variant not in MODEL_VARIANT_TO_ENCODER:
+        supported = ", ".join(MODEL_VARIANT_TO_ENCODER.keys())
+        raise ValueError(f"Unsupported model_variant={model_variant!r}. Supported: {supported}")
+    return MODEL_VARIANT_TO_ENCODER[model_variant], MODEL_VARIANT_TO_LABEL[model_variant]
+
+
 def run_scenario(
     scenario_name: str,
     train_df: pd.DataFrame,
@@ -175,11 +242,14 @@ def run_scenario(
     test_df: Optional[pd.DataFrame],
     protein_matrix_dirs: List[str],
     ligand_matrix_dirs: List[str],
+    ligand_vector_dirs: Optional[List[str]],
     config: TrainingConfig,
     device,
     seed: int,
     checkpoint_path: Optional[str] = None,
     use_attention: bool = False,
+    use_ligand_vectors: bool = False,
+    external_test_df: Optional[pd.DataFrame] = None,
     evaluation_split: str = "test",
 ) -> Dict:
     """
@@ -190,11 +260,14 @@ def run_scenario(
         train_df, val_df, test_df: DataFrames for each split (test_df can be None)
         protein_matrix_dirs: List of paths to protein embeddings/attention matrices
         ligand_matrix_dirs: List of paths to ligand embeddings
+        ligand_vector_dirs: List of paths to ligand vectors (optional)
         config: Training configuration
         device: Training device
         seed: Random seed
         checkpoint_path: Path for checkpointing
         use_attention: Use attention matrices instead of embeddings
+        use_ligand_vectors: Use ligand vectors instead of per-token matrices
+        external_test_df: Optional external test DataFrame (never used for training)
         evaluation_split: Which split to evaluate after training ("test" or "val")
 
     Returns:
@@ -214,11 +287,13 @@ def run_scenario(
         train_loader = create_attention_dataloader(
             train_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=True,
+            num_workers=config.dataloader_num_workers,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_attention_dataloader(
             val_df, protein_matrix_dirs, ligand_matrix_dirs,
             max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+            num_workers=config.dataloader_num_workers,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = None
@@ -226,40 +301,109 @@ def run_scenario(
             test_loader = create_attention_dataloader(
                 test_df, protein_matrix_dirs, ligand_matrix_dirs,
                 max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
                 label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
             )
     else:
         train_loader = create_matrix_dataloader(
             train_df, protein_matrix_dirs, ligand_matrix_dirs,
+            ligand_vector_dir=ligand_vector_dirs if use_ligand_vectors else None,
             batch_size=config.batch_size, shuffle=True,
+            num_workers=config.dataloader_num_workers,
+            pin_memory=config.dataloader_pin_memory,
+            prefetch_factor=config.dataloader_prefetch_factor,
+            persistent_workers=config.dataloader_persistent_workers,
+            cache_in_memory=config.dataloader_cache_in_memory,
+            use_ligand_matrices=not use_ligand_vectors,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         val_loader = create_matrix_dataloader(
             val_df, protein_matrix_dirs, ligand_matrix_dirs,
+            ligand_vector_dir=ligand_vector_dirs if use_ligand_vectors else None,
             batch_size=config.batch_size, shuffle=False,
+            num_workers=config.dataloader_num_workers,
+            pin_memory=config.dataloader_pin_memory,
+            prefetch_factor=config.dataloader_prefetch_factor,
+            persistent_workers=config.dataloader_persistent_workers,
+            cache_in_memory=config.dataloader_cache_in_memory,
+            use_ligand_matrices=not use_ligand_vectors,
             label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
         )
         test_loader = None
         if test_df is not None and len(test_df) > 0:
             test_loader = create_matrix_dataloader(
                 test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                ligand_vector_dir=ligand_vector_dirs if use_ligand_vectors else None,
                 batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                pin_memory=config.dataloader_pin_memory,
+                prefetch_factor=config.dataloader_prefetch_factor,
+                persistent_workers=config.dataloader_persistent_workers,
+                cache_in_memory=config.dataloader_cache_in_memory,
+                use_ligand_matrices=not use_ligand_vectors,
                 label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
             )
 
-    # Create model
-    print(f"  Creating model (protein_dim={config.protein_dim}, ligand_dim={config.ligand_dim})...")
-
-    model = CrossAttentionAffinityModel(
-        protein_dim=config.protein_dim,
-        ligand_dim=config.ligand_dim,
-        hidden_dim=config.hidden_dim,
-        num_cnn_layers=config.num_cnn_layers,
-        num_cross_attn_layers=config.num_cross_attn_layers,
-        num_heads=config.num_heads,
-        ff_dim=config.ff_dim,
-        dropout=config.dropout
+    encoder_type, model_label = _resolve_model_variant(config.model_variant)
+    print(
+        f"  Creating model ({model_label}; protein_dim={config.protein_dim}, "
+        f"ligand_dim={config.ligand_dim})..."
     )
+
+    if encoder_type == "level5_lite":
+        from .models.level5_lite import Level5LiteModel
+        model = Level5LiteModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+        )
+    elif encoder_type == "level3_crossatt":
+        from src.models.level3_crossatt import Level3CrossAttModel
+        model = Level3CrossAttModel(
+            protein_dim=config.protein_dim,
+            ligand_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_heads=config.num_heads,
+            encoder_dropout=config.dropout,
+            attention_dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+        )
+    elif encoder_type == "diffusion":
+        model = DiffusionAffinityModel(
+            protein_dim=config.protein_dim,
+            ligand_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_diffusion_layers=config.diffusion_layers,
+            num_cross_attn_layers=config.diffusion_cross_attn_layers,
+            num_heads=config.num_heads,
+            ff_dim=config.ff_dim,
+            dropout=config.dropout,
+            pool_num_queries=config.diffusion_pool_queries,
+            diffusion_steps=config.diffusion_steps,
+            diffusion_beta_start=config.diffusion_beta_start,
+            diffusion_beta_end=config.diffusion_beta_end,
+            diffusion_loss_weight=config.diffusion_loss_weight,
+            snr_sampling_gamma=config.diffusion_snr_sampling_gamma,
+            snr_sampling_mix=config.diffusion_snr_sampling_mix,
+            joint_denoise=config.diffusion_joint_denoise,
+            classification_only=config.classification_only,
+        )
+    else:
+        model = CrossAttentionAffinityModel(
+            protein_dim=config.protein_dim,
+            ligand_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            encoder_type=encoder_type,
+            num_cnn_layers=config.num_cnn_layers,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            ff_dim=config.ff_dim,
+            dropout=config.dropout
+        )
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Model parameters: {n_params:,}")
@@ -273,6 +417,7 @@ def run_scenario(
         classification_weight=config.classification_weight,
         regression_weight=config.regression_weight,
         classification_pos_weight=class_pos_weight,
+        label_smoothing=config.label_smoothing,
     )
 
     # Train
@@ -346,6 +491,55 @@ def run_scenario(
         f"Threshold={test_metrics['decision_threshold']:.4f}"
     )
 
+    # Optional external test evaluation (never used for threshold calibration)
+    if external_test_df is not None and len(external_test_df) > 0:
+        print("  Evaluating on external test set...")
+        if use_attention:
+            external_loader = create_attention_dataloader(
+                external_test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                max_seq_len=MAX_SEQ_LEN, batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
+        else:
+            external_loader = create_matrix_dataloader(
+                external_test_df, protein_matrix_dirs, ligand_matrix_dirs,
+                ligand_vector_dir=ligand_vector_dirs if use_ligand_vectors else None,
+                batch_size=config.batch_size, shuffle=False,
+                num_workers=config.dataloader_num_workers,
+                pin_memory=config.dataloader_pin_memory,
+                prefetch_factor=config.dataloader_prefetch_factor,
+                persistent_workers=config.dataloader_persistent_workers,
+                cache_in_memory=config.dataloader_cache_in_memory,
+                use_ligand_matrices=not use_ligand_vectors,
+                label_column='label', protein_id_column='seq_id', ligand_id_column='chembl_id'
+            )
+
+        external_result = evaluate(
+            model,
+            external_loader,
+            device,
+            raise_on_invalid=False,
+            decision_threshold=decision_threshold,
+        )
+
+        if not external_result.is_valid:
+            raise EvaluationError(
+                f"External test evaluation failed: {external_result.failure_reason}"
+            )
+
+        ext_metrics = external_result.metrics
+        test_metrics['external_accuracy'] = ext_metrics['accuracy']
+        test_metrics['external_mcc'] = ext_metrics['mcc']
+        test_metrics['external_auc'] = ext_metrics['auc']
+        test_metrics['external_loss'] = ext_metrics['loss']
+        test_metrics['external_evaluation_split'] = "external_test"
+        print(
+            f"  Results (external): Acc={ext_metrics['accuracy']:.4f}, "
+            f"MCC={ext_metrics['mcc']:.4f}, AUC={ext_metrics['auc']:.4f}, "
+            f"Loss={ext_metrics['loss']:.4f}"
+        )
+
     return test_metrics
 
 
@@ -358,9 +552,12 @@ def run_crossattention_analysis(
     prefix: str = "",
     use_attention: bool = False,
     scenarios: List[str] = None,
-    use_molformer_ligand: bool = False,
+    use_molformer_ligand: bool = True,
+    use_ligand_vectors: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     external_test_mode: bool = False,
+    custom_protein_matrix_dir: str = None,
+    custom_ligand_matrix_dir: str = None,
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -375,8 +572,11 @@ def run_crossattention_analysis(
         use_attention: Use attention matrices instead of embeddings
         scenarios: Scenario list (only scaffold is supported)
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
+        use_ligand_vectors: Use ligand vectors instead of per-token matrices
         scaffold_split_dir: Directory generated by scaffold_split.py
         external_test_mode: If True, use only precomputed scaffold train/val and skip internal test
+        custom_protein_matrix_dir: Optional custom directory for fine-tuned protein matrices
+        custom_ligand_matrix_dir: Optional custom directory for fine-tuned ligand matrices
 
     Returns:
         Tuple of (all_results, split_stats) or (None, None) on failure
@@ -397,6 +597,10 @@ def run_crossattention_analysis(
             'build'
         )]
 
+    if use_attention and use_ligand_vectors:
+        print("ERROR: Ligand vectors are not supported with attention matrices.")
+        return None, None
+
     if use_attention:
         protein_matrix_dirs = [os.path.join(d, 'attention_matrices') for d in embedding_dirs]
         input_type = "Attention Matrices"
@@ -404,15 +608,30 @@ def run_crossattention_analysis(
         protein_matrix_dirs = [os.path.join(d, 'protein_matrices') for d in embedding_dirs]
         input_type = "Per-token Embeddings"
 
-    # Select ligand matrix directory
-    if use_molformer_ligand:
-        ligand_dir_name = LIGAND_MATRIX_DIRS['molformer']
-        ligand_type = "Per-token Embeddings (MoLFormer)"
+    # Select ligand input
+    ligand_vector_dirs = []
+    if use_ligand_vectors:
+        ligand_dir_name = LIGAND_VECTOR_DIR
+        ligand_type = "Vector Embeddings"
+        ligand_vector_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
+        # Keep matrix dirs for backward compatibility (not used in vector mode)
+        ligand_matrix_dirs = [os.path.join(d, LIGAND_MATRIX_DIRS['molformer']) for d in embedding_dirs]
     else:
-        ligand_dir_name = LIGAND_MATRIX_DIRS['smited']
-        ligand_type = "Per-token Embeddings (SMI-TED)"
+        if use_molformer_ligand:
+            ligand_dir_name = LIGAND_MATRIX_DIRS['molformer']
+            ligand_type = "Per-token Embeddings (MoLFormer)"
+        else:
+            ligand_dir_name = LIGAND_MATRIX_DIRS['smited']
+            ligand_type = "Per-token Embeddings (SMI-TED)"
+        ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
 
-    ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
+    # Override with custom paths if provided (for fine-tuned embeddings)
+    if custom_protein_matrix_dir:
+        protein_matrix_dirs = [custom_protein_matrix_dir]
+        input_type = f"{input_type} (Fine-tuned)"
+    if custom_ligand_matrix_dir:
+        ligand_matrix_dirs = [custom_ligand_matrix_dir]
+        ligand_type = f"{ligand_type} (Fine-tuned)"
 
     # For backward compatibility, keep single dir references
     protein_matrix_dir = protein_matrix_dirs[0]
@@ -424,21 +643,33 @@ def run_crossattention_analysis(
     else:
         print(f"  Protein dir: {protein_matrix_dir}")
     print(f"  Ligand input: {ligand_type}")
-    if len(ligand_matrix_dirs) > 1:
-        print(f"  Ligand dirs: {ligand_matrix_dirs}")
+    if use_ligand_vectors:
+        if len(ligand_vector_dirs) > 1:
+            print(f"  Ligand dirs: {ligand_vector_dirs}")
+        else:
+            print(f"  Ligand dir: {ligand_vector_dirs[0]}")
     else:
-        print(f"  Ligand dir: {ligand_matrix_dir}")
+        if len(ligand_matrix_dirs) > 1:
+            print(f"  Ligand dirs: {ligand_matrix_dirs}")
+        else:
+            print(f"  Ligand dir: {ligand_matrix_dir}")
 
     # Check that at least one directory exists
     protein_dirs_exist = [os.path.exists(d) for d in protein_matrix_dirs]
-    ligand_dirs_exist = [os.path.exists(d) for d in ligand_matrix_dirs]
+    if use_ligand_vectors:
+        ligand_dirs_exist = [os.path.exists(d) for d in ligand_vector_dirs]
+    else:
+        ligand_dirs_exist = [os.path.exists(d) for d in ligand_matrix_dirs]
 
     if not any(protein_dirs_exist):
         print(f"ERROR: No protein matrices found in: {protein_matrix_dirs}")
         return None, None
 
     if not any(ligand_dirs_exist):
-        print(f"ERROR: No ligand matrices found in: {ligand_matrix_dirs}")
+        if use_ligand_vectors:
+            print(f"ERROR: No ligand vectors found in: {ligand_vector_dirs}")
+        else:
+            print(f"ERROR: No ligand matrices found in: {ligand_matrix_dirs}")
         return None, None
 
     # Load fixed scaffold split produced by scaffold_split.py
@@ -456,12 +687,41 @@ def run_crossattention_analysis(
         print(f"ERROR: {exc}")
         return None, None
 
+    external_test_df = None
+    external_test_paths: Dict[str, str] = {}
+    if external_test_mode:
+        try:
+            external_test_df, external_test_paths = _load_external_test_dataframe(
+                dataset_type=dataset_type,
+                scaffold_split_dir=scaffold_split_dir,
+                threshold=threshold,
+            )
+        except (RuntimeError, ValueError) as exc:
+            print(f"ERROR: {exc}")
+            return None, None
+        if external_test_df is None or len(external_test_df) == 0:
+            expected = (
+                [f"{dataset_type}_test.tsv(.gz)"]
+                if dataset_type in {"human", "non_human"}
+                else ["human_test.tsv(.gz)", "non_human_test.tsv(.gz)"]
+            )
+            print(
+                "WARNING: External test mode enabled but no external test file found. "
+                f"Checked in {scaffold_split_dir}: {', '.join(expected)}"
+            )
+        else:
+            print(
+                f"  Loaded external test set: rows={len(external_test_df)} "
+                f"from {external_test_paths}"
+            )
+
     if external_test_mode:
         test_df = None
         split_source_metadata = {
             **split_source_metadata,
             "external_test_mode": True,
             "train_val_protocol": "precomputed_scaffold_split",
+            "external_test_paths": external_test_paths,
         }
     else:
         split_source_metadata = {
@@ -492,6 +752,8 @@ def run_crossattention_analysis(
     device = get_device()
     print(f"  Device: {device}")
     print(f"  Seeds: {seeds} (n={len(seeds)})")
+    _, model_label = _resolve_model_variant(config.model_variant)
+    print(f"  Model variant: {config.model_variant} ({model_label})")
 
     all_results = {}
     split_stats = {}
@@ -557,11 +819,14 @@ def run_crossattention_analysis(
                 test_df if not external_test_mode else None,
                 protein_matrix_dirs,
                 ligand_matrix_dirs,
+                ligand_vector_dirs if use_ligand_vectors else None,
                 config,
                 device,
                 seed,
                 checkpoint_path=checkpoint_path,
                 use_attention=use_attention,
+                use_ligand_vectors=use_ligand_vectors,
+                external_test_df=external_test_df,
                 evaluation_split="val" if external_test_mode else "test",
             )
             scenario_seed_results[seed] = metrics
@@ -572,7 +837,7 @@ def run_crossattention_analysis(
     if scenario_seed_results:
         if len(scenario_seed_results) == 1:
             seed_metrics = list(scenario_seed_results.values())[0]
-            all_results[SCAFFOLD_SCENARIO_KEY] = {'CNN+CrossAttn': seed_metrics}
+            all_results[SCAFFOLD_SCENARIO_KEY] = {model_label: seed_metrics}
         else:
             aggregated = {}
             for metric in [
@@ -580,6 +845,8 @@ def run_crossattention_analysis(
                 'mcc',
                 'auc',
                 'f1',
+                'precision',
+                'recall',
                 'loss',
                 'decision_threshold',
                 'threshold_optimized_score',
@@ -604,7 +871,7 @@ def run_crossattention_analysis(
 
             aggregated['seed_results'] = scenario_seed_results
             aggregated['n_seeds'] = len(scenario_seed_results)
-            all_results[SCAFFOLD_SCENARIO_KEY] = {'CNN+CrossAttn': aggregated}
+            all_results[SCAFFOLD_SCENARIO_KEY] = {model_label: aggregated}
 
     return all_results, split_stats
 
@@ -628,15 +895,38 @@ def run_single_analysis(
     num_heads: int = 8,
     ff_dim: int = 1024,
     dropout: float = 0.1,
+    classifier_dropout: float = 0.2,
+    label_smoothing: float = 0.0,
+    diffusion_steps: int = 200,
+    diffusion_beta_start: float = 1e-4,
+    diffusion_beta_end: float = 0.02,
+    diffusion_layers: int = 4,
+    diffusion_cross_attn_layers: int = 1,
+    diffusion_loss_weight: float = 0.1,
+    diffusion_loss_anneal: str = "none",
+    classification_only: bool = False,
+    diffusion_pool_queries: int = 4,
+    diffusion_snr_sampling_gamma: float = 0.5,
+    diffusion_snr_sampling_mix: float = 0.2,
+    diffusion_joint_denoise: bool = False,
+    dataloader_num_workers: int = 0,
+    dataloader_cache_in_memory: bool = False,
+    dataloader_pin_memory: bool = True,
+    dataloader_prefetch_factor: int = 2,
+    dataloader_persistent_workers: bool = True,
     max_grad_norm: float = 1.0,
     classification_weight: float = 1.0,
     regression_weight: float = 0.5,
     optimize_threshold: bool = True,
     threshold_metric: str = "mcc",
     fixed_threshold: float = 0.5,
-    use_molformer_ligand: bool = False,
+    use_molformer_ligand: bool = True,
+    use_ligand_vectors: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
     external_test_mode: bool = False,
+    model_variant: str = 'cnn_crossattn',
+    custom_protein_matrix_dir: str = None,
+    custom_ligand_matrix_dir: str = None,
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -660,6 +950,24 @@ def run_single_analysis(
         num_heads: Number of attention heads per block
         ff_dim: Feed-forward hidden size in attention blocks
         dropout: Dropout applied throughout model
+        classifier_dropout: Dropout for classifier head (for level5_lite)
+        diffusion_steps: Number of diffusion timesteps
+        diffusion_beta_start: Diffusion beta start value
+        diffusion_beta_end: Diffusion beta end value
+        diffusion_layers: Number of diffusion denoiser layers
+        diffusion_cross_attn_layers: Number of cross-attention blocks after diffusion
+        diffusion_loss_weight: Weight for diffusion auxiliary loss
+        diffusion_loss_anneal: Anneal schedule for diffusion loss weight
+        classification_only: If True, optimize classification head only
+        diffusion_pool_queries: Number of attention pooling queries per modality
+        diffusion_snr_sampling_gamma: Exponent for SNR-based timestep sampling
+        diffusion_snr_sampling_mix: Mix ratio with uniform sampling (0-1)
+        diffusion_joint_denoise: Joint denoising over concatenated protein+ligand tokens
+        dataloader_num_workers: DataLoader worker processes
+        dataloader_cache_in_memory: Cache matrices in RAM
+        dataloader_pin_memory: Enable pinned memory
+        dataloader_prefetch_factor: Prefetch factor when num_workers > 0
+        dataloader_persistent_workers: Keep DataLoader workers alive
         max_grad_norm: Gradient clipping max norm
         classification_weight: Weight for classification loss term
         regression_weight: Weight for regression loss term
@@ -667,13 +975,15 @@ def run_single_analysis(
         threshold_metric: Metric optimized during threshold calibration
         fixed_threshold: Threshold used when optimize_threshold=False
         use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
+        use_ligand_vectors: Use ligand vectors instead of per-token matrices
         scaffold_split_dir: Directory generated by scaffold_split.py
         external_test_mode: Train/val-only mode using precomputed scaffold split; test is external
+        model_variant: 'cnn_crossattn', 'cross_attention_lite', or 'diffusion'
 
     Returns:
         Results dictionary or None
     """
-    from .config import SUPPORTED_EMBEDDINGS, DEFAULT_SCENARIOS
+    from .config import SUPPORTED_EMBEDDINGS, DEFAULT_SCENARIOS, LIGAND_VECTOR_DIR
 
     if seeds is None:
         seeds = DEFAULT_SEEDS
@@ -689,6 +999,14 @@ def run_single_analysis(
         )
     if not (0.0 <= fixed_threshold <= 1.0):
         raise ValueError(f"fixed_threshold must be in [0, 1], got {fixed_threshold}")
+    if diffusion_snr_sampling_gamma <= 0:
+        raise ValueError(
+            f"diffusion_snr_sampling_gamma must be > 0, got {diffusion_snr_sampling_gamma}"
+        )
+    if not (0.0 <= diffusion_snr_sampling_mix <= 1.0):
+        raise ValueError(
+            f"diffusion_snr_sampling_mix must be in [0, 1], got {diffusion_snr_sampling_mix}"
+        )
 
     # Resolve embedding name
     if embedding_name in SUPPORTED_EMBEDDINGS:
@@ -697,8 +1015,15 @@ def run_single_analysis(
     # Generate prefix (include molformer tag to avoid overwriting existing results)
     short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
     attn_prefix = 'attn_' if use_attention else ''
-    molformer_prefix = 'molformer_' if use_molformer_ligand else ''
-    prefix = f"{dataset_type}_{attn_prefix}{molformer_prefix}{short_name}_"
+    molformer_prefix = 'molformer_' if (use_molformer_ligand and not use_ligand_vectors) else ''
+    ligvec_prefix = 'ligvec_' if use_ligand_vectors else ''
+    if model_variant == 'cross_attention_lite':
+        variant_prefix = 'lite_'
+    elif model_variant == 'diffusion':
+        variant_prefix = 'diffusion_'
+    else:
+        variant_prefix = ''
+    prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{molformer_prefix}{ligvec_prefix}{short_name}_"
 
     # Check cache
     json_file = os.path.join(output_dir, f'{prefix}crossattention_analysis_results.json')
@@ -708,10 +1033,15 @@ def run_single_analysis(
         print(f"        Use --force to recalculate.")
         return None
 
+    _, model_label = _resolve_model_variant(model_variant)
     protein_input_type = "ATTENTION MATRICES" if use_attention else "PER-TOKEN EMBEDDINGS"
-    ligand_input_type = "PER-TOKEN EMBEDDINGS (MoLFormer)" if use_molformer_ligand else "PER-TOKEN EMBEDDINGS (SMI-TED)"
+    if use_ligand_vectors:
+        ligand_input_type = "VECTOR EMBEDDINGS"
+    else:
+        ligand_input_type = "PER-TOKEN EMBEDDINGS (MoLFormer)" if use_molformer_ligand else "PER-TOKEN EMBEDDINGS (SMI-TED)"
     print("\n" + "=" * 70)
-    print(f"CNN+CROSSATTENTION ANALYSIS: {embedding_name} + {dataset_type}")
+    print(f"{model_label.upper()} ANALYSIS: {embedding_name} + {dataset_type}")
+    print(f"MODEL VARIANT: {model_variant}")
     print(f"PROTEIN INPUT: {protein_input_type}")
     print(f"LIGAND INPUT: {ligand_input_type}")
     print(f"SEEDS: {seeds}")
@@ -749,6 +1079,26 @@ def run_single_analysis(
         num_heads=num_heads,
         ff_dim=ff_dim,
         dropout=dropout,
+        classifier_dropout=classifier_dropout,
+        label_smoothing=label_smoothing,
+        diffusion_steps=diffusion_steps,
+        diffusion_beta_start=diffusion_beta_start,
+        diffusion_beta_end=diffusion_beta_end,
+        diffusion_layers=diffusion_layers,
+        diffusion_cross_attn_layers=diffusion_cross_attn_layers,
+        diffusion_loss_weight=diffusion_loss_weight,
+        diffusion_loss_anneal=diffusion_loss_anneal,
+        classification_only=classification_only,
+        diffusion_pool_queries=diffusion_pool_queries,
+        diffusion_snr_sampling_gamma=diffusion_snr_sampling_gamma,
+        diffusion_snr_sampling_mix=diffusion_snr_sampling_mix,
+        diffusion_joint_denoise=diffusion_joint_denoise,
+        dataloader_num_workers=dataloader_num_workers,
+        dataloader_cache_in_memory=dataloader_cache_in_memory,
+        dataloader_pin_memory=dataloader_pin_memory,
+        dataloader_prefetch_factor=dataloader_prefetch_factor,
+        dataloader_persistent_workers=dataloader_persistent_workers,
+        model_variant=model_variant,
         num_epochs=num_epochs,
         patience=patience,
         batch_size=batch_size,
@@ -770,8 +1120,11 @@ def run_single_analysis(
         embedding_name, dataset_type, output_dir, config,
         seeds=seeds, prefix=prefix, use_attention=use_attention,
         scenarios=scenarios, use_molformer_ligand=use_molformer_ligand,
+        use_ligand_vectors=use_ligand_vectors,
         scaffold_split_dir=scaffold_split_dir,
         external_test_mode=external_test_mode,
+        custom_protein_matrix_dir=custom_protein_matrix_dir,
+        custom_ligand_matrix_dir=custom_ligand_matrix_dir,
     )
 
     if all_results is None:

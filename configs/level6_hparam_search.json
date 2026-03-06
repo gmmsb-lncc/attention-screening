@@ -1,0 +1,103 @@
+{
+  "description": "Level 6 Hyperparameter Search Space - Optimized Transformer Architecture",
+  "optimization_strategy": "optuna",
+  "n_trials": 20,
+  "timeout_hours": 48,
+  "metric": "val_mcc",
+  "direction": "maximize",
+  
+  "fixed_params": {
+    "protein_dim": "auto",
+    "ligand_dim": 768,
+    "max_epochs": 10,
+    "batch_size": 64,
+    "early_stopping_patience": 3,
+    "grad_clip": 1.0,
+    "label_smoothing": 0.1
+  },
+  
+  "search_space": {
+    "d_model": {
+      "type": "categorical",
+      "choices": [256, 384, 512]
+    },
+    "nhead": {
+      "type": "categorical",
+      "choices": [4, 8, 12]
+    },
+    "num_encoder_layers": {
+      "type": "int",
+      "low": 2,
+      "high": 6
+    },
+    "dim_feedforward": {
+      "type": "categorical",
+      "choices": [1024, 2048, 3072]
+    },
+    "dropout": {
+      "type": "float",
+      "low": 0.1,
+      "high": 0.4,
+      "step": 0.05
+    },
+    "attention_dropout": {
+      "type": "float",
+      "low": 0.0,
+      "high": 0.2,
+      "step": 0.05
+    },
+    "cross_attention_heads": {
+      "type": "categorical",
+      "choices": [4, 8, 12]
+    },
+    "cross_attention_layers": {
+      "type": "int",
+      "low": 1,
+      "high": 3
+    },
+    "classifier_dropout": {
+      "type": "float",
+      "low": 0.2,
+      "high": 0.5,
+      "step": 0.05
+    },
+    "learning_rate": {
+      "type": "loguniform",
+      "low": 1e-5,
+      "high": 5e-4
+    },
+    "weight_decay": {
+      "type": "loguniform",
+      "low": 1e-6,
+      "high": 1e-3
+    },
+    "warmup_ratio": {
+      "type": "float",
+      "low": 0.05,
+      "high": 0.15,
+      "step": 0.05
+    }
+  },
+  
+  "pruning": {
+    "enabled": true,
+    "startup_trials": 5,
+    "warmup_epochs": 10,
+    "min_delta": 0.01
+  },
+  
+  "notes": [
+    "d_model: Transformer hidden dimension (controls model capacity)",
+    "nhead: Number of attention heads (must divide d_model evenly)",
+    "num_encoder_layers: Depth of protein/ligand encoders",
+    "dim_feedforward: FFN dimension (typically 2-4x d_model)",
+    "dropout: General dropout rate",
+    "attention_dropout: Dropout in attention mechanisms",
+    "cross_attention_heads: Heads for protein-ligand interaction",
+    "cross_attention_layers: Number of cross-attention blocks",
+    "classifier_dropout: Dropout before final prediction layer",
+    "learning_rate: AdamW learning rate",
+    "weight_decay: L2 regularization strength",
+    "warmup_ratio: Fraction of training for learning rate warmup"
+  ]
+}

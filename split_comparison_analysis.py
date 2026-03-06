@@ -25,7 +25,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score, matthews_corrcoef, f1_score,
-    precision_score, recall_score, roc_auc_score
+    precision_score, recall_score, roc_auc_score, log_loss
 )
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
@@ -37,6 +37,12 @@ warnings.filterwarnings('ignore')
 from crossattention_split_analysis.config import (
     DATASET_PATHS, DEFAULT_AFFINITY_THRESHOLD,
     AVAILABLE_SCENARIOS, DEFAULT_SCENARIOS
+)
+from crossattention_split_analysis.experiment import (
+    _load_precomputed_scaffold_splits,
+)
+from crossattention_split_analysis.training.evaluator import (
+    optimize_threshold_from_predictions,
 )
 from crossattention_split_analysis.utils.json_io import read_json, write_json
 from crossattention_split_analysis.visualization.leakage_analysis import (
@@ -52,7 +58,9 @@ DEFAULT_TEST_FRACTION = 0.10
 DEFAULT_S4_RESTARTS = 2048
 MIN_TEST_SAMPLES = 50
 DEFAULT_SPLIT_MODE = "single_90_10"
+DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
 SPLIT_PROTOCOL_VERSION = "single_split_v1"
+EMBEDDING_BASE_PATH = "./results/protein_model_benchmark_{dataset_type}_v2"
 
 # Plot style
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -190,7 +198,7 @@ def load_dataset(filepath: str, keep_monotonic: bool = False,
     return df
 
 
-_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
 
 
 def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing fingerprints"):
@@ -212,7 +220,7 @@ def compute_morgan_fingerprints(smiles_list: list, desc: str = "Computing finger
         print(f"  WARNING: {n_invalid}/{len(smiles_list)} SMILES failed RDKit parsing "
               f"({100*n_invalid/len(smiles_list):.1f}% dropped)")
 
-    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 2048), dtype=np.float32), valid_indices
+    return np.array(fingerprints, dtype=np.float32) if fingerprints else np.empty((0, 1024), dtype=np.float32), valid_indices
 
 
 def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None):
@@ -245,13 +253,13 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
                     valid_idx_pos.append(pos)
 
         if not fps_list:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
         fps = np.stack(fps_list)
     else:
         fps, valid_idx_pos = compute_morgan_fingerprints(df['canonical_smiles'].tolist())
         if len(fps) == 0:
-            return np.empty((0, 2048 + n_kinases), dtype=np.float32), np.array([]), []
+            return np.empty((0, 1024 + n_kinases), dtype=np.float32), np.array([]), []
 
     kinase_oh = np.zeros((len(valid_idx_pos), n_kinases), dtype=np.float32)
     for j, pos in enumerate(valid_idx_pos):
@@ -263,6 +271,105 @@ def prepare_features(df: pd.DataFrame, all_kinases: list, fp_cache: dict = None)
     y = df.iloc[valid_idx_pos]['label'].values
 
     return X, y, valid_idx_pos
+
+
+def _l2_normalize(X: np.ndarray) -> np.ndarray:
+    """L2-normalize each row of X (unit norm per sample)."""
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    return X / norms
+
+
+def prepare_embedding_features(
+    df: pd.DataFrame,
+    protein_vector_dir,
+    ligand_vector_dir,
+) -> tuple:
+    """Prepare features from PLM embedding vectors (ESM-2 + MoLFormer).
+
+    Each protein/ligand vector is L2-normalized independently before
+    concatenation so that both modalities contribute equally regardless
+    of their original magnitude.
+
+    Args:
+        df: DataFrame with seq_id, chembl_id, label columns.
+        protein_vector_dir: Single path (str/Path) or list of paths to search.
+        ligand_vector_dir: Single path (str/Path) or list of paths to search.
+
+    Returns (X, y, valid_indices) where X has shape [n, protein_dim + ligand_dim].
+    """
+    # Support single dir or list of dirs (needed for dataset="all")
+    if isinstance(protein_vector_dir, (str, Path)):
+        prot_dirs = [Path(protein_vector_dir)]
+    else:
+        prot_dirs = [Path(d) for d in protein_vector_dir]
+    if isinstance(ligand_vector_dir, (str, Path)):
+        lig_dirs = [Path(ligand_vector_dir)]
+    else:
+        lig_dirs = [Path(d) for d in ligand_vector_dir]
+
+    def _find_file(dirs, filenames):
+        """Find a file trying multiple possible filenames.
+        
+        Args:
+            dirs: List of directories to search
+            filenames: List of possible filenames to try
+            
+        Returns:
+            Path to the first existing file, or None
+        """
+        if isinstance(filenames, str):
+            filenames = [filenames]
+        for d in dirs:
+            for filename in filenames:
+                p = d / filename
+                if p.exists():
+                    return p
+        return None
+
+    seq_ids = df['seq_id'].astype(str).values
+    chembl_ids = df['chembl_id'].astype(str).values
+    labels = df['label'].values
+
+    prot_vecs = []
+    lig_vecs = []
+    valid_idx = []
+
+    for i in range(len(df)):
+        # Try multiple protein embedding filename patterns
+        prot_path = _find_file(prot_dirs, [
+            f"{seq_ids[i]}_embedding.npy",
+            f"{seq_ids[i]}.npy",
+        ])
+        
+        # Try multiple ligand embedding filename patterns (including molformer)
+        lig_path = _find_file(lig_dirs, [
+            f"{chembl_ids[i]}_embedding.npy",
+            f"{chembl_ids[i]}_molformer_embedding.npy",
+            f"{chembl_ids[i]}.npy",
+        ])
+
+        if prot_path is None or lig_path is None:
+            continue
+
+        prot_vecs.append(np.load(prot_path))
+        lig_vecs.append(np.load(lig_path))
+        valid_idx.append(i)
+
+    if not prot_vecs:
+        return np.empty((0, 0), dtype=np.float32), np.array([]), []
+
+    prot_mat = np.stack(prot_vecs, axis=0).astype(np.float32)  # [n, protein_dim]
+    lig_mat = np.stack(lig_vecs, axis=0).astype(np.float32)    # [n, ligand_dim]
+
+    # L2-normalize each modality independently before concatenation.
+    prot_norm = _l2_normalize(prot_mat)
+    lig_norm = _l2_normalize(lig_mat)
+
+    X = np.hstack([prot_norm, lig_norm])  # [n, protein_dim + ligand_dim]
+    y = labels[valid_idx]
+
+    return X, y, valid_idx
 
 
 # =============================================================================
@@ -280,11 +387,14 @@ def _compute_metrics(y_true, y_pred, y_proba=None):
     }
     if y_proba is not None and len(np.unique(y_true)) == 2:
         try:
-            metrics['auroc'] = float(roc_auc_score(y_true, y_proba))
+            metrics['auc'] = float(roc_auc_score(y_true, y_proba))
         except ValueError:
-            metrics['auroc'] = float('nan')
+            metrics['auc'] = float('nan')
+        probs_clipped = np.clip(y_proba, 1e-7, 1.0 - 1e-7)
+        metrics['loss'] = float(log_loss(y_true, probs_clipped, labels=[0, 1]))
     else:
-        metrics['auroc'] = float('nan')
+        metrics['auc'] = float('nan')
+        metrics['loss'] = float('nan')
     return metrics
 
 
@@ -351,16 +461,14 @@ def train_and_evaluate(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(128,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        learning_rate='adaptive',
-        learning_rate_init=0.001,
-        max_iter=500,
+        max_iter=100,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=10,
         random_state=seed
     )
     mlp.fit(X_train_scaled, y_train)
@@ -455,6 +563,117 @@ def train_and_evaluate(
         print(f"    Model artifacts saved: {scenario_dir}")
 
     results["_artifacts"] = artifact_paths
+    return results
+
+
+def train_and_evaluate_with_val(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    seed: int = 42,
+    fp_cache: dict = None,
+    threshold_metric: str = "mcc",
+    feature_type: str = "fingerprint",
+    protein_vector_dir: str = None,
+    ligand_vector_dir: str = None,
+):
+    """Train KNN+MLP with threshold optimization on validation set.
+
+    Used for precomputed scaffold splits where train/val/test are separate
+    DataFrames (same splits as the crossattention pipeline).
+
+    feature_type: "fingerprint" (Morgan FP + one-hot kinase) or
+                  "embedding" (L2-normalized protein + ligand vectors).
+    Threshold is optimized on val, final evaluation on test.
+    """
+    print(f"    Preparing features ({feature_type}): train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+
+    if feature_type == "embedding":
+        if not protein_vector_dir or not ligand_vector_dir:
+            raise ValueError("protein_vector_dir and ligand_vector_dir are required for embedding features")
+        X_train, y_train, _ = prepare_embedding_features(train_df, protein_vector_dir, ligand_vector_dir)
+        X_val, y_val, _ = prepare_embedding_features(val_df, protein_vector_dir, ligand_vector_dir)
+        X_test, y_test, _ = prepare_embedding_features(test_df, protein_vector_dir, ligand_vector_dir)
+    else:
+        # One-hot kinase space defined from TRAIN only (unseen kinases → all-zero).
+        train_kinases = list(train_df['target_kinase'].unique())
+        X_train, y_train, _ = prepare_features(train_df, train_kinases, fp_cache)
+        X_val, y_val, _ = prepare_features(val_df, train_kinases, fp_cache)
+        X_test, y_test, _ = prepare_features(test_df, train_kinases, fp_cache)
+
+    if len(X_train) == 0 or len(X_val) == 0 or len(X_test) == 0:
+        print("    WARNING: empty feature set after preparation; skipping.")
+        return None
+    if len(np.unique(y_train)) < 2:
+        print("    WARNING: training set has single class; skipping.")
+        return None
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train).astype(np.float32)
+    X_val_scaled = scaler.transform(X_val).astype(np.float32)
+    X_test_scaled = scaler.transform(X_test).astype(np.float32)
+
+    results = {}
+
+    # --- KNN via FAISS ---
+    print("    Training KNN (FAISS)...")
+    t0 = time.time()
+    knn_k = 5
+
+    # Optimize threshold on validation
+    _, knn_val_proba = faiss_knn_predict(X_train_scaled, y_train, X_val_scaled, k=knn_k)
+    knn_threshold_info = optimize_threshold_from_predictions(
+        np.asarray(y_val, dtype=np.int64),
+        np.asarray(knn_val_proba, dtype=np.float64),
+        metric=threshold_metric,
+    )
+    knn_threshold = knn_threshold_info['decision_threshold']
+
+    # Evaluate on test with optimized threshold
+    _, knn_test_proba = faiss_knn_predict(X_train_scaled, y_train, X_test_scaled, k=knn_k)
+    knn_test_pred = (knn_test_proba >= knn_threshold).astype(int)
+    knn_time = time.time() - t0
+
+    results['KNN'] = _compute_metrics(y_test, knn_test_pred, knn_test_proba)
+    results['KNN']['decision_threshold'] = float(knn_threshold)
+    results['KNN']['threshold_source'] = f'validation_{threshold_metric}'
+    print(f"    KNN done in {format_time(knn_time)} (threshold={knn_threshold:.4f})")
+
+    # --- MLP ---
+    print("    Training MLP...")
+    t0 = time.time()
+    mlp = MLPClassifier(
+        hidden_layer_sizes=(128,),
+        activation='relu',
+        solver='adam',
+        alpha=0.0001,
+        max_iter=100,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=10,
+        random_state=seed,
+    )
+    mlp.fit(X_train_scaled, y_train)
+
+    # Optimize threshold on validation
+    mlp_val_proba = mlp.predict_proba(X_val_scaled)[:, 1]
+    mlp_threshold_info = optimize_threshold_from_predictions(
+        np.asarray(y_val, dtype=np.int64),
+        np.asarray(mlp_val_proba, dtype=np.float64),
+        metric=threshold_metric,
+    )
+    mlp_threshold = mlp_threshold_info['decision_threshold']
+
+    # Evaluate on test with optimized threshold
+    mlp_test_proba = mlp.predict_proba(X_test_scaled)[:, 1]
+    mlp_test_pred = (mlp_test_proba >= mlp_threshold).astype(int)
+    mlp_time = time.time() - t0
+
+    results['MLP'] = _compute_metrics(y_test, mlp_test_pred, mlp_test_proba)
+    results['MLP']['decision_threshold'] = float(mlp_threshold)
+    results['MLP']['threshold_source'] = f'validation_{threshold_metric}'
+    print(f"    MLP done in {format_time(mlp_time)} (threshold={mlp_threshold:.4f})")
+
     return results
 
 
@@ -896,11 +1115,20 @@ def run_comparison(
     model_output_dir: str = None,
     dataset_metadata: dict = None,
     s4_restarts: int = DEFAULT_S4_RESTARTS,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    feature_type: str = "fingerprint",
+    embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
     """Run comparison across split scenarios.
 
     split_mode="single_90_10": one train/test split per scenario.
     split_mode="kfold_cv": legacy k-fold protocol with train/val/test folds.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
     """
 
     valid_modes = {"single_90_10", "kfold_cv"}
@@ -1000,6 +1228,120 @@ def run_comparison(
             print("  [checkpoint] Scenario already computed. Skipping recalculation.")
             continue
 
+        # -----------------------------------------------------------------
+        # SCAFFOLD scenario with precomputed splits (aligned with crossattention pipeline)
+        # -----------------------------------------------------------------
+        if scenario_id == 'scaffold' and scaffold_split_dir:
+            dataset_type = (dataset_metadata or {}).get('dataset_type', 'non_human')
+            threshold = DEFAULT_AFFINITY_THRESHOLD.threshold_pchembl
+            try:
+                sc_train_df, sc_val_df, sc_test_df, sc_meta = _load_precomputed_scaffold_splits(
+                    dataset_type=dataset_type,
+                    scaffold_split_dir=scaffold_split_dir,
+                    threshold=threshold,
+                )
+            except (FileNotFoundError, RuntimeError, ValueError) as exc:
+                print(f"  WARNING: Could not load precomputed scaffold splits: {exc}")
+                print("  Falling back to runtime scaffold split generation.")
+                sc_train_df = None
+
+            if sc_train_df is not None:
+                print(f"  Using PRECOMPUTED scaffold splits (same as crossattention pipeline):")
+                print(f"    Train: {len(sc_train_df)}, Val: {len(sc_val_df)}, Test: {len(sc_test_df)}")
+                print(f"    Source: {scaffold_split_dir}")
+
+                train_compounds = set(sc_train_df['chembl_id'])
+                test_compounds = set(sc_test_df['chembl_id'])
+                leaked = train_compounds & test_compounds
+                total_rows = len(sc_train_df) + len(sc_val_df) + len(sc_test_df)
+
+                stats = {
+                    'train_size': len(sc_train_df),
+                    'val_size': len(sc_val_df),
+                    'test_size': len(sc_test_df),
+                    'dropped_size': 0,
+                    'test_compounds': len(test_compounds),
+                    'leaked_compounds': len(leaked),
+                    'leak_pct': 100 * len(leaked) / len(test_compounds) if test_compounds else 0,
+                    'test_fraction_used': float(len(sc_test_df) / total_rows) if total_rows > 0 else 0.0,
+                    'test_fraction_total': float(len(sc_test_df) / total_rows) if total_rows > 0 else 0.0,
+                    'split_source': 'precomputed_scaffold_split',
+                }
+                print(f"    Test compounds: {len(test_compounds)}, Leaked: {len(leaked)} ({stats['leak_pct']:.1f}%)")
+                stats['feature_type'] = feature_type
+
+                # Resolve embedding directories for embedding feature mode.
+                prot_vec_dir = None
+                lig_vec_dir = None
+                if feature_type == "embedding" and embedding_name:
+                    # Use custom fine-tuned paths if provided
+                    if custom_protein_embedding_dir and custom_ligand_embedding_dir:
+                        prot_vec_dir = [custom_protein_embedding_dir]
+                        lig_vec_dir = [custom_ligand_embedding_dir]
+                        print(f"    Embedding features: FINE-TUNED")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
+                    else:
+                        from crossattention_split_analysis.config import (
+                            SUPPORTED_EMBEDDINGS, EMBEDDING_BASE_PATHS_ALL,
+                        )
+                        esm_model = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
+                        if dataset_type == "all":
+                            build_dirs = [
+                                os.path.join(bp, esm_model, "build")
+                                for bp in EMBEDDING_BASE_PATHS_ALL
+                            ]
+                        else:
+                            build_dirs = [os.path.join(
+                                EMBEDDING_BASE_PATH.format(dataset_type=dataset_type),
+                                esm_model, "build",
+                            )]
+                        prot_vec_dir = [os.path.join(bd, "proteins") for bd in build_dirs]
+                        lig_vec_dir = [os.path.join(bd, "ligand_embeddings") for bd in build_dirs]
+                        print(f"    Embedding features: {esm_model}")
+                        print(f"      Protein vectors: {prot_vec_dir}")
+                        print(f"      Ligand vectors:  {lig_vec_dir}")
+
+                results = train_and_evaluate_with_val(
+                    sc_train_df, sc_val_df, sc_test_df,
+                    seed=seed,
+                    fp_cache=fp_cache,
+                    threshold_metric="mcc",
+                    feature_type=feature_type,
+                    protein_vector_dir=prot_vec_dir,
+                    ligand_vector_dir=lig_vec_dir,
+                )
+
+                if results is not None:
+                    split_stats[scenario_key] = stats
+                    # Single-round result, same structure as other scenarios
+                    single = results
+                    all_results[scenario_key] = single
+                    for model in ['KNN', 'MLP']:
+                        m = results[model]
+                        auc_str = f", AUROC={m['auc']:.4f}" if not np.isnan(m.get('auc', float('nan'))) else ""
+                        thr_str = f", thr={m.get('decision_threshold', 0.5):.4f}"
+                        print(f"  {model}: Acc={m['accuracy']:.4f}, MCC={m['mcc']:.4f}, F1={m['f1']:.4f}{auc_str}{thr_str}")
+                else:
+                    print("  WARNING: Scaffold scenario evaluation returned None.")
+
+                if checkpoint_path and scenario_key not in completed_scenarios:
+                    completed_scenarios.append(scenario_key)
+                    write_json(checkpoint_path, {
+                        'config': {
+                            'seed': seed, 'split_mode': split_mode,
+                            'test_fraction': test_fraction,
+                            'scenarios': [s for s, _, _ in scenarios_config],
+                        },
+                        'all_results': all_results,
+                        'split_stats': split_stats,
+                        'completed_scenarios': completed_scenarios,
+                    })
+                continue  # Skip the normal split generation path for scaffold
+
+        # -----------------------------------------------------------------
+        # Standard runtime split path (all non-scaffold scenarios, or fallback)
+        # -----------------------------------------------------------------
         eval_rounds = []
         if split_mode == "single_90_10":
             split_payload = _generate_single_split(
@@ -1107,10 +1449,10 @@ def run_comparison(
                 fold_results[round_i] = {
                     'metrics': results
                 }
-                knn_auroc = f", AUROC={results['KNN']['auroc']:.4f}" if not np.isnan(results['KNN'].get('auroc', float('nan'))) else ""
-                mlp_auroc = f", AUROC={results['MLP']['auroc']:.4f}" if not np.isnan(results['MLP'].get('auroc', float('nan'))) else ""
-                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auroc}")
-                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auroc}")
+                knn_auc = f", AUROC={results['KNN']['auc']:.4f}" if not np.isnan(results['KNN'].get('auc', float('nan'))) else ""
+                mlp_auc = f", AUROC={results['MLP']['auc']:.4f}" if not np.isnan(results['MLP'].get('auc', float('nan'))) else ""
+                print(f"  KNN: Acc={results['KNN']['accuracy']:.4f}, MCC={results['KNN']['mcc']:.4f}, F1={results['KNN']['f1']:.4f}{knn_auc}")
+                print(f"  MLP: Acc={results['MLP']['accuracy']:.4f}, MCC={results['MLP']['mcc']:.4f}, F1={results['MLP']['f1']:.4f}{mlp_auc}")
 
         # Aggregate across folds
         if fold_results:
@@ -1137,7 +1479,7 @@ def run_comparison(
                 aggregated = {}
                 for model in ['KNN', 'MLP']:
                     model_agg = {}
-                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                    for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                         values = [r['metrics'][model][metric] for r in fold_results.values()
                                   if not np.isnan(r['metrics'][model].get(metric, float('nan')))]
                         if values:
@@ -1164,10 +1506,10 @@ def run_comparison(
                 print(f"\n  --- Aggregate ({len(fold_results)} folds) ---")
                 for model in ['KNN', 'MLP']:
                     m = aggregated[model]
-                    auroc_str = f", AUROC={m['auroc']:.4f}" if not np.isnan(m.get('auroc', float('nan'))) else ""
+                    auc_str = f", AUROC={m['auc']:.4f}" if not np.isnan(m.get('auc', float('nan'))) else ""
                     print(f"  {model}: Acc={m['accuracy']:.4f}+/-{m['accuracy_std']:.4f}, "
                           f"MCC={m['mcc']:.4f}+/-{m['mcc_std']:.4f}, "
-                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auroc_str}")
+                          f"F1={m['f1']:.4f}+/-{m['f1_std']:.4f}{auc_str}")
 
             if scenario_key not in completed_scenarios:
                 completed_scenarios.append(scenario_key)
@@ -1347,8 +1689,18 @@ def run_single_dataset(
     save_knn_features: bool = False,
     model_output_dir: str = None,
     s4_restarts: int = DEFAULT_S4_RESTARTS,
+    scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
+    feature_type: str = "fingerprint",
+    embedding_name: str = None,
+    custom_protein_embedding_dir: str = None,
+    custom_ligand_embedding_dir: str = None,
 ):
-    """Run analysis for a single dataset type."""
+    """Run analysis for a single dataset type.
+    
+    Args:
+        custom_protein_embedding_dir: Optional custom path for fine-tuned protein embeddings
+        custom_ligand_embedding_dir: Optional custom path for fine-tuned ligand embeddings
+    """
     data_path = resolve_dataset_input_path(
         dataset_type=dataset_type,
         input_path=input_path,
@@ -1499,6 +1851,11 @@ def run_single_dataset(
         model_output_dir=model_output_dir,
         dataset_metadata=dataset_metadata,
         s4_restarts=s4_restarts,
+        scaffold_split_dir=scaffold_split_dir,
+        feature_type=feature_type,
+        embedding_name=embedding_name,
+        custom_protein_embedding_dir=custom_protein_embedding_dir,
+        custom_ligand_embedding_dir=custom_ligand_embedding_dir,
     )
     if not all_results:
         print("  No results generated.")
@@ -1534,12 +1891,17 @@ def run_single_dataset(
         for model in ['KNN', 'MLP']:
             m = all_results[scenario_key][model]
             scenario_json[model] = {}
-            for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+            for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                 val = m.get(metric)
                 if val is not None and not (isinstance(val, float) and np.isnan(val)):
                     scenario_json[model][metric] = val
+            # Threshold info (from precomputed scaffold splits with val-based optimization)
+            if 'decision_threshold' in m:
+                scenario_json[model]['decision_threshold'] = m['decision_threshold']
+            if 'threshold_source' in m:
+                scenario_json[model]['threshold_source'] = m['threshold_source']
             if multi_round:
-                for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auroc']:
+                for metric in ['accuracy', 'mcc', 'f1', 'precision', 'recall', 'auc', 'loss']:
                     std_val = m.get(f'{metric}_std', 0.0)
                     if not (isinstance(std_val, float) and np.isnan(std_val)):
                         scenario_json[model][f'{metric}_std'] = std_val
@@ -1838,6 +2200,28 @@ Available scenarios (Pahikkala et al. 2015 framework):
         help='Directory containing *_input_without_test.tsv files (default: scaffolds_splits/output)'
     )
     parser.add_argument(
+        '--scaffold_split_dir',
+        type=str,
+        default=DEFAULT_SCAFFOLD_SPLIT_DIR,
+        help='Directory with precomputed scaffold splits from scaffold_split.py. '
+             'Used for the scaffold scenario to align with the crossattention pipeline '
+             f'(default: {DEFAULT_SCAFFOLD_SPLIT_DIR})'
+    )
+    parser.add_argument(
+        '--feature_type',
+        choices=['fingerprint', 'embedding'],
+        default='fingerprint',
+        help='Feature type: "fingerprint" (Morgan FP + one-hot kinase) or '
+             '"embedding" (L2-normalized ESM-2 + MoLFormer vectors). '
+             'Embedding mode requires --embedding and precomputed vectors.'
+    )
+    parser.add_argument(
+        '--embedding', '-e',
+        choices=['8M', '150M', '650M'],
+        default=None,
+        help='ESM-2 model for embedding features (required when --feature_type embedding)'
+    )
+    parser.add_argument(
         '--use_without_test_input',
         dest='use_without_test_input',
         action='store_true',
@@ -1940,6 +2324,8 @@ Available scenarios (Pahikkala et al. 2015 framework):
         parser.error("--test_fraction must be in (0, 1) when --split_mode single_90_10")
     if args.s4_restarts < 1:
         parser.error("--s4_restarts must be >= 1")
+    if args.feature_type == 'embedding' and args.embedding is None:
+        parser.error("--embedding is required when --feature_type embedding")
 
     if args.scenarios:
         if args.scenarios.strip().lower() == 'all':
@@ -2030,6 +2416,9 @@ Available scenarios (Pahikkala et al. 2015 framework):
                 save_knn_features=args.save_knn_features,
                 model_output_dir=dataset_model_output_dir,
                 s4_restarts=args.s4_restarts,
+                scaffold_split_dir=args.scaffold_split_dir,
+                feature_type=args.feature_type,
+                embedding_name=args.embedding,
             )
             dataset_time = time.time() - dataset_start_time
             all_dataset_times[dataset_type] = dataset_time
