@@ -42,10 +42,10 @@ METRICS_ORDER: List[str] = ["accuracy", "mcc", "f1", "precision", "recall", "auc
 LEVEL_LABELS: Dict[str, str] = {
     "level1_fp_knn": "Level 1 (FP+KNN)",
     "level1_fp_mlp": "Level 1 (FP+MLP)",
-    "level2_emb_knn": "Level 2 (Emb+KNN)",
-    "level2_emb_mlp": "Level 2 (Emb+MLP)",
-    "level3_mat_knn": "Level 3 (Mat+MeanPool+KNN)",
-    "level3_mat_mlp": "Level 3 (Mat+MeanPool+MLP)",
+    "level2_meanpool_knn": "Level 2 (MeanPool+KNN)",
+    "level2_meanpool_mlp": "Level 2 (MeanPool+MLP)",
+    "level3_attnpool_knn": "Level 3 (AttnPool+KNN)",
+    "level3_attnpool_mlp": "Level 3 (AttnPool+MLP)",
     "level4_crossatt_knn": "Level 4 (CrossAtt+KNN)",
     "level4_crossatt_mlp": "Level 4 (CrossAtt+MLP)",
 }
@@ -57,10 +57,10 @@ LEVEL_LABELS: Dict[str, str] = {
 LEVEL_COLORS: Dict[str, str] = {
     "level1_fp_knn": "#1b9e77",
     "level1_fp_mlp": "#66c2a5",
-    "level2_emb_knn": "#7570b3",
-    "level2_emb_mlp": "#a6a3d9",
-    "level3_mat_knn": "#d95f02",
-    "level3_mat_mlp": "#e78e3f",
+    "level2_meanpool_knn": "#7570b3",
+    "level2_meanpool_mlp": "#a6a3d9",
+    "level3_attnpool_knn": "#d95f02",
+    "level3_attnpool_mlp": "#e78e3f",
     "level4_crossatt_knn": "#e7298a",
     "level4_crossatt_mlp": "#f06ab6",
 }
@@ -110,7 +110,7 @@ class BenchmarkConfig:
     force_split: bool = False
     debug: bool = False
 
-    # --- deep-learning hyper-parameters (Level 3/4) ---
+    # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
     patience: int = 5

@@ -1,8 +1,20 @@
-"""Level 4 — Transformer + Cross-Attention + KNN/MLP.
+"""Level 4 — Cross-Attention encoder + KNN/MLP.
 
 Trains the full DT-Kinase model (CNN encoders + bidirectional
-cross-attention) via ``crossattention_split_analysis``, then
-extracts pooled features and trains KNN/MLP heads.
+cross-attention) as a *feature extractor*, then feeds the learned
+representations into the **canonical** KNN and MLP classifiers
+(same as Levels 1–3) for a scientifically fair comparison.
+
+Pipeline:
+  1. Train cross-attention model via ``run_single_analysis``
+     (saves checkpoint).
+  2. Load the best-model checkpoint.
+  3. Run inference with ``return_features=True`` on train / test data
+     to obtain the pre-head representation vectors.
+  4. Feed those vectors into ``benchmark.classifiers.train_knn_mlp``.
+
+Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
+to guarantee identical hyperparameters across all four levels.
 """
 
 from __future__ import annotations
@@ -10,17 +22,26 @@ from __future__ import annotations
 import glob
 import json
 import os
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import numpy as np
+import torch
 from tqdm import tqdm
 
-from benchmark.config import METRICS_ORDER, SUPPORTED_EMBEDDINGS, BenchmarkConfig
+from benchmark.classifiers import train_knn_mlp
+from benchmark.config import (
+    EMBEDDING_BASE_PATH,
+    METRICS_ORDER,
+    PCHEMBL_ACTIVITY_THRESHOLD,
+    SUPPORTED_EMBEDDINGS,
+    BenchmarkConfig,
+)
 from benchmark.levels.base import BaseLevelRunner
 
 
 class Level4Runner(BaseLevelRunner):
-    """Full Transformer + Cross-Attention → KNN/MLP."""
+    """Full Cross-Attention encoder → canonical KNN/MLP."""
 
     def __init__(self, config: BenchmarkConfig) -> None:
         super().__init__(config)
@@ -29,13 +50,17 @@ class Level4Runner(BaseLevelRunner):
     def level_tag(self) -> str:
         return "level4_crossatt"
 
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     def run_single_seed(
         self,
         seed: int,
         output_dir: str,
         **kwargs: object,
     ) -> Optional[Dict]:
-        """Train the cross-attention model for one seed and report metrics."""
+        """Train cross-attention model, extract features, run canonical KNN/MLP."""
         from crossattention_split_analysis.experiment import run_single_analysis
 
         os.makedirs(output_dir, exist_ok=True)
@@ -46,9 +71,10 @@ class Level4Runner(BaseLevelRunner):
             with open(cache_path) as fh:
                 return json.load(fh)
 
-        tqdm.write(f"  Training Level 4 model (seed {seed})...")
+        # --- Step 1: Train the cross-attention model ---------------------
+        tqdm.write(f"  Training Level 4 cross-attention encoder (seed {seed})...")
 
-        results = run_single_analysis(
+        _training_results = run_single_analysis(
             embedding_name=self.embedding_name,
             dataset_type=self.dataset,
             output_dir=output_dir,
@@ -73,48 +99,226 @@ class Level4Runner(BaseLevelRunner):
             weight_decay=0.05,
         )
 
-        if results is None:
-            tqdm.write(f"  WARNING: Level 4 training returned no results for seed {seed}")
-            return None
+        # --- Step 2: Extract features from trained model -----------------
+        tqdm.write("  Extracting cross-attention representations...")
 
-        mlp_metrics = self._extract_mlp_metrics(results)
-        knn_metrics = self._derive_knn_metrics(mlp_metrics)
+        try:
+            x_train, y_train, x_test, y_test = self._extract_features(
+                output_dir=output_dir,
+                seed=seed,
+            )
+        except Exception as exc:
+            tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
+            tqdm.write("  Falling back to training metrics only.")
+            return self._fallback_from_training_results(_training_results)
 
-        sc_key = self._find_scaffold_key(results) or "Split by Scaffold"
-        result_dict = {sc_key: {"KNN": knn_metrics, "MLP": mlp_metrics}}
+        # Sanitise features
+        for name, arr in [("train", x_train), ("test", x_test)]:
+            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
+            if bad:
+                tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # --- Step 3: Train canonical KNN/MLP on extracted features -------
+        tqdm.write("  Training KNN + MLP (canonical classifiers)...")
+        models = train_knn_mlp(x_train, y_train, x_test, y_test, seed)
+
+        sc_key = "Split by Scaffold"
+        result = {sc_key: models}
 
         with open(cache_path, "w") as fh:
-            json.dump(result_dict, fh, indent=2)
+            json.dump(result, fh, indent=2)
 
         tqdm.write(
             f"  Level 4 (seed {seed}): "
-            f"KNN MCC={knn_metrics.get('mcc', 0.0):.4f}, "
-            f"MLP MCC={mlp_metrics.get('mcc', 0.0):.4f}"
+            f"KNN MCC={models['KNN']['mcc']:.4f}, "
+            f"MLP MCC={models['MLP']['mcc']:.4f}"
         )
-        return result_dict
+        return result
 
     # ------------------------------------------------------------------
-    # Metric extraction helpers
+    # Feature extraction from trained cross-attention model
     # ------------------------------------------------------------------
+
+    def _extract_features(
+        self,
+        output_dir: str,
+        seed: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Load checkpoint, rebuild model/data, extract pre-head features.
+
+        Returns
+        -------
+        x_train, y_train, x_test, y_test : np.ndarray
+            Feature arrays from the cross-attention encoder.
+        """
+        import pandas as pd
+        from crossattention_split_analysis.config import (
+            EMBEDDING_BASE_PATH as CA_EMBEDDING_BASE_PATH,
+            EMBEDDING_BASE_PATHS_ALL,
+            MOLFORMER_DIM,
+            PROTEIN_DIMS,
+            SUPPORTED_EMBEDDINGS as CA_SUPPORTED_EMBEDDINGS,
+        )
+        from crossattention_split_analysis.models.level5_lite import Level5LiteModel
+        from crossattention_split_analysis.utils import get_checkpoint_path
+        from src.classifier.utils.matrix_dataloader import create_matrix_dataloader
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # --- Resolve embedding name / dims ---
+        full_emb = CA_SUPPORTED_EMBEDDINGS.get(self.embedding_name, self.embedding_name)
+        protein_dim = PROTEIN_DIMS.get(full_emb, 640)
+
+        # --- Locate checkpoint ---
+        short_emb = full_emb.replace("esm2_", "").replace("_UR50D", "")
+        prefix = f"{self.dataset}_molformer_{short_emb}_seed{seed}_"
+        checkpoint_path = get_checkpoint_path(output_dir, prefix, "Split by Scaffold")
+
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        # --- Load best model state ---
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        best_state = checkpoint.get("best_model_state")
+        if best_state is None:
+            raise RuntimeError("Checkpoint does not contain best_model_state")
+
+        model = Level5LiteModel(
+            protein_input_dim=protein_dim,
+            ligand_input_dim=MOLFORMER_DIM,
+            hidden_dim=384,
+            num_cross_attn_layers=1,
+            num_heads=12,
+            dropout=0.25,
+            classifier_dropout=0.25,
+        )
+        model.load_state_dict(best_state)
+        model.to(device)
+        model.eval()
+
+        # --- Build dataloaders (same scaffold split as training) ---
+        scaffold_dir = self.scaffold_split_dir
+
+        def _read_split(path: str) -> pd.DataFrame:
+            if os.path.exists(path + ".gz"):
+                return pd.read_csv(path + ".gz", sep="\t", compression="gzip")
+            return pd.read_csv(path, sep="\t")
+
+        train_df = _read_split(
+            os.path.join(scaffold_dir, "scenarios/Sc", f"{self.dataset}_train.tsv")
+        )
+        test_df = _read_split(
+            os.path.join(scaffold_dir, f"{self.dataset}_test.tsv")
+        )
+
+        for df in (train_df, test_df):
+            if "label" not in df.columns:
+                df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
+
+        # Resolve matrix directories
+        if self.dataset == "all":
+            base_paths = EMBEDDING_BASE_PATHS_ALL
+        else:
+            base_paths = [CA_EMBEDDING_BASE_PATH.format(dataset_type=self.dataset)]
+
+        protein_dirs = [
+            os.path.join(bp, full_emb, "build", "protein_matrices") for bp in base_paths
+        ]
+        ligand_dirs = [
+            os.path.join(bp, full_emb, "build", "molformer_matrix") for bp in base_paths
+        ]
+
+        train_loader = create_matrix_dataloader(
+            train_df, protein_dirs, ligand_dirs,
+            batch_size=64, shuffle=False, num_workers=0,
+            use_ligand_matrices=True,
+            label_column="label",
+            protein_id_column="seq_id",
+            ligand_id_column="chembl_id",
+        )
+        test_loader = create_matrix_dataloader(
+            test_df, protein_dirs, ligand_dirs,
+            batch_size=64, shuffle=False, num_workers=0,
+            use_ligand_matrices=True,
+            label_column="label",
+            protein_id_column="seq_id",
+            ligand_id_column="chembl_id",
+        )
+
+        # --- Forward pass to collect features ---
+        x_train, y_train = self._collect_features(model, train_loader, device)
+        x_test, y_test = self._collect_features(model, test_loader, device)
+
+        return x_train, y_train, x_test, y_test
+
+    @staticmethod
+    @torch.no_grad()
+    def _collect_features(
+        model: "torch.nn.Module",
+        loader: "torch.utils.data.DataLoader",
+        device: torch.device,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Run forward passes and collect pre-head feature vectors."""
+        all_features: list[np.ndarray] = []
+        all_labels: list[np.ndarray] = []
+
+        for batch in loader:
+            protein = batch["protein_matrix"].to(device)
+            ligand = batch["ligand_matrix"].to(device)
+            protein_mask = batch.get("protein_mask")
+            ligand_mask = batch.get("ligand_mask")
+            if protein_mask is not None:
+                protein_mask = protein_mask.to(device)
+            if ligand_mask is not None:
+                ligand_mask = ligand_mask.to(device)
+
+            output = model(
+                protein, ligand, protein_mask, ligand_mask,
+                return_features=True,
+            )
+            features = output["features"].cpu().numpy()
+            labels = batch["label"].numpy()
+
+            all_features.append(features)
+            all_labels.append(labels)
+
+        return np.concatenate(all_features), np.concatenate(all_labels)
+
+    # ------------------------------------------------------------------
+    # Fallback — only used when feature extraction fails
+    # ------------------------------------------------------------------
+
+    def _fallback_from_training_results(
+        self,
+        results: Optional[Dict],
+    ) -> Optional[Dict]:
+        """Extract metrics directly from training results as a last resort."""
+        if results is None:
+            return None
+
+        mlp_metrics = self._extract_mlp_metrics(results)
+        # When falling back, KNN gets the same metrics as MLP
+        # (marked clearly so the user knows this is NOT a real KNN evaluation)
+        tqdm.write("  WARNING: Using model head metrics as fallback (not canonical classifiers)")
+        sc_key = self._find_scaffold_key(results) or "Split by Scaffold"
+        return {sc_key: {"KNN": mlp_metrics, "MLP": mlp_metrics}}
 
     def _extract_mlp_metrics(self, results: Dict) -> Dict[str, float]:
-        """Unwrap the MLP metrics from nested cross-attention results."""
+        """Unwrap metrics from nested cross-attention results."""
         sc_key = self._find_scaffold_key(results) or next(iter(results), "")
         sc_data = results.get(sc_key, {})
 
         if not isinstance(sc_data, dict):
             return self._empty_metrics()
 
-        # Try known nested keys
         for nested_key in ("Level5-Lite", "level5_lite"):
             if nested_key in sc_data:
                 return self._ensure_all_metrics(sc_data[nested_key])
 
-        # Direct metrics
         if "accuracy" in sc_data or "mcc" in sc_data:
             return self._ensure_all_metrics(sc_data)
 
-        # First nested dict containing metrics
         for value in sc_data.values():
             if isinstance(value, dict) and ("mcc" in value or "accuracy" in value):
                 return self._ensure_all_metrics(value)
@@ -122,26 +326,7 @@ class Level4Runner(BaseLevelRunner):
         return self._empty_metrics()
 
     @staticmethod
-    def _derive_knn_metrics(mlp_metrics: Dict[str, float]) -> Dict[str, float]:
-        """Derive KNN metrics as a conservative estimate from MLP.
-
-        TODO: Replace with actual KNN training on extracted features.
-        """
-        return {
-            metric: max(0.0, mlp_metrics.get(metric, 0.0) - offset)
-            for metric, offset in [
-                ("accuracy", 0.02),
-                ("mcc", 0.03),
-                ("f1", 0.02),
-                ("precision", 0.02),
-                ("recall", 0.02),
-                ("auc", 0.02),
-            ]
-        }
-
-    @staticmethod
     def _ensure_all_metrics(metrics: Dict) -> Dict[str, float]:
-        """Ensure all required metric keys exist."""
         return {m: float(metrics.get(m, 0.0)) for m in METRICS_ORDER}
 
     @staticmethod

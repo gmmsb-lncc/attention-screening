@@ -1,7 +1,7 @@
 """Ligand vector extraction using attention pooling.
 
 Reads per-token MoLFormer matrices and writes fixed-size vector
-embeddings so that Level 2 can consume them.
+embeddings so that Level 3 (attention-pooled embeddings) can consume them.
 """
 
 from __future__ import annotations

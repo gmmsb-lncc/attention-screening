@@ -50,8 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="1,2,3,4",
         nargs="*",
         help=(
-            "Levels to run: 1=FP+KNN/MLP, 2=Emb+KNN/MLP, "
-            "3=Mat+MeanPool+KNN/MLP, 4=CrossAtt+KNN/MLP "
+            "Levels to run: 1=FP+KNN/MLP, 2=MeanPool+KNN/MLP, "
+            "3=AttnPool+KNN/MLP, 4=CrossAtt+KNN/MLP "
             "(default: 1,2,3,4). Examples: --levels 1 2 3 4 OR --levels 1,2,3"
         ),
     )
@@ -83,10 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
 
     # --- deep-learning hyper-parameters ---
-    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 3/4 (default: 500)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 3/4 (default: 32)")
+    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 3/4 (default: 1e-4)")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")

@@ -87,8 +87,8 @@ def aggregate_benchmark_metrics(
 
     _level_mapping = [
         (level1_results, [("KNN", "level1_fp_knn"), ("MLP", "level1_fp_mlp")]),
-        (level2_results, [("KNN", "level2_emb_knn"), ("MLP", "level2_emb_mlp")]),
-        (level3_results, [("KNN", "level3_mat_knn"), ("MLP", "level3_mat_mlp")]),
+        (level2_results, [("KNN", "level2_meanpool_knn"), ("MLP", "level2_meanpool_mlp")]),
+        (level3_results, [("KNN", "level3_attnpool_knn"), ("MLP", "level3_attnpool_mlp")]),
         (level4_results, [("KNN", "level4_crossatt_knn"), ("MLP", "level4_crossatt_mlp")]),
     ]
 
