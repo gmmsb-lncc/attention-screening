@@ -99,7 +99,7 @@ class Level4Runner(BaseLevelRunner):
             force=self.force,
             scenarios=["scaffold"],
             num_epochs=self._config.epochs,
-            patience=10,
+            patience=self._config.resolved_patience or 10,
             batch_size=32,
             learning_rate=1e-4,
             hidden_dim=384,

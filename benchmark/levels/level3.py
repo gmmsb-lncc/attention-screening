@@ -20,6 +20,10 @@ the inter-modality interaction that cross-attention provides.
 Training protocol (consistent with all levels):
   - Attention pooling model trained on the **training** split
     (validation split for early stopping).
+  - Training hyperparameters (epochs, patience, learning rate) are
+    taken from the CLI / ``BenchmarkConfig`` — the same values that
+    control Level 4 — so both learned levels train under identical
+    budgets.
   - Features extracted from the **validation** split — the model was
     *not* directly trained on val, only used it for model selection,
     so val features are free of train-set optimism.
@@ -357,6 +361,9 @@ class Level3Runner(BaseLevelRunner):
             train_loader=train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
+            lr=self._config.learning_rate,
+            epochs=self._config.epochs,
+            patience=self._config.resolved_patience or 10,
             seed=seed,
         )
 

@@ -196,13 +196,18 @@ class BaseLevelRunner(ABC):
 
     @staticmethod
     def _load_cached_results(directory: str) -> Optional[Dict]:
-        """Load cached ``split_comparison_results.json`` if it exists."""
-        json_path = os.path.join(directory, "split_comparison_results.json")
-        if not os.path.exists(json_path):
+        """Load cached per-seed results JSON if it exists.
+
+        Each level saves its seed results as ``levelN_knn_mlp_results.json``.
+        This fallback searches for any matching file in the seed directory.
+        """
+        import glob as _glob
+
+        candidates = _glob.glob(os.path.join(directory, "*_knn_mlp_results.json"))
+        if not candidates:
             return None
         try:
-            with open(json_path) as fh:
-                data = json.load(fh)
-            return data.get("results")
+            with open(candidates[0]) as fh:
+                return json.load(fh)
         except (json.JSONDecodeError, KeyError):
             return None
