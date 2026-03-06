@@ -5,6 +5,12 @@ cross-attention) as a *feature extractor*, then feeds the learned
 representations into the **canonical** KNN and MLP classifiers
 (same as Levels 1–3) for a scientifically fair comparison.
 
+Input matrices are the **same** as those used by Levels 2 and 3.
+The difference is the encoding strategy:
+  - Level 2: mean pooling (zero parameters)
+  - Level 3: projection + attention pooling (learned query)
+  - Level 4: projection + cross-attention + attention pooling (full DT-Kinase)
+
 Pipeline:
   1. Train cross-attention model via ``run_single_analysis``
      (saves checkpoint).
@@ -33,11 +39,13 @@ from benchmark.classifiers import train_knn_mlp
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
     METRICS_ORDER,
-    PCHEMBL_ACTIVITY_THRESHOLD,
+    MOLFORMER_DIM,
+    PROTEIN_DIMS,
     SUPPORTED_EMBEDDINGS,
     BenchmarkConfig,
 )
 from benchmark.levels.base import BaseLevelRunner
+from benchmark.levels.matrix_utils import build_matrix_dataloaders
 
 
 class Level4Runner(BaseLevelRunner):
@@ -147,22 +155,20 @@ class Level4Runner(BaseLevelRunner):
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Load checkpoint, rebuild model/data, extract pre-head features.
 
+        Uses ``build_matrix_dataloaders`` from ``matrix_utils`` — the
+        **same** data pipeline as Levels 2 and 3, ensuring that all
+        matrix-based levels receive identical inputs.
+
         Returns
         -------
         x_train, y_train, x_test, y_test : np.ndarray
             Feature arrays from the cross-attention encoder.
         """
-        import pandas as pd
         from crossattention_split_analysis.config import (
-            EMBEDDING_BASE_PATH as CA_EMBEDDING_BASE_PATH,
-            EMBEDDING_BASE_PATHS_ALL,
-            MOLFORMER_DIM,
-            PROTEIN_DIMS,
             SUPPORTED_EMBEDDINGS as CA_SUPPORTED_EMBEDDINGS,
         )
         from crossattention_split_analysis.models.level5_lite import Level5LiteModel
         from crossattention_split_analysis.utils import get_checkpoint_path
-        from src.classifier.utils.matrix_dataloader import create_matrix_dataloader
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -197,53 +203,14 @@ class Level4Runner(BaseLevelRunner):
         model.to(device)
         model.eval()
 
-        # --- Build dataloaders (same scaffold split as training) ---
-        scaffold_dir = self.scaffold_split_dir
-
-        def _read_split(path: str) -> pd.DataFrame:
-            if os.path.exists(path + ".gz"):
-                return pd.read_csv(path + ".gz", sep="\t", compression="gzip")
-            return pd.read_csv(path, sep="\t")
-
-        train_df = _read_split(
-            os.path.join(scaffold_dir, "scenarios/Sc", f"{self.dataset}_train.tsv")
-        )
-        test_df = _read_split(
-            os.path.join(scaffold_dir, f"{self.dataset}_test.tsv")
-        )
-
-        for df in (train_df, test_df):
-            if "label" not in df.columns:
-                df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
-
-        # Resolve matrix directories
-        if self.dataset == "all":
-            base_paths = EMBEDDING_BASE_PATHS_ALL
-        else:
-            base_paths = [CA_EMBEDDING_BASE_PATH.format(dataset_type=self.dataset)]
-
-        protein_dirs = [
-            os.path.join(bp, full_emb, "build", "protein_matrices") for bp in base_paths
-        ]
-        ligand_dirs = [
-            os.path.join(bp, full_emb, "build", "molformer_matrix") for bp in base_paths
-        ]
-
-        train_loader = create_matrix_dataloader(
-            train_df, protein_dirs, ligand_dirs,
-            batch_size=64, shuffle=False, num_workers=0,
-            use_ligand_matrices=True,
-            label_column="label",
-            protein_id_column="seq_id",
-            ligand_id_column="chembl_id",
-        )
-        test_loader = create_matrix_dataloader(
-            test_df, protein_dirs, ligand_dirs,
-            batch_size=64, shuffle=False, num_workers=0,
-            use_ligand_matrices=True,
-            label_column="label",
-            protein_id_column="seq_id",
-            ligand_id_column="chembl_id",
+        # --- Build dataloaders (same as L2/L3 — shared matrix_utils) ---
+        # For dataset="all" this correctly concatenates human + non_human
+        # splits and searches matrices in both directories.
+        train_loader, _val_loader, test_loader = build_matrix_dataloaders(
+            dataset_type=self.dataset,
+            embedding_name=full_emb,
+            scaffold_split_dir=self.scaffold_split_dir,
+            batch_size=64,
         )
 
         # --- Forward pass to collect features ---
