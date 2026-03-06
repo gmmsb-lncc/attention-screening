@@ -38,9 +38,9 @@ The classifier (**KNN + MLP**) is held constant — only the input changes.
 | Level | Input Representation | Pooling / Encoding | Module |
 |-------|---------------------|-------------------|--------|
 | **1** | Morgan fingerprints (no PLM) | — | `levels/level1.py` |
-| **2** | Per-residue ESM-2 protein + per-token MoLFormer ligand **matrices** | **Mean pooling** (simple average) | `levels/level2.py` |
-| **3** | Mean-pooled ESM-2 protein + attention-pooled MoLFormer ligand **vectors** | **Attention pooling** (learned) | `levels/level3.py` |
-| **4** | Per-residue/per-token matrices → CNN encoders + bidirectional cross-attention (DT-Kinase) | **Cross-attention** (trained encoder) | `levels/level4.py` |
+| **2** | Per-residue ESM-2 protein + per-token MoLFormer ligand **matrices** | **Mean pooling** (zero parameters) | `levels/level2.py` |
+| **3** | Same matrices as Levels 2/4 → linear projection + **attention pooling** | **Attention pooling** (learned query) | `levels/level3.py` |
+| **4** | Same matrices → projection + bidirectional **cross-attention** + attention pooling (DT-Kinase) | **Cross-attention** (full encoder) | `levels/level4.py` |
 
 **Complexity increases monotonically:** fingerprints → mean pooling → attention pooling → cross-attention.
 
@@ -59,7 +59,6 @@ semantic_screening_models.py          ← Thin CLI entry point (33 lines)
     ├── classifiers.py                ← Canonical KNN + MLP (shared by all levels)
     ├── progress.py                   ← tqdm-based step tracker
     ├── splits.py                     ← Scaffold split verification / generation
-    ├── embeddings.py                 ← Attention pooling for ligand vectors
     ├── finetuning.py                 ← ESM-2 + MolFormer fine-tuning
     ├── metrics.py                    ← Multi-level metric aggregation
     ├── reporting.py                  ← Terminal table + JSON export
@@ -67,10 +66,11 @@ semantic_screening_models.py          ← Thin CLI entry point (33 lines)
     └── levels/
         ├── __init__.py               ← Re-exports all runners
         ├── base.py                   ← BaseLevelRunner ABC (Template Method)
+        ├── matrix_utils.py           ← Shared matrix loading, padding, mean-pool
         ├── level1.py                 ← Fingerprint baseline
-        ├── level2.py                 ← Matrix mean-pooling
-        ├── level3.py                 ← Attention-pooled embeddings
-        └── level4.py                 ← Cross-attention (DT-Kinase)
+        ├── level2.py                 ← Matrix mean-pooling → KNN/MLP
+        ├── level3.py                 ← Projection + attention pooling → KNN/MLP
+        └── level4.py                 ← Cross-attention encoder → KNN/MLP
 ```
 
 ## Design Principles
@@ -113,11 +113,10 @@ Provides the canonical KNN and MLP classifiers used by all four levels.
 ### `orchestrator.py`
 Coordinates the pipeline in order:
 1. Verify/generate scaffold splits
-2. Extract ligand vectors (if Level 3 requested)
-3. Fine-tuning (if `--finetune` flag)
-4. Run requested levels (each via its `BaseLevelRunner`)
-5. Aggregate metrics, print table, save JSON
-6. Generate visualizations
+2. Fine-tuning (if `--finetune` flag)
+3. Run requested levels (each via its `BaseLevelRunner`)
+4. Aggregate metrics, print table, save JSON
+5. Generate visualizations
 
 ### `levels/base.py`
 Abstract base class with:
@@ -130,9 +129,9 @@ Abstract base class with:
 Concrete runners implementing `run_single_seed()`. Each one produces a different molecular representation, then feeds it into the **same canonical KNN/MLP classifiers** (`benchmark.classifiers.train_knn_mlp`):
 
 - **Level 1**: Morgan fingerprints via `split_comparison_analysis.run_single_dataset(feature_type="fingerprint")`.
-- **Level 2**: Per-residue protein + per-token ligand matrices → mean pooling → `train_knn_mlp()`.
-- **Level 3**: Attention-pooled embeddings via `split_comparison_analysis.run_single_dataset(feature_type="embedding")`.
-- **Level 4**: Trains cross-attention model → extracts pre-head features → `train_knn_mlp()`.
+- **Level 2**: Same matrices as Level 4 → mean pooling (no parameters) → `train_knn_mlp()`.
+- **Level 3**: Same matrices as Level 4 → projection + attention pooling (learned) → `train_knn_mlp()`.
+- **Level 4**: Same matrices → trains cross-attention encoder → extracts pre-head features → `train_knn_mlp()`.
 
 ### `finetuning.py`
 Optional step that:

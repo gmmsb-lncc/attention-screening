@@ -30,10 +30,10 @@ from benchmark.config import (
 _MODEL_ORDER = [
     "level1_fp_knn",
     "level1_fp_mlp",
-    "level2_emb_knn",
-    "level2_emb_mlp",
-    "level3_mat_knn",
-    "level3_mat_mlp",
+    "level2_meanpool_knn",
+    "level2_meanpool_mlp",
+    "level3_attnpool_knn",
+    "level3_attnpool_mlp",
     "level4_crossatt_knn",
     "level4_crossatt_mlp",
 ]
