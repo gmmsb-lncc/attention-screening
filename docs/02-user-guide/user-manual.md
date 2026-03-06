@@ -42,14 +42,14 @@ python -m pytest tests/ -v
 ```bash
 source env/bin/activate
 
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1
 ```
 
 ### Regression (Quantitative Prediction)
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1 \
     --no-classification
@@ -63,14 +63,14 @@ python run_complete_pipeline.py \
 
 #### Basic Usage
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/experiment1
 ```
 
 #### Advanced Options
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/experiment1 \
     --protein-model esm2_t36_3B_UR50D \
@@ -374,10 +374,10 @@ python setup.py
 #### 2. CUDA out of memory
 ```bash
 # Solution 1: Reduce batch size
-python run_complete_pipeline.py --batch-size 4
+python scripts/run_complete_pipeline.py --batch-size 4
 
 # Solution 2: Use CPU
-python run_complete_pipeline.py --device cpu
+python scripts/run_complete_pipeline.py --device cpu
 ```
 
 #### 3. No activity values found

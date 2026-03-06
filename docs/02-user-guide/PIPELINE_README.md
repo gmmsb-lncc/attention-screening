@@ -22,7 +22,7 @@ Level 1 (Baseline)  →  Level 2 (Embeddings)  →  Level 3 (Cross-Attention)  �
 - **MCC típico**: ~0.40-0.45
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 1 \
@@ -59,7 +59,7 @@ pooled_vector = (embeddings * attention_weights).sum(dim=1)  # [batch, dim]
 - ✅ Mantém compatibilidade com modelos clássicos (KNN, MLP)
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 2 \
@@ -161,7 +161,7 @@ output = concat(attention_1, ..., attention_8)  # [batch, seq, 512]
 - Classifier: ~7.9M
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 3 \
@@ -186,7 +186,7 @@ python semantic_screening_models_beta.py \
 - **Fase 3**: Ensemble de modelos
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
@@ -202,7 +202,7 @@ python semantic_screening_models_beta.py \
 Execute todos os níveis sequencialmente:
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 1 2 3 \

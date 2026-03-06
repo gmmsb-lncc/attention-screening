@@ -60,7 +60,7 @@ Quando você utiliza o **Boltz**, o modelo concatena apenas **Boltz + FM4M (liga
 Quando você roda o pipeline com Boltz:
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data.tsv \
     --protein-model boltz2 \
     --ligand-model SMI-TED

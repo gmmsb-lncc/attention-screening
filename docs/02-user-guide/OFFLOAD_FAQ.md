@@ -7,7 +7,7 @@
 
 ```bash
 # ✅ MESMO COMANDO DE SEMPRE
-source env/bin/activate && python run_complete_pipeline.py \
+source env/bin/activate && python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_nomenclature_fix_v3 \
     --esm-model esm2_t6_8M_UR50D \
@@ -55,7 +55,7 @@ else:
 ### **Exemplo 1: Modelo Pequeno (8M) - SEU CASO**
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_small \
     --esm-model esm2_t6_8M_UR50D \
@@ -76,7 +76,7 @@ python run_complete_pipeline.py \
 ### **Exemplo 2: Modelo Grande (3B) - COM OFFLOADING**
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_large \
     --esm-model esm2_t36_3B_UR50D \
@@ -101,7 +101,7 @@ python run_complete_pipeline.py \
 ### **Exemplo 3: Modelo Gigante (15B) - FUNCIONA!**
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_huge \
     --esm-model esm2_t48_15B_UR50D \
@@ -203,7 +203,7 @@ self.model_manager = ModelManager(
 
 ```bash
 # Execute seu comando normal
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test \
     --esm-model esm2_t6_8M_UR50D
@@ -224,7 +224,7 @@ python run_complete_pipeline.py \
 ```bash
 # ⚠️ ATENÇÃO: Modelo 3B demora ~5-10 min para baixar na primeira vez
 
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \
     --output results/test_large \
     --esm-model esm2_t36_3B_UR50D \

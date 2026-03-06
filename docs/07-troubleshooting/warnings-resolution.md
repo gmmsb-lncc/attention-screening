@@ -201,7 +201,7 @@
 ✅ Documentação completa disponível em `docs/USER_GUIDE.md`
 ✅ Setup automático disponível via `setup.py`
 ✅ Validação final pode ser executada via `pytest tests/`
-✅ **Classification pipeline**: `python run_complete_pipeline.py`
+✅ **Classification pipeline**: `python scripts/run_complete_pipeline.py`
 ✅ **Regression pipeline**: `python run_regression_pipeline.py` ⭐
 
 ---

@@ -83,7 +83,7 @@ CC(=O)Oc1ccccc1C(=O)O	MKTAYIAK...	1	10.5	25.3	100.0
 
 ### **3A.1 Complete Pipeline**
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/your_file.tsv \
     --output results/my_experiment \
     --model esm2_t36_3B_UR50D \
@@ -160,7 +160,7 @@ source env/bin/activate
 python setup.py
 
 # 2. Classification
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1
 
@@ -174,7 +174,7 @@ python run_regression_pipeline.py \
 ### **Advanced (Custom Configuration)**
 ```bash
 # Classification with GPU
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input src/database/data.tsv \
     --output results/exp1 \
     --model esm2_t36_3B_UR50D \
@@ -245,10 +245,10 @@ results/my_experiment/
 ### **CUDA out of memory**
 ```bash
 # Reduce batch size
-python run_complete_pipeline.py --batch-size 4
+python scripts/run_complete_pipeline.py --batch-size 4
 
 # Or use CPU
-python run_complete_pipeline.py --device cpu
+python scripts/run_complete_pipeline.py --device cpu
 ```
 
 ### **Module not found**

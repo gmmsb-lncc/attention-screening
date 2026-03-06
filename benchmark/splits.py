@@ -63,7 +63,7 @@ def ensure_scaffold_splits(config: BenchmarkConfig) -> bool:
 
     cmd = [
         sys.executable,
-        "scaffold_split.py",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "scaffold_split.py"),
         "--output-dir",
         scaffold_split_dir,
         "--scenarios",
@@ -75,8 +75,8 @@ def ensure_scaffold_splits(config: BenchmarkConfig) -> bool:
         subprocess.run(cmd, check=True, capture_output=False)
         return True
     except subprocess.CalledProcessError as exc:
-        print(f"  ERROR: scaffold_split.py failed with code {exc.returncode}")
+        print(f"  ERROR: scripts/scaffold_split.py failed with code {exc.returncode}")
         return False
     except FileNotFoundError:
-        print("  ERROR: scaffold_split.py not found")
+        print("  ERROR: scripts/scaffold_split.py not found")
         return False

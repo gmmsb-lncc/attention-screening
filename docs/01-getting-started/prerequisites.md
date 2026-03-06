@@ -199,7 +199,7 @@ print('✅ Dual pipeline system ready!')
 pytest tests/ -v
 
 # Testar classification pipeline
-python run_complete_pipeline.py --help
+python scripts/run_complete_pipeline.py --help
 
 # Testar regression pipeline (NOVO!)
 python run_regression_pipeline.py --help
@@ -336,7 +336,7 @@ Após instalação completa, você terá acesso a:
 
 ### Classification Pipeline (6 modelos):
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset data/test_dataset_1000.tsv \
     --output-dir results/classification
 ```

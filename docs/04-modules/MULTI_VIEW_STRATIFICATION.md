@@ -188,18 +188,18 @@ Test:  Cluster 1 (20%), Cluster 2 (20%), Cluster 3 (20%)
 
 ```bash
 # Auto threshold with target method (default)
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/auto_strat
 
 # Manual threshold
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/manual_strat \
     --stratifier-threshold 0.95
 
 # Custom auto-threshold method
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --input data/kinase_compounds.tsv \
     --output results/silhouette_strat \
     --stratifier-method silhouette

@@ -30,7 +30,7 @@ python setup.py
 
 ```bash
 # Pipeline completo: embeddings + build + classificação
-python run_complete_pipeline.py
+python scripts/run_complete_pipeline.py
 
 # Ou apenas classificação (se embeddings já existem)
 python -m src.classifier.train
@@ -81,7 +81,7 @@ python setup.py
 source env/bin/activate
 
 # 3. Pipeline COMPLETO (classificação + regressão)
-python run_complete_pipeline.py      # Classificação
+python scripts/run_complete_pipeline.py      # Classificação
 python run_regression_pipeline.py    # Regressão
 
 # Resultados salvos em:

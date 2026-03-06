@@ -96,7 +96,7 @@ def download_with_retry(func, max_retries=3):
    env\Scripts\activate  # Windows
    
    # Run classification pipeline
-   python run_complete_pipeline.py
+   python scripts/run_complete_pipeline.py
    
    # OR run regression pipeline
    python run_regression_pipeline.py --help
@@ -109,7 +109,7 @@ def download_with_retry(func, max_retries=3):
 source env/bin/activate
 
 # Run pipeline
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset data/test_dataset_1000.tsv \
     --output-dir results/test_run
 ```
@@ -230,7 +230,7 @@ git clone https://github.com/gmmsb-lncc/docktkinase.git
 cd docktkinase
 python setup.py                    # Creates env + installs deps + downloads models
 source env/bin/activate
-python run_complete_pipeline.py   # Test classification
+python scripts/run_complete_pipeline.py   # Test classification
 python run_regression_pipeline.py --help  # Test regression
 ```
 

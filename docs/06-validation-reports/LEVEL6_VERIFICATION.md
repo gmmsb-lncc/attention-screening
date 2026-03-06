@@ -69,7 +69,7 @@ Search space: ['d_model', 'nhead', 'num_encoder_layers', 'dim_feedforward', 'dro
 ## 🚀 Comando de Execução
 
 ```bash
-python semantic_screening_models_beta.py \
+python semantic_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
@@ -193,7 +193,7 @@ pip install optuna
    - `LEVEL6_VERIFICATION.md` - Este arquivo
 
 2. **Código**:
-   - `semantic_screening_models_beta.py` - Entry point
+   - `semantic_screening_models.py` (or `legacy/semantic_screening_models_beta.py`) - Entry point
    - `src/models/level6_optimized.py` - Arquitetura
    - `configs/level6_hparam_search.json` - Config HPO
 

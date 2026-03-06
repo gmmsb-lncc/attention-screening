@@ -42,7 +42,7 @@ def run_molformer_for_protein_models():
         
         # Comando para executar o pipeline
         cmd = [
-            "python", "run_complete_pipeline.py",
+            "python", "scripts/run_complete_pipeline.py",
             "--input", dataset_path,
             "--output", output_dir,
             "--ligand-model", "MOLFORMER",      # Usar MoLFormer

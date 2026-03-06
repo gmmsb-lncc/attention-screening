@@ -66,7 +66,7 @@ Isso reduz fragmentação de memória.
 
 ### Comando Básico
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset all \
     --model esm2_t36_3B_UR50D \
     --device cuda
@@ -77,7 +77,7 @@ O batch size será ajustado **automaticamente** baseado na memória disponível.
 ### Monitoramento
 ```bash
 # Terminal 1: Executar pipeline
-nohup python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda > logs/production.log 2>&1 &
+nohup python scripts/run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda > logs/production.log 2>&1 &
 
 # Terminal 2: Monitorar logs
 tail -f logs/production.log
@@ -159,7 +159,7 @@ max_retries = 5  # Padrão: 3
 
 **Solução 1**: Usar modelo menor
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --model esm2_t33_650M_UR50D \  # Menor (650M parâmetros)
     --device cuda
 ```
@@ -167,14 +167,14 @@ python run_complete_pipeline.py \
 **Solução 2**: Processar em chunks
 ```bash
 # Processar 10k sequências por vez
-python run_complete_pipeline.py --max-samples 10000 --output-dir results/chunk1
-python run_complete_pipeline.py --max-samples 10000 --output-dir results/chunk2
+python scripts/run_complete_pipeline.py --max-samples 10000 --output-dir results/chunk1
+python scripts/run_complete_pipeline.py --max-samples 10000 --output-dir results/chunk2
 # ... combinar resultados
 ```
 
 **Solução 3**: Usar CPU (muito mais lento)
 ```bash
-python run_complete_pipeline.py --device cpu
+python scripts/run_complete_pipeline.py --device cpu
 ```
 
 ### Problema: Checkpoint não está sendo removido
@@ -191,7 +191,7 @@ rm -f tmp/embedding_checkpoint.npz
 **Solução**: Definir variável de ambiente **antes** de executar
 ```bash
 export PYTORCH_ALLOC_CONF=expandable_segments:True
-python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda
+python scripts/run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device cuda
 ```
 
 ## 📈 Performance
@@ -232,7 +232,7 @@ python run_complete_pipeline.py --dataset all --model esm2_t36_3B_UR50D --device
 
 ```bash
 # Testar com 1000 amostras primeiro
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --max-samples 1000 \
     --model esm2_t36_3B_UR50D \
     --device cuda
@@ -242,7 +242,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Modelo menor + GPU potente
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --model esm2_t30_150M_UR50D \
     --device cuda
 ```

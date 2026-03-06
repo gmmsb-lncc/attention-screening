@@ -381,7 +381,7 @@ python examples/demo_esmc_phase1.py
 pytest tests/test_esmc_strategy.py -v
 
 # 4. Integrate with pipeline
-python run_complete_pipeline.py --model esmc-300m-2024-12 --sequences input.fasta
+python scripts/run_complete_pipeline.py --model esmc-300m-2024-12 --sequences input.fasta
 
 # 🚀 Phase 1 Complete! Move to Phase 2 (ESM-3 full models)
 ```

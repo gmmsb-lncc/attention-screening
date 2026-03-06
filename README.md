@@ -45,15 +45,17 @@ For detailed information:
 - **[CrossAttention Lite (Detailed Visual Guide)](crossattention_split_analysis/CROSS_ATTENTION_LITE.md)** - Detailed explanation of the lightweight bidirectional token-to-token cross-attention variant.
 - **[Diffusion Variant (Detailed Guide)](crossattention_split_analysis/DIFFUSION.md)** - Diffusion-based classifier with SNR‑weighted loss, cross‑attention after denoising, multi‑query pooling, classification‑only mode, and a didactic flow diagram.
 - **[Diffusion vs CNN Cross‑Attention](docs/DIFFUSION_VS_CNN.md)** - Why diffusion can outperform CNNs in highly similar datasets (with mathematical rationale).
-- **[Suggested Command Presets](crossattention_split_analysis_main.py)** - Run `--print_suggested_commands` to print common training commands.
+- **[Suggested Command Presets](legacy/crossattention_split_analysis_main.py)** - Run `--print_suggested_commands` to print common training commands.
 - **Ligand input modes**: MoLFormer matrices are default; use `--smited_ligand` or `--ligand_vectors` to override.
 - **External test protocol**: Use `--external_test_mode` to train on train/val only and automatically evaluate on `scaffolds_splits/output/{dataset}_test.tsv` (or `.tsv.gz`) after training.
 - **[Stratification Guide](docs/methodology.md#chapter-7-stratification--validation-methodology)** - Scaffold-based splitting methodology (Murcko scaffolds).
-- **[Unified Benchmark](docs/methodology.md#chapter-11-unified-benchmark-pipeline)** - 4-level model comparison with KNN/MLP for each level:
-  - **Level 1**: Fingerprint (ECFP 1024) + KNN/MLP
-  - **Level 2**: Embedding Vectors + KNN/MLP  
-  - **Level 3**: Matrices + Attention Pooling + KNN/MLP
-  - **Level 4**: Matrices + Transformer + Cross-Attention + KNN/MLP
+- **[Unified Benchmark](docs/methodology.md#chapter-11-unified-benchmark-pipeline)** - 6-level model comparison with KNN/MLP for each level:
+  - **Level 1a**: Fingerprint (ECFP 1024) + KNN/MLP
+  - **Level 1b**: Ligand MoLFormer mean pooling + KNN/MLP
+  - **Level 1c**: Ligand MoLFormer attention pooling + KNN/MLP
+  - **Level 2**: Protein+Ligand mean pooling + KNN/MLP  
+  - **Level 3**: Protein+Ligand attention pooling + KNN/MLP
+  - **Level 4**: Cross-Attention + KNN/MLP
 
 ---
 
@@ -207,17 +209,17 @@ Analysis of ChEMBL kinase datasets reveals significant monotonic contamination:
 
 ### Filtering Options
 
-The `split_comparison_analysis.py` script provides filtering to remove trivial cases:
+The `scripts/split_comparison_analysis.py` script provides filtering to remove trivial cases:
 
 ```bash
 # Default: removes monotonic kinases (recommended)
-python crossattention_split_analysis_main.py --embedding 150M --dataset human
+python legacy/crossattention_split_analysis_main.py --embedding 150M --dataset human
 
 # Keep monotonic kinases (NOT recommended, inflates metrics)
-python crossattention_split_analysis_main.py --embedding 150M --dataset human --keep_monotonic
+python legacy/crossattention_split_analysis_main.py --embedding 150M --dataset human --keep_monotonic
 
 # Remove monotonic compounds (pan-active and pan-inactive)
-python crossattention_split_analysis_main.py --embedding 150M --dataset human --filter_monotonic_compounds
+python legacy/crossattention_split_analysis_main.py --embedding 150M --dataset human --filter_monotonic_compounds
 ```
 
 ### What Gets Removed
@@ -237,7 +239,7 @@ When `--filter_monotonic_compounds` is enabled:
 2. **Force Generalization**: After filtering, the model must learn chemical features that determine selectivity
 3. **Identify Artifacts**: Pan-active compounds may indicate assay interference; pan-inactive may be negative controls
 
-**Detailed analysis**: See [KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md](KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md) for complete statistics.
+**Detailed analysis**: See [KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md](docs/06-validation-reports/KINASE_COMPOUND_EXTREME_PROFILES_REPORT.md) for complete statistics.
 
 ---
 
@@ -245,10 +247,16 @@ When `--filter_monotonic_compounds` is enabled:
 
 ```
 semantic-screening/
-├── semantic_screening_models_beta.py   # Unified 3-level benchmark orchestrator
-├── scaffold_split.py                   # Scaffold split generation (Murcko)
-├── split_comparison_analysis.py        # Level 1 & 2 analysis (KNN/MLP)
-├── crossattention_split_analysis/      # Level 3 analysis (CNN+CrossAttention)
+├── semantic_screening_models.py        # Unified 6-level benchmark entry point
+├── benchmark/                          # Modular benchmark package (SOLID)
+│   ├── cli.py                          # CLI parser & config builder
+│   ├── orchestrator.py                 # Multi-seed orchestrator
+│   ├── levels/                         # Level runners (1a, 1b, 1c, 2, 3, 4)
+│   ├── classifiers.py                  # Canonical KNN/MLP
+│   ├── metrics.py                      # Metric aggregation
+│   └── visualization.py                # Plot generation
+│
+├── crossattention_split_analysis/      # Cross-attention analysis module
 │   ├── experiment.py                   # Multi-seed experiment runner
 │   ├── config.py                       # Training config, constants
 │   ├── data/                           # Datasets & splits
@@ -267,7 +275,12 @@ semantic-screening/
 │   ├── classifier/                     # Classical ML classification
 │   └── regression/                     # Classical ML regression
 │
-├── scripts/                            # Analysis & visualization scripts
+├── scripts/                            # Utility & analysis scripts
+│   ├── scaffold_split.py               # Scaffold split generation (Murcko)
+│   ├── split_comparison_analysis.py    # Standalone split analysis
+│   ├── run_complete_pipeline.py        # Full embedding pipeline
+│   └── ...                             # Visualization, extraction scripts
+├── legacy/                             # Deprecated code (monolithic beta)
 ├── docs/                               # Comprehensive documentation
 └── tests/                              # Unit and integration tests
 ```
@@ -292,23 +305,23 @@ python scripts/post_install.py
 ### Running the Unified Benchmark
 
 ```bash
-# Full benchmark: all 4 levels (non-human dataset, ESM-2 8M)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2,3,4
+# Full benchmark: all 6 levels (non-human dataset, ESM-2 8M)
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a 1b 1c 2 3 4
 
 # Human dataset
-python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1,2,3,4
+python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3 4
 
 # Combined (human + non_human)
-python semantic_screening_models_beta.py --dataset all --embedding 8M --levels 1,2,3,4
+python semantic_screening_models.py --dataset all --embedding 8M --levels 1a 1b 1c 2 3 4
 
-# Quick baseline: Levels 1 & 2 only (no GPU needed)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 1,2
+# Quick baseline: Level 1a only (fingerprint, no GPU needed)
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a
 
-# Level 3 only: Matrices + Attention Pooling + KNN/MLP
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 3
+# Levels 1a-1c: FP vs embedding comparison (no GPU)
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a 1b 1c
 
-# Level 4 only: Matrices + Cross-Attention + KNN/MLP (requires GPU)
-python semantic_screening_models_beta.py --dataset non_human --embedding 8M --levels 4 \
+# Level 4 only: Cross-Attention + KNN/MLP (requires GPU)
+python semantic_screening_models.py --dataset non_human --embedding 8M --levels 4 \
     --epochs 100 --batch_size 32 --patience 15
 ```
 
@@ -319,23 +332,22 @@ and timing per step.
 
 ```bash
 # Generate scaffold splits only
-python scaffold_split.py --output-dir scaffolds_splits/output --scenarios Sc
+python scripts/scaffold_split.py --output-dir scaffolds_splits/output --scenarios Sc
 
 # Level 1 & 2 analysis standalone
-python split_comparison_analysis.py --dataset non_human --scenarios scaffold
+python scripts/split_comparison_analysis.py --dataset non_human --scenarios scaffold
 
-# Level 3 (CNN+CrossAttention) standalone
-python crossattention_split_analysis_main.py --embedding 8M --dataset non_human
+# Cross-attention analysis (legacy entry point)
+python legacy/crossattention_split_analysis_main.py --embedding 8M --dataset non_human
 ```
 
 ## CLI Reference
 
 | Script | Description | Key Arguments |
 |--------|-------------|---------------|
-| `semantic_screening_models_beta.py` | **Unified 4-level benchmark** with KNN/MLP comparison | `--dataset`, `--embedding`, `--levels`, `--epochs` |
-| `scaffold_split.py` | Generate scaffold splits | `--output-dir`, `--scenarios`, `--seed` |
-| `split_comparison_analysis.py` | Baseline models (KNN/MLP) for Levels 1-2 | `--dataset`, `--feature_type`, `--scaffold_split_dir` |
-| `crossattention_split_analysis_main.py` | DT-Kinase training (alternative) | `--embedding`, `--dataset`, `--seeds` |
+| `semantic_screening_models.py` | **Unified 6-level benchmark** (modular) | `--dataset`, `--embedding`, `--levels`, `--epochs` |
+| `scripts/scaffold_split.py` | Generate scaffold splits | `--output-dir`, `--scenarios`, `--seed` |
+| `scripts/split_comparison_analysis.py` | Baseline models (KNN/MLP) for analysis | `--dataset`, `--feature_type`, `--scaffold_split_dir` |
 
 See [User Guide](docs/02-user-guide/) for full parameter lists.
 

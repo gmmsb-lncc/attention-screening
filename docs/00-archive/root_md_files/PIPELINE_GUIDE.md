@@ -18,7 +18,7 @@ O pipeline executa automaticamente:
 ### Teste Rápido (100 amostras)
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset human \
     --model esm2_t6_8M_UR50D \
     --max-samples 100 \
@@ -28,7 +28,7 @@ python run_complete_pipeline.py \
 ### Dataset Completo Humano
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset human \
     --model esm2_t33_650M_UR50D \
     --output-dir results_human
@@ -37,7 +37,7 @@ python run_complete_pipeline.py \
 ### Dataset Não-Humano
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset non_human \
     --model esm2_t6_8M_UR50D \
     --output-dir results_non_human
@@ -46,7 +46,7 @@ python run_complete_pipeline.py \
 ### Dataset Completo (All)
 
 ```bash
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset all \
     --model esm2_t36_3B_UR50D \
     --device cuda \
@@ -75,7 +75,7 @@ python run_complete_pipeline.py \
 ## ⚙️ Argumentos Completos
 
 ```bash
-python run_complete_pipeline.py [OPÇÕES]
+python scripts/run_complete_pipeline.py [OPÇÕES]
 
 Argumentos:
   --dataset {human,non_human,all}
@@ -144,7 +144,7 @@ Contém todas as estatísticas do pipeline:
 
 ```bash
 # Teste com 500 amostras, modelo pequeno
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset human \
     --model esm2_t6_8M_UR50D \
     --max-samples 500 \
@@ -157,7 +157,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Dataset não-humano completo, modelo médio
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset non_human \
     --model esm2_t33_650M_UR50D \
     --device cuda \
@@ -170,7 +170,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Dataset humano completo, melhor modelo
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset human \
     --model esm2_t36_3B_UR50D \
     --device cuda \
@@ -184,7 +184,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Todos os dados, modelo grande
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --dataset all \
     --model esm2_t36_3B_UR50D \
     --device cuda \
@@ -217,14 +217,14 @@ O pipeline valida automaticamente que o split está balanceado:
 
 ```bash
 # Usar modelo pequeno
-python run_complete_pipeline.py --model esm2_t6_8M_UR50D
+python scripts/run_complete_pipeline.py --model esm2_t6_8M_UR50D
 ```
 
 ### GPU
 
 ```bash
 # Usar modelo grande com CUDA
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --model esm2_t36_3B_UR50D \
     --device cuda
 ```
@@ -233,7 +233,7 @@ python run_complete_pipeline.py \
 
 ```bash
 # Limitar amostras
-python run_complete_pipeline.py --max-samples 1000
+python scripts/run_complete_pipeline.py --max-samples 1000
 ```
 
 ## 🔧 Requisitos de Sistema
@@ -262,24 +262,24 @@ python run_complete_pipeline.py --max-samples 1000
 
 ```bash
 # Usar modelo menor
-python run_complete_pipeline.py --model esm2_t6_8M_UR50D
+python scripts/run_complete_pipeline.py --model esm2_t6_8M_UR50D
 
 # Ou usar CPU
-python run_complete_pipeline.py --device cpu
+python scripts/run_complete_pipeline.py --device cpu
 ```
 
 ### Dataset muito grande
 
 ```bash
 # Limitar amostras
-python run_complete_pipeline.py --max-samples 10000
+python scripts/run_complete_pipeline.py --max-samples 10000
 ```
 
 ### Pipeline lento
 
 ```bash
 # Usar modelo menor e GPU
-python run_complete_pipeline.py \
+python scripts/run_complete_pipeline.py \
     --model esm2_t6_8M_UR50D \
     --device cuda
 ```
