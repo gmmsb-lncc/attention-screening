@@ -180,7 +180,7 @@ def _butina_cluster(
             valid_scaffolds.append(smi)
 
     if not fps:
-        return _frequency_cluster(scaffolds, max_clusters)
+        return _frequency_cluster(scaffolds, scaffolds, max_clusters)
 
     # Compute pairwise distance matrix (upper triangle)
     n = len(fps)

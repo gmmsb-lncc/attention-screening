@@ -212,6 +212,7 @@ class BANLayer(nn.Module):
             logits = logits + self.attention_pooling(
                 v_, q_, att_maps[:, i, :, :]
             )
-        logits = self.bn(logits)
+        if logits.size(0) > 1 or not self.training:
+            logits = self.bn(logits)
 
         return logits, att_maps
