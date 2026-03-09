@@ -150,6 +150,8 @@ def build_scaffold_clusters(
         Mapping from scaffold SMILES to cluster id (0-indexed).
     """
     unique_scaffolds = list(dict.fromkeys(scaffolds))  # deduplicate, preserve order
+    # Filter out NaN / non-string scaffold values that come from missing data
+    unique_scaffolds = [s for s in unique_scaffolds if isinstance(s, str)]
 
     try:
         return _butina_cluster(unique_scaffolds, cutoff, num_clusters)
