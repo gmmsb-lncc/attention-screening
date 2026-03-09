@@ -47,13 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3,4,5",
+        default="1a,1b,1c,2,3,4,5,5b",
         nargs="*",
         help=(
             "Levels to run: 1a=FP, 1b=LigandMeanPool, 1c=LigandAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAtt, 5=DA "
-            "(default: 1a,1b,1c,2,3,4,5). "
-            "Examples: --levels 1a 1b 1c 2 3 4 5 OR --levels 1a,2,4,5"
+            "2=MeanPool, 3=AttnPool, 4=CrossAtt, 5=DA, 5b=AttnPool+DA "
+            "(default: 1a,1b,1c,2,3,4,5,5b). "
+            "Examples: --levels 1a 1b 1c 2 3 4 5 5b OR --levels 1a,2,4,5,5b"
         ),
     )
 
