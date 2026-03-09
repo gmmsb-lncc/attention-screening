@@ -219,6 +219,8 @@ MODEL_VARIANT_TO_ENCODER = {
     'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
     'level5_da': 'level5_da',
     'level5b_da': 'level5b_da',
+    'level6a': 'level6a',
+    'level6b': 'level6b',
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -229,6 +231,8 @@ MODEL_VARIANT_TO_LABEL = {
     'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
     'level5_da': 'Level5-DA',
     'level5b_da': 'Level5b-DA',
+    'level6a': 'Level6a-BAN',
+    'level6b': 'Level6b-BAN',
 }
 
 
@@ -288,7 +292,7 @@ def run_scenario(
 
     # Inject scaffold domain labels for Level 5 / 5b DA
     num_domains = 16
-    if config.model_variant in ('level5_da', 'level5b_da') and 'scaffold' in train_df.columns:
+    if config.model_variant in ('level5_da', 'level5b_da', 'level6a', 'level6b') and 'scaffold' in train_df.columns:
         from .models.level5_da.domain_adaptation import build_scaffold_clusters
         scaffold_to_cluster = build_scaffold_clusters(
             train_df['scaffold'].tolist(),
@@ -402,6 +406,28 @@ def run_scenario(
             ligand_input_dim=config.ligand_dim,
             hidden_dim=config.hidden_dim,
             num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level6a":
+        from .models.level6a import Level6aModel
+        model = Level6aModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level6b":
+        from .models.level6b import Level6bModel
+        model = Level6bModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
             dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
             num_domains=num_domains,
@@ -1070,6 +1096,10 @@ def run_single_analysis(
         variant_prefix = 'da_'
     elif model_variant == 'level5b_da':
         variant_prefix = 'da5b_'
+    elif model_variant == 'level6a':
+        variant_prefix = 'ban6a_'
+    elif model_variant == 'level6b':
+        variant_prefix = 'ban6b_'
     else:
         variant_prefix = ''
     prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{molformer_prefix}{ligvec_prefix}{short_name}_"

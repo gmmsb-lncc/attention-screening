@@ -44,6 +44,10 @@ _MODEL_ORDER = [
     "level5_da_mlp",
     "level5b_da_knn",
     "level5b_da_mlp",
+    "level6a_ban_knn",
+    "level6a_ban_mlp",
+    "level6b_ban_knn",
+    "level6b_ban_mlp",
 ]
 
 
