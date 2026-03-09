@@ -76,6 +76,8 @@ def aggregate_benchmark_metrics(
     level4_results: Optional[Dict] = None,
     level5_results: Optional[Dict] = None,
     level5b_results: Optional[Dict] = None,
+    level6a_results: Optional[Dict] = None,
+    level6b_results: Optional[Dict] = None,
 ) -> Dict[str, Dict[str, Optional[float]]]:
     """Aggregate metrics from all levels into a unified dict.
 
@@ -98,6 +100,8 @@ def aggregate_benchmark_metrics(
         (level4_results, [("KNN", "level4_crossatt_knn"), ("MLP", "level4_crossatt_mlp")]),
         (level5_results, [("KNN", "level5_da_knn"), ("MLP", "level5_da_mlp")]),
         (level5b_results, [("KNN", "level5b_da_knn"), ("MLP", "level5b_da_mlp")]),
+        (level6a_results, [("KNN", "level6a_ban_knn"), ("MLP", "level6a_ban_mlp")]),
+        (level6b_results, [("KNN", "level6b_ban_knn"), ("MLP", "level6b_ban_mlp")]),
     ]
 
     for results, model_pairs in _level_mapping:

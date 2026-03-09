@@ -32,6 +32,8 @@ from benchmark.levels.level3 import Level3Runner
 from benchmark.levels.level4 import Level4Runner
 from benchmark.levels.level5 import Level5Runner
 from benchmark.levels.level5b import Level5bRunner
+from benchmark.levels.level6a import Level6aRunner
+from benchmark.levels.level6b import Level6bRunner
 from benchmark.metrics import aggregate_benchmark_metrics
 from benchmark.progress import BenchmarkProgress
 from benchmark.reporting import print_comparison_table, save_benchmark_json
@@ -129,6 +131,8 @@ class BenchmarkOrchestrator:
             level4_results=self._level_results.get("4"),
             level5_results=self._level_results.get("5"),
             level5b_results=self._level_results.get("5b"),
+            level6a_results=self._level_results.get("6a"),
+            level6b_results=self._level_results.get("6b"),
         )
 
         if not self._aggregated:
@@ -175,6 +179,12 @@ class BenchmarkOrchestrator:
 
         if "5b" in config.levels:
             runners.append(("5b", Level5bRunner(config), "Step 5b: Level 5b (AttnPool+DA+KNN/MLP)"))
+
+        if "6a" in config.levels:
+            runners.append(("6a", Level6aRunner(config), "Step 6a: Level 6a (BAN+CrossAttn+KNN/MLP)"))
+
+        if "6b" in config.levels:
+            runners.append(("6b", Level6bRunner(config), "Step 6b: Level 6b (BAN+KNN/MLP)"))
 
         return runners
 

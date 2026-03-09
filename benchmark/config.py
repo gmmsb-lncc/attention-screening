@@ -68,6 +68,10 @@ LEVEL_LABELS: Dict[str, str] = {
     "level5_da_mlp": "L5 (DA+MLP)",
     "level5b_da_knn": "L5b (AttnPool+DA+KNN)",
     "level5b_da_mlp": "L5b (AttnPool+DA+MLP)",
+    "level6a_ban_knn": "L6a (BAN+CrossAttn+KNN)",
+    "level6a_ban_mlp": "L6a (BAN+CrossAttn+MLP)",
+    "level6b_ban_knn": "L6b (BAN+KNN)",
+    "level6b_ban_mlp": "L6b (BAN+MLP)",
 }
 
 # ---------------------------------------------------------------------------
@@ -91,13 +95,17 @@ LEVEL_COLORS: Dict[str, str] = {
     "level5_da_mlp": "#fb6a4a",
     "level5b_da_knn": "#ff7f00",
     "level5b_da_mlp": "#fdbf6f",
+    "level6a_ban_knn": "#984ea3",
+    "level6a_ban_mlp": "#cab2d6",
+    "level6b_ban_knn": "#a65628",
+    "level6b_ban_mlp": "#d2a679",
 }
 
 # ---------------------------------------------------------------------------
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5", "5b"})
+VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5", "5b", "6a", "6b"})
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -124,7 +132,7 @@ class BenchmarkConfig:
     embedding: str  # shorthand: "8M", "150M", "650M"
 
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5", "5b"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5", "5b", "6a", "6b"])
 
     # --- output ---
     output_dir: Optional[str] = None
