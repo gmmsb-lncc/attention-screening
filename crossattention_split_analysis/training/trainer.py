@@ -94,6 +94,14 @@ def train_epoch(
             losses['total'] = losses['total'] + scaled_auxiliary_loss
             losses['aux'] = scaled_auxiliary_loss.detach().item()
 
+        # Domain adversarial loss (Level 5 DA)
+        domain_logits = model_output.get('domain_logits')
+        if domain_logits is not None and 'domain_label' in batch:
+            domain_labels = batch['domain_label'].to(device)
+            domain_loss = F.cross_entropy(domain_logits, domain_labels)
+            losses['total'] = losses['total'] + domain_loss
+            losses['domain'] = domain_loss.detach().item()
+
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
             warnings.warn("NaN/Inf loss detected, skipping batch")
@@ -108,6 +116,8 @@ def train_epoch(
         total_reg_loss += losses['regression'].item()
         if 'aux' in losses:
             total_aux_loss += losses['aux']
+        if 'domain' in losses:
+            total_aux_loss += losses['domain']
         num_batches += 1
 
         progress_info = {
@@ -116,6 +126,8 @@ def train_epoch(
         }
         if 'aux' in losses:
             progress_info['aux'] = f"{losses['aux']:.4f}"
+        if 'domain' in losses:
+            progress_info['dom'] = f"{losses['domain']:.4f}"
         progress_bar.set_postfix(progress_info)
 
     if num_batches == 0:
@@ -214,6 +226,12 @@ def train_model(
             aux_loss_scale = max(0.0, 1.0 - (epoch / denom))
         else:
             aux_loss_scale = 1.0
+
+        # Update GRL lambda schedule (Level 5 DA)
+        if hasattr(model, 'set_grl_lambda'):
+            from ..models.level5_da.domain_adaptation import lambda_schedule
+            progress = epoch / max(1, config.num_epochs - 1)
+            model.set_grl_lambda(lambda_schedule(progress))
 
         # Train
         try:

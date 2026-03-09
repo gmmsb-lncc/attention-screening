@@ -35,6 +35,8 @@ MODEL_DISPLAY_ORDER = [
     "level3_attnpool_mlp",
     "level4_crossatt_knn",
     "level4_crossatt_mlp",
+    "level5_da_knn",
+    "level5_da_mlp",
 ]
 
 

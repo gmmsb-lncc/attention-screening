@@ -127,7 +127,7 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
-    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite'] = 'cnn_crossattn'
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite', 'level5_da'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8

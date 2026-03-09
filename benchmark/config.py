@@ -64,6 +64,8 @@ LEVEL_LABELS: Dict[str, str] = {
     "level3_attnpool_mlp": "L3 (AttnPool+MLP)",
     "level4_crossatt_knn": "L4 (CrossAtt+KNN)",
     "level4_crossatt_mlp": "L4 (CrossAtt+MLP)",
+    "level5_da_knn": "L5 (DA+KNN)",
+    "level5_da_mlp": "L5 (DA+MLP)",
 }
 
 # ---------------------------------------------------------------------------
@@ -83,13 +85,15 @@ LEVEL_COLORS: Dict[str, str] = {
     "level3_attnpool_mlp": "#e78e3f",
     "level4_crossatt_knn": "#e7298a",
     "level4_crossatt_mlp": "#f06ab6",
+    "level5_da_knn": "#e41a1c",
+    "level5_da_mlp": "#fb6a4a",
 }
 
 # ---------------------------------------------------------------------------
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4"})
+VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5"})
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -116,7 +120,7 @@ class BenchmarkConfig:
     embedding: str  # shorthand: "8M", "150M", "650M"
 
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5"])
 
     # --- output ---
     output_dir: Optional[str] = None
