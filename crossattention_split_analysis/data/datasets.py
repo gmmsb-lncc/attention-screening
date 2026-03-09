@@ -139,6 +139,10 @@ class AttentionMatrixDataset(Dataset):
                 result['regression_target'] = torch.tensor(0.0, dtype=torch.float32)
                 result['has_regression'] = torch.tensor(0, dtype=torch.float32)
 
+        # Domain label for adversarial domain adaptation (Level 5 DA / Level 6)
+        if 'domain_label' in self.data_df.columns:
+            result['domain_label'] = torch.tensor(int(row['domain_label']), dtype=torch.long)
+
         return result
 
 
@@ -186,15 +190,21 @@ def collate_attention_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
             regression_targets[i] = sample['regression_target']
             regression_mask[i] = sample.get('has_regression', torch.tensor(1))
 
-    return {
+    result = {
         'protein_matrix': protein_matrices,
         'ligand_matrix': ligand_matrices,
         'protein_mask': protein_masks,
         'ligand_mask': ligand_masks,
         'labels': labels,
         'regression_targets': regression_targets,
-        'regression_mask': regression_mask
+        'regression_mask': regression_mask,
     }
+
+    # Domain labels for adversarial domain adaptation (Level 5 DA / Level 6)
+    if 'domain_label' in batch[0]:
+        result['domain_label'] = torch.stack([s['domain_label'] for s in batch])
+
+    return result
 
 
 def create_attention_dataloader(
