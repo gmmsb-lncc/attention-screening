@@ -25,8 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 4\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 --finetune\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
         ),
     )
 
@@ -47,14 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3,4,5,5b,6a,6b",
+        default="1a,1b,1c,2,3,4,5a,5b,6a,6b",
         nargs="*",
         help=(
-            "Levels to run: 1a=FP, 1b=LigandMeanPool, 1c=LigandAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAtt, 5=DA, 5b=AttnPool+DA, "
-            "6a=BAN+CrossAttn, 6b=BAN "
-            "(default: 1a,1b,1c,2,3,4,5,5b,6a,6b). "
-            "Examples: --levels 1a 1b 1c 2 3 4 5 5b 6a 6b OR --levels 1a,2,4,5,6a"
+            "Levels to run: "
+            "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
+            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool, "
+            "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
+            "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
+            "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
+            "Examples: --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b OR --levels 1a,2,4,5a,6a"
         ),
     )
 

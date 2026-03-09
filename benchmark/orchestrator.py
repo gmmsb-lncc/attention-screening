@@ -129,7 +129,7 @@ class BenchmarkOrchestrator:
             level2_results=self._level_results.get("2"),
             level3_results=self._level_results.get("3"),
             level4_results=self._level_results.get("4"),
-            level5_results=self._level_results.get("5"),
+            level5_results=self._level_results.get("5a"),
             level5b_results=self._level_results.get("5b"),
             level6a_results=self._level_results.get("6a"),
             level6b_results=self._level_results.get("6b"),
@@ -157,34 +157,34 @@ class BenchmarkOrchestrator:
         runners: List[tuple[str, BaseLevelRunner, str]] = []
 
         if "1a" in config.levels:
-            runners.append(("1a", Level1Runner(config), "Step 1a: Level 1a (FP+KNN/MLP)"))
+            runners.append(("1a", Level1Runner(config), "Step 1a: L1a (FP+KNN/MLP)"))
 
         if "1b" in config.levels:
-            runners.append(("1b", Level1bRunner(config), "Step 1b: Level 1b (LigandMeanPool+KNN/MLP)"))
+            runners.append(("1b", Level1bRunner(config), "Step 1b: L1b (LigMeanPool+KNN/MLP)"))
 
         if "1c" in config.levels:
-            runners.append(("1c", Level1cRunner(config), "Step 1c: Level 1c (LigandAttnPool+KNN/MLP)"))
+            runners.append(("1c", Level1cRunner(config), "Step 1c: L1c (LigAttnPool+KNN/MLP)"))
 
         if "2" in config.levels:
-            runners.append(("2", Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
+            runners.append(("2", Level2Runner(config), "Step 2: L2 (MeanPool+KNN/MLP)"))
 
         if "3" in config.levels:
-            runners.append(("3", Level3Runner(config), "Step 3: Level 3 (AttnPool+KNN/MLP)"))
+            runners.append(("3", Level3Runner(config), "Step 3: L3 (AttnPool+KNN/MLP)"))
 
         if "4" in config.levels:
-            runners.append(("4", Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
+            runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
 
-        if "5" in config.levels:
-            runners.append(("5", Level5Runner(config), "Step 5: Level 5 (DA+KNN/MLP)"))
+        if "5a" in config.levels:
+            runners.append(("5a", Level5Runner(config), "Step 5a: L5a (CrossAttn+AttnPool+GRL+KNN/MLP)"))
 
         if "5b" in config.levels:
-            runners.append(("5b", Level5bRunner(config), "Step 5b: Level 5b (AttnPool+DA+KNN/MLP)"))
+            runners.append(("5b", Level5bRunner(config), "Step 5b: L5b (AttnPool+GRL+KNN/MLP)"))
 
         if "6a" in config.levels:
-            runners.append(("6a", Level6aRunner(config), "Step 6a: Level 6a (BAN+CrossAttn+KNN/MLP)"))
+            runners.append(("6a", Level6aRunner(config), "Step 6a: L6a (CrossAttn+BAN+GRL+KNN/MLP)"))
 
         if "6b" in config.levels:
-            runners.append(("6b", Level6bRunner(config), "Step 6b: Level 6b (BAN+KNN/MLP)"))
+            runners.append(("6b", Level6bRunner(config), "Step 6b: L6b (AttnPool+BAN+GRL+KNN/MLP)"))
 
         return runners
 

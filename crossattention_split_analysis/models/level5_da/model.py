@@ -129,6 +129,12 @@ class Level5DAModel(nn.Module):
             return_features=True,
         )
 
+        # Override regression to None — L5a is classification-only.
+        # The backbone (Level5LiteModel) returns a regression head for
+        # historical reasons, but the DA variant must not use it so that
+        # the trainer follows the classification-only BCE path.
+        out["regression"] = None
+
         features = out["features"]  # [B, 2*hidden_dim]
 
         # Domain adversarial branch

@@ -229,7 +229,7 @@ MODEL_VARIANT_TO_LABEL = {
     'diffusion': 'Diffusion',
     'level5_lite': 'Level5-Lite',
     'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
-    'level5_da': 'Level5-DA',
+    'level5_da': 'Level5a-DA',
     'level5b_da': 'Level5b-DA',
     'level6a': 'Level6a-BAN',
     'level6b': 'Level6b-BAN',
@@ -428,6 +428,7 @@ def run_scenario(
             protein_input_dim=config.protein_dim,
             ligand_input_dim=config.ligand_dim,
             hidden_dim=config.hidden_dim,
+            num_heads=config.num_heads,
             dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
             num_domains=num_domains,

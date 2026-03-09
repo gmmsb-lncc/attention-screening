@@ -1,16 +1,22 @@
-"""Level 6b model: BAN fusion + GRL (no cross-attention).
+"""Level 6b model: AttnPool + BAN fusion + GRL (no cross-attention).
 
 Architecture
 ------------
   1. Projection (protein_dim → hidden, ligand_dim → hidden)
-  2. **BANLayer** — bilinear attention directly on projected sequences.
-     No cross-attention enrichment — isolates the BAN contribution.
-  3. Classification head
-  4. GRL + Domain Discriminator (scaffold-invariance)
+  2. **AttentionPooling** — per-modality learned pooling (seq → vec).
+  3. **BANLayer** — bilinear attention directly on projected sequences,
+     producing a cross-modal interaction vector.
+  4. Concatenation of AttnPool vectors + BAN vector → [B, 3*hidden]
+  5. Classification head
+  6. GRL + Domain Discriminator (scaffold-invariance)
 
 Comparison with Level 6a:
   - Level 6a: Proj → CrossAttn → BAN → classifier + GRL
-  - Level 6b: Proj → BAN → classifier + GRL (no cross-attention)
+  - Level 6b: Proj → AttnPool + BAN → classifier + GRL (no cross-attention)
+
+The AttnPool captures uni-modal summaries while BAN captures the
+bilinear cross-modal interaction, giving a richer representation
+(3*hidden_dim) than either alone.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ import torch.nn as nn
 from torch.nn.utils.weight_norm import weight_norm
 
 from ..ban import BANLayer
+from ..level5_lite.attention import AttentionPooling
 from ..level5_da.domain_adaptation import (
     DomainDiscriminator,
     GradientReversalLayer,
@@ -27,7 +34,7 @@ from ..level5_da.domain_adaptation import (
 
 
 class Level6bModel(nn.Module):
-    """Level 6b: BAN + GRL (no cross-attention).
+    """Level 6b: AttnPool + BAN + GRL (no cross-attention).
 
     Parameters
     ----------
@@ -38,9 +45,9 @@ class Level6bModel(nn.Module):
     hidden_dim : int
         Shared hidden dimension after projection.
     num_heads : int
-        (Unused — kept for interface consistency with other levels.)
+        Attention heads in AttentionPooling layers.
     dropout : float
-        Dropout in projections and BAN.
+        Dropout in projections, pooling, and BAN.
     ban_heads : int
         Number of bilinear attention heads.
     ban_k : int
@@ -79,6 +86,9 @@ class Level6bModel(nn.Module):
         self._hidden_dim = hidden_dim
         self.num_domains = num_domains
 
+        # Feature dim: AttnPool gives 2*hidden (concat), BAN gives hidden
+        self._feature_dim = hidden_dim * 3
+
         # --- Projection layers ---
         self.protein_proj = nn.Sequential(
             nn.Linear(protein_input_dim, hidden_dim),
@@ -93,7 +103,11 @@ class Level6bModel(nn.Module):
             nn.Dropout(dropout),
         )
 
-        # --- BAN fusion (replaces AttnPool + concat of L5b) ---
+        # --- Attention pooling (uni-modal summaries) ---
+        self.protein_pool = AttentionPooling(hidden_dim, num_heads, dropout)
+        self.ligand_pool = AttentionPooling(hidden_dim, num_heads, dropout)
+
+        # --- BAN fusion (cross-modal bilinear interaction) ---
         self.ban = weight_norm(
             BANLayer(
                 v_dim=hidden_dim,
@@ -109,17 +123,18 @@ class Level6bModel(nn.Module):
         )
 
         # --- Classification head ---
+        # Input: cat(protein_vec, ligand_vec, ban_vec) = 3 * hidden_dim
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(self._feature_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(classifier_dropout),
-            nn.Linear(hidden_dim // 2, 1),
+            nn.Linear(hidden_dim, 1),
         )
 
         # --- Domain adaptation branch ---
         self.grl = GradientReversalLayer(lam=grl_lambda)
         self.domain_discriminator = DomainDiscriminator(
-            input_dim=hidden_dim,
+            input_dim=self._feature_dim,
             hidden_dim=domain_hidden_dim,
             num_domains=num_domains,
             dropout=domain_dropout,
@@ -165,23 +180,34 @@ class Level6bModel(nn.Module):
           - ``'classification'``: [B, 1] logits
           - ``'regression'``: None
           - ``'domain_logits'``: [B, num_domains]
-          - ``'features'``: [B, hidden_dim] (only if return_features)
+          - ``'features'``: [B, 3*hidden_dim] (only if return_features)
         """
+        # Invert masks for PyTorch attention (True = padding)
+        p_attn_mask = (protein_mask == 0) if protein_mask is not None else None
+        l_attn_mask = (ligand_mask == 0) if ligand_mask is not None else None
+
         # Project
         protein = self.protein_proj(protein_matrix)  # [B, prot_len, hidden]
         ligand = self.ligand_proj(ligand_matrix)      # [B, lig_len, hidden]
 
-        # BAN fusion (directly on projected sequences — no cross-attention)
-        fused, _att_maps = self.ban(
+        # Path A: Attention pooling (uni-modal summaries)
+        protein_vec = self.protein_pool(protein, p_attn_mask)  # [B, hidden]
+        ligand_vec = self.ligand_pool(ligand, l_attn_mask)      # [B, hidden]
+
+        # Path B: BAN fusion (cross-modal bilinear interaction)
+        ban_vec, _att_maps = self.ban(
             protein, ligand, softmax=True,
             v_mask=protein_mask, q_mask=ligand_mask,
-        )  # fused: [B, hidden_dim]
+        )  # ban_vec: [B, hidden]
+
+        # Combine uni-modal + cross-modal representations
+        combined = torch.cat([protein_vec, ligand_vec, ban_vec], dim=-1)  # [B, 3*hidden]
 
         # Classification
-        classification = self.classifier(fused)  # [B, 1]
+        classification = self.classifier(combined)  # [B, 1]
 
         # Domain adversarial branch
-        reversed_features = self.grl(fused)
+        reversed_features = self.grl(combined)
         domain_logits = self.domain_discriminator(reversed_features)
 
         out: dict = {
@@ -190,6 +216,6 @@ class Level6bModel(nn.Module):
             "domain_logits": domain_logits,
         }
         if return_features:
-            out["features"] = fused
+            out["features"] = combined
 
         return out
