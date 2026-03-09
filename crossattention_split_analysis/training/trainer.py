@@ -69,10 +69,13 @@ def train_epoch(
             # Use simple BCE loss for classification only
             classification_logits = model_output['classification'].squeeze(-1)
             classification_labels_squeezed = classification_labels.squeeze(-1).float()
+            _pw = None
+            if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None:
+                _pw = loss_fn.pos_weight_tensor.to(device)
             classification_loss = F.binary_cross_entropy_with_logits(
-                classification_logits, 
-                classification_labels_squeezed, 
-                pos_weight=loss_fn.pos_weight_tensor if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None else None
+                classification_logits,
+                classification_labels_squeezed,
+                pos_weight=_pw,
             )
             losses = {
                 'total': classification_loss, 
