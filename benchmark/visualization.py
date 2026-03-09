@@ -42,6 +42,8 @@ _MODEL_ORDER = [
     "level4_crossatt_mlp",
     "level5_da_knn",
     "level5_da_mlp",
+    "level5b_da_knn",
+    "level5b_da_mlp",
 ]
 
 

@@ -218,6 +218,7 @@ MODEL_VARIANT_TO_ENCODER = {
     'level5_lite': 'level5_lite',
     'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
     'level5_da': 'level5_da',
+    'level5b_da': 'level5b_da',
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -227,6 +228,7 @@ MODEL_VARIANT_TO_LABEL = {
     'level5_lite': 'Level5-Lite',
     'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
     'level5_da': 'Level5-DA',
+    'level5b_da': 'Level5b-DA',
 }
 
 
@@ -284,9 +286,9 @@ def run_scenario(
     if evaluation_split not in {"test", "val"}:
         raise ValueError(f"evaluation_split must be 'test' or 'val', got {evaluation_split!r}")
 
-    # Inject scaffold domain labels for Level 5 DA
+    # Inject scaffold domain labels for Level 5 / 5b DA
     num_domains = 16
-    if config.model_variant == 'level5_da' and 'scaffold' in train_df.columns:
+    if config.model_variant in ('level5_da', 'level5b_da') and 'scaffold' in train_df.columns:
         from .models.level5_da.domain_adaptation import build_scaffold_clusters
         scaffold_to_cluster = build_scaffold_clusters(
             train_df['scaffold'].tolist(),
@@ -388,6 +390,17 @@ def run_scenario(
             ligand_input_dim=config.ligand_dim,
             hidden_dim=config.hidden_dim,
             num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level5b_da":
+        from .models.level5b_da import Level5bDAModel
+        model = Level5bDAModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
             num_heads=config.num_heads,
             dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
@@ -1055,6 +1068,8 @@ def run_single_analysis(
         variant_prefix = 'diffusion_'
     elif model_variant == 'level5_da':
         variant_prefix = 'da_'
+    elif model_variant == 'level5b_da':
+        variant_prefix = 'da5b_'
     else:
         variant_prefix = ''
     prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{molformer_prefix}{ligvec_prefix}{short_name}_"

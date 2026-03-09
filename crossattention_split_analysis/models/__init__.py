@@ -19,6 +19,8 @@ from .level5_da import (
     lambda_schedule,
 )
 
+from .level5b_da import Level5bDAModel
+
 __all__ = [
     "Level5LiteModel",
     "ProteinEncoder",
@@ -29,6 +31,7 @@ __all__ = [
     "Level5LiteDataset",
     "collate_level5_lite",
     "Level5DAModel",
+    "Level5bDAModel",
     "GradientReversalLayer",
     "DomainDiscriminator",
     "build_scaffold_clusters",
