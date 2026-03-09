@@ -1,13 +1,15 @@
-"""Level 6b — BAN + GRL + KNN/MLP (no cross-attention).
+"""Level 6b — AttnPool + BAN + GRL + KNN/MLP (no cross-attention).
 
 Parallel to L6a, but without the cross-attention encoder stage.  Protein
-and ligand sequences are projected to a shared hidden space, then BAN
-performs direct bilinear interaction modeling + pooling.
+and ligand sequences are projected to a shared hidden space, then
+AttentionPooling produces uni-modal summaries while BAN computes the
+bilinear cross-modal interaction.  Both are concatenated into a
+3*hidden_dim feature vector.
 
 Pipeline:
   1.  Cluster training scaffolds (same as L5/L5b).
   2.  Train Level6bModel via ``run_single_analysis(model_variant="level6b")``.
-  3.  Load checkpoint and extract BAN-fused features.
+  3.  Load checkpoint and extract AttnPool+BAN features.
   4.  Feed features into canonical KNN / MLP classifiers.
 """
 
@@ -151,6 +153,7 @@ class Level6bRunner(BaseLevelRunner):
             protein_input_dim=protein_dim,
             ligand_input_dim=MOLFORMER_DIM,
             hidden_dim=256,
+            num_heads=8,
             dropout=0.2,
             classifier_dropout=0.2,
             num_domains=16,

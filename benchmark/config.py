@@ -54,24 +54,24 @@ METRICS_ORDER: List[str] = ["accuracy", "mcc", "f1", "precision", "recall", "auc
 LEVEL_LABELS: Dict[str, str] = {
     "level1a_fp_knn": "L1a (FP+KNN)",
     "level1a_fp_mlp": "L1a (FP+MLP)",
-    "level1b_ligmean_knn": "L1b (LigMean+KNN)",
-    "level1b_ligmean_mlp": "L1b (LigMean+MLP)",
-    "level1c_ligattn_knn": "L1c (LigAttn+KNN)",
-    "level1c_ligattn_mlp": "L1c (LigAttn+MLP)",
+    "level1b_ligmean_knn": "L1b (LigMeanPool+KNN)",
+    "level1b_ligmean_mlp": "L1b (LigMeanPool+MLP)",
+    "level1c_ligattn_knn": "L1c (LigAttnPool+KNN)",
+    "level1c_ligattn_mlp": "L1c (LigAttnPool+MLP)",
     "level2_meanpool_knn": "L2 (MeanPool+KNN)",
     "level2_meanpool_mlp": "L2 (MeanPool+MLP)",
     "level3_attnpool_knn": "L3 (AttnPool+KNN)",
     "level3_attnpool_mlp": "L3 (AttnPool+MLP)",
-    "level4_crossatt_knn": "L4 (CrossAtt+KNN)",
-    "level4_crossatt_mlp": "L4 (CrossAtt+MLP)",
-    "level5_da_knn": "L5 (DA+KNN)",
-    "level5_da_mlp": "L5 (DA+MLP)",
-    "level5b_da_knn": "L5b (AttnPool+DA+KNN)",
-    "level5b_da_mlp": "L5b (AttnPool+DA+MLP)",
-    "level6a_ban_knn": "L6a (BAN+CrossAttn+KNN)",
-    "level6a_ban_mlp": "L6a (BAN+CrossAttn+MLP)",
-    "level6b_ban_knn": "L6b (BAN+KNN)",
-    "level6b_ban_mlp": "L6b (BAN+MLP)",
+    "level4_crossatt_knn": "L4 (CrossAttn+AttnPool+KNN)",
+    "level4_crossatt_mlp": "L4 (CrossAttn+AttnPool+MLP)",
+    "level5_da_knn": "L5a (CrossAttn+AttnPool+GRL+KNN)",
+    "level5_da_mlp": "L5a (CrossAttn+AttnPool+GRL+MLP)",
+    "level5b_da_knn": "L5b (AttnPool+GRL+KNN)",
+    "level5b_da_mlp": "L5b (AttnPool+GRL+MLP)",
+    "level6a_ban_knn": "L6a (CrossAttn+BAN+GRL+KNN)",
+    "level6a_ban_mlp": "L6a (CrossAttn+BAN+GRL+MLP)",
+    "level6b_ban_knn": "L6b (AttnPool+BAN+GRL+KNN)",
+    "level6b_ban_mlp": "L6b (AttnPool+BAN+GRL+MLP)",
 }
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -132,7 +132,7 @@ class BenchmarkConfig:
     embedding: str  # shorthand: "8M", "150M", "650M"
 
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5", "5b", "6a", "6b"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"])
 
     # --- output ---
     output_dir: Optional[str] = None

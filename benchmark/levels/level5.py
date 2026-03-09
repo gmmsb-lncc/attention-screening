@@ -1,4 +1,4 @@
-"""Level 5 — Cross-Attention + Domain Adaptation (GRL) + KNN/MLP.
+"""Level 5a — Cross-Attention + Domain Adaptation (GRL) + KNN/MLP.
 
 Extends Level 4 with adversarial scaffold-domain adaptation.
 The Gradient Reversal Layer forces the feature extractor to produce
@@ -249,7 +249,7 @@ class Level5Runner(BaseLevelRunner):
         sc_data = results.get(sc_key, {})
         if not isinstance(sc_data, dict):
             return self._empty_metrics()
-        for nested_key in ("Level5-DA", "level5_da"):
+        for nested_key in ("Level5a-DA", "level5_da"):
             if nested_key in sc_data:
                 return self._ensure_all_metrics(sc_data[nested_key])
         if "accuracy" in sc_data or "mcc" in sc_data:
