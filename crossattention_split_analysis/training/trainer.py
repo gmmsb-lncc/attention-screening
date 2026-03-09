@@ -72,7 +72,7 @@ def train_epoch(
             classification_loss = F.binary_cross_entropy_with_logits(
                 classification_logits, 
                 classification_labels_squeezed, 
-                pos_weight=loss_fn.pos_weight if hasattr(loss_fn, 'pos_weight') else None
+                pos_weight=loss_fn.pos_weight_tensor if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None else None
             )
             losses = {
                 'total': classification_loss, 
