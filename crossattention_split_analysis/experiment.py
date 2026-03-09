@@ -217,6 +217,7 @@ MODEL_VARIANT_TO_ENCODER = {
     'diffusion': 'diffusion',
     'level5_lite': 'level5_lite',
     'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
+    'level5_da': 'level5_da',
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -225,6 +226,7 @@ MODEL_VARIANT_TO_LABEL = {
     'diffusion': 'Diffusion',
     'level5_lite': 'Level5-Lite',
     'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
+    'level5_da': 'Level5-DA',
 }
 
 
@@ -281,6 +283,24 @@ def run_scenario(
 
     if evaluation_split not in {"test", "val"}:
         raise ValueError(f"evaluation_split must be 'test' or 'val', got {evaluation_split!r}")
+
+    # Inject scaffold domain labels for Level 5 DA
+    num_domains = 16
+    if config.model_variant == 'level5_da' and 'scaffold' in train_df.columns:
+        from .models.level5_da.domain_adaptation import build_scaffold_clusters
+        scaffold_to_cluster = build_scaffold_clusters(
+            train_df['scaffold'].tolist(),
+            num_clusters=num_domains,
+        )
+        fallback_id = num_domains - 1
+        train_df = train_df.copy()
+        train_df['domain_label'] = train_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        val_df = val_df.copy()
+        val_df['domain_label'] = val_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        if test_df is not None:
+            test_df = test_df.copy()
+            test_df['domain_label'] = test_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        print(f"  Domain adaptation: {num_domains} scaffold clusters")
 
     # Create data loaders (pass list of directories for multi-source datasets)
     if use_attention:
@@ -360,6 +380,18 @@ def run_scenario(
             num_heads=config.num_heads,
             dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
+        )
+    elif encoder_type == "level5_da":
+        from .models.level5_da import Level5DAModel
+        model = Level5DAModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
         )
     elif encoder_type == "level3_crossatt":
         from src.models.level3_crossatt import Level3CrossAttModel
@@ -1021,6 +1053,8 @@ def run_single_analysis(
         variant_prefix = 'lite_'
     elif model_variant == 'diffusion':
         variant_prefix = 'diffusion_'
+    elif model_variant == 'level5_da':
+        variant_prefix = 'da_'
     else:
         variant_prefix = ''
     prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{molformer_prefix}{ligvec_prefix}{short_name}_"

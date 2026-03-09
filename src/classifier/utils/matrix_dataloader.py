@@ -266,7 +266,11 @@ class MatrixEmbeddingDataset(Dataset):
             else:
                 result['regression_target'] = torch.tensor(0.0, dtype=torch.float32)
                 result['has_regression'] = torch.tensor(0, dtype=torch.float32)
-        
+
+        # Domain label for adversarial domain adaptation (Level 5 DA)
+        if 'domain_label' in self.data_df.columns:
+            result['domain_label'] = torch.tensor(int(row['domain_label']), dtype=torch.long)
+
         return result
 
 
@@ -338,7 +342,7 @@ def collate_matrix_batch(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]
         protein_ids.append(sample['protein_id'])
         ligand_ids.append(sample['ligand_id'])
     
-    return {
+    result = {
         'protein_matrix': protein_matrices,
         'ligand_matrix': ligand_matrices,
         'protein_mask': protein_masks,
@@ -349,6 +353,12 @@ def collate_matrix_batch(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]
         'protein_ids': protein_ids,
         'ligand_ids': ligand_ids
     }
+
+    # Domain labels for adversarial domain adaptation (Level 5 DA)
+    if 'domain_label' in batch[0]:
+        result['domain_label'] = torch.stack([s['domain_label'] for s in batch])
+
+    return result
 
 
 def create_matrix_dataloader(

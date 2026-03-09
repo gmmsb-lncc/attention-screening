@@ -30,6 +30,7 @@ from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner
 from benchmark.levels.level4 import Level4Runner
+from benchmark.levels.level5 import Level5Runner
 from benchmark.metrics import aggregate_benchmark_metrics
 from benchmark.progress import BenchmarkProgress
 from benchmark.reporting import print_comparison_table, save_benchmark_json
@@ -125,6 +126,7 @@ class BenchmarkOrchestrator:
             level2_results=self._level_results.get("2"),
             level3_results=self._level_results.get("3"),
             level4_results=self._level_results.get("4"),
+            level5_results=self._level_results.get("5"),
         )
 
         if not self._aggregated:
@@ -165,6 +167,9 @@ class BenchmarkOrchestrator:
 
         if "4" in config.levels:
             runners.append(("4", Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
+
+        if "5" in config.levels:
+            runners.append(("5", Level5Runner(config), "Step 5: Level 5 (DA+KNN/MLP)"))
 
         return runners
 
