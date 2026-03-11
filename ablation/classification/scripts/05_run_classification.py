@@ -56,7 +56,7 @@ KNN_CONFIG = {
 }
 
 MLP_CONFIG = {
-    'hidden_layer_sizes': (256, 128),
+    'hidden_layer_sizes': (512,),
     'activation': 'relu',
     'solver': 'adam',
     'max_iter': 500,

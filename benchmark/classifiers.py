@@ -10,7 +10,7 @@ Classifier specifications:
  * **KNN** — FAISS inner-product index on L2-normalised features
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
  * **MLP** — ``sklearn.neural_network.MLPClassifier`` with a single hidden
-   layer of 128 units, ReLU activation, Adam solver, α = 1 × 10⁻⁴,
+   layer of 512 units, ReLU activation, Adam solver, α = 1 × 10⁻⁴,
    max 500 iterations.  Early stopping is **disabled** so that the MLP
    trains on 100 % of the input features — the same proportion as KNN.
  * Both classifiers receive features after ``StandardScaler``.
@@ -171,9 +171,9 @@ def train_knn_mlp(
     knn_pred, knn_proba = _faiss_knn_predict(x_train_sc, y_train, x_test_sc, k=5)
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
 
-    # ---------- MLP (single 128-unit hidden layer) -------------------
+    # ---------- MLP (single 512-unit hidden layer) -------------------
     mlp = MLPClassifier(
-        hidden_layer_sizes=(128,),
+        hidden_layer_sizes=(512,),
         activation="relu",
         solver="adam",
         alpha=1e-4,

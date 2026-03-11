@@ -35,7 +35,7 @@ Scaffold Split:  train (~80%)  /  val (~10%)  /  test (~10%)
 | Component | Specification |
 |---|---|
 | **KNN** | FAISS inner-product on L2-normalised features (cosine similarity), *k* = 5, distance-weighted voting |
-| **MLP** | sklearn `MLPClassifier(hidden_layer_sizes=(128,), activation='relu', solver='adam', alpha=1e-4, max_iter=100, early_stopping=True, validation_fraction=0.1, n_iter_no_change=10)` |
+| **MLP** | sklearn `MLPClassifier(hidden_layer_sizes=(512,), activation='relu', solver='adam', alpha=1e-4, max_iter=500, early_stopping=False)` |
 | **Scaler** | `StandardScaler` applied before both classifiers |
 | **Threshold** | Fixed at 0.5 (no per-model threshold optimisation) |
 

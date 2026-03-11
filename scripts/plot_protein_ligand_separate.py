@@ -153,7 +153,7 @@ def evaluate_model(X_train, X_test, y_train, y_test, classifier_type='KNN'):
         )
     else:  # MLP
         model = MLPClassifier(
-            hidden_layer_sizes=(256, 128),
+            hidden_layer_sizes=(512,),
             max_iter=500,
             random_state=SEEDS[0],
             early_stopping=True
