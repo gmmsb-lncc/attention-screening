@@ -1,0 +1,58 @@
+# GraphBAN Kinase Inductive Configuration
+# Based on GraphBAN_DA.yaml defaults, adapted for thesis kinase datasets
+#
+# This config enables domain adaptation (CDAN) for inductive CPI prediction.
+# The original GraphBAN paper uses these settings for out-of-distribution
+# generalization on unseen compounds and proteins.
+
+SOLVER:
+  BATCH_SIZE: 32
+  MAX_EPOCH: 50
+  LR: 1e-5
+  DA_LR: 5e-5
+  NUM_WORKERS: 0
+  SEED: 42
+
+DRUG:
+  NODE_IN_FEATS: 75
+  PADDING: True
+  HIDDEN_LAYERS: [128, 128, 128]
+  NODE_IN_EMBEDDING: 128
+  MAX_NODES: 290
+
+PROTEIN:
+  NUM_FILTERS: [128, 128, 128]
+  KERNEL_SIZE: [3, 6, 9]
+  EMBEDDING_DIM: 128
+  PADDING: True
+
+BCN:
+  HEADS: 2
+
+DECODER:
+  NAME: "MLP"
+  IN_DIM: 256
+  HIDDEN_DIM: 512
+  OUT_DIM: 128
+  BINARY: 2
+
+RESULT:
+  OUTPUT_DIR: "./results/kinase"
+  SAVE_MODEL: True
+
+DA:
+  TASK: True
+  USE: True
+  METHOD: "CDAN"
+  USE_ENTROPY: False
+  RANDOM_LAYER: True
+  ORIGINAL_RANDOM: True
+  RANDOM_DIM: 256
+  INIT_EPOCH: 10
+  LAMB_DA: 1
+
+COMET:
+  WORKSPACE: "graphban-kinase"
+  PROJECT_NAME: "GraphBAN_Kinase_Baseline"
+  USE: False
+  TAG: null
