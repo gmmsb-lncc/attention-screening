@@ -148,7 +148,13 @@ class BaseLevelRunner(ABC):
         result: Dict,
         accumulator: Dict[str, Dict[str, List[float]]],
     ) -> None:
-        """Extract per-model metrics from a single seed and append."""
+        """Extract per-model metrics from a single seed and append.
+
+        KNN is deterministic (no random component) so its results are
+        identical across seeds.  Only the **first** seed is accumulated
+        for KNN to avoid redundant computation and a misleading std of 0.
+        MLP varies with the seed and is accumulated normally.
+        """
         sc_key = self._find_scaffold_key(result)
         if sc_key is None:
             return
@@ -156,6 +162,9 @@ class BaseLevelRunner(ABC):
         sc = result[sc_key]
         for model in ("KNN", "MLP"):
             if model not in sc:
+                continue
+            # KNN is deterministic — only keep first seed's results.
+            if model == "KNN" and model in accumulator:
                 continue
             if model not in accumulator:
                 accumulator[model] = {}
