@@ -174,10 +174,14 @@ class BenchmarkConfig:
 
     @property
     def resolved_output_dir(self) -> str:
-        """Compute actual output directory."""
-        if self.output_dir:
-            return self.output_dir
-        return f"./results/benchmark_{self.dataset}_{self.embedding}_{self.mode}"
+        """Compute actual output directory.
+
+        Always appends ``/{mode}`` so that train and test phases
+        write to separate directories even when the user provides
+        the same ``--output_dir``.
+        """
+        base = self.output_dir if self.output_dir else f"./results/benchmark_{self.dataset}_{self.embedding}"
+        return os.path.join(base, self.mode)
 
     @property
     def resolved_patience(self) -> Optional[int]:

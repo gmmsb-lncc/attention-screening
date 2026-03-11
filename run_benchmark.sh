@@ -36,7 +36,7 @@ python semantic_screening_models.py \
     --levels ${LEVELS} \
     --test \
     --patience ${PATIENCE} \
-    --output_dir "${OUTPUT_BASE}/"
+    --output_dir "${OUTPUT_BASE}"
 
 echo ""
 echo "============================================================"
