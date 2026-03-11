@@ -131,6 +131,20 @@ class BaseLevelRunner(ABC):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @property
+    def knn_is_deterministic(self) -> bool:
+        """Whether KNN results are identical across seeds for this level.
+
+        True for levels without learned feature extractors (1a, 1b, 2):
+        same input → same KNN output regardless of seed.
+
+        False for levels with learned extractors (1c, 3, 4+): the
+        upstream model is seed-dependent, so KNN input varies per seed.
+
+        Subclasses with learned components should override to return False.
+        """
+        return True
+
     def _uses_embedding(self) -> bool:
         """Whether this level's directory needs the embedding shorthand."""
         return True
@@ -163,8 +177,9 @@ class BaseLevelRunner(ABC):
         for model in ("KNN", "MLP"):
             if model not in sc:
                 continue
-            # KNN is deterministic — only keep first seed's results.
-            if model == "KNN" and model in accumulator:
+            # KNN is deterministic for levels without learned feature
+            # extractors.  Skip re-accumulation only when safe.
+            if model == "KNN" and model in accumulator and self.knn_is_deterministic:
                 continue
             if model not in accumulator:
                 accumulator[model] = {}

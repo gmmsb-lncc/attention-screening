@@ -41,6 +41,10 @@ class Level6bRunner(BaseLevelRunner):
         super().__init__(config)
 
     @property
+    def knn_is_deterministic(self) -> bool:
+        return False  # Learned feature extractor → KNN input varies per seed
+
+    @property
     def level_tag(self) -> str:
         return "level6b_ban"
 

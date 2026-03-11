@@ -378,7 +378,12 @@ def split_loader_for_feature_extraction(
 
     dataset = loader.dataset
     n = len(dataset)
-    labels = np.array([dataset[i][2] for i in range(n)])  # label is 3rd element
+    # Fast path: read labels from the DataFrame if available (avoids
+    # loading .npy matrices just to extract a scalar label per row).
+    if hasattr(dataset, '_df') and 'label' in dataset._df.columns:
+        labels = dataset._df['label'].to_numpy(dtype=int)
+    else:
+        labels = np.array([dataset[i][2] for i in range(n)])
 
     # Stratified split using label distribution
     rng = np.random.RandomState(seed)
