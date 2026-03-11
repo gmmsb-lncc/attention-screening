@@ -11,8 +11,9 @@ set -euo pipefail
 
 DATASET="human"
 EMBEDDING="8M"
-LEVELS="0"                          # 0 = classical ML (1a, 1b, 1c, 3)
-OUTPUT_BASE="results/output_dir"
+LEVELS="0"
+PATIENCE="30"
+OUTPUT_BASE="results/non_human_10_03_2026_v4"
 
 echo "============================================================"
 echo " Phase 1/2 — TRAIN (fit=80% train, eval=10% val)"
@@ -22,8 +23,8 @@ python semantic_screening_models.py \
     --embedding "${EMBEDDING}" \
     --levels ${LEVELS} \
     --train \
-    --patience 30 \
-    --output_dir "${OUTPUT_BASE}/non_human_10_03_2026_v4"
+    --patience ${PATIENCE} \
+    --output_dir "${OUTPUT_BASE}"
 
 echo ""
 echo "============================================================"
@@ -34,8 +35,8 @@ python semantic_screening_models.py \
     --embedding "${EMBEDDING}" \
     --levels ${LEVELS} \
     --test \
-    --patience 30 \
-    --output_dir "${OUTPUT_BASE}/non_human_10_03_2026_v4"
+    --patience ${PATIENCE} \
+    --output_dir "${OUTPUT_BASE}/"
 
 echo ""
 echo "============================================================"
