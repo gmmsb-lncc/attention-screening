@@ -22,7 +22,8 @@ python semantic_screening_models.py \
     --embedding "${EMBEDDING}" \
     --levels ${LEVELS} \
     --train \
-    --output_dir "${OUTPUT_BASE}/train"
+    --patience 30 \
+    --output_dir "${OUTPUT_BASE}/non_human_10_03_2026_v4"
 
 echo ""
 echo "============================================================"
@@ -33,7 +34,8 @@ python semantic_screening_models.py \
     --embedding "${EMBEDDING}" \
     --levels ${LEVELS} \
     --test \
-    --output_dir "${OUTPUT_BASE}/test"
+    --patience 30 \
+    --output_dir "${OUTPUT_BASE}/non_human_10_03_2026_v4"
 
 echo ""
 echo "============================================================"
