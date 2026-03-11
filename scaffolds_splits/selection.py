@@ -15,7 +15,7 @@ class UniversalSelectionConfig:
     seed: int = 42
     restarts: int = 64
     weight_human: float = 8.0
-    weight_non_human: float = 1.0
+    weight_non_human: float = 3.0
     weight_ratio: float = 0.1
     class_penalty: float = 5.0
     class_rate_weight: float = 2.0

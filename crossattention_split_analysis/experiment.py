@@ -102,37 +102,34 @@ def _load_precomputed_scaffold_splits(
     """
     Load fixed scaffold splits produced by scaffold_split.py.
 
-    Expected files:
-      - {dir}/scenarios/Sc/{dataset}_train.tsv (or .tsv.gz)
-      - {dir}/scenarios/Sc/{dataset}_val.tsv (or .tsv.gz)
-      - {dir}/{dataset}_test.tsv (or .tsv.gz)
-    where dataset is human/non_human, or both concatenated when dataset_type=all.
+    Always reads the **universal** split files and filters by
+    ``dataset_source`` when *dataset_type* is ``human`` or ``non_human``.
     """
     base = Path(scaffold_split_dir)
     scenario_dir = base / "scenarios" / SCAFFOLD_SCENARIO_CODE
 
-    def _load_one(ds: str):
-        train_path = scenario_dir / f"{ds}_train.tsv"
-        val_path = scenario_dir / f"{ds}_val.tsv"
-        test_path = base / f"{ds}_test.tsv"
+    def _load_universal():
+        train_path = scenario_dir / "universal_train.tsv"
+        val_path = scenario_dir / "universal_val.tsv"
+        test_path = base / "universal_test.tsv"
 
-        train_df, train_used = _read_split_tsv(train_path, f"{ds} train")
-        val_df, val_used = _read_split_tsv(val_path, f"{ds} val")
+        train_df, train_used = _read_split_tsv(train_path, "universal train")
+        val_df, val_used = _read_split_tsv(val_path, "universal val")
         if include_test:
-            test_df, test_used = _read_split_tsv(test_path, f"{ds} test")
+            test_df, test_used = _read_split_tsv(test_path, "universal test")
         else:
             test_df = val_df.iloc[0:0].copy()
             test_used = None
 
-        train_df = _ensure_label_column(train_df, threshold, f"{ds} train")
-        val_df = _ensure_label_column(val_df, threshold, f"{ds} val")
+        train_df = _ensure_label_column(train_df, threshold, "universal train")
+        val_df = _ensure_label_column(val_df, threshold, "universal val")
         if include_test:
-            test_df = _ensure_label_column(test_df, threshold, f"{ds} test")
+            test_df = _ensure_label_column(test_df, threshold, "universal test")
 
-        _ensure_required_columns(train_df, f"{ds} train")
-        _ensure_required_columns(val_df, f"{ds} val")
+        _ensure_required_columns(train_df, "universal train")
+        _ensure_required_columns(val_df, "universal val")
         if include_test:
-            _ensure_required_columns(test_df, f"{ds} test")
+            _ensure_required_columns(test_df, "universal test")
 
         return train_df, val_df, test_df, {
             "train_path": str(train_used),
@@ -140,34 +137,26 @@ def _load_precomputed_scaffold_splits(
             "test_path": str(test_used) if test_used else None,
         }
 
-    if dataset_type in {"human", "non_human"}:
-        train_df, val_df, test_df, paths = _load_one(dataset_type)
-        metadata = {"dataset_type": dataset_type, "split_source": "precomputed_scaffold_split", "paths": paths}
-        return train_df, val_df, test_df, metadata
+    train_df, val_df, test_df, paths = _load_universal()
 
-    if dataset_type == "all":
-        h_train, h_val, h_test, h_paths = _load_one("human")
-        n_train, n_val, n_test, n_paths = _load_one("non_human")
+    # Filter by corpus origin when a specific dataset is requested
+    source_filter = None if dataset_type == "all" else dataset_type
+    if source_filter is not None and source_filter in {"human", "non_human"}:
+        if "dataset_source" in train_df.columns:
+            train_df = train_df[train_df["dataset_source"] == source_filter].reset_index(drop=True)
+            val_df = val_df[val_df["dataset_source"] == source_filter].reset_index(drop=True)
+            if include_test:
+                test_df = test_df[test_df["dataset_source"] == source_filter].reset_index(drop=True)
 
-        for frame, source in (
-            (h_train, "human"), (h_val, "human"), (h_test, "human"),
-            (n_train, "non_human"), (n_val, "non_human"), (n_test, "non_human"),
-        ):
-            if "dataset_source" not in frame.columns:
-                frame["dataset_source"] = source
+    metadata = {
+        "dataset_type": dataset_type,
+        "split_source": "precomputed_scaffold_split_universal",
+        "paths": paths,
+    }
+    if source_filter:
+        metadata["dataset_source_filter"] = source_filter
 
-        train_df = pd.concat([h_train, n_train], axis=0, ignore_index=True)
-        val_df = pd.concat([h_val, n_val], axis=0, ignore_index=True)
-        test_df = pd.concat([h_test, n_test], axis=0, ignore_index=True)
-
-        metadata = {
-            "dataset_type": dataset_type,
-            "split_source": "precomputed_scaffold_split",
-            "paths": {"human": h_paths, "non_human": n_paths},
-        }
-        return train_df, val_df, test_df, metadata
-
-    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+    return train_df, val_df, test_df, metadata
 
 
 def _load_external_test_dataframe(
@@ -175,41 +164,24 @@ def _load_external_test_dataframe(
     scaffold_split_dir: str,
     threshold: float,
 ) -> Tuple[Optional[pd.DataFrame], Dict[str, str]]:
-    """Load external test split(s) from scaffold output, accepting .tsv or .tsv.gz."""
+    """Load external test split from universal scaffold output, accepting .tsv or .tsv.gz."""
     base = Path(scaffold_split_dir)
-
-    def _load_one(ds: str) -> Tuple[pd.DataFrame, Path]:
-        raw_df, used_path = _read_split_tsv(base / f"{ds}_test.tsv", f"{ds} external test")
-        test_df = _ensure_label_column(raw_df, threshold, f"{ds} external test")
-        _ensure_required_columns(test_df, f"{ds} external test")
-        return test_df, used_path
-
     loaded_paths: Dict[str, str] = {}
 
-    if dataset_type in {"human", "non_human"}:
-        try:
-            df, used = _load_one(dataset_type)
-        except FileNotFoundError:
-            return None, loaded_paths
-        loaded_paths[dataset_type] = str(used)
-        return df, loaded_paths
+    try:
+        raw_df, used_path = _read_split_tsv(base / "universal_test.tsv", "universal external test")
+    except FileNotFoundError:
+        return None, loaded_paths
 
-    if dataset_type == "all":
-        frames: List[pd.DataFrame] = []
-        for ds in ("human", "non_human"):
-            try:
-                frame, used = _load_one(ds)
-            except FileNotFoundError:
-                continue
-            if "dataset_source" not in frame.columns:
-                frame["dataset_source"] = ds
-            frames.append(frame)
-            loaded_paths[ds] = str(used)
-        if not frames:
-            return None, loaded_paths
-        return pd.concat(frames, axis=0, ignore_index=True), loaded_paths
+    test_df = _ensure_label_column(raw_df, threshold, "universal external test")
+    _ensure_required_columns(test_df, "universal external test")
+    loaded_paths["universal"] = str(used_path)
 
-    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+    # Filter by corpus if not "all"
+    if dataset_type in {"human", "non_human"} and "dataset_source" in test_df.columns:
+        test_df = test_df[test_df["dataset_source"] == dataset_type].reset_index(drop=True)
+
+    return test_df, loaded_paths
 
 MODEL_VARIANT_TO_ENCODER = {
     'cnn_crossattn': 'cnn',
@@ -656,8 +628,8 @@ def run_crossattention_analysis(
     if seeds is None:
         seeds = DEFAULT_SEEDS
 
-    # For dataset 'all', use multiple directories (human + non_human)
-    if dataset_type == 'all':
+    # For dataset 'all' or 'universal', use multiple directories (human + non_human)
+    if dataset_type in ('all', 'universal'):
         embedding_dirs = [
             os.path.join(base_path, embedding_name, 'build')
             for base_path in EMBEDDING_BASE_PATHS_ALL

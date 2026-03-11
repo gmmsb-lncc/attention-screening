@@ -353,6 +353,7 @@ class Level3Runner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
+            dataset_source_filter=self._config.dataset_source_filter,
         )
 
         # Train projection + attention pooling

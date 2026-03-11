@@ -197,20 +197,47 @@ def build_matrix_dataloaders(
     embedding_name: str,
     scaffold_split_dir: str,
     batch_size: int = 32,
+    dataset_source_filter: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build train / val / test ``DataLoader`` instances from scaffold splits.
+    """Build train / val / test ``DataLoader`` instances from universal splits.
 
-    Handles ``dataset_type="all"`` transparently by concatenating
-    DataFrames and searching both ``human`` and ``non_human`` matrix
-    directories.
+    Always reads the **universal** scaffold split files.  When
+    *dataset_source_filter* is set (e.g. ``"human"``), rows are filtered
+    by the ``dataset_source`` column before building tensors.
+
+    *dataset_type* still controls which embedding directories to search
+    for matrix ``.npy`` files (per-corpus storage is unchanged).
 
     Returns
     -------
     train_loader, val_loader, test_loader
     """
-    if dataset_type == "all":
-        return _build_all_dataloaders(embedding_name, scaffold_split_dir, batch_size)
-    return _build_single_dataloaders(dataset_type, embedding_name, scaffold_split_dir, batch_size)
+    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
+
+    train_df = read_split_file(
+        os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv")
+    )
+    val_df = read_split_file(
+        os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_val.tsv")
+    )
+    test_df = read_split_file(
+        os.path.join(scaffold_split_dir, "universal_test.tsv")
+    )
+
+    if dataset_source_filter is not None:
+        train_df = train_df[train_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+        val_df = val_df[val_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+        test_df = test_df[test_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+
+    for df in (train_df, val_df, test_df):
+        if "label" not in df.columns:
+            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
+
+    return (
+        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
+        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
+        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
+    )
 
 
 def _resolve_matrix_dirs(
@@ -222,7 +249,7 @@ def _resolve_matrix_dirs(
     For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
     because naming conventions vary across machines and datasets.
     """
-    if dataset_type == "all":
+    if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
     else:
         base_paths = [EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)]
@@ -237,74 +264,6 @@ def _resolve_matrix_dirs(
         ligand_dirs.append(build / "ligand_matrices")
         ligand_dirs.append(build / "molformer_matrix")
     return protein_dirs, ligand_dirs
-
-
-def _build_single_dataloaders(
-    dataset_type: str,
-    embedding_name: str,
-    scaffold_split_dir: str,
-    batch_size: int,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build loaders for a single dataset type (human or non_human)."""
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
-
-    train_df = read_split_file(
-        os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset_type}_train.tsv")
-    )
-    val_df = read_split_file(
-        os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset_type}_val.tsv")
-    )
-    test_df = read_split_file(
-        os.path.join(scaffold_split_dir, f"{dataset_type}_test.tsv")
-    )
-
-    for df in (train_df, val_df, test_df):
-        if "label" not in df.columns:
-            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
-
-    return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-    )
-
-
-def _build_all_dataloaders(
-    embedding_name: str,
-    scaffold_split_dir: str,
-    batch_size: int,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build loaders for dataset_type='all' by combining human + non_human."""
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs("all", embedding_name)
-
-    train_dfs: list[pd.DataFrame] = []
-    val_dfs: list[pd.DataFrame] = []
-    test_dfs: list[pd.DataFrame] = []
-
-    for ds in ("human", "non_human"):
-        train_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{ds}_train.tsv"))
-        )
-        val_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{ds}_val.tsv"))
-        )
-        test_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, f"{ds}_test.tsv"))
-        )
-
-    train_df = pd.concat(train_dfs, ignore_index=True)
-    val_df = pd.concat(val_dfs, ignore_index=True)
-    test_df = pd.concat(test_dfs, ignore_index=True)
-
-    for df in (train_df, val_df, test_df):
-        if "label" not in df.columns:
-            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
-
-    return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-    )
 
 
 def _make_loader(

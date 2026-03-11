@@ -958,7 +958,7 @@ Examples:
                         help='Embedding model (8M, 150M, or 3B)')
     parser.add_argument('--dataset', type=str, default='non_human',
                         choices=['human', 'non_human', 'all'],
-                        help='Dataset type (human, non_human, or all for both)')
+                        help='Dataset type (human, non_human, or all). All use universal scaffold splits.')
     parser.add_argument('--run_all', action='store_true',
                         help='Run all embeddings (8M, 150M, 3B) for the specified dataset(s)')
     parser.add_argument('--force', action='store_true',

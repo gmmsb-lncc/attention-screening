@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Set
 
+import pandas as pd
+
 from scaffolds_splits.data_io import load_dataset
 from scaffolds_splits.scaffold_utils import (
     UNKNOWN_SCAFFOLD,
@@ -130,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--weight-non-human",
         type=float,
-        default=1.0,
+        default=3.0,
         help="Weight for non-human test-fraction deviation in shared_scaffold mode",
     )
     parser.add_argument(
@@ -616,9 +618,68 @@ def main() -> None:
         seed_offset=200_000,
     )
 
+    # =====================================================================
+    # Universal Dataset: combine both datasets into a single pool with
+    # globally disjoint scaffolds across train / val / test.
+    #
+    # Guarantees:
+    #   1) No scaffold from test appears in train or val (any source)
+    #   2) No scaffold from val appears in train (any source)
+    #   3) Human and non-human test sets share the same test scaffolds
+    #   4) A scaffold present in both organisms is assigned entirely to
+    #      one split (never split across train_h / val_nh, etc.)
+    # =====================================================================
+    print("\n--- Universal Dataset ---")
+
+    def _tag_source(df, source):
+        out = df.copy()
+        if "dataset_source" not in out.columns:
+            out["dataset_source"] = source
+        return out
+
+    universal_pool_df = pd.concat(
+        [_tag_source(human_pool_df, "human"), _tag_source(non_human_pool_df, "non_human")],
+        axis=0, ignore_index=True,
+    )
+    universal_test_df = pd.concat(
+        [_tag_source(human_test_df, "human"), _tag_source(non_human_test_df, "non_human")],
+        axis=0, ignore_index=True,
+    )
+    universal_full_df = pd.concat(
+        [_tag_source(human_df, "human"), _tag_source(non_human_df, "non_human")],
+        axis=0, ignore_index=True,
+    )
+
+    _validate_fixed_test("universal", universal_test_df)
+
+    universal_run = _run_dataset_scenarios(
+        dataset_name="universal",
+        full_df=universal_full_df,
+        test_df=universal_test_df,
+        pool_df=universal_pool_df,
+        scenarios=scenarios,
+        args=args,
+        out_dir=out_dir,
+        seed_offset=300_000,
+    )
+
+    # Cross-dataset validation: no test scaffold may appear in universal train/val.
+    if "Sc" in scenarios:
+        from scaffolds_splits.validation import validate_dataset_split as _validate_ds
+        sc_dir = out_dir / "scenarios" / "Sc"
+        u_train = pd.read_csv(sc_dir / "universal_train.tsv", sep="\t")
+        u_val = pd.read_csv(sc_dir / "universal_val.tsv", sep="\t")
+        if "label" not in u_train.columns:
+            u_train["label"] = (u_train["pchembl_value"] >= args.threshold_pchembl).astype(int)
+        if "label" not in u_val.columns:
+            u_val["label"] = (u_val["pchembl_value"] >= args.threshold_pchembl).astype(int)
+        _validate_ds("universal", {"train": u_train, "val": u_val, "test": universal_test_df})
+        print("  Universal scaffold isolation validated (train/val/test disjoint)")
+
     # Backward-compatible top-level train/val/test files use canonical scenario.
     human_top_paths = human_run["top_level_paths"]
     non_human_top_paths = non_human_run["top_level_paths"]
+    universal_top_paths = universal_run["top_level_paths"]
 
     combined_test_path = write_combined_test(
         human_test_df=human_test_df,
@@ -626,11 +687,19 @@ def main() -> None:
         output_dir=str(out_dir),
     )
 
-    distribution_rows = list(human_run["distribution_rows"]) + list(non_human_run["distribution_rows"])
+    distribution_rows = (
+        list(human_run["distribution_rows"])
+        + list(non_human_run["distribution_rows"])
+        + list(universal_run["distribution_rows"])
+    )
     distribution_path = write_distribution_summary(distribution_rows, str(out_dir))
 
     text_report_path = out_dir / "split_class_distribution_report.txt"
-    text_lines = list(human_run["summary_lines"]) + list(non_human_run["summary_lines"])
+    text_lines = (
+        list(human_run["summary_lines"])
+        + list(non_human_run["summary_lines"])
+        + list(universal_run["summary_lines"])
+    )
     text_report_path.write_text("\n".join(text_lines) + "\n", encoding="utf-8")
 
     manifest = {
@@ -664,17 +733,21 @@ def main() -> None:
         "scenario_summaries": {
             "human": human_run["scenario_summaries"],
             "non_human": non_human_run["scenario_summaries"],
+            "universal": universal_run["scenario_summaries"],
         },
         "canonical_scenario": {
             "human": human_run["canonical_scenario"],
             "non_human": non_human_run["canonical_scenario"],
+            "universal": universal_run["canonical_scenario"],
         },
         "outputs": {
             "human": human_top_paths,
             "non_human": non_human_top_paths,
+            "universal": universal_top_paths,
             "scenario_outputs": {
                 "human": human_run["scenario_outputs"],
                 "non_human": non_human_run["scenario_outputs"],
+                "universal": universal_run["scenario_outputs"],
             },
             "universal_scaffolds": scaffold_path,
             "combined_test": combined_test_path,

@@ -166,6 +166,7 @@ class Level6aRunner(BaseLevelRunner):
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
+            dataset_source_filter=self._config.dataset_source_filter,
         )
 
         x_val, y_val = self._collect_features(model, val_loader, device)

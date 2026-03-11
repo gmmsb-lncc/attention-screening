@@ -224,6 +224,7 @@ class Level4Runner(BaseLevelRunner):
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
+            dataset_source_filter=self._config.dataset_source_filter,
         )
 
         # --- Forward pass to collect features (val + test only) ---

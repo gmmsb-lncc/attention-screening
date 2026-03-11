@@ -286,6 +286,7 @@ class Level1cRunner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
+            dataset_source_filter=self._config.dataset_source_filter,
         )
 
         # Train ligand-only attention pooling

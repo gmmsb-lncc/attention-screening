@@ -41,7 +41,7 @@ MAX_SEQ_LEN = 1024
 DATASET_PATHS = {
     'human': './tests/datasets/kinase_human_compounds.tsv',
     'non_human': './tests/datasets/kinase_non_human_compounds.tsv',
-    'all': './tests/datasets/kinase_all_compounds.tsv'
+    'all': './tests/datasets/kinase_all_compounds.tsv',
 }
 
 EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
