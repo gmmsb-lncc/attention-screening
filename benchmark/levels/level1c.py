@@ -287,6 +287,7 @@ class Level1cRunner(BaseLevelRunner):
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
             dataset_source_filter=self._config.dataset_source_filter,
+            mode=self.mode,
         )
 
         # Train ligand-only attention pooling
@@ -302,21 +303,25 @@ class Level1cRunner(BaseLevelRunner):
 
         device = next(model.parameters()).device
 
-        # Extract features from val (not train — avoids train-set optimism)
-        tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
-        x_val, y_val = _extract_features(model, val_loader, device)
-        x_test, y_test = _extract_features(model, test_loader, device)
+        if self.mode == "train":
+            tqdm.write("  Extracting ligand attention-pooled features (train + val)...")
+            x_fit, y_fit = _extract_features(model, train_loader, device)
+            x_eval, y_eval = _extract_features(model, val_loader, device)
+        else:
+            tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
+            x_fit, y_fit = _extract_features(model, val_loader, device)
+            x_eval, y_eval = _extract_features(model, test_loader, device)
 
         # Sanitize
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Train canonical KNN/MLP on val features
+        # Train canonical KNN/MLP on fit features
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

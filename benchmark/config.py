@@ -144,6 +144,9 @@ class BenchmarkConfig:
     # --- reproducibility ---
     seeds: Optional[List[int]] = None
 
+    # --- mode ---
+    mode: str = "train"  # "train" = fit on train, eval on val; "test" = fit on val, eval on test
+
     # --- flags ---
     force: bool = False
     force_split: bool = False
@@ -174,7 +177,7 @@ class BenchmarkConfig:
         """Compute actual output directory."""
         if self.output_dir:
             return self.output_dir
-        return f"./results/benchmark_{self.dataset}_{self.embedding}"
+        return f"./results/benchmark_{self.dataset}_{self.embedding}_{self.mode}"
 
     @property
     def resolved_patience(self) -> Optional[int]:
@@ -232,6 +235,9 @@ class BenchmarkConfig:
             raise ValueError(msg)
         if self.dataset not in {"human", "non_human", "all"}:
             msg = f"Invalid dataset '{self.dataset}'. Choose from: human, non_human, all"
+            raise ValueError(msg)
+        if self.mode not in {"train", "test"}:
+            msg = f"Invalid mode '{self.mode}'. Choose from: train, test"
             raise ValueError(msg)
         for level in self.levels:
             if level not in VALID_LEVELS:

@@ -84,6 +84,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seeds for multi-seed runs (default: from config.DEFAULT_SEEDS)",
     )
 
+    # --- mode (mutually exclusive) ---
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--train",
+        dest="mode",
+        action="store_const",
+        const="train",
+        help="Train mode: fit classifiers on train (80%%), evaluate on val (10%%). "
+             "Test set is NEVER loaded.",
+    )
+    mode_group.add_argument(
+        "--test",
+        dest="mode",
+        action="store_const",
+        const="test",
+        help="Test mode: fit classifiers on val (10%%), evaluate on held-out test (10%%).",
+    )
+    parser.set_defaults(mode="train")
+
     # --- flags ---
     parser.add_argument("--force", action="store_true", help="Force recalculation of all levels")
     parser.add_argument("--force_split", action="store_true", help="Force regeneration of scaffold splits")
@@ -150,6 +169,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         output_dir=args.output_dir,
         scaffold_split_dir=args.scaffold_split_dir,
         seeds=args.seeds,
+        mode=args.mode,
         force=args.force,
         force_split=args.force_split,
         debug=args.debug,

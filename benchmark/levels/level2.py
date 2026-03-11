@@ -96,26 +96,32 @@ class Level2Runner(BaseLevelRunner):
 
         tqdm.write(f"  Extracting Level 2 features (seed {seed})...")
 
-        _train_loader, val_loader, test_loader = build_matrix_dataloaders(
+        train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
             dataset_source_filter=self._config.dataset_source_filter,
+            mode=self.mode,
         )
 
-        tqdm.write("  Mean-pooling protein + ligand matrices (val + test)...")
-        x_val, y_val = _extract_features(val_loader)
-        x_test, y_test = _extract_features(test_loader)
+        if self.mode == "train":
+            tqdm.write("  Mean-pooling protein + ligand matrices (train + val)...")
+            x_fit, y_fit = _extract_features(train_loader)
+            x_eval, y_eval = _extract_features(val_loader)
+        else:
+            tqdm.write("  Mean-pooling protein + ligand matrices (val + test)...")
+            x_fit, y_fit = _extract_features(val_loader)
+            x_eval, y_eval = _extract_features(test_loader)
 
         # Sanitize features
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = np.isnan(arr).sum() + np.isinf(arr).sum()
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

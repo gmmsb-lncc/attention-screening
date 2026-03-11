@@ -118,7 +118,7 @@ class Level1Runner(BaseLevelRunner):
         output_dir: str,
         **kwargs: object,
     ) -> Optional[Dict]:
-        """Compute fingerprints from val/test splits, train canonical KNN/MLP."""
+        """Compute fingerprints from splits, train canonical KNN/MLP."""
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level1a_knn_mlp_results.json")
@@ -129,24 +129,24 @@ class Level1Runner(BaseLevelRunner):
 
         tqdm.write(f"  Computing Level 1a fingerprint features (seed {seed})...")
 
-        val_df, test_df = self._load_val_test_splits()
+        fit_df, eval_df = self._load_splits()
 
-        x_val, y_val = _prepare_fp_features(val_df)
-        x_test, y_test = _prepare_fp_features(test_df)
+        x_fit, y_fit = _prepare_fp_features(fit_df)
+        x_eval, y_eval = _prepare_fp_features(eval_df)
 
-        if len(x_val) == 0 or len(x_test) == 0:
+        if len(x_fit) == 0 or len(x_eval) == 0:
             tqdm.write("  WARNING: Empty feature set after FP computation. Skipping.")
             return None
 
         # Sanitise
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -165,30 +165,38 @@ class Level1Runner(BaseLevelRunner):
     # Split loading
     # ------------------------------------------------------------------
 
-    def _load_val_test_splits(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Load validation and test DataFrames from universal scaffold splits.
+    def _load_splits(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Load fit / eval DataFrames from universal scaffold splits.
 
-        Always reads ``universal_val.tsv`` / ``universal_test.tsv`` and
-        filters by ``dataset_source`` when ``--dataset`` is ``human`` or
-        ``non_human``.
+        In **train** mode (default): fit=train (80%), eval=val (10%).
+        Test is never loaded.
+
+        In **test** mode: fit=val (10%), eval=test (10%).
         """
         scaffold_dir = self.scaffold_split_dir
-
-        val_df = read_split_file(
-            os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
-        )
-        test_df = read_split_file(
-            os.path.join(scaffold_dir, "universal_test.tsv")
-        )
-
-        # Filter by corpus when a specific dataset is requested
         source_filter = self._config.dataset_source_filter
-        if source_filter is not None:
-            val_df = val_df[val_df["dataset_source"] == source_filter].reset_index(drop=True)
-            test_df = test_df[test_df["dataset_source"] == source_filter].reset_index(drop=True)
 
-        for df in (val_df, test_df):
+        if self.mode == "train":
+            fit_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_train.tsv")
+            )
+            eval_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
+            )
+        else:  # test
+            fit_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
+            )
+            eval_df = read_split_file(
+                os.path.join(scaffold_dir, "universal_test.tsv")
+            )
+
+        if source_filter is not None:
+            fit_df = fit_df[fit_df["dataset_source"] == source_filter].reset_index(drop=True)
+            eval_df = eval_df[eval_df["dataset_source"] == source_filter].reset_index(drop=True)
+
+        for df in (fit_df, eval_df):
             if "label" not in df.columns:
                 df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
 
-        return val_df, test_df
+        return fit_df, eval_df

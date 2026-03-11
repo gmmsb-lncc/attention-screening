@@ -260,6 +260,7 @@ class BenchmarkOrchestrator:
         print("SEMANTIC SCREENING — UNIFIED BENCHMARK")
         print("=" * 70)
         print(f"  Dataset:          {config.dataset}")
+        print(f"  Mode:             {config.mode} ({'fit=train, eval=val' if config.mode == 'train' else 'fit=val, eval=test'})")
         print(f"  Embedding:        {config.embedding} ({config.embedding_name})")
         print(f"  Levels:           {config.levels}")
         print(f"  Seeds:            {config.resolved_seeds}")
