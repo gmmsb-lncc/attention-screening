@@ -5,10 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Set
+
+# Ensure repo root is on sys.path so ``scaffolds_splits`` is importable
+# when the script is invoked as ``python scripts/scaffold_split.py``.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
