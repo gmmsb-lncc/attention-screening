@@ -96,6 +96,7 @@ class Level1bRunner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
+            dataset_source_filter=self._config.dataset_source_filter,
         )
 
         tqdm.write("  Mean-pooling ligand matrices (val + test)...")

@@ -166,31 +166,26 @@ class Level1Runner(BaseLevelRunner):
     # ------------------------------------------------------------------
 
     def _load_val_test_splits(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Load validation and test DataFrames from scaffold splits.
+        """Load validation and test DataFrames from universal scaffold splits.
 
-        Handles ``dataset='all'`` by concatenating human + non_human.
+        Always reads ``universal_val.tsv`` / ``universal_test.tsv`` and
+        filters by ``dataset_source`` when ``--dataset`` is ``human`` or
+        ``non_human``.
         """
         scaffold_dir = self.scaffold_split_dir
 
-        if self.dataset == "all":
-            val_dfs: list[pd.DataFrame] = []
-            test_dfs: list[pd.DataFrame] = []
-            for ds in ("human", "non_human"):
-                val_dfs.append(
-                    read_split_file(os.path.join(scaffold_dir, "scenarios/Sc", f"{ds}_val.tsv"))
-                )
-                test_dfs.append(
-                    read_split_file(os.path.join(scaffold_dir, f"{ds}_test.tsv"))
-                )
-            val_df = pd.concat(val_dfs, ignore_index=True)
-            test_df = pd.concat(test_dfs, ignore_index=True)
-        else:
-            val_df = read_split_file(
-                os.path.join(scaffold_dir, "scenarios/Sc", f"{self.dataset}_val.tsv")
-            )
-            test_df = read_split_file(
-                os.path.join(scaffold_dir, f"{self.dataset}_test.tsv")
-            )
+        val_df = read_split_file(
+            os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
+        )
+        test_df = read_split_file(
+            os.path.join(scaffold_dir, "universal_test.tsv")
+        )
+
+        # Filter by corpus when a specific dataset is requested
+        source_filter = self._config.dataset_source_filter
+        if source_filter is not None:
+            val_df = val_df[val_df["dataset_source"] == source_filter].reset_index(drop=True)
+            test_df = test_df[test_df["dataset_source"] == source_filter].reset_index(drop=True)
 
         for df in (val_df, test_df):
             if "label" not in df.columns:

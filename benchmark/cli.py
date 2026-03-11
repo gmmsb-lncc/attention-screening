@@ -13,6 +13,7 @@ from typing import List
 
 from benchmark.config import (
     DEFAULT_SCAFFOLD_SPLIT_DIR,
+    LEVEL_0_EXPANSION,
     VALID_LEVELS,
     BenchmarkConfig,
 )
@@ -35,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset",
         required=True,
         choices=["human", "non_human", "all"],
-        help="Dataset to benchmark (all = human + non_human combined)",
+        help="Dataset to benchmark. All options use the universal scaffold-disjoint split; "
+             "'human'/'non_human' filter by dataset_source, 'all' uses all rows.",
     )
     parser.add_argument(
         "--embedding",
@@ -51,12 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         help=(
             "Levels to run: "
+            "0=ClassicalML(1a+1b+1c+3), "
             "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
             "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool, "
             "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
             "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
             "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
-            "Examples: --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b OR --levels 1a,2,4,5a,6a"
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b"
         ),
     )
 
@@ -126,6 +129,10 @@ def parse_levels(levels_arg: object) -> List[str]:
             if level not in VALID_LEVELS:
                 msg = f"Invalid level: {level}. Valid: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)
+
+        # Expand level 0 shortcut → 1a, 1b, 1c, 3
+        if "0" in levels:
+            levels = sorted({lv for lv in levels if lv != "0"} | set(LEVEL_0_EXPANSION))
 
         return levels if levels else sorted(VALID_LEVELS)
 

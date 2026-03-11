@@ -105,7 +105,10 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
+
+# Level 0 is a shortcut for the classical ML baseline subset
+LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -198,10 +201,26 @@ class BenchmarkConfig:
         )
 
     def datasets_to_process(self) -> List[str]:
-        """List of concrete datasets (expands 'all' → ['human', 'non_human'])."""
+        """List of concrete datasets for embedding directory iteration.
+
+        Expands ``'all'`` → ``['human', 'non_human']`` because embedding
+        files are stored per-corpus.  Split loading always uses the
+        universal scaffold files (see ``dataset_source_filter``).
+        """
         if self.dataset == "all":
             return ["human", "non_human"]
         return [self.dataset]
+
+    @property
+    def dataset_source_filter(self) -> Optional[str]:
+        """Filter value for the ``dataset_source`` column in universal splits.
+
+        Returns ``None`` for ``'all'`` (no filtering — use every row),
+        or the corpus name (``'human'`` / ``'non_human'``) otherwise.
+        """
+        if self.dataset == "all":
+            return None
+        return self.dataset
 
     def __post_init__(self) -> None:
         """Validate configuration at construction time."""
