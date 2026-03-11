@@ -150,7 +150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-val-scaffolds",
         type=int,
-        default=15,
+        default=50,
         help="Minimum number of scaffolds in validation set (diversity penalty below this)",
     )
     parser.add_argument(
