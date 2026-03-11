@@ -55,6 +55,7 @@ from benchmark.config import (
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
+    split_loader_for_feature_extraction,
 )
 
 
@@ -357,10 +358,20 @@ class Level3Runner(BaseLevelRunner):
             mode=self.mode,
         )
 
+        # In train mode, split training data to avoid train-set optimism:
+        # model trains on 80% of train, KNN features from the held-out 20%.
+        feat_extract_loader = None
+        if self.mode == "train":
+            model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
+                train_loader, seed=seed,
+            )
+        else:
+            model_train_loader = train_loader
+
         # Train projection + attention pooling
         tqdm.write("  Training projection + attention pooling...")
         model = _train_attention_pooling(
-            train_loader=train_loader,
+            train_loader=model_train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
             lr=self._config.learning_rate,
@@ -372,8 +383,8 @@ class Level3Runner(BaseLevelRunner):
         device = next(model.parameters()).device
 
         if self.mode == "train":
-            tqdm.write("  Extracting attention-pooled features (train + val)...")
-            x_fit, y_fit = _extract_features(model, train_loader, device)
+            tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
+            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
             x_eval, y_eval = _extract_features(model, val_loader, device)
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
