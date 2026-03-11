@@ -9,10 +9,11 @@ Classifier specifications:
 
  * **KNN** — FAISS inner-product index on L2-normalised features
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
- * **MLP** — ``sklearn.neural_network.MLPClassifier`` with a single hidden
-   layer of 512 units, ReLU activation, Adam solver, α = 1 × 10⁻⁴,
-   max 500 iterations.  Early stopping is **disabled** so that the MLP
-   trains on 100 % of the input features — the same proportion as KNN.
+ * **MLP** — ``sklearn.neural_network.MLPClassifier`` with two hidden
+   layers of (512, 256) units, ReLU activation, Adam solver, adaptive
+   learning rate, α = 1 × 10⁻³, max 1000 iterations.  Early stopping
+   is **enabled** (10 % held-out, patience = 20) to prevent overfitting
+   and mirror the implicit regularisation of KNN distance-weighted voting.
  * Both classifiers receive features after ``StandardScaler``.
 
 Evaluation protocol:
@@ -171,14 +172,18 @@ def train_knn_mlp(
     knn_pred, knn_proba = _faiss_knn_predict(x_train_sc, y_train, x_test_sc, k=5)
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
 
-    # ---------- MLP (single 512-unit hidden layer) -------------------
+    # ---------- MLP (two hidden layers, early stopping, adaptive LR) --
     mlp = MLPClassifier(
-        hidden_layer_sizes=(512,),
+        hidden_layer_sizes=(512, 256),
         activation="relu",
         solver="adam",
-        alpha=1e-4,
-        max_iter=500,
-        early_stopping=False,
+        alpha=1e-3,
+        learning_rate="adaptive",
+        learning_rate_init=1e-3,
+        max_iter=1000,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=20,
         random_state=seed,
     )
     mlp.fit(x_train_sc, y_train)
