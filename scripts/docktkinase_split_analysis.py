@@ -395,7 +395,7 @@ def train_and_evaluate(embeddings: np.ndarray, labels: np.ndarray,
     # MLP
     print("    Training MLP...")
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(512,),
         activation='relu',
         solver='adam',
         alpha=0.0001,

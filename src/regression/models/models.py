@@ -196,10 +196,10 @@ class RegressionModels:
         
         # 12. MLP - Neural network with early stopping (BENEFITS from scaling)
         models['MLP'] = _make_pipeline(MLPRegressor(
-            hidden_layer_sizes=(100, 50),
+            hidden_layer_sizes=(512,),
             activation='relu',
             solver='adam',
-            max_iter=50,
+            max_iter=500,
             early_stopping=True,
             validation_fraction=0.1,
             n_iter_no_change=10,

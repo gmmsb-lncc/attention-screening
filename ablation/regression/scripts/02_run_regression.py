@@ -119,7 +119,7 @@ def create_mlp_regressor(random_state: int = RANDOM_SEED) -> Pipeline:
     return Pipeline([
         ('scaler', StandardScaler()),
         ('model', MLPRegressor(
-            hidden_layer_sizes=(256, 128, 64),
+            hidden_layer_sizes=(512,),
             activation='relu',
             solver='adam',
             alpha=0.0001,

@@ -178,7 +178,7 @@ class DatasetSimilarityAnalyzer:
             clf = KNeighborsClassifier(n_neighbors=5, weights='distance', metric='cosine')
         else:  # mlp
             clf = MLPClassifier(
-                hidden_layer_sizes=(256, 128),
+                hidden_layer_sizes=(512,),
                 max_iter=500,
                 early_stopping=True,
                 validation_fraction=0.1,
