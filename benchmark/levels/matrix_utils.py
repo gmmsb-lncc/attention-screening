@@ -198,7 +198,8 @@ def build_matrix_dataloaders(
     scaffold_split_dir: str,
     batch_size: int = 32,
     dataset_source_filter: str | None = None,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
+    mode: str = "test",
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     """Build train / val / test ``DataLoader`` instances from universal splits.
 
     Always reads the **universal** scaffold split files.  When
@@ -208,9 +209,12 @@ def build_matrix_dataloaders(
     *dataset_type* still controls which embedding directories to search
     for matrix ``.npy`` files (per-corpus storage is unchanged).
 
+    When *mode* is ``"train"``, test data is **never loaded** — the
+    returned ``test_loader`` is ``None``.
+
     Returns
     -------
-    train_loader, val_loader, test_loader
+    train_loader, val_loader, test_loader (or None when mode="train")
     """
     protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
 
@@ -220,23 +224,34 @@ def build_matrix_dataloaders(
     val_df = read_split_file(
         os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_val.tsv")
     )
-    test_df = read_split_file(
-        os.path.join(scaffold_split_dir, "universal_test.tsv")
-    )
+
+    if mode == "test":
+        test_df = read_split_file(
+            os.path.join(scaffold_split_dir, "universal_test.tsv")
+        )
+    else:
+        test_df = None
 
     if dataset_source_filter is not None:
         train_df = train_df[train_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
         val_df = val_df[val_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
-        test_df = test_df[test_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+        if test_df is not None:
+            test_df = test_df[test_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
 
     for df in (train_df, val_df, test_df):
-        if "label" not in df.columns:
+        if df is not None and "label" not in df.columns:
             df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
+
+    test_loader = (
+        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False)
+        if test_df is not None
+        else None
+    )
 
     return (
         _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
         _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
+        test_loader,
     )
 
 

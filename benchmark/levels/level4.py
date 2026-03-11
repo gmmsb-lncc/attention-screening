@@ -120,7 +120,7 @@ class Level4Runner(BaseLevelRunner):
         tqdm.write("  Extracting cross-attention representations...")
 
         try:
-            x_val, y_val, x_test, y_test = self._extract_features(
+            x_fit, y_fit, x_eval, y_eval = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
             )
@@ -130,15 +130,15 @@ class Level4Runner(BaseLevelRunner):
             return self._fallback_from_training_results(_training_results)
 
         # Sanitise features
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # --- Step 3: Train canonical KNN/MLP on val features -------------
+        # --- Step 3: Train canonical KNN/MLP on fit features -------------
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -168,13 +168,14 @@ class Level4Runner(BaseLevelRunner):
         **same** data pipeline as Levels 2 and 3, ensuring that all
         matrix-based levels receive identical inputs.
 
-        Features are extracted from the **validation** split (not training)
-        to avoid train-set optimism — the model was only exposed to val
-        for early stopping, not for gradient updates.
+        In **train** mode, features are extracted from the training split
+        (for KNN/MLP fitting) and validation split (for evaluation).
+        In **test** mode, features are extracted from validation (fitting)
+        and test (evaluation).
 
         Returns
         -------
-        x_val, y_val, x_test, y_test : np.ndarray
+        x_fit, y_fit, x_eval, y_eval : np.ndarray
             Feature arrays from the cross-attention encoder.
         """
         from crossattention_split_analysis.config import (
@@ -219,20 +220,24 @@ class Level4Runner(BaseLevelRunner):
         # --- Build dataloaders (same as L2/L3 — shared matrix_utils) ---
         # For dataset="all" this correctly concatenates human + non_human
         # splits and searches matrices in both directories.
-        _train_loader, val_loader, test_loader = build_matrix_dataloaders(
+        train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
             dataset_source_filter=self._config.dataset_source_filter,
+            mode=self._config.mode,
         )
 
-        # --- Forward pass to collect features (val + test only) ---
-        # Val features are used for KNN/MLP training (no train-set optimism).
-        x_val, y_val = self._collect_features(model, val_loader, device)
-        x_test, y_test = self._collect_features(model, test_loader, device)
+        # --- Forward pass to collect features based on mode ---
+        if self._config.mode == "train":
+            x_fit, y_fit = self._collect_features(model, train_loader, device)
+            x_eval, y_eval = self._collect_features(model, val_loader, device)
+        else:
+            x_fit, y_fit = self._collect_features(model, val_loader, device)
+            x_eval, y_eval = self._collect_features(model, test_loader, device)
 
-        return x_val, y_val, x_test, y_test
+        return x_fit, y_fit, x_eval, y_eval
 
     @staticmethod
     @torch.no_grad()

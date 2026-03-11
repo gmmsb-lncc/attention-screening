@@ -103,7 +103,7 @@ class Level5Runner(BaseLevelRunner):
         tqdm.write("  Extracting scaffold-invariant representations...")
 
         try:
-            x_val, y_val, x_test, y_test = self._extract_features(
+            x_fit, y_fit, x_eval, y_eval = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
             )
@@ -113,7 +113,7 @@ class Level5Runner(BaseLevelRunner):
             return self._fallback_from_training_results(_training_results)
 
         # Sanitise
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf → replaced with 0")
@@ -121,7 +121,7 @@ class Level5Runner(BaseLevelRunner):
 
         # --- Step 3: Canonical KNN/MLP ---
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -189,12 +189,17 @@ class Level5Runner(BaseLevelRunner):
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
             dataset_source_filter=self._config.dataset_source_filter,
+            mode=self._config.mode,
         )
 
-        x_val, y_val = self._collect_features(model, val_loader, device)
-        x_test, y_test = self._collect_features(model, test_loader, device)
+        if self._config.mode == "train":
+            x_fit, y_fit = self._collect_features(model, _train_loader, device)
+            x_eval, y_eval = self._collect_features(model, val_loader, device)
+        else:
+            x_fit, y_fit = self._collect_features(model, val_loader, device)
+            x_eval, y_eval = self._collect_features(model, test_loader, device)
 
-        return x_val, y_val, x_test, y_test
+        return x_fit, y_fit, x_eval, y_eval
 
     @staticmethod
     @torch.no_grad()

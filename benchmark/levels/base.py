@@ -78,6 +78,10 @@ class BaseLevelRunner(ABC):
         return self._config.force
 
     @property
+    def mode(self) -> str:
+        return self._config.mode
+
+    @property
     def scaffold_split_dir(self) -> str:
         return self._config.scaffold_split_dir
 
