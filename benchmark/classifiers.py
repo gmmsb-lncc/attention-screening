@@ -11,9 +11,10 @@ Classifier specifications:
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
  * **MLP** — ``sklearn.neural_network.MLPClassifier`` with two hidden
    layers of (512, 256) units, ReLU activation, Adam solver, adaptive
-   learning rate, α = 1 × 10⁻³, max 1000 iterations.  Early stopping
-   is **enabled** (10 % held-out, patience = 20) to prevent overfitting
-   and mirror the implicit regularisation of KNN distance-weighted voting.
+   learning rate, α = 5 × 10⁻⁴, batch size 64, max 2000 iterations.
+   Early stopping is **enabled** (15 % held-out, patience = 50) to
+   prevent overfitting while giving the model sufficient convergence
+   runway across all random seeds.
  * Both classifiers receive features after ``StandardScaler``.
 
 Evaluation protocol:
@@ -177,13 +178,14 @@ def train_knn_mlp(
         hidden_layer_sizes=(512, 256),
         activation="relu",
         solver="adam",
-        alpha=1e-3,
+        alpha=5e-4,
+        batch_size=64,
         learning_rate="adaptive",
         learning_rate_init=1e-3,
-        max_iter=1000,
+        max_iter=2000,
         early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=20,
+        validation_fraction=0.15,
+        n_iter_no_change=50,
         random_state=seed,
     )
     mlp.fit(x_train_sc, y_train)
