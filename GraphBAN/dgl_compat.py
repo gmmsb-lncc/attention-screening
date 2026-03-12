@@ -128,17 +128,35 @@ def eager_import_dgl():
             )
         _orig_exit(code)
 
-    sys.exit = _intercept
+def eager_import_dgl():
+    """Pre-import DGL while graphbolt stubs are active.
+
+    DGL is NOT imported at run_baseline.py module level — it is only imported
+    later when setup_graphban_imports() loads GraphBAN's models.py.  By that
+    point sys.modules stubs are already in place from patch_graphbolt(), so
+    DGL will pick them up.  This function pre-triggers that import while stubs
+    are fresh and DGL_GRAPHBOLT_DISABLE is already set.
+
+    NOTE: On some DGL conda builds, graphbolt loading happens inside a compiled
+    C extension (_graphbolt.so) that calls libc exit() directly, making Python
+    sys.exit monkey-patching useless. For those builds the only reliable fix is
+    to rename the .so so it can never be dlopen()'d — this must be done once on
+    the server before running:
+
+        find ~/miniconda/envs/graphban/ -path "*/dgl/graphbolt/*.so" \\
+            -exec mv {} {}.disabled \\;
+    """
+    if "dgl" in sys.modules:
+        return
+
     try:
         import dgl  # noqa: F401
-    except ImportError as exc:
+    except Exception as exc:
         warnings.warn(
             f"dgl_compat: DGL pre-import failed: {exc}. "
             "GraphBAN may fail at runtime.",
             stacklevel=2,
         )
-    finally:
-        sys.exit = _orig_exit
 
 
 # Auto-apply on import
