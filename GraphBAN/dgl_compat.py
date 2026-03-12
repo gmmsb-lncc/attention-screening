@@ -8,14 +8,25 @@ GraphBAN does NOT use graphbolt features (it only uses basic DGL graphs and
 GCN from dgllife). This shim stubs out graphbolt before DGL loads, allowing
 the rest of DGL to work normally.
 
+It also sets DGL_GRAPHBOLT_DISABLE=1 to prevent DGL's native graphbolt C
+extension (dgl._C.graphbolt) from being loaded. Without this, DGL 2.x detects
+the missing native library, checks for google.colab, and (if the package is
+installed) triggers a Colab runtime restart — even outside Colab.
+
 Usage:
     import dgl_compat  # must be first import
     import dgl
     from dgllife.utils import smiles_to_bigraph
 """
 
+import os
 import sys
 import types
+
+# Disable DGL graphbolt native C extension before any DGL import.
+# This prevents dgl/_C.graphbolt from loading and avoids the Colab-restart
+# error path in DGL 2.x (which fires whenever google-colab is installed).
+os.environ.setdefault("DGL_GRAPHBOLT_DISABLE", "1")
 
 
 def patch_setuptools():
