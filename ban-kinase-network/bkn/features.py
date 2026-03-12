@@ -7,15 +7,15 @@ import types
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Compatibility shim — transformers >= 4.40 removed transformers.onnx, but
-# MoLFormer's cached configuration_molformer.py still imports OnnxConfig from
-# it. Inject a stub before any transformers import so the dynamic module load
-# does not crash.
+# Compatibility shims for MoLFormer's cached HuggingFace code vs modern
+# transformers (>= 4.40).  MoLFormer's dynamic modules import symbols that
+# were renamed or removed.  We patch at module‐level before any transformers
+# import so the cached configuration/modeling files don't crash.
 # ---------------------------------------------------------------------------
-if "transformers.onnx" not in sys.modules:
-    import importlib
-    import transformers as _transformers_pkg
+import transformers as _transformers_pkg
 
+# 1) transformers.onnx.OnnxConfig was removed in >= 4.40
+if "transformers.onnx" not in sys.modules:
     _onnx_stub = types.ModuleType("transformers.onnx")
 
     class _OnnxConfig:  # minimal stub — only used as a base class
@@ -24,6 +24,13 @@ if "transformers.onnx" not in sys.modules:
     _onnx_stub.OnnxConfig = _OnnxConfig  # type: ignore[attr-defined]
     sys.modules["transformers.onnx"] = _onnx_stub
     _transformers_pkg.onnx = _onnx_stub  # type: ignore[attr-defined]
+
+# 2) find_pruneable_heads_and_indices was renamed to find_prunable_heads_and_indices
+from transformers import pytorch_utils as _pu
+
+if not hasattr(_pu, "find_pruneable_heads_and_indices"):
+    if hasattr(_pu, "find_prunable_heads_and_indices"):
+        _pu.find_pruneable_heads_and_indices = _pu.find_prunable_heads_and_indices
 
 import numpy as np
 import pandas as pd
