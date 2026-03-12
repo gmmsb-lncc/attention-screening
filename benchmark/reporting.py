@@ -242,6 +242,7 @@ def save_benchmark_json(
             "seeds": config.resolved_seeds,
             "elapsed_seconds": round(elapsed_seconds, 1),
             "ligand_semantic_model": config.ligand_model,
+            "ligand_weight": config.ligand_weight,
             "use_se3_ligand": config.use_se3_ligand,
             "se3_features_dir": config.se3_features_dir,
             "se3_default_dirs": config.resolved_se3_feature_dirs,

@@ -213,6 +213,39 @@ def _compute_metrics(
     }
 
 
+def _apply_ligand_block_weight(
+    x: np.ndarray,
+    protein_dim: int | None,
+    ligand_weight: float,
+) -> np.ndarray:
+    """Apply relative ligand block weight on already-scaled features.
+
+    Parameters
+    ----------
+    x : ndarray [n_samples, n_features]
+        Feature matrix after StandardScaler.
+    protein_dim : int | None
+        Number of leading protein features. Remaining columns are ligand features.
+        If ``None`` or invalid, no weighting is applied.
+    ligand_weight : float
+        Multiplicative factor for ligand block.
+    """
+    if ligand_weight == 1.0 or protein_dim is None:
+        return x
+
+    if protein_dim <= 0 or protein_dim >= x.shape[1]:
+        logger.warning(
+            "Skipping ligand weighting: invalid protein_dim=%s for n_features=%s",
+            protein_dim,
+            x.shape[1],
+        )
+        return x
+
+    xw = np.asarray(x, dtype=np.float32).copy()
+    xw[:, protein_dim:] *= float(ligand_weight)
+    return xw
+
+
 # ------------------------------------------------------------------ #
 # Public API
 # ------------------------------------------------------------------ #
@@ -223,6 +256,8 @@ def train_knn_mlp(
     x_test: np.ndarray,
     y_test: np.ndarray,
     seed: int,
+    protein_dim: int | None = None,
+    ligand_weight: float = 1.0,
 ) -> Dict[str, Dict[str, float]]:
     """Train canonical KNN and MLP classifiers and return metric dicts.
 
@@ -259,6 +294,11 @@ def train_knn_mlp(
     x_cal_sc = scaler.transform(x_cal).astype(np.float32)
     x_test_sc = scaler.transform(x_test).astype(np.float32)
 
+    # Apply ligand block weighting after feature standardization.
+    x_model_sc = _apply_ligand_block_weight(x_model_sc, protein_dim, ligand_weight)
+    x_cal_sc = _apply_ligand_block_weight(x_cal_sc, protein_dim, ligand_weight)
+    x_test_sc = _apply_ligand_block_weight(x_test_sc, protein_dim, ligand_weight)
+
     # ---------- KNN (FAISS, k=5, cosine, distance-weighted) ----------
     knn_cal_proba = _faiss_knn_proba(x_model_sc, y_model, x_cal_sc, k=5)
     knn_threshold = _optimize_threshold_mcc(y_cal, knn_cal_proba)
@@ -269,6 +309,8 @@ def train_knn_mlp(
     knn_metrics["details"] = {
         "fit": {
             "n_rows": int(len(y_train)),
+            "protein_dim": int(protein_dim) if protein_dim is not None else None,
+            "ligand_weight": float(ligand_weight),
         },
         "model_train": {
             "n_rows": int(len(y_model)),
@@ -309,6 +351,8 @@ def train_knn_mlp(
     mlp_metrics["details"] = {
         "fit": {
             "n_rows": int(len(y_train)),
+            "protein_dim": int(protein_dim) if protein_dim is not None else None,
+            "ligand_weight": float(ligand_weight),
         },
         "model_train": {
             "n_rows": int(len(y_model)),

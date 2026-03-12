@@ -31,7 +31,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from benchmark.classifiers import train_knn_mlp
-from benchmark.config import BenchmarkConfig
+from benchmark.config import BenchmarkConfig, PROTEIN_DIMS
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
@@ -141,6 +141,12 @@ class Level2Runner(BaseLevelRunner):
         x_fit, y_fit = _extract_features(split_selection.fit, se3_loader=se3_loader)
         x_eval, y_eval = _extract_features(split_selection.eval, se3_loader=se3_loader)
 
+        protein_dim = PROTEIN_DIMS.get(self.embedding_name, 640)
+        if self._config.ligand_weight != 1.0:
+            tqdm.write(
+                f"  [Fusion] Ligand block weighting enabled: ligand_weight={self._config.ligand_weight:.3f} (protein block weight=1.000)"
+            )
+
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             arr_sanitized, bad = sanitize_features(arr)
@@ -149,7 +155,15 @@ class Level2Runner(BaseLevelRunner):
                 arr[:] = arr_sanitized
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            protein_dim=protein_dim,
+            ligand_weight=self._config.ligand_weight,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

@@ -130,6 +130,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ligand embedding model: molformer (768d), smited (768d), chemberta (384d). Default: molformer",
     )
     parser.add_argument(
+        "--ligand-weight",
+        dest="ligand_weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Relative weight for ligand feature block vs protein feature block in KNN/MLP. "
+            "Applied after StandardScaler in levels with protein+ligand features (L2/L3). Default: 1.0"
+        ),
+    )
+    parser.add_argument(
         "--se3",
         dest="use_se3_ligand",
         action="store_true",
@@ -196,6 +206,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         dataset=args.dataset,
         embedding=args.embedding,
         ligand_model=args.ligand_model,
+        ligand_weight=args.ligand_weight,
         use_se3_ligand=args.use_se3_ligand,
         se3_features_dir=args.se3_features_dir,
         levels=parse_levels(args.levels),

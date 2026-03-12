@@ -153,6 +153,7 @@ class BenchmarkConfig:
 
     # --- ligand model ---
     ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
+    ligand_weight: float = 1.0
     use_se3_ligand: bool = False
     se3_features_dir: Optional[str] = None
 
@@ -285,6 +286,9 @@ class BenchmarkConfig:
                 f"Invalid ligand_model '{self.ligand_model}'. "
                 f"Choose from: {sorted(VALID_LIGAND_MODELS)}"
             )
+            raise ValueError(msg)
+        if self.ligand_weight <= 0:
+            msg = "--ligand-weight must be > 0"
             raise ValueError(msg)
         if self.se3_features_dir is not None and not self.se3_features_dir.strip():
             msg = "--se3-features-dir cannot be empty when provided"

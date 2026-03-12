@@ -432,9 +432,23 @@ class Level3Runner(BaseLevelRunner):
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = arr_sanitized
 
+        protein_feature_dim = int(model.hidden_dim)
+        if self._config.ligand_weight != 1.0:
+            tqdm.write(
+                f"  [Fusion] Ligand block weighting enabled: ligand_weight={self._config.ligand_weight:.3f} (protein block weight=1.000)"
+            )
+
         # Train canonical KNN/MLP (same as all levels)
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            protein_dim=protein_feature_dim,
+            ligand_weight=self._config.ligand_weight,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
