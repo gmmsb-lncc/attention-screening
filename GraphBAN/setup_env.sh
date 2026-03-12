@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Setup conda environment for GraphBAN baseline.
 # Run: bash setup_env.sh
+# All packages installed via conda. Only fair-esm uses pip (not on conda).
 set -euo pipefail
 
 ENV_NAME="graphban"
@@ -15,51 +16,79 @@ fi
 eval "$(conda shell.bash hook)"
 conda activate "${ENV_NAME}"
 
-# Detect CUDA for PyTorch, torch-geometric, and DGL installation
+# ── PyTorch + DGL + PyG ────────────────────────────────────────────────────
 if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
     CUDA_VER=$(nvidia-smi | grep -oP 'CUDA Version: \K[0-9]+\.[0-9]+' | head -1)
     CUDA_MAJOR=$(echo "${CUDA_VER}" | cut -d. -f1)
+    CUDA_MINOR=$(echo "${CUDA_VER}" | cut -d. -f2)
     echo "[INFO] Detected CUDA ${CUDA_VER}"
+
+    # CUDA channel tags
     if [ "${CUDA_MAJOR}" -ge 12 ]; then
-        TORCH_INDEX="cu121"
-        DGL_CUDA="cu121"
+        PYTORCH_CUDA="12.1"
+        DGL_LABEL="cu121"
+        PYG_CUDA="cu121"
     else
-        TORCH_INDEX="cu118"
-        DGL_CUDA="cu118"
+        PYTORCH_CUDA="11.8"
+        DGL_LABEL="cu118"
+        PYG_CUDA="cu118"
     fi
-    echo "[INFO] Installing PyTorch with CUDA (${TORCH_INDEX})..."
-    pip install torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/${TORCH_INDEX}"
 
-    echo "[INFO] Installing torch-geometric..."
-    pip install torch-geometric
-    TORCH_VER=$(python -c 'import torch; print(torch.__version__.split("+")[0])')
-    pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
-        -f "https://data.pyg.org/whl/torch-${TORCH_VER}+${TORCH_INDEX}.html"
+    echo "[INFO] Installing PyTorch ${PYTORCH_CUDA} via conda..."
+    conda install -y pytorch torchvision torchaudio \
+        pytorch-cuda=${PYTORCH_CUDA} \
+        -c pytorch -c nvidia
 
-    echo "[INFO] Installing DGL with CUDA (${DGL_CUDA})..."
-    pip uninstall dgl -y 2>/dev/null || true
-    pip install dgl -f "https://data.dgl.ai/wheels/${DGL_CUDA}/repo.html"
+    echo "[INFO] Installing PyTorch-Geometric via conda (pyg channel)..."
+    conda install -y pyg pytorch-scatter pytorch-sparse pytorch-cluster \
+        pytorch-spline-conv \
+        -c pyg
+
+    echo "[INFO] Installing DGL (CUDA ${DGL_LABEL}) via conda..."
+    conda install -y dgl \
+        -c "dglteam/label/${DGL_LABEL}"
 else
-    echo "[INFO] No GPU detected. Installing CPU-only versions..."
-    pip install torch torchvision torchaudio
+    echo "[INFO] No GPU detected. Installing CPU-only versions via conda..."
 
-    echo "[INFO] Installing torch-geometric (CPU)..."
-    pip install torch-geometric
-    TORCH_VER=$(python -c 'import torch; print(torch.__version__.split("+")[0])')
-    pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
-        -f "https://data.pyg.org/whl/torch-${TORCH_VER}+cpu.html"
+    conda install -y pytorch torchvision torchaudio cpuonly \
+        -c pytorch
 
-    echo "[INFO] Installing DGL (CPU)..."
-    pip install dgl -f https://data.dgl.ai/wheels/repo.html
+    echo "[INFO] Installing PyTorch-Geometric (CPU) via conda..."
+    conda install -y pyg pytorch-scatter pytorch-sparse pytorch-cluster \
+        pytorch-spline-conv \
+        -c pyg
+
+    echo "[INFO] Installing DGL (CPU) via conda..."
+    conda install -y dgl \
+        -c dglteam
 fi
 
-pip install dgllife
+# ── DGLlife ────────────────────────────────────────────────────────────────
+echo "[INFO] Installing dgllife via conda..."
+conda install -y dgllife -c conda-forge
 
-echo "[INFO] Installing remaining dependencies..."
-pip install --force-reinstall setuptools packaging
-pip install torchmetrics transformers fair-esm
-pip install "numpy<2" rdkit-pypi scikit-learn pandas prettytable yacs tqdm pyarrow
+# ── Remaining dependencies (all via conda-forge) ──────────────────────────
+echo "[INFO] Installing remaining dependencies via conda-forge..."
+conda install -y \
+    "numpy<2" \
+    scikit-learn \
+    pandas \
+    tqdm \
+    pyarrow \
+    rdkit \
+    prettytable \
+    yacs \
+    torchmetrics \
+    transformers \
+    setuptools \
+    packaging \
+    -c conda-forge
 
+# ── fair-esm: pip only (not available on conda) ───────────────────────────
+echo "[INFO] Installing fair-esm via pip (not available on conda)..."
+pip install fair-esm
+
+# ── GraphBAN source ────────────────────────────────────────────────────────
 echo "[INFO] Cloning GraphBAN source code..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRAPHBAN_SRC="${SCRIPT_DIR}/src"
