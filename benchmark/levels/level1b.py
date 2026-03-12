@@ -39,19 +39,27 @@ from benchmark.levels.matrix_utils import (
     mean_pool,
 )
 from benchmark.levels.protocol import sanitize_features, select_fit_eval
+from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 
 # ---------------------------------------------------------------------------
 # Feature extraction (ligand-only mean pooling)
 # ---------------------------------------------------------------------------
 
-def _extract_ligand_features(loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
+def _extract_ligand_features(
+    loader: DataLoader,
+    se3_loader: SE3FeatureLoader | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Extract mean-pooled **ligand-only** features from a dataloader."""
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
 
     for batch in loader:
         ligand_pooled = mean_pool(batch["ligand_matrix"], batch["ligand_mask"])
+        if se3_loader is not None:
+            se3_batch = se3_loader.get_batch(batch["chembl_id"])
+            if se3_batch.shape[1] > 0:
+                ligand_pooled = np.concatenate([ligand_pooled, se3_batch], axis=-1)
         ligand_pooled = np.nan_to_num(
             ligand_pooled, nan=0.0, posinf=0.0, neginf=0.0,
         )
@@ -92,6 +100,14 @@ class Level1bRunner(BaseLevelRunner):
 
         tqdm.write(f"  Extracting Level 1b ligand features (seed {seed})...")
 
+        se3_loader = build_se3_loader(
+            feature_dir=self._config.se3_features_dir,
+            use_se3_ligand=self._config.use_se3_ligand,
+            default_feature_dirs=self._config.resolved_se3_feature_dirs,
+        )
+        if self._config.use_se3_ligand and se3_loader is None:
+            tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
+
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
@@ -105,8 +121,8 @@ class Level1bRunner(BaseLevelRunner):
         tqdm.write(
             f"  Mean-pooling ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
         )
-        x_fit, y_fit = _extract_ligand_features(split_selection.fit)
-        x_eval, y_eval = _extract_ligand_features(split_selection.eval)
+        x_fit, y_fit = _extract_ligand_features(split_selection.fit, se3_loader=se3_loader)
+        x_eval, y_eval = _extract_ligand_features(split_selection.eval, se3_loader=se3_loader)
 
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:

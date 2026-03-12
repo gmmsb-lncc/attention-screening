@@ -55,6 +55,7 @@ VALID_LIGAND_MODELS = frozenset({"molformer", "smited", "chemberta"})
 
 EMBEDDING_BASE_PATH = "./results/protein_model_benchmark_{dataset_type}_v2"
 DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
+DEFAULT_SE3_FEATURES_SUBDIR = "se3_features"
 
 # ---------------------------------------------------------------------------
 # Metrics
@@ -152,6 +153,8 @@ class BenchmarkConfig:
 
     # --- ligand model ---
     ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
+    use_se3_ligand: bool = False
+    se3_features_dir: Optional[str] = None
 
     # --- level selection ---
     levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3"])
@@ -206,6 +209,16 @@ class BenchmarkConfig:
         """
         base = self.output_dir if self.output_dir else f"./results/benchmark_{self.dataset}_{self.embedding}"
         return os.path.join(base, self.mode)
+
+    @property
+    def resolved_se3_feature_dirs(self) -> List[str]:
+        """Default SE3 feature directories following embedding build layout."""
+        dirs: List[str] = []
+        for ds in self.datasets_to_process():
+            dirs.append(
+                os.path.join(self.build_dir(ds), DEFAULT_SE3_FEATURES_SUBDIR)
+            )
+        return dirs
 
     @property
     def resolved_patience(self) -> Optional[int]:
@@ -272,6 +285,9 @@ class BenchmarkConfig:
                 f"Invalid ligand_model '{self.ligand_model}'. "
                 f"Choose from: {sorted(VALID_LIGAND_MODELS)}"
             )
+            raise ValueError(msg)
+        if self.se3_features_dir is not None and not self.se3_features_dir.strip():
+            msg = "--se3-features-dir cannot be empty when provided"
             raise ValueError(msg)
         for level in self.levels:
             if level in OBSOLETE_LEVELS:
