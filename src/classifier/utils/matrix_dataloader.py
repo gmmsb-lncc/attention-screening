@@ -171,10 +171,11 @@ class MatrixEmbeddingDataset(Dataset):
         if is_protein:
             file_patterns = [f"{embed_id}_matrix.npy"]
         else:
-            # Ligands may use different naming: SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+            # Ligands may use different naming: SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy, ChemBERTa uses _chemberta_matrix.npy
             file_patterns = [
                 f"{embed_id}_matrix.npy",
                 f"{embed_id}_molformer_matrix.npy",
+                f"{embed_id}_chemberta_matrix.npy",
             ]
 
         # Try loading matrix from each directory with each pattern
