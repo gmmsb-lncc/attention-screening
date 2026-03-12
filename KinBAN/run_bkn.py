@@ -64,6 +64,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--no-da", action="store_true")
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--molformer-path",
+        type=str,
+        default=None,
+        help="Local path to MoLFormer-XL weights (skips HuggingFace download). "
+             "Example: /tmp/molformer_dl",
+    )
     return parser.parse_args()
 
 
@@ -98,6 +105,11 @@ def main() -> None:
         cfg.defrost(); cfg.SOLVER.NUM_WORKERS = args.num_workers; cfg.freeze()
     if args.no_da:
         cfg.defrost(); cfg.DA.USE = False; cfg.DA.TASK = False; cfg.freeze()
+
+    # Override MoLFormer model path if a local directory is provided
+    if args.molformer_path:
+        import bkn.constants as _bkn_const
+        _bkn_const.MOLFORMER_MODEL_NAME = str(args.molformer_path)
 
     output_base = Path(args.output_dir or (SCRIPT_DIR / "results" / args.dataset)).resolve()
     output_base.mkdir(parents=True, exist_ok=True)
