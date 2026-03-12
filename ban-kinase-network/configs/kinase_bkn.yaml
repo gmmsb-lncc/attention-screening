@@ -57,8 +57,4 @@ DA:
   INIT_EPOCH: 10
   LAMB_DA: 1
 
-COMET:
-  WORKSPACE: "ban-kinase-network"
-  PROJECT_NAME: "BKN_ESM2_MoLFormer_AttnPool"
-  USE: False
-  TAG: null
+
