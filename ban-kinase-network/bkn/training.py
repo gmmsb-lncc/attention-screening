@@ -147,7 +147,10 @@ def train_single_seed(
     print(f"  Val-optimized threshold={val_threshold:.4f} (val MCC={val_best_mcc:.4f})")
 
     print("  Collecting train predictions...")
-    train_eval_gen = torch.utils.data.DataLoader(train_dataset, **params_eval)
+    # Use DTIDataset (5-tuple) not DTIDataset2 (6-tuple with teacher) so that
+    # graph_collate_func can unpack correctly during evaluation.
+    train_eval_dataset = modules["DTIDataset"](train_df_seed.index.values, train_df_seed)
+    train_eval_gen = torch.utils.data.DataLoader(train_eval_dataset, **params_eval)
     train_y_true, train_y_prob = collect_predictions(
         trainer.best_model, train_eval_gen, device, n_class,
     )

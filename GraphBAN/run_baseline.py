@@ -591,8 +591,11 @@ def train_single_seed(
     print(f"  Val-optimized threshold={val_threshold:.4f} (val MCC={val_best_mcc:.4f})")
 
     # Step 3: Collect predictions on TRAIN set with best model (for overfit diagnosis)
+    # Use DTIDataset (5-tuple) not DTIDataset2 (6-tuple with teacher) so that
+    # graph_collate_func can unpack correctly.
     print("  Collecting train predictions...")
-    train_eval_generator = torch.utils.data.DataLoader(train_dataset, **params_eval)
+    train_eval_dataset = modules["DTIDataset"](train_df_seed.index.values, train_df_seed)
+    train_eval_generator = torch.utils.data.DataLoader(train_eval_dataset, **params_eval)
     train_y_true, train_y_prob = _collect_predictions(
         trainer.best_model, train_eval_generator, device, n_class,
     )
