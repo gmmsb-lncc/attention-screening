@@ -125,41 +125,33 @@ class MolecularGCN(nn.Module):
 class LinearTransform(nn.Module):
     def __init__(self):
         super(LinearTransform, self).__init__()
-        self.linear1 = nn.Linear(768, 512)  # 768-d: MoLFormer-XL (was 384 for ChemBERTa)
+        self.norm   = nn.LayerNorm(768)       # stabilizes 768-d MoLFormer embeddings
+        self.linear1 = nn.Linear(768, 512)    # 768-d: MoLFormer-XL (was 384 for ChemBERTa)
         self.linear2 = nn.Linear(512, 128)
         self.dropout = nn.Dropout(p=0.5)
     def forward(self, x):
-        # Reshape the input tensor to [batch_size, 1024]
-        x = x.view(x.size(0), -1)
-
-        # Apply the first linear layer
+        x = x.view(x.size(0), -1)             # [batch, 768]
+        x = self.norm(x)
         x = torch.relu(self.linear1(x))
         x = self.dropout(x)
-        x = x.unsqueeze(1)  # Add a singleton dimension to match [batch_size, 1, 512]
-
-        # Apply the second linear layer
+        x = x.unsqueeze(1)
         x = torch.relu(self.linear2(x))
-
         return x
 
 class LinearTransform_esm(nn.Module):
     def __init__(self):
         super(LinearTransform_esm, self).__init__()
+        self.norm    = nn.LayerNorm(1280)     # stabilizes 1280-d ESM-2 embeddings
         self.linear1 = nn.Linear(1280, 512)
         self.linear2 = nn.Linear(512, 128)
         self.dropout = nn.Dropout(p=0.5)
     def forward(self, x):
-        # Reshape the input tensor to [batch_size, 1024]
-        x = x.view(x.size(0), -1)
-
-        # Apply the first linear layer
+        x = x.view(x.size(0), -1)             # [batch, 1280]
+        x = self.norm(x)
         x = torch.relu(self.linear1(x))
         x = self.dropout(x)
-        x = x.unsqueeze(1)  # Add a singleton dimension to match [batch_size, 1, 512]
-
-        # Apply the second linear layer
+        x = x.unsqueeze(1)
         x = torch.relu(self.linear2(x))
-
         return x
 
 class molFusion(nn.Module):
