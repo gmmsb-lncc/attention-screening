@@ -121,6 +121,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--finetune_lr", type=float, default=1e-5, help="Fine-tuning learning rate (default: 1e-5)")
     parser.add_argument("--finetune_batch_size", type=int, default=8, help="Fine-tuning batch size (default: 8)")
 
+    # --- ligand model ---
+    parser.add_argument(
+        "--ligand-model",
+        dest="ligand_model",
+        default="molformer",
+        choices=["molformer", "smited", "chemberta"],
+        help="Ligand embedding model: molformer (768d), smited (768d), chemberta (384d). Default: molformer",
+    )
+
     return parser
 
 
@@ -165,6 +174,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
     return BenchmarkConfig(
         dataset=args.dataset,
         embedding=args.embedding,
+        ligand_model=args.ligand_model,
         levels=parse_levels(args.levels),
         output_dir=args.output_dir,
         scaffold_split_dir=args.scaffold_split_dir,

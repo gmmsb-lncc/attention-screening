@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
+    LIGAND_MATRIX_DIRS,
     PCHEMBL_ACTIVITY_THRESHOLD,
 )
 
@@ -86,18 +87,21 @@ class MatrixDataset(Dataset):
     ) -> np.ndarray:
         """Search across multiple directories for a ``.npy`` file.
 
-        Tries both ``{id}_matrix.npy`` and ``{id}_molformer_matrix.npy``
-        naming conventions to handle cross-machine inconsistencies.
+        Tries ``{id}_matrix.npy``, ``{id}_molformer_matrix.npy``, and
+        ``{id}_chemberta_matrix.npy`` naming conventions.
         """
-        # Build alternate filename: foo_matrix.npy -> foo_molformer_matrix.npy
-        alt_filename = filename.replace("_matrix.npy", "_molformer_matrix.npy")
+        alt_filenames = [
+            filename.replace("_matrix.npy", "_molformer_matrix.npy"),
+            filename.replace("_matrix.npy", "_chemberta_matrix.npy"),
+        ]
         for d in dirs:
             path = d / filename
             if path.exists():
                 return np.load(path).astype(np.float32)
-            alt_path = d / alt_filename
-            if alt_path.exists():
-                return np.load(alt_path).astype(np.float32)
+            for alt in alt_filenames:
+                alt_path = d / alt
+                if alt_path.exists():
+                    return np.load(alt_path).astype(np.float32)
         return np.zeros(fallback_shape, dtype=np.float32)
 
 
@@ -199,6 +203,7 @@ def build_matrix_dataloaders(
     batch_size: int = 32,
     dataset_source_filter: str | None = None,
     mode: str = "test",
+    ligand_model: str = "molformer",
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     """Build train / val / test ``DataLoader`` instances from universal splits.
 
@@ -216,7 +221,7 @@ def build_matrix_dataloaders(
     -------
     train_loader, val_loader, test_loader (or None when mode="train")
     """
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
+    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name, ligand_model)
 
     train_df = read_split_file(
         os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv")
@@ -258,11 +263,12 @@ def build_matrix_dataloaders(
 def _resolve_matrix_dirs(
     dataset_type: str,
     embedding_name: str,
+    ligand_model: str = "molformer",
 ) -> tuple[list[Path], list[Path]]:
     """Return lists of protein and ligand matrix directories.
 
-    For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
-    because naming conventions vary across machines and datasets.
+    For ligands, uses ``LIGAND_MATRIX_DIRS`` to resolve which subdirectories
+    to search based on the selected ligand model.
     """
     if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
@@ -273,11 +279,13 @@ def _resolve_matrix_dirs(
         Path(bp) / embedding_name / "build" / "protein_matrices"
         for bp in base_paths
     ]
+
+    ligand_subdirs = LIGAND_MATRIX_DIRS.get(ligand_model, ["ligand_matrices", "molformer_matrix"])
     ligand_dirs = []
     for bp in base_paths:
         build = Path(bp) / embedding_name / "build"
-        ligand_dirs.append(build / "ligand_matrices")
-        ligand_dirs.append(build / "molformer_matrix")
+        for subdir in ligand_subdirs:
+            ligand_dirs.append(build / subdir)
     return protein_dirs, ligand_dirs
 
 
@@ -320,7 +328,9 @@ def _validate_matrix_coverage(
         str(cid)
         for cid in unique_chembls
         if not any(
-            (d / f"{cid}_matrix.npy").exists() or (d / f"{cid}_molformer_matrix.npy").exists()
+            (d / f"{cid}_matrix.npy").exists()
+            or (d / f"{cid}_molformer_matrix.npy").exists()
+            or (d / f"{cid}_chemberta_matrix.npy").exists()
             for d in ligand_dirs
         )
     ]
