@@ -51,11 +51,11 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
+from . import constants as _constants
 from .constants import (
     ESM2_MAX_SEQ_LEN,
     ESM2_MODEL_NAME,
     MOLFORMER_MAX_LEN,
-    MOLFORMER_MODEL_NAME,
 )
 from .pooling import cls_guided_attention_pool
 
@@ -132,11 +132,13 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
     """
     from transformers import AutoModel, AutoTokenizer
 
-    print(f"\n  Loading MoLFormer-XL ({MOLFORMER_MODEL_NAME})...")
+    # Read at call-time so --molformer-path override in run_bkn.py takes effect
+    molformer_name = _constants.MOLFORMER_MODEL_NAME
+    print(f"\n  Loading MoLFormer-XL ({molformer_name})...")
     tokenizer = AutoTokenizer.from_pretrained(
-        MOLFORMER_MODEL_NAME, trust_remote_code=True
+        molformer_name, trust_remote_code=True
     )
-    model = AutoModel.from_pretrained(MOLFORMER_MODEL_NAME, trust_remote_code=True)
+    model = AutoModel.from_pretrained(molformer_name, trust_remote_code=True)
     model = model.to(device).eval()
 
     df_unique = df.drop_duplicates(subset="SMILES").copy()
