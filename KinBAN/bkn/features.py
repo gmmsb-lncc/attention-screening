@@ -141,6 +141,13 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
     model = AutoModel.from_pretrained(molformer_name, trust_remote_code=True)
     model = model.to(device).eval()
 
+    # MoLFormer's dynamic module may be missing PreTrainedModel methods when loaded
+    # via trust_remote_code in newer transformers. Patch them onto the class.
+    from transformers import PreTrainedModel as _PTM
+    for _method in ("get_head_mask", "_convert_head_mask_to_5d"):
+        if not hasattr(type(model), _method):
+            setattr(type(model), _method, getattr(_PTM, _method))
+
     df_unique = df.drop_duplicates(subset="SMILES").copy()
     print(
         f"  Extracting MoLFormer features for {len(df_unique)} unique SMILES "
