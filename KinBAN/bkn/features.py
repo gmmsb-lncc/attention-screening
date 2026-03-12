@@ -139,10 +139,12 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
         molformer_name, trust_remote_code=True
     )
     model = AutoModel.from_pretrained(molformer_name, trust_remote_code=True)
-    model = model.to(device).eval()
 
-    # MoLFormer's dynamic module may be missing PreTrainedModel helpers in newer
-    # transformers. Patch them directly onto the loaded class if absent.
+    # Force float32 — bfloat16/float16 weights can overflow to NaN on some GPUs
+    model = model.float().to(device).eval()
+
+    # ── Compatibility shims for MoLFormer dynamic code + transformers >= 4.40 ──
+
     if not hasattr(type(model), "get_head_mask"):
         def _get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
             if head_mask is not None:
@@ -163,6 +165,64 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
                 head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
             return head_mask.to(dtype=next(self.parameters()).dtype)
         type(model)._convert_head_mask_to_5d = _convert_head_mask_to_5d
+
+    # Override get_extended_attention_mask — the version inherited from
+    # PreTrainedModel changed signature / behaviour in transformers >= 4.40
+    # and MoLFormer's dynamic code may call it with the old API, producing NaN.
+    def _safe_get_extended_attention_mask(self, attention_mask, input_shape, device=None, dtype=None):
+        if dtype is None:
+            dtype = torch.float32
+        if attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]       # [B, 1, 1, seq]
+        elif attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]          # [B, 1, seq, seq]
+        else:
+            extended = attention_mask
+        extended = extended.to(dtype=dtype)
+        extended = (1.0 - extended) * torch.finfo(dtype).min  # 0 → -inf for masked
+        return extended
+    type(model).get_extended_attention_mask = _safe_get_extended_attention_mask
+
+    # Also patch invert_attention_mask (used by some encoder implementations)
+    def _safe_invert_attention_mask(self, encoder_attention_mask):
+        dtype = torch.float32
+        if encoder_attention_mask.dim() == 2:
+            inverted = encoder_attention_mask[:, None, None, :]
+        else:
+            inverted = encoder_attention_mask
+        inverted = inverted.to(dtype=dtype)
+        inverted = (1.0 - inverted) * torch.finfo(dtype).min
+        return inverted
+    type(model).invert_attention_mask = _safe_invert_attention_mask
+
+    # ── Validation: quick forward pass on a test molecule ──
+    _test_enc = tokenizer("CCO", return_tensors="pt", max_length=10,
+                          padding="max_length", truncation=True)
+    _test_enc = {k: v.to(device) for k, v in _test_enc.items()}
+
+    # Check weights first
+    _n_nan_w = sum(torch.isnan(p).sum().item() for p in model.parameters())
+    if _n_nan_w > 0:
+        print(f"  ERROR: model weights contain {_n_nan_w} NaN values (corrupted download?)")
+
+    with torch.no_grad():
+        _test_out = model(**_test_enc)
+    _test_ok = not torch.isnan(_test_out.last_hidden_state).any().item()
+    if _test_ok:
+        print("  MoLFormer validation: forward pass OK (no NaN)")
+    else:
+        print("  WARNING: MoLFormer forward() still produces NaN after patches!")
+        # Debug: check embedding layer output
+        _emb_layer = getattr(model, "embeddings", None) or getattr(model, "mol_encoder", None)
+        if _emb_layer is not None:
+            with torch.no_grad():
+                _emb_out = _emb_layer(_test_enc["input_ids"])
+            _emb_nan = torch.isnan(_emb_out).any().item()
+            print(f"  Embedding layer NaN: {_emb_nan}")
+        # List model submodules for debugging
+        print(f"  Model type: {type(model).__name__}")
+        for name, child in model.named_children():
+            print(f"    .{name} = {type(child).__name__}")
 
     df_unique = df.drop_duplicates(subset="SMILES").copy()
     print(
@@ -191,8 +251,10 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
         if idx == 0:
             has_nan = torch.isnan(token_reps).any().item()
             has_inf = torch.isinf(token_reps).any().item()
+            rng_lo = token_reps[~torch.isnan(token_reps)].min().item() if not has_nan else float("nan")
+            rng_hi = token_reps[~torch.isnan(token_reps)].max().item() if not has_nan else float("nan")
             print(f"  MoLFormer sanity check (first SMILES): NaN={has_nan}, Inf={has_inf}, "
-                  f"shape={list(token_reps.shape)}, range=[{token_reps.min():.3f}, {token_reps.max():.3f}]")
+                  f"shape={list(token_reps.shape)}, range=[{rng_lo:.3f}, {rng_hi:.3f}]")
 
         emb = cls_guided_attention_pool(
             token_reps, cls, dim=768, mask=mask,
