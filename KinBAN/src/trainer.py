@@ -422,6 +422,7 @@ class Trainer(object):
             loss+=  1 * z
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             self.optim.step()
             loss_epoch += loss.item()
             if self.experiment:
@@ -537,6 +538,7 @@ class Trainer(object):
             else:
                 loss = model_loss
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             self.optim.step()
             self.optim_da.step()
             total_loss_epoch += loss.item()
