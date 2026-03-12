@@ -172,10 +172,14 @@ def _train_ligand_attention_pooling(
     best_state = None
     wait = 0
 
+    tqdm.write(f"    Training: {epochs} epochs, patience={patience}, device={device}, ligand_dim={ligand_dim}")
+
     for epoch in range(1, epochs + 1):
         # --- train ---
         model.train()
         aux_head.train()
+        train_loss = 0.0
+        n_batches = 0
         for batch in train_loader:
             l = batch["ligand_matrix"].to(device)
             lm = batch["ligand_mask"].to(device)
@@ -189,6 +193,9 @@ def _train_ligand_attention_pooling(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+
+            train_loss += loss.item()
+            n_batches += 1
 
         scheduler.step()
 
@@ -208,7 +215,11 @@ def _train_ligand_attention_pooling(
                 val_loss += criterion(logits, y).item()
                 val_n += 1
 
+        avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
+
+        if epoch <= 3 or epoch % 10 == 0:
+            tqdm.write(f"    Epoch {epoch}/{epochs}  train_loss={avg_train:.4f}  val_loss={avg_val:.4f}  wait={wait}")
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val
@@ -297,6 +308,11 @@ class Level1cRunner(BaseLevelRunner):
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
             ligand_model=self._config.ligand_model,
+        )
+
+        tqdm.write(
+            f"  Dataloaders: train={len(train_loader)} batches ({len(train_loader.dataset)} samples), "
+            f"val={len(val_loader)} batches ({len(val_loader.dataset)} samples)"
         )
 
         # In train mode, split training data to avoid train-set optimism:
