@@ -255,6 +255,7 @@ def _extract_features(
     model.eval()
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
+    se3_logged = False
 
     for batch in loader:
         l = batch["ligand_matrix"].to(device)
@@ -264,6 +265,14 @@ def _extract_features(
         if se3_loader is not None:
             se3_batch = se3_loader.get_batch(batch["chembl_id"])
             if se3_batch.shape[1] > 0:
+                if not se3_logged:
+                    sem_dim = int(features.shape[1])
+                    se3_dim = int(se3_batch.shape[1])
+                    fused_dim = sem_dim + se3_dim
+                    tqdm.write(
+                        f"  [SE3] Active fusion (Level 1c): semantic_dim={sem_dim}, se3_dim={se3_dim}, fused_ligand_dim={fused_dim}"
+                    )
+                    se3_logged = True
                 features = np.concatenate([features, se3_batch], axis=-1)
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         all_features.append(features)
@@ -314,6 +323,10 @@ class Level1cRunner(BaseLevelRunner):
         )
         if self._config.use_se3_ligand and se3_loader is None:
             tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
+        elif se3_loader is not None:
+            tqdm.write(
+                f"  [SE3] Structural vectors loaded: dim={se3_loader.dim}. Ligand concatenation enabled."
+            )
 
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,

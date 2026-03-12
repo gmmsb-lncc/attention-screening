@@ -52,6 +52,7 @@ def _extract_features(
     """Extract mean-pooled protein+ligand features from a dataloader."""
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
+    se3_logged = False
 
     for batch in loader:
         protein_pooled = mean_pool(batch["protein_matrix"], batch["protein_mask"])
@@ -59,6 +60,15 @@ def _extract_features(
         if se3_loader is not None:
             se3_batch = se3_loader.get_batch(batch["chembl_id"])
             if se3_batch.shape[1] > 0:
+                if not se3_logged:
+                    lig_sem_dim = int(ligand_pooled.shape[1])
+                    se3_dim = int(se3_batch.shape[1])
+                    lig_fused_dim = lig_sem_dim + se3_dim
+                    total_dim = int(protein_pooled.shape[1]) + lig_fused_dim
+                    tqdm.write(
+                        f"  [SE3] Active fusion (Level 2): ligand_sem_dim={lig_sem_dim}, se3_dim={se3_dim}, fused_ligand_dim={lig_fused_dim}, total_feature_dim={total_dim}"
+                    )
+                    se3_logged = True
                 ligand_pooled = np.concatenate([ligand_pooled, se3_batch], axis=-1)
         combined = np.nan_to_num(
             np.concatenate([protein_pooled, ligand_pooled], axis=-1),
@@ -110,6 +120,10 @@ class Level2Runner(BaseLevelRunner):
         )
         if self._config.use_se3_ligand and se3_loader is None:
             tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
+        elif se3_loader is not None:
+            tqdm.write(
+                f"  [SE3] Structural vectors loaded: dim={se3_loader.dim}. Ligand concatenation enabled."
+            )
 
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
