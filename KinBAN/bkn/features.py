@@ -141,12 +141,28 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
     model = AutoModel.from_pretrained(molformer_name, trust_remote_code=True)
     model = model.to(device).eval()
 
-    # MoLFormer's dynamic module may be missing PreTrainedModel methods when loaded
-    # via trust_remote_code in newer transformers. Patch them onto the class.
-    from transformers import PreTrainedModel as _PTM
-    for _method in ("get_head_mask", "_convert_head_mask_to_5d"):
-        if not hasattr(type(model), _method):
-            setattr(type(model), _method, getattr(_PTM, _method))
+    # MoLFormer's dynamic module may be missing PreTrainedModel helpers in newer
+    # transformers. Patch them directly onto the loaded class if absent.
+    if not hasattr(type(model), "get_head_mask"):
+        def _get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
+            if head_mask is not None:
+                head_mask = self._convert_head_mask_to_5d(head_mask, num_hidden_layers)
+                if is_attention_chunked is True:
+                    head_mask = head_mask.unsqueeze(-1)
+            else:
+                head_mask = [None] * num_hidden_layers
+            return head_mask
+        type(model).get_head_mask = _get_head_mask
+
+    if not hasattr(type(model), "_convert_head_mask_to_5d"):
+        def _convert_head_mask_to_5d(self, head_mask, num_hidden_layers):
+            if head_mask.dim() == 1:
+                head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+                head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+            elif head_mask.dim() == 2:
+                head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+            return head_mask.to(dtype=next(self.parameters()).dtype)
+        type(model)._convert_head_mask_to_5d = _convert_head_mask_to_5d
 
     df_unique = df.drop_duplicates(subset="SMILES").copy()
     print(
