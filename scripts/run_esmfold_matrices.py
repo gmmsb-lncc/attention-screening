@@ -22,6 +22,7 @@ import math
 import sys
 from pathlib import Path
 from typing import Any
+import importlib
 
 import numpy as np
 import pandas as pd
@@ -124,18 +125,46 @@ def _sequence_proxy_vector(seq: str) -> np.ndarray:
 
 
 def _build_esmfold_model(device: str) -> tuple[Any, Any] | None:
-    """Try loading ESMFold model from local esm package."""
+    """Try loading ESMFold model from local/pip esm package."""
     try:
         import torch
-        import esm
     except Exception as exc:
         print(f"WARNING: ESMFold dependencies unavailable ({exc}).")
         return None
 
+    # Prefer local ESM repo when available (project convention: llm/ESM).
+    repo_root = Path(__file__).resolve().parent.parent
+    local_esm_repo = repo_root / "llm" / "ESM"
+    if local_esm_repo.exists():
+        local_path = str(local_esm_repo)
+        if local_path not in sys.path:
+            sys.path.insert(0, local_path)
+
     dev = torch.device(device if (device == "cpu" or torch.cuda.is_available()) else "cpu")
 
     try:
-        model = esm.pretrained.esmfold_v1()
+        esm = importlib.import_module("esm")
+
+        # Try known constructor paths across esm versions.
+        model = None
+
+        pretrained_mod = getattr(esm, "pretrained", None)
+        if pretrained_mod is not None and hasattr(pretrained_mod, "esmfold_v1"):
+            model = pretrained_mod.esmfold_v1()
+
+        if model is None:
+            try:
+                from esm import pretrained as pretrained_import  # type: ignore
+                if hasattr(pretrained_import, "esmfold_v1"):
+                    model = pretrained_import.esmfold_v1()
+            except Exception:
+                pass
+
+        if model is None:
+            raise RuntimeError(
+                "ESMFold constructor not found. Expected esm.pretrained.esmfold_v1()."
+            )
+
         model = model.eval().to(dev)
     except Exception as exc:
         print(f"WARNING: Could not initialize ESMFold model ({exc}).")
