@@ -88,7 +88,24 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
 
     The result is stored in column ``"fcfp"`` (GraphBAN's expected column name).
     """
+    import sys
+    import types
+
+    import transformers
     from transformers import AutoModel, AutoTokenizer
+
+    # MoLFormer's configuration_molformer.py does `from transformers.onnx import
+    # OnnxConfig`, which was removed in transformers >= 4.40. Inject a shim so
+    # the dynamic module load does not crash.
+    if "transformers.onnx" not in sys.modules:
+        _onnx_mod = types.ModuleType("transformers.onnx")
+
+        class _OnnxConfig:  # noqa: N801 — mimics the removed base class
+            pass
+
+        _onnx_mod.OnnxConfig = _OnnxConfig  # type: ignore[attr-defined]
+        sys.modules["transformers.onnx"] = _onnx_mod
+        transformers.onnx = _onnx_mod  # type: ignore[attr-defined]
 
     print(f"\n  Loading MoLFormer-XL ({MOLFORMER_MODEL_NAME})...")
     tokenizer = AutoTokenizer.from_pretrained(
