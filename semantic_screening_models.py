@@ -9,7 +9,8 @@ Coordinates the full pipeline:
   Step 1c: Level 1c — Ligand MoLFormer attention pooling + KNN/MLP
   Step 2:  Level 2  — Protein+Ligand mean pooling + KNN/MLP
   Step 3:  Level 3  — Protein+Ligand attention pooling + KNN/MLP
-  Note: Levels after 3 (4, 5a, 5b, 6a, 6b) are obsolete.
+  Step 4:  Level 4  — Protein+Ligand cross-attention + KNN/MLP
+  Note: Levels after 4 (5a, 5b, 6a, 6b) are obsolete.
   Report:  Comparative report and visualizations
 
 Monotonic complexity hierarchy:
@@ -24,9 +25,9 @@ Evaluation protocol:
     learned feature extractors (1c, 3).
 
 Usage:
-  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3
-    python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune
-  python semantic_screening_models.py --dataset human --embedding 8M --levels 1b 1c 2 3 --se3 --se3-features-dir path/to/se3_features
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3 4
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4 --finetune
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1b 1c 2 3 4 --se3 --se3-features-dir path/to/se3_features
 """
 
 from benchmark.cli import build_parser, config_from_args

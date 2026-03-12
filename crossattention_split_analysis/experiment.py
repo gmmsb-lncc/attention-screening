@@ -682,6 +682,18 @@ def run_crossattention_analysis(
         ligand_type = f"Per-token Embeddings ({ligand_label})"
         ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
 
+        # Compatibility fallback: some pipelines store MoLFormer matrices under
+        # build/ligand_matrices instead of build/molformer_matrix.
+        if ligand_model == 'molformer':
+            fallback_dirs = [os.path.join(d, 'ligand_matrices') for d in embedding_dirs]
+            has_primary = any(os.path.exists(d) for d in ligand_matrix_dirs)
+            has_fallback = any(os.path.exists(d) for d in fallback_dirs)
+            if not has_primary and has_fallback:
+                print(
+                    "  WARNING: molformer_matrix not found; falling back to ligand_matrices for MoLFormer inputs."
+                )
+                ligand_matrix_dirs = fallback_dirs
+
     # Override with custom paths if provided (for fine-tuned embeddings)
     if custom_protein_matrix_dir:
         protein_matrix_dirs = [custom_protein_matrix_dir]
