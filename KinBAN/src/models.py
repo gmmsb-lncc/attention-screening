@@ -89,8 +89,8 @@ class GraphBAN(nn.Module):
         v_p = self.protein_extractor(v_p)
         v_p_esm = self.protein_esm(v_p_esm)
         v_p_fusion = self.pro_fusion(v_p, v_p_esm)
-        f, att = self.bcn(v_fusion, v_p_fusion)
-        
+        f, att = self.bcn(v_fusion, v_p_fusion, softmax=True)  # softmax=True bounds attention to sum=1
+
         #f_numpy = f.detach().cpu().numpy()
         #_scaled = torch.tensor(self.scaler.fit_transform(f_numpy))
         #f_scaled = f_scaled.to(device)
