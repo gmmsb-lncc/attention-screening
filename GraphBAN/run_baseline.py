@@ -400,6 +400,40 @@ def compute_metrics_at_threshold(
 
 
 # ---------------------------------------------------------------------------
+# Per-epoch MCC injection (monkey-patch, no GraphBAN source changes needed)
+# ---------------------------------------------------------------------------
+
+def _patch_trainer_for_mcc_logging(
+    trainer_obj,
+    val_gen: torch.utils.data.DataLoader,
+    device: torch.device,
+    n_class: int,
+) -> None:
+    """Inject per-epoch MCC into GraphBAN's Trainer without modifying its source.
+
+    Wraps trainer.test() at instance level: the original method runs first
+    (printing its own AUROC/AUPRC line), then we collect fresh predictions on
+    the validation set and append the MCC line.
+    """
+    original_test = trainer_obj.test  # bound method saved BEFORE override
+
+    def _test_with_mcc(*args, **kwargs):
+        result = original_test(*args, **kwargs)
+        try:
+            y_true, y_prob = _collect_predictions(
+                trainer_obj.model, val_gen, device, n_class,
+            )
+            _, val_mcc = optimize_threshold_on_validation(y_true, y_prob, metric="mcc")
+            # also compute train MCC at val-optimal threshold for overfitting signal
+            print(f"  → Val MCC={val_mcc:.4f}")
+        except Exception:
+            pass  # never crash training over logging
+        return result
+
+    trainer_obj.test = _test_with_mcc  # instance-level override; self.test() resolves here
+
+
+# ---------------------------------------------------------------------------
 # Single-seed training
 # ---------------------------------------------------------------------------
 
@@ -503,6 +537,7 @@ def train_single_seed(
         opt_da = None
 
     # Create trainer
+    n_class = cfg.DECODER.BINARY
     train_loader = multi_generator if cfg.DA.USE else training_generator
     trainer = modules["Trainer"](
         model, opt, device,
@@ -514,6 +549,10 @@ def train_single_seed(
         experiment=None,
         **cfg,
     )
+
+    # Inject per-epoch MCC logging (appends a "→ Val MCC=..." line after
+    # GraphBAN's own "Validation at Epoch X ..." AUROC/AUPRC line)
+    _patch_trainer_for_mcc_logging(trainer, val_generator, device, n_class)
 
     t0 = time.time()
     result = trainer.train()
@@ -528,7 +567,7 @@ def train_single_seed(
         result_metrics = {}
 
     # --- Fair evaluation protocol (mirrors DT-Kinase methodology) ---
-    n_class = cfg.DECODER.BINARY
+    # (n_class already defined above before trainer creation)
 
     # Step 1: Collect predictions on VALIDATION set with best model
     print("  Collecting validation predictions for fair threshold optimization...")
