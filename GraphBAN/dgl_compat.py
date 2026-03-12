@@ -72,11 +72,49 @@ def patch_torchdata_datapipes():
             sys.modules[mod_name] = stub
 
 
-def patch_graphbolt():
-    """Stub out dgl.graphbolt.* to avoid C++ library load failure.
+def patch_graphbolt_init_file():
+    """Overwrite the graphbolt __init__.py with a no-op stub.
 
-    Pre-populates sys.modules with empty stubs so that DGL's __init__.py
-    finds them already resolved and skips the real graphbolt loader.
+    DGL 2.x graphbolt/__init__.py ends with ``load_graphbolt()`` which
+    dlopen()'s a version-tagged .so. When the .so is missing or incompatible
+    it calls libc exit(1) — uncatchable from Python. Stamping the file with a
+    single comment line is the only 100 % reliable defence.
+
+    This is safe because GraphBAN never uses graphbolt. The file is only
+    modified if it still contains the ``load_graphbolt`` call.
+    """
+    try:
+        import importlib.util
+        import pathlib
+
+        spec = importlib.util.find_spec("dgl")
+        if spec is None:
+            return
+        gb_init = pathlib.Path(spec.origin).parent / "graphbolt" / "__init__.py"
+        if not gb_init.exists():
+            return
+        content = gb_init.read_text(errors="replace")
+        if "load_graphbolt" not in content:
+            return  # already patched or a different DGL version — leave it alone
+        gb_init.write_text("# graphbolt disabled by dgl_compat — GraphBAN does not use it\n")
+    except Exception as exc:
+        warnings.warn(
+            f"dgl_compat: could not patch graphbolt __init__.py: {exc}. "
+            "If DGL crashes with 'Stopping RUNTIME', run manually:\n"
+            "  DGL_GB=$(python3 -c \"import importlib.util,pathlib; "
+            "print(pathlib.Path(importlib.util.find_spec('dgl').origin).parent"
+            "/'graphbolt/__init__.py')\")\n"
+            "  echo '# disabled' > \"$DGL_GB\"",
+            stacklevel=2,
+        )
+
+
+def patch_graphbolt():
+    """Stub out dgl.graphbolt.* in sys.modules.
+
+    Belt-and-suspenders layer on top of patch_graphbolt_init_file():
+    pre-populates sys.modules with empty stubs so that any remaining
+    graphbolt import paths also resolve safely.
     """
     if "dgl" in sys.modules:
         return
@@ -99,34 +137,6 @@ def patch_graphbolt():
             stub.__file__ = "stub"
             sys.modules[mod_name] = stub
 
-
-def eager_import_dgl():
-    """Pre-import DGL while graphbolt stubs are active.
-
-    DGL is NOT imported at run_baseline.py module level — it is only imported
-    later when setup_graphban_imports() loads GraphBAN's models.py.  By that
-    point sys.exit interception is no longer in effect.  Importing DGL here
-    (while stubs are fresh and sys.exit is intercepted) ensures it is cached
-    in sys.modules before GraphBAN's code runs, so GraphBAN's `import dgl`
-    just retrieves the already-loaded module.
-
-    Also intercepts sys.exit(1) as a belt-and-suspenders measure: if graphbolt
-    loading somehow reaches the sys.exit(1) path despite all stubs, we convert
-    it to ImportError instead of killing the process.
-    """
-    if "dgl" in sys.modules:
-        return
-
-    _orig_exit = sys.exit
-
-    def _intercept(code=0):
-        if code != 0:
-            raise ImportError(
-                f"DGL initialization called sys.exit({code}). "
-                "Likely graphbolt C extension version mismatch — "
-                "suppressed by dgl_compat. GraphBAN will continue."
-            )
-        _orig_exit(code)
 
 def eager_import_dgl():
     """Pre-import DGL while graphbolt stubs are active.
@@ -159,8 +169,9 @@ def eager_import_dgl():
         )
 
 
-# Auto-apply on import
+# ── Auto-apply on import ─────────────────────────────────────────────────────
 patch_setuptools()
 patch_torchdata_datapipes()
+patch_graphbolt_init_file()   # must run before any `import dgl`
 patch_graphbolt()
 eager_import_dgl()
