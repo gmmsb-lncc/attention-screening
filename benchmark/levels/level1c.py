@@ -1,6 +1,6 @@
 """Level 1c — Ligand embedding + attention pooling + KNN/MLP.
 
-Uses the **same** MoLFormer per-token ligand matrices as Levels 2–4,
+Uses the **same** MoLFormer per-token ligand matrices as Levels 2–3,
 but applies a **learned attention pooling** mechanism to produce a
 fixed-size vector — **ligand only, no protein**.
 
@@ -19,14 +19,13 @@ Comparison axes:
   - **1c vs 3**: Ligand-only attn pool vs protein+ligand attn pool
 
 Training protocol (consistent with all levels):
-  - Attention pooling model trained on the **training** split
-    (validation split for early stopping).
+    - Attention pooling model trained on the **training** split
+        (validation split for early stopping).
   - Training hyperparameters (epochs, patience, learning rate) are
     taken from the CLI / ``BenchmarkConfig`` — the same values that
-    control Levels 3 and 4.
-  - Features extracted from the **validation** split.
-  - KNN/MLP classifiers trained on val features.
-  - Evaluation on the hold-out **test** split.
+        control Level 3.
+    - In ``train`` mode: fit on held-out train features, evaluate on val features.
+    - In ``test`` mode: fit on val features, evaluate on test features.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
 to guarantee identical hyperparameters across all levels.
@@ -51,6 +50,7 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     split_loader_for_feature_extraction,
 )
+from benchmark.levels.protocol import sanitize_features
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@ class Level1cRunner(BaseLevelRunner):
             ligand_dim=self._config.ligand_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
-            patience=self._config.resolved_patience or 10,
+            patience=self._config.resolved_patience,
             seed=seed,
         )
 
@@ -350,10 +350,10 @@ class Level1cRunner(BaseLevelRunner):
 
         # Sanitize
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
+            arr_sanitized, bad = sanitize_features(arr)
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                arr[:] = arr_sanitized
 
         # Train canonical KNN/MLP on fit features
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")

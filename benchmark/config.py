@@ -120,7 +120,8 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3"})
+OBSOLETE_LEVELS = frozenset({"4", "5a", "5b", "6a", "6b"})
 
 # Level 0 is a shortcut for the classical ML baseline subset
 LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
@@ -153,7 +154,7 @@ class BenchmarkConfig:
     ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
 
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3"])
 
     # --- output ---
     output_dir: Optional[str] = None
@@ -273,6 +274,12 @@ class BenchmarkConfig:
             )
             raise ValueError(msg)
         for level in self.levels:
+            if level in OBSOLETE_LEVELS:
+                msg = (
+                    f"Level '{level}' is obsolete and no longer supported. "
+                    "Use levels up to 3: 0, 1a, 1b, 1c, 2, 3."
+                )
+                raise ValueError(msg)
             if level not in VALID_LEVELS:
                 msg = f"Invalid level '{level}'. Valid levels: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)

@@ -13,10 +13,9 @@ Comparison axes:
     (both compound-only, simple aggregation)
   - **1b vs 2**: Compound-only vs compound+protein (both mean pooling)
 
-Training protocol (consistent with all levels):
-  - Features extracted from the **validation** split.
-  - KNN/MLP classifiers trained on val features.
-  - Evaluation on the hold-out **test** split.
+Training protocol (consistent with active levels):
+    - In ``train`` mode: fit on train features, evaluate on val features.
+    - In ``test`` mode: fit on val features, evaluate on test features.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
 to guarantee identical hyperparameters across all levels.
@@ -39,6 +38,7 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     mean_pool,
 )
+from benchmark.levels.protocol import sanitize_features, select_fit_eval
 
 
 # ---------------------------------------------------------------------------
@@ -101,21 +101,19 @@ class Level1bRunner(BaseLevelRunner):
             ligand_model=self._config.ligand_model,
         )
 
-        if self.mode == "train":
-            tqdm.write("  Mean-pooling ligand matrices (train + val)...")
-            x_fit, y_fit = _extract_ligand_features(train_loader)
-            x_eval, y_eval = _extract_ligand_features(val_loader)
-        else:
-            tqdm.write("  Mean-pooling ligand matrices (val + test)...")
-            x_fit, y_fit = _extract_ligand_features(val_loader)
-            x_eval, y_eval = _extract_ligand_features(test_loader)
+        split_selection = select_fit_eval(self.mode, train_loader, val_loader, test_loader)
+        tqdm.write(
+            f"  Mean-pooling ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
+        )
+        x_fit, y_fit = _extract_ligand_features(split_selection.fit)
+        x_eval, y_eval = _extract_ligand_features(split_selection.eval)
 
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            bad = np.isnan(arr).sum() + np.isinf(arr).sum()
+            arr_sanitized, bad = sanitize_features(arr)
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                arr[:] = arr_sanitized
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
         models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)

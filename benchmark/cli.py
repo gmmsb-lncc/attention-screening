@@ -14,6 +14,7 @@ from typing import List
 from benchmark.config import (
     DEFAULT_SCAFFOLD_SPLIT_DIR,
     LEVEL_0_EXPANSION,
+    OBSOLETE_LEVELS,
     VALID_LEVELS,
     BenchmarkConfig,
 )
@@ -26,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3\n"
             "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
         ),
     )
@@ -49,17 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3,4,5a,5b,6a,6b",
+        default="1a,1b,1c,2,3",
         nargs="*",
         help=(
             "Levels to run: "
             "0=ClassicalML(1a+1b+1c+3), "
             "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool, "
-            "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
-            "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
-            "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
-            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b"
+            "2=MeanPool, 3=AttnPool. "
+            "Levels after 3 (4, 5a, 5b, 6a, 6b) are obsolete. "
+            "(default: 1a,1b,1c,2,3). "
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3"
         ),
     )
 
@@ -109,10 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
 
     # --- deep-learning hyper-parameters ---
-    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
+    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for learned pooling levels (default: 500)")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for learned pooling levels (default: 32)")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for learned pooling levels (default: 1e-4)")
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")
@@ -154,6 +154,12 @@ def parse_levels(levels_arg: object) -> List[str]:
         levels = sorted({x.strip().lower() for x in parts if x.strip()})
 
         for level in levels:
+            if level in OBSOLETE_LEVELS:
+                msg = (
+                    f"Obsolete level: {level}. "
+                    "Supported levels are up to 3: 0, 1a, 1b, 1c, 2, 3"
+                )
+                raise ValueError(msg)
             if level not in VALID_LEVELS:
                 msg = f"Invalid level: {level}. Valid: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)

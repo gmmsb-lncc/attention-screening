@@ -7,19 +7,17 @@ trains KNN and MLP classifiers.
 This is the simplest matrix-based level — no learned pooling, just
 averaging over the sequence dimension.
 
-Input matrices are the **same** as those used by Levels 3 and 4.
+Input matrices are the **same** as those used by Level 3.
 The only difference is the pooling strategy:
   - Level 2: mean pooling (no parameters)
   - Level 3: learned attention pooling
-  - Level 4: full cross-attention encoder
 
-Training protocol (consistent with all levels):
-  - Features extracted from the **validation** split.
-  - KNN/MLP classifiers trained on val features.
-  - Evaluation on the hold-out **test** split.
+Training protocol (consistent with active levels):
+    - In ``train`` mode: fit on train features, evaluate on val features.
+    - In ``test`` mode: fit on val features, evaluate on test features.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
-to guarantee identical hyperparameters across all four levels.
+to guarantee identical hyperparameters across all active levels.
 """
 
 from __future__ import annotations
@@ -39,6 +37,7 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     mean_pool,
 )
+from benchmark.levels.protocol import sanitize_features, select_fit_eval
 
 
 # ---------------------------------------------------------------------------
@@ -105,21 +104,19 @@ class Level2Runner(BaseLevelRunner):
             ligand_model=self._config.ligand_model,
         )
 
-        if self.mode == "train":
-            tqdm.write("  Mean-pooling protein + ligand matrices (train + val)...")
-            x_fit, y_fit = _extract_features(train_loader)
-            x_eval, y_eval = _extract_features(val_loader)
-        else:
-            tqdm.write("  Mean-pooling protein + ligand matrices (val + test)...")
-            x_fit, y_fit = _extract_features(val_loader)
-            x_eval, y_eval = _extract_features(test_loader)
+        split_selection = select_fit_eval(self.mode, train_loader, val_loader, test_loader)
+        tqdm.write(
+            f"  Mean-pooling protein + ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
+        )
+        x_fit, y_fit = _extract_features(split_selection.fit)
+        x_eval, y_eval = _extract_features(split_selection.eval)
 
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            bad = np.isnan(arr).sum() + np.isinf(arr).sum()
+            arr_sanitized, bad = sanitize_features(arr)
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                arr[:] = arr_sanitized
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
         models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)

@@ -1,7 +1,7 @@
 """Level 3 — Embedding matrices + attention pooling + KNN/MLP.
 
 Loads the **same** per-residue ESM-2 protein matrices and per-token
-MoLFormer ligand matrices used by Levels 2 and 4, but applies a
+MoLFormer ligand matrices used by Level 2, but applies a
 **learned attention pooling** mechanism to produce fixed-size vectors.
 
 Architecture (identical to Level 4 minus cross-attention):
@@ -12,7 +12,6 @@ Architecture (identical to Level 4 minus cross-attention):
 Difference from other levels:
   - Level 2: mean pooling (no parameters)
   - **Level 3: projection + attention pooling (light trainable parameters)**
-  - Level 4: projection + cross-attention + attention pooling (full model)
 
 This level isolates the contribution of *learned aggregation* without
 the inter-modality interaction that cross-attention provides.
@@ -21,17 +20,12 @@ Training protocol (consistent with all levels):
   - Attention pooling model trained on the **training** split
     (validation split for early stopping).
   - Training hyperparameters (epochs, patience, learning rate) are
-    taken from the CLI / ``BenchmarkConfig`` — the same values that
-    control Level 4 — so both learned levels train under identical
-    budgets.
-  - Features extracted from the **validation** split — the model was
-    *not* directly trained on val, only used it for model selection,
-    so val features are free of train-set optimism.
-  - KNN/MLP classifiers trained on val features.
-  - Evaluation on the hold-out **test** split.
+        taken from the CLI / ``BenchmarkConfig``.
+    - In ``train`` mode: fit on held-out train features, evaluate on val features.
+    - In ``test`` mode: fit on val features, evaluate on test features.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
-to guarantee identical hyperparameters across all four levels.
+to guarantee identical hyperparameters across all active levels.
 """
 
 from __future__ import annotations
@@ -56,6 +50,7 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     split_loader_for_feature_extraction,
 )
+from benchmark.levels.protocol import sanitize_features
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +177,7 @@ def _train_attention_pooling(
     dropout: float = 0.2,
     lr: float = 1e-3,
     epochs: int = 30,
-    patience: int = 10,
+    patience: int | None = 10,
     seed: int = 42,
 ) -> _AttentionPoolingModel:
     """Train the projection + attention pooling model.
@@ -388,7 +383,7 @@ class Level3Runner(BaseLevelRunner):
             ligand_dim=self._config.ligand_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
-            patience=self._config.resolved_patience or 10,
+            patience=self._config.resolved_patience,
             seed=seed,
         )
 
@@ -405,10 +400,10 @@ class Level3Runner(BaseLevelRunner):
 
         # Sanitize
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
+            arr_sanitized, bad = sanitize_features(arr)
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                arr[:] = arr_sanitized
 
         # Train canonical KNN/MLP (same as all levels)
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
