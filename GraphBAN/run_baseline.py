@@ -542,47 +542,63 @@ def train_single_seed(
     )
     print(f"  Val-optimized threshold={val_threshold:.4f} (val MCC={val_best_mcc:.4f})")
 
-    # Step 3: Collect predictions on TEST set with best model
+    # Step 3: Collect predictions on TRAIN set with best model (for overfit diagnosis)
+    print("  Collecting train predictions...")
+    train_eval_generator = torch.utils.data.DataLoader(train_dataset, **params_eval)
+    train_y_true, train_y_prob = _collect_predictions(
+        trainer.best_model, train_eval_generator, device, n_class,
+    )
+
+    # Step 4: Collect predictions on TEST set with best model
     print("  Collecting test predictions...")
     test_y_true, test_y_prob = _collect_predictions(
         trainer.best_model, test_generator, device, n_class,
     )
 
-    # Step 4: Apply val-optimized threshold to test → primary (fair) metrics
-    metrics = compute_metrics_at_threshold(test_y_true, test_y_prob, val_threshold)
-    metrics["threshold_source"] = "validation_mcc"
-    metrics["val_threshold"] = val_threshold
-    metrics["val_best_mcc"] = val_best_mcc
-    metrics["training_time_s"] = round(elapsed, 1)
-    metrics["best_epoch"] = result_metrics.get("best_epoch", -1)
-    metrics["model_selection"] = "val_auroc"
+    # Step 5: Apply val-optimized threshold to all splits → primary (fair) metrics
+    train_metrics = compute_metrics_at_threshold(train_y_true, train_y_prob, val_threshold)
+    val_metrics = compute_metrics_at_threshold(val_y_true, val_y_prob, val_threshold)
+    test_metrics = compute_metrics_at_threshold(test_y_true, test_y_prob, val_threshold)
 
     # Also record GraphBAN's native metrics for transparency
     native_threshold = result_metrics.get("thred_optim", 0.5)
     native_test_metrics = compute_metrics_at_threshold(
         test_y_true, test_y_prob, native_threshold,
     )
-    metrics["graphban_native"] = {
-        "threshold": native_threshold,
-        "threshold_source": "test_f1_optimal (GraphBAN original — NOT used for comparison)",
-        "mcc": native_test_metrics["mcc"],
-        "f1": native_test_metrics["f1"],
-        "accuracy": native_test_metrics["accuracy"],
-        "auroc": result_metrics.get("auroc", native_test_metrics["auroc"]),
-        "auprc": result_metrics.get("auprc", None),
-        "sensitivity": result_metrics.get("sensitivity", None),
-        "specificity": result_metrics.get("specificity", None),
-        "note": (
-            "GraphBAN original protocol uses test set for both validation and "
-            "threshold optimization. These metrics are recorded for transparency "
-            "but NOT used for comparison with DT-Kinase."
-        ),
+
+    metrics = {
+        "train": train_metrics,
+        "val": val_metrics,
+        "test": test_metrics,
+        "val_threshold": val_threshold,
+        "threshold_source": "validation_mcc",
+        "training_time_s": round(elapsed, 1),
+        "best_epoch": result_metrics.get("best_epoch", -1),
+        "model_selection": "val_auroc",
+        "graphban_native": {
+            "threshold": native_threshold,
+            "threshold_source": "test_f1_optimal (GraphBAN original — NOT used for comparison)",
+            "mcc": native_test_metrics["mcc"],
+            "f1": native_test_metrics["f1"],
+            "accuracy": native_test_metrics["accuracy"],
+            "auroc": result_metrics.get("auroc", native_test_metrics["auroc"]),
+            "auprc": result_metrics.get("auprc", None),
+            "sensitivity": result_metrics.get("sensitivity", None),
+            "specificity": result_metrics.get("specificity", None),
+            "note": (
+                "GraphBAN original protocol uses test set for both validation and "
+                "threshold optimization. These metrics are recorded for transparency "
+                "but NOT used for comparison with DT-Kinase."
+            ),
+        },
     }
 
-    print(f"  Results (seed={seed}, fair protocol):")
-    print(f"    MCC={metrics['mcc']:.4f}  AUROC={metrics['auroc']:.4f}  "
-          f"F1={metrics['f1']:.4f}  Acc={metrics['accuracy']:.4f}")
-    print(f"    Threshold={val_threshold:.4f} (from validation MCC)")
+    print(f"  Results (seed={seed}, fair protocol, threshold={val_threshold:.4f}):")
+    print(f"    {'Split':<6}  {'MCC':>7}  {'AUROC':>7}  {'F1':>7}  {'Acc':>7}")
+    print(f"    {'─'*38}")
+    for split_name, split_m in [("Train", train_metrics), ("Val", val_metrics), ("Test", test_metrics)]:
+        print(f"    {split_name:<6}  {split_m['mcc']:>7.4f}  {split_m['auroc']:>7.4f}  "
+              f"{split_m['f1']:>7.4f}  {split_m['accuracy']:>7.4f}")
     print(f"    [GraphBAN native: MCC={native_test_metrics['mcc']:.4f} "
           f"threshold={native_threshold:.4f} (test-set F1, not used)]")
     print(f"    Time: {elapsed:.1f}s  Best epoch: {metrics['best_epoch']}")
@@ -590,6 +606,8 @@ def train_single_seed(
     # Save raw predictions for reproducibility
     np.savez(
         seed_output / "raw_predictions.npz",
+        train_y_true=train_y_true,
+        train_y_prob=train_y_prob,
         val_y_true=val_y_true,
         val_y_prob=val_y_prob,
         test_y_true=test_y_true,
@@ -604,16 +622,21 @@ def train_single_seed(
 # ---------------------------------------------------------------------------
 
 def aggregate_results(all_metrics: list[dict]) -> dict:
-    """Compute mean +/- std across seeds."""
+    """Compute mean +/- std across seeds for train/val/test splits."""
     metric_names = ["accuracy", "f1", "precision", "recall", "mcc", "auroc"]
     agg = {}
-    for m in metric_names:
-        values = [r[m] for r in all_metrics]
-        agg[m] = {
-            "mean": float(np.mean(values)),
-            "std": float(np.std(values)),
-            "values": values,
-        }
+
+    # Aggregate per split
+    for split in ["train", "val", "test"]:
+        agg[split] = {}
+        for m in metric_names:
+            values = [r[split][m] for r in all_metrics]
+            agg[split][m] = {
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values)),
+                "values": values,
+            }
+
     agg["val_threshold"] = {
         "mean": float(np.mean([r["val_threshold"] for r in all_metrics])),
         "std": float(np.std([r["val_threshold"] for r in all_metrics])),
@@ -636,20 +659,24 @@ def aggregate_results(all_metrics: list[dict]) -> dict:
 
 
 def print_summary_table(agg: dict, dataset: str, seeds: list[int]) -> None:
-    """Print a formatted summary table."""
-    print(f"\n{'='*60}")
+    """Print a formatted summary table showing train/val/test metrics."""
+    print(f"\n{'='*72}")
     print(f"  GraphBAN Baseline — {dataset} ({len(seeds)} seeds)")
-    print(f"{'='*60}")
-    print(f"  {'Metric':<12} {'Mean':>8} {'± Std':>8}")
-    print(f"  {'─'*28}")
+    print(f"{'='*72}")
+    print(f"  {'Metric':<12} {'Train Mean':>11} {'± Std':>7}  {'Val Mean':>9} {'± Std':>7}  {'Test Mean':>10} {'± Std':>7}")
+    print(f"  {'─'*68}")
     for m in ["mcc", "auroc", "f1", "accuracy", "precision", "recall"]:
-        vals = agg[m]
-        print(f"  {m.upper():<12} {vals['mean']:>8.4f} {vals['std']:>8.4f}")
-    print(f"  {'─'*28}")
+        tr = agg["train"][m]
+        vl = agg["val"][m]
+        te = agg["test"][m]
+        print(f"  {m.upper():<12} {tr['mean']:>11.4f} {tr['std']:>7.4f}  "
+              f"{vl['mean']:>9.4f} {vl['std']:>7.4f}  "
+              f"{te['mean']:>10.4f} {te['std']:>7.4f}")
+    print(f"  {'─'*68}")
     if "graphban_native_mcc" in agg:
         native = agg["graphban_native_mcc"]
-        print(f"  {'MCC (native)':<12} {native['mean']:>8.4f} {native['std']:>8.4f}  "
-              f"(test-set threshold, not used)")
+        print(f"  {'MCC (native)':<12} {'N/A':>11} {'':>7}  {'N/A':>9} {'':>7}  "
+              f"{native['mean']:>10.4f} {native['std']:>7.4f}  (test-set threshold, not used)")
     print(f"  Avg training time: {agg['training_time_s']['mean']:.1f}s per seed")
 
 
