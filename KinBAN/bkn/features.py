@@ -171,7 +171,8 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
     )
 
     emblist: list[np.ndarray] = []
-    for _, row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="  MoLFormer"):
+    n_nan_fallback = 0
+    for idx, (_, row) in enumerate(tqdm(df_unique.iterrows(), total=len(df_unique), desc="  MoLFormer")):
         encodings = tokenizer(
             row["SMILES"],
             return_tensors="pt",
@@ -186,10 +187,29 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
         mask = encodings["attention_mask"][0]      # [L]
         cls = token_reps[0]                        # [768] — CLS token
 
+        # Sanity check on first molecule
+        if idx == 0:
+            has_nan = torch.isnan(token_reps).any().item()
+            has_inf = torch.isinf(token_reps).any().item()
+            print(f"  MoLFormer sanity check (first SMILES): NaN={has_nan}, Inf={has_inf}, "
+                  f"shape={list(token_reps.shape)}, range=[{token_reps.min():.3f}, {token_reps.max():.3f}]")
+
         emb = cls_guided_attention_pool(
             token_reps, cls, dim=768, mask=mask,
         ).cpu().numpy().astype(np.float64)
+
+        # Fallback: if CLS-guided pool produced NaN, use simple mean pooling
+        if np.any(np.isnan(emb)):
+            valid = mask.bool().cpu()
+            emb = token_reps[valid].mean(dim=0).cpu().numpy().astype(np.float64)
+            # If still NaN (model itself outputs NaN), zero-fill
+            if np.any(np.isnan(emb)):
+                emb = np.zeros(768, dtype=np.float64)
+            n_nan_fallback += 1
         emblist.append(emb)
+
+    if n_nan_fallback > 0:
+        print(f"  WARNING: {n_nan_fallback}/{len(df_unique)} SMILES produced NaN -> mean-pool fallback used")
 
     df_unique["fcfp"] = emblist
     df = pd.merge(df, df_unique[["SMILES", "fcfp"]], on="SMILES", how="left")
@@ -220,8 +240,14 @@ def extract_features_cached(
         print("\n  Loading cached BKN features...")
         with open(cache_file, "rb") as f:
             train_df, val_df, test_df = pickle.load(f)
-        print("  Cache loaded.")
-        return train_df, val_df, test_df
+        # Validate cache: reject if MoLFormer embeddings are all NaN
+        sample_emb = train_df["fcfp"].iloc[0]
+        if isinstance(sample_emb, np.ndarray) and np.all(np.isnan(sample_emb)):
+            print("  WARNING: cached MoLFormer embeddings are all NaN — deleting stale cache")
+            cache_file.unlink()
+        else:
+            print("  Cache loaded (validated).")
+            return train_df, val_df, test_df
 
     print("\n  Extracting features (ESM-2 + MoLFormer + AttentionPool)...")
     all_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
