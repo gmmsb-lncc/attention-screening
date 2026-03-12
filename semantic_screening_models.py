@@ -26,6 +26,7 @@ Evaluation protocol:
 Usage:
   python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3
     python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1b 1c 2 3 --se3 --se3-features-dir path/to/se3_features
 """
 
 from benchmark.cli import build_parser, config_from_args

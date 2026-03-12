@@ -51,6 +51,7 @@ from benchmark.levels.matrix_utils import (
     split_loader_for_feature_extraction,
 )
 from benchmark.levels.protocol import sanitize_features
+from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +298,7 @@ def _extract_features(
     model: _AttentionPoolingModel,
     loader: DataLoader,
     device: torch.device,
+    se3_loader: SE3FeatureLoader | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract attention-pooled features from a dataloader."""
     model.eval()
@@ -310,6 +312,10 @@ def _extract_features(
         lm = batch["ligand_mask"].to(device)
 
         features = model(p, l, pm, lm).cpu().numpy()
+        if se3_loader is not None:
+            se3_batch = se3_loader.get_batch(batch["chembl_id"])
+            if se3_batch.shape[1] > 0:
+                features = np.concatenate([features, se3_batch], axis=-1)
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         all_features.append(features)
         all_labels.append(batch["label"].numpy())
@@ -352,6 +358,14 @@ class Level3Runner(BaseLevelRunner):
 
         tqdm.write(f"  Building Level 3 attention pooling (seed {seed})...")
 
+        se3_loader = build_se3_loader(
+            feature_dir=self._config.se3_features_dir,
+            use_se3_ligand=self._config.use_se3_ligand,
+            default_feature_dirs=self._config.resolved_se3_feature_dirs,
+        )
+        if self._config.use_se3_ligand and se3_loader is None:
+            tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
+
         # Resolve protein dimension from embedding model
         protein_dim = PROTEIN_DIMS.get(self.embedding_name, 640)
 
@@ -391,12 +405,12 @@ class Level3Runner(BaseLevelRunner):
 
         if self.mode == "train":
             tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
-            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
-            x_eval, y_eval = _extract_features(model, val_loader, device)
+            x_fit, y_fit = _extract_features(model, feat_extract_loader, device, se3_loader=se3_loader)
+            x_eval, y_eval = _extract_features(model, val_loader, device, se3_loader=se3_loader)
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
-            x_fit, y_fit = _extract_features(model, val_loader, device)
-            x_eval, y_eval = _extract_features(model, test_loader, device)
+            x_fit, y_fit = _extract_features(model, val_loader, device, se3_loader=se3_loader)
+            x_eval, y_eval = _extract_features(model, test_loader, device, se3_loader=se3_loader)
 
         # Sanitize
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:

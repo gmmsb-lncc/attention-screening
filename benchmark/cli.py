@@ -129,6 +129,21 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["molformer", "smited", "chemberta"],
         help="Ligand embedding model: molformer (768d), smited (768d), chemberta (384d). Default: molformer",
     )
+    parser.add_argument(
+        "--se3",
+        dest="use_se3_ligand",
+        action="store_true",
+        help="Enable SE(3)-Transformer structural ligand vectors concatenated with LLM ligand features.",
+    )
+    parser.add_argument(
+        "--se3-features-dir",
+        dest="se3_features_dir",
+        default=None,
+        help=(
+            "Directory with per-ligand SE3 vectors named {chembl_id}_se3.npy or {chembl_id}.npy. "
+            "If omitted with --se3, uses the standardized default under each embedding build dir: build/se3_features/."
+        ),
+    )
 
     return parser
 
@@ -181,6 +196,8 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         dataset=args.dataset,
         embedding=args.embedding,
         ligand_model=args.ligand_model,
+        use_se3_ligand=args.use_se3_ligand,
+        se3_features_dir=args.se3_features_dir,
         levels=parse_levels(args.levels),
         output_dir=args.output_dir,
         scaffold_split_dir=args.scaffold_split_dir,
