@@ -29,11 +29,6 @@ from benchmark.levels.level1b import Level1bRunner
 from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner
-from benchmark.levels.level4 import Level4Runner
-from benchmark.levels.level5 import Level5Runner
-from benchmark.levels.level5b import Level5bRunner
-from benchmark.levels.level6a import Level6aRunner
-from benchmark.levels.level6b import Level6bRunner
 from benchmark.metrics import aggregate_benchmark_metrics
 from benchmark.progress import BenchmarkProgress
 from benchmark.reporting import print_comparison_table, save_benchmark_json
@@ -170,21 +165,6 @@ class BenchmarkOrchestrator:
 
         if "3" in config.levels:
             runners.append(("3", Level3Runner(config), "Step 3: L3 (AttnPool+KNN/MLP)"))
-
-        if "4" in config.levels:
-            runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
-
-        if "5a" in config.levels:
-            runners.append(("5a", Level5Runner(config), "Step 5a: L5a (CrossAttn+AttnPool+GRL+KNN/MLP)"))
-
-        if "5b" in config.levels:
-            runners.append(("5b", Level5bRunner(config), "Step 5b: L5b (AttnPool+GRL+KNN/MLP)"))
-
-        if "6a" in config.levels:
-            runners.append(("6a", Level6aRunner(config), "Step 6a: L6a (CrossAttn+BAN+GRL+KNN/MLP)"))
-
-        if "6b" in config.levels:
-            runners.append(("6b", Level6bRunner(config), "Step 6b: L6b (AttnPool+BAN+GRL+KNN/MLP)"))
 
         return runners
 
