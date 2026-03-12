@@ -32,7 +32,22 @@ PROTEIN_DIMS: Dict[str, int] = {
     "esm2_t33_650M_UR50D": 1280,
 }
 
-MOLFORMER_DIM: int = 768  # MoLFormer per-token embeddings
+MOLFORMER_DIM: int = 768  # MoLFormer per-token embeddings (kept for backward compat)
+CHEMBERTA_DIM: int = 384  # ChemBERTa-77M-MTR per-token embeddings
+
+LIGAND_MODEL_DIMS: Dict[str, int] = {
+    "molformer": 768,
+    "smited": 768,
+    "chemberta": 384,
+}
+
+LIGAND_MATRIX_DIRS: Dict[str, List[str]] = {
+    "molformer": ["ligand_matrices", "molformer_matrix"],
+    "smited": ["ligand_matrices"],
+    "chemberta": ["chemberta_matrix"],
+}
+
+VALID_LIGAND_MODELS = frozenset({"molformer", "smited", "chemberta"})
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -134,6 +149,9 @@ class BenchmarkConfig:
     dataset: str
     embedding: str  # shorthand: "8M", "150M", "650M"
 
+    # --- ligand model ---
+    ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
+
     # --- level selection ---
     levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"])
 
@@ -171,6 +189,11 @@ class BenchmarkConfig:
     def embedding_name(self) -> str:
         """Full ESM-2 model name from shorthand."""
         return SUPPORTED_EMBEDDINGS[self.embedding]
+
+    @property
+    def ligand_dim(self) -> int:
+        """Ligand embedding dimension for the selected ligand model."""
+        return LIGAND_MODEL_DIMS.get(self.ligand_model, 768)
 
     @property
     def resolved_output_dir(self) -> str:
@@ -242,6 +265,12 @@ class BenchmarkConfig:
             raise ValueError(msg)
         if self.mode not in {"train", "test"}:
             msg = f"Invalid mode '{self.mode}'. Choose from: train, test"
+            raise ValueError(msg)
+        if self.ligand_model not in VALID_LIGAND_MODELS:
+            msg = (
+                f"Invalid ligand_model '{self.ligand_model}'. "
+                f"Choose from: {sorted(VALID_LIGAND_MODELS)}"
+            )
             raise ValueError(msg)
         for level in self.levels:
             if level not in VALID_LEVELS:

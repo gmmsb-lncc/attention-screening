@@ -98,6 +98,7 @@ class Level1bRunner(BaseLevelRunner):
             scaffold_split_dir=self.scaffold_split_dir,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
+            ligand_model=self._config.ligand_model,
         )
 
         if self.mode == "train":

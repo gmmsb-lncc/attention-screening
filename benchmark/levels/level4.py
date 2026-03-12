@@ -47,8 +47,8 @@ from tqdm import tqdm
 from benchmark.classifiers import train_knn_mlp
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
+    LIGAND_MODEL_DIMS,
     METRICS_ORDER,
-    MOLFORMER_DIM,
     PROTEIN_DIMS,
     SUPPORTED_EMBEDDINGS,
     BenchmarkConfig,
@@ -112,12 +112,13 @@ class Level4Runner(BaseLevelRunner):
             dropout=0.25,
             classifier_dropout=0.25,
             classification_only=True,
-            use_molformer_ligand=True,
+            use_molformer_ligand=(self._config.ligand_model != "smited"),
             scaffold_split_dir=self.scaffold_split_dir,
             model_variant="level5_lite",
             optimize_threshold=False,
             fixed_threshold=0.5,
             weight_decay=0.05,
+            ligand_model=self._config.ligand_model,
         )
 
         # --- Step 2: Extract features from trained model -----------------
@@ -193,10 +194,13 @@ class Level4Runner(BaseLevelRunner):
         # --- Resolve embedding name / dims ---
         full_emb = CA_SUPPORTED_EMBEDDINGS.get(self.embedding_name, self.embedding_name)
         protein_dim = PROTEIN_DIMS.get(full_emb, 640)
+        ligand_dim = self._config.ligand_dim
 
         # --- Locate checkpoint ---
         short_emb = full_emb.replace("esm2_", "").replace("_UR50D", "")
-        prefix = f"{self.dataset}_molformer_{short_emb}_seed{seed}_"
+        ligand_prefix_map = {"molformer": "molformer_", "smited": "", "chemberta": "chemberta_"}
+        ligand_tag = ligand_prefix_map.get(self._config.ligand_model, "molformer_")
+        prefix = f"{self.dataset}_{ligand_tag}{short_emb}_seed{seed}_"
         checkpoint_path = get_checkpoint_path(output_dir, prefix, "Split by Scaffold")
 
         if not os.path.exists(checkpoint_path):
@@ -210,7 +214,7 @@ class Level4Runner(BaseLevelRunner):
 
         model = Level5LiteModel(
             protein_input_dim=protein_dim,
-            ligand_input_dim=MOLFORMER_DIM,
+            ligand_input_dim=ligand_dim,
             hidden_dim=384,
             num_cross_attn_layers=1,
             num_heads=12,
@@ -231,6 +235,7 @@ class Level4Runner(BaseLevelRunner):
             batch_size=64,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self._config.mode,
+            ligand_model=self._config.ligand_model,
         )
 
         # --- Forward pass to collect features based on mode ---
@@ -333,11 +338,14 @@ def load_crossattention_results(
     level_dir: str,
     dataset: str,
     embedding_short: str,
+    ligand_model: str = "molformer",
 ) -> Optional[Dict]:
     """Load cached ``crossattention_analysis_results.json`` if available."""
     full_name = SUPPORTED_EMBEDDINGS.get(embedding_short, embedding_short)
     short_name = full_name.replace("esm2_", "").replace("_UR50D", "")
-    prefix = f"{dataset}_molformer_{short_name}_"
+    ligand_prefix_map = {"molformer": "molformer_", "smited": "", "chemberta": "chemberta_"}
+    ligand_tag = ligand_prefix_map.get(ligand_model, "molformer_")
+    prefix = f"{dataset}_{ligand_tag}{short_name}_"
     json_path = os.path.join(level_dir, f"{prefix}crossattention_analysis_results.json")
 
     if not os.path.exists(json_path):

@@ -45,7 +45,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from benchmark.classifiers import train_knn_mlp
-from benchmark.config import MOLFORMER_DIM, BenchmarkConfig
+from benchmark.config import BenchmarkConfig
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
@@ -129,6 +129,7 @@ class _AttentionPool(nn.Module):
 def _train_ligand_attention_pooling(
     train_loader: DataLoader,
     val_loader: DataLoader,
+    ligand_dim: int = 768,
     hidden_dim: int = 256,
     num_heads: int = 8,
     dropout: float = 0.2,
@@ -148,7 +149,7 @@ def _train_ligand_attention_pooling(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = _LigandAttentionPoolingModel(
-        ligand_input_dim=MOLFORMER_DIM,
+        ligand_input_dim=ligand_dim,
         hidden_dim=hidden_dim,
         num_heads=num_heads,
         dropout=dropout,
@@ -295,6 +296,7 @@ class Level1cRunner(BaseLevelRunner):
             scaffold_split_dir=self.scaffold_split_dir,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
+            ligand_model=self._config.ligand_model,
         )
 
         # In train mode, split training data to avoid train-set optimism:
@@ -312,6 +314,7 @@ class Level1cRunner(BaseLevelRunner):
         model = _train_ligand_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
+            ligand_dim=self._config.ligand_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,

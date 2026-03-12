@@ -48,7 +48,6 @@ from tqdm import tqdm
 
 from benchmark.classifiers import train_knn_mlp
 from benchmark.config import (
-    MOLFORMER_DIM,
     PROTEIN_DIMS,
     BenchmarkConfig,
 )
@@ -177,6 +176,7 @@ def _train_attention_pooling(
     train_loader: DataLoader,
     val_loader: DataLoader,
     protein_dim: int,
+    ligand_dim: int = 768,
     hidden_dim: int = 256,
     num_heads: int = 8,
     dropout: float = 0.2,
@@ -198,7 +198,7 @@ def _train_attention_pooling(
 
     model = _AttentionPoolingModel(
         protein_input_dim=protein_dim,
-        ligand_input_dim=MOLFORMER_DIM,
+        ligand_input_dim=ligand_dim,
         hidden_dim=hidden_dim,
         num_heads=num_heads,
         dropout=dropout,
@@ -360,6 +360,7 @@ class Level3Runner(BaseLevelRunner):
             scaffold_split_dir=self.scaffold_split_dir,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
+            ligand_model=self._config.ligand_model,
         )
 
         # In train mode, split training data to avoid train-set optimism:
@@ -378,6 +379,7 @@ class Level3Runner(BaseLevelRunner):
             train_loader=model_train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
+            ligand_dim=self._config.ligand_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,
