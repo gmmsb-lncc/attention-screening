@@ -160,7 +160,7 @@ def extract_chemberta_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
 
     print("\n  Loading ChemBERTa-77M-MTR model...")
     model_name = "DeepChem/ChemBERTa-77M-MTR"
-    model = RobertaModel.from_pretrained(model_name, num_labels=2, add_pooling_layer=True)
+    model = RobertaModel.from_pretrained(model_name, num_labels=2, add_pooling_layer=True, use_safetensors=True)
     model = model.to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
