@@ -125,7 +125,7 @@ class MolecularGCN(nn.Module):
 class LinearTransform(nn.Module):
     def __init__(self):
         super(LinearTransform, self).__init__()
-        self.linear1 = nn.Linear(384, 512)#for seed 12 for better score it was on 384>64>128
+        self.linear1 = nn.Linear(768, 512)  # 768-d: MoLFormer-XL (was 384 for ChemBERTa)
         self.linear2 = nn.Linear(512, 128)
         self.dropout = nn.Dropout(p=0.5)
     def forward(self, x):
