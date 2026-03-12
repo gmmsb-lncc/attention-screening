@@ -34,12 +34,21 @@ import os
 import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
 
 # Apply DGL graphbolt compatibility shim before any DGL import
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import dgl_compat  # noqa: F401, E402 — must be before dgl
+
+# Suppress torch.tensor(sourceTensor) deprecation warnings from GraphBAN's
+# trainer.py (upstream code, not modified here).
+warnings.filterwarnings(
+    "ignore",
+    message="To copy construct from a tensor.*use sourceTensor.clone",
+    category=UserWarning,
+)
 
 import numpy as np
 import pandas as pd
