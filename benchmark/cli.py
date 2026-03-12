@@ -50,16 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3",
+        default="1a,1b,1c,2,3,4",
         nargs="*",
         help=(
             "Levels to run: "
             "0=ClassicalML(1a+1b+1c+3), "
             "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
-            "2=MeanPool, 3=AttnPool. "
-            "Levels after 3 (4, 5a, 5b, 6a, 6b) are obsolete. "
-            "(default: 1a,1b,1c,2,3). "
-            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3"
+            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool. "
+            "Levels after 4 (5a, 5b, 6a, 6b) are obsolete. "
+            "(default: 1a,1b,1c,2,3,4). "
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4"
         ),
     )
 
@@ -182,7 +182,7 @@ def parse_levels(levels_arg: object) -> List[str]:
             if level in OBSOLETE_LEVELS:
                 msg = (
                     f"Obsolete level: {level}. "
-                    "Supported levels are up to 3: 0, 1a, 1b, 1c, 2, 3"
+                    "Supported levels are up to 4: 0, 1a, 1b, 1c, 2, 3, 4"
                 )
                 raise ValueError(msg)
             if level not in VALID_LEVELS:
