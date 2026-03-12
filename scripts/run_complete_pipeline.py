@@ -200,8 +200,8 @@ Devices:
         '--ligand-model',
         type=str,
         default='SMI-TED',
-        choices=['SMI-TED', 'MOLFORMER'],
-        help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim)'
+        choices=['SMI-TED', 'MOLFORMER', 'CHEMBERTA'],
+        help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim; CHEMBERTA: 384-dim)'
     )
     
     parser.add_argument(
