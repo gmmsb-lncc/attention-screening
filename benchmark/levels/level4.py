@@ -54,6 +54,10 @@ from benchmark.config import (
     BenchmarkConfig,
 )
 from benchmark.levels.base import BaseLevelRunner
+from benchmark.levels.protein_structure_features import (
+    ProteinStructureFeatureLoader,
+    build_protein_structure_loader,
+)
 from benchmark.levels.matrix_utils import build_matrix_dataloaders
 
 
@@ -124,10 +128,23 @@ class Level4Runner(BaseLevelRunner):
         # --- Step 2: Extract features from trained model -----------------
         tqdm.write("  Extracting cross-attention representations...")
 
+        protein_structure_loader = build_protein_structure_loader(
+            feature_dir=self._config.esmfold_features_dir,
+            use_esmfold_protein=self._config.use_esmfold_protein,
+            default_feature_dirs=self._config.resolved_esmfold_feature_dirs,
+        )
+        if self._config.use_esmfold_protein and protein_structure_loader is None:
+            tqdm.write("  WARNING: ESMFold protein fusion requested, but no valid .npy structure vectors were found. Proceeding with semantic protein features only.")
+        elif protein_structure_loader is not None:
+            tqdm.write(
+                f"  [ESMFold] Structural vectors loaded: dim={protein_structure_loader.dim}. Protein concatenation enabled."
+            )
+
         try:
             x_fit, y_fit, x_eval, y_eval = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
+                protein_structure_loader=protein_structure_loader,
             )
         except Exception as exc:
             tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
@@ -166,6 +183,7 @@ class Level4Runner(BaseLevelRunner):
         self,
         output_dir: str,
         seed: int,
+        protein_structure_loader: ProteinStructureFeatureLoader | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Load checkpoint, rebuild model/data, extract pre-head features.
 
@@ -240,11 +258,31 @@ class Level4Runner(BaseLevelRunner):
 
         # --- Forward pass to collect features based on mode ---
         if self._config.mode == "train":
-            x_fit, y_fit = self._collect_features(model, train_loader, device)
-            x_eval, y_eval = self._collect_features(model, val_loader, device)
+            x_fit, y_fit = self._collect_features(
+                model,
+                train_loader,
+                device,
+                protein_structure_loader=protein_structure_loader,
+            )
+            x_eval, y_eval = self._collect_features(
+                model,
+                val_loader,
+                device,
+                protein_structure_loader=protein_structure_loader,
+            )
         else:
-            x_fit, y_fit = self._collect_features(model, val_loader, device)
-            x_eval, y_eval = self._collect_features(model, test_loader, device)
+            x_fit, y_fit = self._collect_features(
+                model,
+                val_loader,
+                device,
+                protein_structure_loader=protein_structure_loader,
+            )
+            x_eval, y_eval = self._collect_features(
+                model,
+                test_loader,
+                device,
+                protein_structure_loader=protein_structure_loader,
+            )
 
         return x_fit, y_fit, x_eval, y_eval
 
@@ -254,10 +292,12 @@ class Level4Runner(BaseLevelRunner):
         model: "torch.nn.Module",
         loader: "torch.utils.data.DataLoader",
         device: torch.device,
+        protein_structure_loader: ProteinStructureFeatureLoader | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Run forward passes and collect pre-head feature vectors."""
         all_features: list[np.ndarray] = []
         all_labels: list[np.ndarray] = []
+        esmfold_logged = False
 
         for batch in loader:
             protein = batch["protein_matrix"].to(device)
@@ -274,6 +314,22 @@ class Level4Runner(BaseLevelRunner):
                 return_features=True,
             )
             features = output["features"].cpu().numpy()
+
+            if protein_structure_loader is not None:
+                seq_ids = batch.get("seq_id")
+                if seq_ids is not None:
+                    prot_struct_batch = protein_structure_loader.get_batch(seq_ids)
+                    if prot_struct_batch.shape[1] > 0:
+                        if not esmfold_logged:
+                            sem_dim = int(features.shape[1])
+                            struct_dim = int(prot_struct_batch.shape[1])
+                            fused_dim = sem_dim + struct_dim
+                            tqdm.write(
+                                f"  [ESMFold] Active fusion (Level 4): semantic_dim={sem_dim}, protein_struct_dim={struct_dim}, fused_feature_dim={fused_dim}"
+                            )
+                            esmfold_logged = True
+                        features = np.concatenate([features, prot_struct_batch], axis=-1)
+
             labels = batch["label"].numpy()
 
             all_features.append(features)

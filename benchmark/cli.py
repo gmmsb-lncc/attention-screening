@@ -140,6 +140,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--esmfold",
+        dest="use_esmfold_protein",
+        action="store_true",
+        help="Enable protein structural vectors (e.g., ESMFold) concatenated with protein semantic features.",
+    )
+    parser.add_argument(
+        "--esmfold-features-dir",
+        dest="esmfold_features_dir",
+        default=None,
+        help=(
+            "Directory with per-protein structure vectors named {seq_id}_esmfold.npy, "
+            "{seq_id}_structure.npy, or {seq_id}.npy. If omitted with --esmfold, "
+            "uses the standardized default under each embedding build dir: build/protein_structure_features/."
+        ),
+    )
+    parser.add_argument(
         "--se3",
         dest="use_se3_ligand",
         action="store_true",
@@ -207,6 +223,8 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         embedding=args.embedding,
         ligand_model=args.ligand_model,
         ligand_weight=args.ligand_weight,
+        use_esmfold_protein=args.use_esmfold_protein,
+        esmfold_features_dir=args.esmfold_features_dir,
         use_se3_ligand=args.use_se3_ligand,
         se3_features_dir=args.se3_features_dir,
         levels=parse_levels(args.levels),
