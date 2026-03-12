@@ -209,6 +209,19 @@ import torch.nn.functional as F
 from sklearn.preprocessing import StandardScaler
 
 
+def _sanitize_tensor(t, name, step):
+    """Replace NaN/Inf in tensor; warn once (first batch only)."""
+    has_nan = torch.isnan(t).any()
+    has_inf = torch.isinf(t).any()
+    if has_nan or has_inf:
+        if step <= 1:
+            n_nan = torch.isnan(t).sum().item()
+            n_inf = torch.isinf(t).sum().item()
+            print(f"  WARNING {name}: {n_nan} NaN, {n_inf} Inf / {t.numel()} total -> sanitized")
+        t = torch.nan_to_num(t, nan=0.0, posinf=1e4, neginf=-1e4)
+    return t
+
+
 class Trainer(object):
     def __init__(self, model, optim, device, train_dataloader, val_dataloader, test_dataloader, opt_da=None, discriminator=None,
                  experiment=None, alpha=1, **config):
@@ -396,15 +409,15 @@ class Trainer(object):
             self.step += 1
             sm = torch.tensor(sm ,dtype=torch.float32)
             sm = torch.reshape(sm,(sm.shape[0],1,768))
+            sm = _sanitize_tensor(sm, "MoLFormer(sm)", self.step)
 
-        
-            
             esm = torch.tensor(esm ,dtype=torch.float32)
             esm = torch.reshape(esm,(esm.shape[0],1,1280))
+            esm = _sanitize_tensor(esm, "ESM-2(esm)", self.step)
 
-         
             teacher = torch.tensor(teacher, dtype=torch.float32)
-         
+            teacher = _sanitize_tensor(teacher, "Teacher", self.step)
+
             v_d, sm,  v_p,esm, labels, teacher = v_d.to(self.device),sm.to(self.device), v_p.to(self.device),esm.to(self.device), labels.float().to(self.device), teacher.to(self.device)
             self.optim.zero_grad()
             device = self.device
@@ -451,17 +464,22 @@ class Trainer(object):
                 self.device), batch_t[3].to(self.device) ,batch_t[4].float().to(self.device)
             
             teacher = torch.tensor(teacher, dtype=torch.float32)
+            teacher = _sanitize_tensor(teacher, "Teacher(DA)", self.step)
             sm = torch.tensor(sm ,dtype=torch.float32)
             sm = torch.reshape(sm,(sm.shape[0],1,768))
+            sm = _sanitize_tensor(sm, "MoLFormer(DA-src)", self.step)
 
             smt = torch.tensor(smt ,dtype=torch.float32)
             smt = torch.reshape(smt,(smt.shape[0],1,768))
-            
+            smt = _sanitize_tensor(smt, "MoLFormer(DA-tgt)", self.step)
+
             esm = torch.tensor(esm ,dtype=torch.float32)
             esm = torch.reshape(esm,(esm.shape[0],1,1280))
+            esm = _sanitize_tensor(esm, "ESM-2(DA-src)", self.step)
 
             esmt = torch.tensor(esmt ,dtype=torch.float32)
             esmt = torch.reshape(esmt,(esmt.shape[0],1,1280))
+            esmt = _sanitize_tensor(esmt, "ESM-2(DA-tgt)", self.step)
 
             self.optim.zero_grad()
             self.optim_da.zero_grad()
@@ -577,8 +595,10 @@ class Trainer(object):
             for i, (v_d, sm, v_p,esm, labels) in enumerate(data_loader):
                 sm = torch.tensor(sm ,dtype=torch.float32)
                 sm = torch.reshape(sm,(sm.shape[0],1,768))
+                sm = _sanitize_tensor(sm, f"MoLFormer({dataloader})", i)
                 esm = torch.tensor(esm ,dtype=torch.float32)
-                esm = torch.reshape(esm,(sm.shape[0],1,1280))
+                esm = torch.reshape(esm,(esm.shape[0],1,1280))
+                esm = _sanitize_tensor(esm, f"ESM-2({dataloader})", i)
                 v_d, sm,  v_p, esm, labels = v_d.to(self.device),sm.to(self.device), v_p.to(self.device), esm.to(self.device), labels.float().to(self.device)
                 device = self.device
                 
@@ -600,6 +620,12 @@ class Trainer(object):
                 test_loss += loss.item()
                 y_label = y_label + labels.to("cpu").tolist()
                 y_pred = y_pred + n.to("cpu").tolist()
+        y_pred_arr = np.array(y_pred)
+        if np.any(np.isnan(y_pred_arr)):
+            n_nan = int(np.isnan(y_pred_arr).sum())
+            print(f"  WARNING: {n_nan}/{len(y_pred_arr)} NaN in {dataloader} predictions -> replaced with 0.5")
+            y_pred_arr = np.nan_to_num(y_pred_arr, nan=0.5)
+            y_pred = y_pred_arr.tolist()
         auroc = roc_auc_score(y_label, y_pred)
         auprc = average_precision_score(y_label, y_pred)
         test_loss = test_loss / num_batches
