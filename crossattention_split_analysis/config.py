@@ -22,12 +22,22 @@ PROTEIN_DIMS = {
 # Ligand embedding dimensions
 LIGAND_DIM = 768  # SMI-TED per-token embeddings
 MOLFORMER_DIM = 768  # MoLFormer per-token embeddings
+CHEMBERTA_DIM = 384  # ChemBERTa-77M-MTR per-token embeddings
 
 # Ligand matrix directory names
 LIGAND_MATRIX_DIRS = {
     'smited': 'ligand_matrices',      # Original SMI-TED matrices
     'molformer': 'molformer_matrix',  # MoLFormer matrices
+    'chemberta': 'chemberta_matrix',  # ChemBERTa matrices
 }
+
+# Ligand model dimensions (for cross-attention pipeline)
+LIGAND_MODEL_DIMS = {
+    'smited': 768,
+    'molformer': 768,
+    'chemberta': 384,
+}
+
 LIGAND_VECTOR_DIR = 'ligand_embeddings'
 
 # Max sequence length for attention matrices
