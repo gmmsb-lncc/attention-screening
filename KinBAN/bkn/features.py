@@ -25,12 +25,26 @@ if "transformers.onnx" not in sys.modules:
     sys.modules["transformers.onnx"] = _onnx_stub
     _transformers_pkg.onnx = _onnx_stub  # type: ignore[attr-defined]
 
-# 2) find_pruneable_heads_and_indices was renamed to find_prunable_heads_and_indices
+# 2) find_pruneable_heads_and_indices was renamed / removed in transformers >= 4.45
 from transformers import pytorch_utils as _pu
 
 if not hasattr(_pu, "find_pruneable_heads_and_indices"):
     if hasattr(_pu, "find_prunable_heads_and_indices"):
         _pu.find_pruneable_heads_and_indices = _pu.find_prunable_heads_and_indices
+    else:
+        # Neither name exists — provide the canonical implementation directly
+        import torch as _torch
+
+        def _find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):  # type: ignore[no-untyped-def]
+            mask = _torch.ones(n_heads, head_size)
+            heads = set(heads) - already_pruned_heads
+            for head in heads:
+                head -= sum(1 if h < head else 0 for h in already_pruned_heads)
+                mask[head] = 0
+            index = _torch.arange(mask.numel())[mask.view(-1).bool()]
+            return heads, index
+
+        _pu.find_pruneable_heads_and_indices = _find_pruneable_heads_and_indices  # type: ignore[attr-defined]
 
 import numpy as np
 import pandas as pd
