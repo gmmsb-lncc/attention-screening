@@ -166,39 +166,16 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
             return head_mask.to(dtype=next(self.parameters()).dtype)
         type(model)._convert_head_mask_to_5d = _convert_head_mask_to_5d
 
-    # Override get_extended_attention_mask — the version inherited from
-    # PreTrainedModel changed signature / behaviour in transformers >= 4.40
-    # and MoLFormer's dynamic code may call it with the old API, producing NaN.
-    def _safe_get_extended_attention_mask(self, attention_mask, input_shape, device=None, dtype=None):
-        if dtype is None:
-            dtype = torch.float32
-        if attention_mask.dim() == 2:
-            extended = attention_mask[:, None, None, :]       # [B, 1, 1, seq]
-        elif attention_mask.dim() == 3:
-            extended = attention_mask[:, None, :, :]          # [B, 1, seq, seq]
-        else:
-            extended = attention_mask
-        extended = extended.to(dtype=dtype)
-        extended = (1.0 - extended) * torch.finfo(dtype).min  # 0 → -inf for masked
-        return extended
-    type(model).get_extended_attention_mask = _safe_get_extended_attention_mask
-
-    # Also patch invert_attention_mask (used by some encoder implementations)
-    def _safe_invert_attention_mask(self, encoder_attention_mask):
-        dtype = torch.float32
-        if encoder_attention_mask.dim() == 2:
-            inverted = encoder_attention_mask[:, None, None, :]
-        else:
-            inverted = encoder_attention_mask
-        inverted = inverted.to(dtype=dtype)
-        inverted = (1.0 - inverted) * torch.finfo(dtype).min
-        return inverted
-    type(model).invert_attention_mask = _safe_invert_attention_mask
-
-    # ── Validation: quick forward pass on a test molecule ──
+    # ── Validation: quick forward pass WITHOUT attention_mask ──
+    # MoLFormer uses linear (Performer) attention — there is no softmax,
+    # so passing an additive -inf mask (the standard BERT approach used by
+    # get_extended_attention_mask in transformers >= 4.40) propagates NaN
+    # through the kernel computations.  The safe strategy is to call
+    # model(input_ids=...) only and apply the padding mask manually at
+    # pooling time (using the stored attention_mask tensor).
     _test_enc = tokenizer("CCO", return_tensors="pt", max_length=10,
                           padding="max_length", truncation=True)
-    _test_enc = {k: v.to(device) for k, v in _test_enc.items()}
+    _test_ids = _test_enc["input_ids"].to(device)
 
     # Check weights first
     _n_nan_w = sum(torch.isnan(p).sum().item() for p in model.parameters())
@@ -206,20 +183,12 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
         print(f"  ERROR: model weights contain {_n_nan_w} NaN values (corrupted download?)")
 
     with torch.no_grad():
-        _test_out = model(**_test_enc)
+        _test_out = model(input_ids=_test_ids)          # ← no attention_mask
     _test_ok = not torch.isnan(_test_out.last_hidden_state).any().item()
     if _test_ok:
         print("  MoLFormer validation: forward pass OK (no NaN)")
     else:
-        print("  WARNING: MoLFormer forward() still produces NaN after patches!")
-        # Debug: check embedding layer output
-        _emb_layer = getattr(model, "embeddings", None) or getattr(model, "mol_encoder", None)
-        if _emb_layer is not None:
-            with torch.no_grad():
-                _emb_out = _emb_layer(_test_enc["input_ids"])
-            _emb_nan = torch.isnan(_emb_out).any().item()
-            print(f"  Embedding layer NaN: {_emb_nan}")
-        # List model submodules for debugging
+        print("  WARNING: MoLFormer forward() still produces NaN!")
         print(f"  Model type: {type(model).__name__}")
         for name, child in model.named_children():
             print(f"    .{name} = {type(child).__name__}")
@@ -240,11 +209,11 @@ def extract_molformer_features(df: pd.DataFrame, device: torch.device) -> pd.Dat
             max_length=MOLFORMER_MAX_LEN,
             truncation=True,
         )
-        encodings = {k: v.to(device) for k, v in encodings.items()}
+        input_ids = encodings["input_ids"].to(device)
+        mask = encodings["attention_mask"][0]          # [L] — kept for manual pooling
         with torch.no_grad():
-            output = model(**encodings)
+            output = model(input_ids=input_ids)        # ← no attention_mask (linear attn)
         token_reps = output.last_hidden_state[0]  # [L, 768]
-        mask = encodings["attention_mask"][0]      # [L]
         cls = token_reps[0]                        # [768] — CLS token
 
         # Sanity check on first molecule
