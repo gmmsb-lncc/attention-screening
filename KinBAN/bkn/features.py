@@ -240,10 +240,19 @@ def extract_features_cached(
         print("\n  Loading cached BKN features...")
         with open(cache_file, "rb") as f:
             cached_train, cached_val, cached_test = pickle.load(f)
-        # Validate cache: reject if MoLFormer embeddings are all NaN
-        sample_emb = cached_train["fcfp"].iloc[0]
-        if isinstance(sample_emb, np.ndarray) and np.all(np.isnan(sample_emb)):
-            print("  WARNING: cached MoLFormer embeddings are all NaN — deleting stale cache")
+        # Validate cache: reject if 'fcfp'/'esm' columns missing or all NaN
+        stale = False
+        for col in ("fcfp", "esm"):
+            if col not in cached_train.columns:
+                print(f"  WARNING: cached features missing '{col}' column — deleting stale cache")
+                stale = True
+                break
+        if not stale:
+            sample_emb = cached_train["fcfp"].iloc[0]
+            if isinstance(sample_emb, np.ndarray) and np.all(np.isnan(sample_emb)):
+                print("  WARNING: cached MoLFormer embeddings are all NaN — deleting stale cache")
+                stale = True
+        if stale:
             cache_file.unlink()
             # Fall through to re-extraction below using the ORIGINAL
             # train_df/val_df/test_df (from CSV, without stale columns).
