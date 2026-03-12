@@ -38,6 +38,10 @@ from benchmark.levels.matrix_utils import (
     mean_pool,
 )
 from benchmark.levels.protocol import sanitize_features, select_fit_eval
+from benchmark.levels.protein_structure_features import (
+    ProteinStructureFeatureLoader,
+    build_protein_structure_loader,
+)
 from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 
@@ -47,15 +51,30 @@ from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 def _extract_features(
     loader: DataLoader,
+    protein_structure_loader: ProteinStructureFeatureLoader | None = None,
     se3_loader: SE3FeatureLoader | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract mean-pooled protein+ligand features from a dataloader."""
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
+    esmfold_logged = False
     se3_logged = False
 
     for batch in loader:
         protein_pooled = mean_pool(batch["protein_matrix"], batch["protein_mask"])
+        if protein_structure_loader is not None:
+            prot_struct_batch = protein_structure_loader.get_batch(batch["seq_id"])
+            if prot_struct_batch.shape[1] > 0:
+                if not esmfold_logged:
+                    prot_sem_dim = int(protein_pooled.shape[1])
+                    prot_str_dim = int(prot_struct_batch.shape[1])
+                    prot_fused_dim = prot_sem_dim + prot_str_dim
+                    tqdm.write(
+                        f"  [ESMFold] Active fusion (Level 2): protein_sem_dim={prot_sem_dim}, protein_struct_dim={prot_str_dim}, fused_protein_dim={prot_fused_dim}"
+                    )
+                    esmfold_logged = True
+                protein_pooled = np.concatenate([protein_pooled, prot_struct_batch], axis=-1)
+
         ligand_pooled = mean_pool(batch["ligand_matrix"], batch["ligand_mask"])
         if se3_loader is not None:
             se3_batch = se3_loader.get_batch(batch["chembl_id"])
@@ -118,6 +137,20 @@ class Level2Runner(BaseLevelRunner):
             use_se3_ligand=self._config.use_se3_ligand,
             default_feature_dirs=self._config.resolved_se3_feature_dirs,
         )
+
+        protein_structure_loader = build_protein_structure_loader(
+            feature_dir=self._config.esmfold_features_dir,
+            use_esmfold_protein=self._config.use_esmfold_protein,
+            default_feature_dirs=self._config.resolved_esmfold_feature_dirs,
+        )
+
+        if self._config.use_esmfold_protein and protein_structure_loader is None:
+            tqdm.write("  WARNING: ESMFold protein fusion requested, but no valid .npy structure vectors were found. Proceeding with semantic protein features only.")
+        elif protein_structure_loader is not None:
+            tqdm.write(
+                f"  [ESMFold] Structural vectors loaded: dim={protein_structure_loader.dim}. Protein concatenation enabled."
+            )
+
         if self._config.use_se3_ligand and se3_loader is None:
             tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
         elif se3_loader is not None:
@@ -138,10 +171,21 @@ class Level2Runner(BaseLevelRunner):
         tqdm.write(
             f"  Mean-pooling protein + ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
         )
-        x_fit, y_fit = _extract_features(split_selection.fit, se3_loader=se3_loader)
-        x_eval, y_eval = _extract_features(split_selection.eval, se3_loader=se3_loader)
+        x_fit, y_fit = _extract_features(
+            split_selection.fit,
+            protein_structure_loader=protein_structure_loader,
+            se3_loader=se3_loader,
+        )
+        x_eval, y_eval = _extract_features(
+            split_selection.eval,
+            protein_structure_loader=protein_structure_loader,
+            se3_loader=se3_loader,
+        )
 
         protein_dim = PROTEIN_DIMS.get(self.embedding_name, 640)
+        if protein_structure_loader is not None:
+            protein_dim += protein_structure_loader.dim
+
         if self._config.ligand_weight != 1.0:
             tqdm.write(
                 f"  [Fusion] Ligand block weighting enabled: ligand_weight={self._config.ligand_weight:.3f} (protein block weight=1.000)"

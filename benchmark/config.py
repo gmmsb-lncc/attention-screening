@@ -56,6 +56,7 @@ VALID_LIGAND_MODELS = frozenset({"molformer", "smited", "chemberta"})
 EMBEDDING_BASE_PATH = "./results/protein_model_benchmark_{dataset_type}_v2"
 DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
 DEFAULT_SE3_FEATURES_SUBDIR = "se3_features"
+DEFAULT_ESMFOLD_FEATURES_SUBDIR = "protein_structure_features"
 
 # ---------------------------------------------------------------------------
 # Metrics
@@ -154,6 +155,8 @@ class BenchmarkConfig:
     # --- ligand model ---
     ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
     ligand_weight: float = 1.0
+    use_esmfold_protein: bool = False
+    esmfold_features_dir: Optional[str] = None
     use_se3_ligand: bool = False
     se3_features_dir: Optional[str] = None
 
@@ -218,6 +221,16 @@ class BenchmarkConfig:
         for ds in self.datasets_to_process():
             dirs.append(
                 os.path.join(self.build_dir(ds), DEFAULT_SE3_FEATURES_SUBDIR)
+            )
+        return dirs
+
+    @property
+    def resolved_esmfold_feature_dirs(self) -> List[str]:
+        """Default ESMFold feature directories following embedding build layout."""
+        dirs: List[str] = []
+        for ds in self.datasets_to_process():
+            dirs.append(
+                os.path.join(self.build_dir(ds), DEFAULT_ESMFOLD_FEATURES_SUBDIR)
             )
         return dirs
 
@@ -289,6 +302,9 @@ class BenchmarkConfig:
             raise ValueError(msg)
         if self.ligand_weight <= 0:
             msg = "--ligand-weight must be > 0"
+            raise ValueError(msg)
+        if self.esmfold_features_dir is not None and not self.esmfold_features_dir.strip():
+            msg = "--esmfold-features-dir cannot be empty when provided"
             raise ValueError(msg)
         if self.se3_features_dir is not None and not self.se3_features_dir.strip():
             msg = "--se3-features-dir cannot be empty when provided"
