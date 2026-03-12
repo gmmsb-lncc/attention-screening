@@ -161,8 +161,12 @@ def _build_esmfold_model(device: str) -> tuple[Any, Any] | None:
                 pass
 
         if model is None:
+            fold_symbols = []
+            if pretrained_mod is not None:
+                fold_symbols = [n for n in dir(pretrained_mod) if "fold" in n.lower()]
             raise RuntimeError(
-                "ESMFold constructor not found. Expected esm.pretrained.esmfold_v1()."
+                "ESMFold constructor not found. Expected esm.pretrained.esmfold_v1(). "
+                f"Available fold-related symbols in esm.pretrained: {fold_symbols}"
             )
 
         model = model.eval().to(dev)
