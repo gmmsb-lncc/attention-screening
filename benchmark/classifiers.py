@@ -156,11 +156,9 @@ def _faiss_knn_predict(
     """
     try:
         import faiss  # type: ignore[import-untyped]
-    except ImportError as exc:
-        raise ImportError(
-            "FAISS is required for KNN classification. "
-            "Install it with: pip install faiss-cpu"
-        ) from exc
+    except ImportError:
+        logger.info("FAISS not available — falling back to sklearn KNeighborsClassifier")
+        return _sklearn_knn_predict(x_train, y_train, x_test, k=k)
 
     x_train_f32 = np.ascontiguousarray(x_train, dtype=np.float32)
     x_test_f32 = np.ascontiguousarray(x_test, dtype=np.float32)
@@ -190,6 +188,31 @@ def _faiss_knn_predict(
     row_sums = np.maximum(class_scores.sum(axis=1, keepdims=True), 1e-12)
     probabilities = class_scores[:, -1] / row_sums.ravel()
 
+    return predictions, probabilities
+
+
+def _sklearn_knn_predict(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    k: int = 5,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Fallback KNN using sklearn when FAISS is not installed.
+
+    Uses cosine metric with distance-weighted voting to match
+    the FAISS implementation behaviour.
+    """
+    from sklearn.neighbors import KNeighborsClassifier
+
+    knn = KNeighborsClassifier(
+        n_neighbors=k,
+        metric="cosine",
+        weights="distance",
+        n_jobs=-1,
+    )
+    knn.fit(x_train, y_train)
+    predictions = knn.predict(x_test)
+    probabilities = knn.predict_proba(x_test)[:, -1]
     return predictions, probabilities
 
 
