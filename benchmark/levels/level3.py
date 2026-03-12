@@ -222,6 +222,8 @@ def _train_attention_pooling(
     best_state = None
     wait = 0
 
+    tqdm.write(f"    Training: {epochs} epochs, patience={patience}, device={device}, protein_dim={protein_dim}, ligand_dim={ligand_dim}")
+
     for epoch in range(1, epochs + 1):
         # --- train ---
         model.train()
@@ -267,7 +269,11 @@ def _train_attention_pooling(
                 val_loss += criterion(logits, y).item()
                 val_n += 1
 
+        avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
+
+        if epoch <= 3 or epoch % 10 == 0:
+            tqdm.write(f"    Epoch {epoch}/{epochs}  train_loss={avg_train:.4f}  val_loss={avg_val:.4f}  wait={wait}")
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val
@@ -276,7 +282,7 @@ def _train_attention_pooling(
         else:
             wait += 1
             if patience and wait >= patience:
-                tqdm.write(f"    Early stopping at epoch {epoch} (val_loss={avg_val:.4f})")
+                tqdm.write(f"    Early stopping at epoch {epoch}/{epochs} (val_loss={avg_val:.4f}, best={best_val_loss:.4f})")
                 break
 
     if best_state is not None:
