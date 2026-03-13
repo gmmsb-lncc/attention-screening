@@ -30,14 +30,15 @@
 set -euo pipefail
 
 ENV_NAME="graphban"
+PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Create environment ─────────────────────────────────────────────────────
 if conda info --envs | grep -q "^${ENV_NAME} "; then
     echo "[INFO] Environment '${ENV_NAME}' already exists. Activating..."
 else
-    echo "[INFO] Creating conda environment '${ENV_NAME}' (Python 3.11)..."
-    conda create -y --name "${ENV_NAME}" python=3.11
+    echo "[INFO] Creating conda environment '${ENV_NAME}' (Python ${PYTHON_VERSION})..."
+    conda create -y --name "${ENV_NAME}" "python=${PYTHON_VERSION}"
 fi
 
 eval "$(conda shell.bash hook)"
@@ -86,9 +87,9 @@ conda install -y \
 # ── Step 3: DGL (CUDA build from dglteam) ────────────────────────────────
 echo "[INFO] Installing DGL..."
 if [ "${GPU_MODE}" = true ]; then
-    conda install -y dgl -c "dglteam/label/${DGL_LABEL}" -c conda-forge
+    conda install -y dgl --override-channels -c "dglteam/label/${DGL_LABEL}" -c pytorch -c nvidia -c conda-forge
 else
-    conda install -y dgl -c dglteam -c conda-forge
+    conda install -y dgl --override-channels -c dglteam -c pytorch -c conda-forge
 fi
 
 # ── Step 3b: Patch DGL graphbolt to prevent exit(1) crash ─────────────────
