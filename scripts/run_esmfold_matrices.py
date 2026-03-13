@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import Any
 import importlib
+import os
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -124,8 +126,14 @@ def _sequence_proxy_vector(seq: str) -> np.ndarray:
     return np.nan_to_num(vec, nan=0.0, posinf=0.0, neginf=0.0)
 
 
-def _build_esmfold_model(device: str) -> tuple[Any, Any] | None:
-    """Try loading ESMFold model from local/pip esm package."""
+def _build_esmfold_model(device: str) -> tuple[str, Any, Any] | None:
+    """Try loading ESMFold backend from local model or Forge API.
+
+    Returns
+    -------
+    tuple(kind, model, device_or_none) or None
+      kind: "local" or "forge"
+    """
     try:
         import torch
     except Exception as exc:
@@ -170,11 +178,51 @@ def _build_esmfold_model(device: str) -> tuple[Any, Any] | None:
             )
 
         model = model.eval().to(dev)
+        print("INFO: Using local ESMFold backend (esm.pretrained.esmfold_v1).")
+        return "local", model, dev
     except Exception as exc:
-        print(f"WARNING: Could not initialize ESMFold model ({exc}).")
+        print(f"WARNING: Local ESMFold unavailable ({exc}).")
+
+    # Fallback: ESM3 Forge folding API backend (requires ESM_API_KEY).
+    try:
+        api_key = os.environ.get("ESM_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("ESM_API_KEY is not set")
+
+        from esm.sdk.forge import SequenceStructureForgeInferenceClient
+
+        client = SequenceStructureForgeInferenceClient(token=api_key)
+        print("INFO: Using ESM3 Forge folding backend (SequenceStructureForgeInferenceClient).")
+        return "forge", client, None
+    except Exception as exc:
+        print(f"WARNING: Forge folding backend unavailable ({exc}).")
         return None
 
-    return model, dev
+
+def _esmfold_pdb_from_backend(seq: str, backend_kind: str, model: Any) -> str:
+    """Generate PDB text from selected folding backend."""
+    if backend_kind == "local":
+        import torch
+
+        with torch.no_grad():
+            return model.infer_pdb(seq)
+
+    if backend_kind == "forge":
+        protein = model.fold(seq, potential_sequence_of_concern=False)
+        # Forge returns ESMProtein object exposing to_pdb(path)
+        with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            protein.to_pdb(tmp_path)
+            with open(tmp_path, "r", encoding="utf-8") as fh:
+                return fh.read()
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    raise RuntimeError(f"Unknown ESMFold backend kind: {backend_kind}")
 
 
 def _parse_ca_coords_from_pdb(pdb_str: str) -> np.ndarray:
@@ -198,21 +246,18 @@ def _parse_ca_coords_from_pdb(pdb_str: str) -> np.ndarray:
     return np.asarray(coords, dtype=np.float32)
 
 
-def _esmfold_vector(seq: str, model: Any, device_obj: Any) -> np.ndarray:
+def _esmfold_vector(seq: str, backend_kind: str, model: Any, device_obj: Any) -> np.ndarray:
     """Build structural vector from ESMFold predicted coordinates.
 
     Output: 76-d vector
     - 12 global/shape descriptors
     - 64-bin C-alpha distance histogram (0..32A)
     """
-    import torch
-
     seq = (seq or "").strip().upper()
     if not seq:
         return np.zeros((76,), dtype=np.float32)
 
-    with torch.no_grad():
-        pdb_str = model.infer_pdb(seq)
+    pdb_str = _esmfold_pdb_from_backend(seq, backend_kind, model)
 
     ca = _parse_ca_coords_from_pdb(pdb_str)
     n = ca.shape[0]
@@ -321,9 +366,9 @@ def generate_esmfold_matrices(
                 continue
 
             if encoder is not None:
-                model, dev = encoder
+                backend_kind, model, dev = encoder
                 try:
-                    vec = _esmfold_vector(seq, model, dev)
+                    vec = _esmfold_vector(seq, backend_kind, model, dev)
                 except Exception:
                     vec = _sequence_proxy_vector(seq)
             else:

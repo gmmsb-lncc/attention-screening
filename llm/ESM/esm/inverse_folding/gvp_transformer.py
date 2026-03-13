@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
@@ -85,7 +85,7 @@ class GVPTransformerModel(nn.Module):
         )
         return logits, extra
     
-    def sample(self, coords, partial_seq=None, temperature=1.0, confidence=None):
+    def sample(self, coords, partial_seq=None, temperature=1.0, confidence=None, device=None):
         """
         Samples sequences based on multinomial sampling (no beam search).
 
@@ -101,7 +101,7 @@ class GVPTransformerModel(nn.Module):
         # Convert to batch format
         batch_converter = CoordBatchConverter(self.decoder.dictionary)
         batch_coords, confidence, _, _, padding_mask = (
-            batch_converter([(coords, confidence, None)])
+            batch_converter([(coords, confidence, None)], device=device)
         )
         
         # Start with prepend token
@@ -118,10 +118,12 @@ class GVPTransformerModel(nn.Module):
         # Run encoder only once
         encoder_out = self.encoder(batch_coords, padding_mask, confidence)
         
+        # Make sure all tensors are on the same device if a GPU is present
+        if device:
+            sampled_tokens = sampled_tokens.to(device)
+        
         # Decode one token at a time
         for i in range(1, L+1):
-            if sampled_tokens[0, i] != mask_idx:
-                continue
             logits, _ = self.decoder(
                 sampled_tokens[:, :i], 
                 encoder_out,
@@ -130,7 +132,8 @@ class GVPTransformerModel(nn.Module):
             logits = logits[0].transpose(0, 1)
             logits /= temperature
             probs = F.softmax(logits, dim=-1)
-            sampled_tokens[:, i] = torch.multinomial(probs, 1).squeeze(-1)
+            if sampled_tokens[0, i] == mask_idx:
+                sampled_tokens[:, i] = torch.multinomial(probs, 1).squeeze(-1)
         sampled_seq = sampled_tokens[0, 1:]
         
         # Convert back to string via lookup
