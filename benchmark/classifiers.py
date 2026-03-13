@@ -11,8 +11,9 @@ Classifier specifications
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
  * **MLP** — classic ``sklearn.neural_network.MLPClassifier`` with
      fixed architecture and hyperparameters shared by all active levels:
-     ``hidden_layer_sizes=(512,)``, ReLU, Adam, ``alpha=1e-4``,
-     ``max_iter=500``, ``early_stopping=False``.
+     ``hidden_layer_sizes=(1024, 512, 256)``, ReLU, Adam,
+     ``alpha=1e-3``, ``learning_rate_init=5e-4``,
+     ``max_iter=1200``, ``early_stopping=True``.
 
  * **Decision threshold** — adaptive per seed/model.
      A calibration split is carved from the fit partition; threshold is
@@ -330,15 +331,19 @@ def train_knn_mlp(
         },
     }
 
-    # ---------- MLP (classic fixed architecture) ----------------------
+    # ---------- MLP (deeper fixed architecture) -----------------------
+    mlp_arch = (1024, 512, 256)
     mlp = MLPClassifier(
-        hidden_layer_sizes=(512,),
+        hidden_layer_sizes=mlp_arch,
         activation="relu",
         solver="adam",
-        alpha=1e-4,
-        learning_rate_init=1e-3,
-        max_iter=500,
-        early_stopping=False,
+        alpha=1e-3,
+        learning_rate_init=5e-4,
+        max_iter=1200,
+        early_stopping=True,
+        validation_fraction=0.15,
+        n_iter_no_change=30,
+        batch_size=64,
         random_state=seed,
     )
     mlp.fit(x_model_sc, y_model)
@@ -353,6 +358,7 @@ def train_knn_mlp(
             "n_rows": int(len(y_train)),
             "protein_dim": int(protein_dim) if protein_dim is not None else None,
             "ligand_weight": float(ligand_weight),
+            "mlp_architecture": list(mlp_arch),
         },
         "model_train": {
             "n_rows": int(len(y_model)),
