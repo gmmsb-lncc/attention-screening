@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
@@ -369,7 +369,7 @@ def read_alignment_lines(
         if len(line) > 0 and line[0] == ">":
             if seq is not None:
                 yield desc, parse(seq)
-            desc = line.strip()
+            desc = line.strip().lstrip(">")
             seq = ""
         else:
             assert isinstance(seq, str)
