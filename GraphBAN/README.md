@@ -25,10 +25,22 @@ python run_baseline.py --dataset non_human --max-epoch 5 --seeds 42
 | File | Purpose |
 |------|---------|
 | `setup_env.sh` | Creates conda env, installs deps, clones GraphBAN |
+| `patch_upstream.py` | Applies reproducibility/runtime patches to cloned upstream source |
 | `prepare_data.py` | Converts thesis scaffold splits to `SMILES,Protein,Y` CSV |
 | `run_baseline.py` | Full training wrapper with fair evaluation protocol |
 | `dgl_compat.py` | DGL graphbolt compatibility shim |
 | `configs/kinase_inductive.yaml` | Hyperparameters for kinase datasets |
+
+## If You Already Have `GraphBAN/src` Cloned
+
+If a run fails with a dataloader error like negative virtual nodes, apply patches in-place:
+
+```bash
+cd GraphBAN
+python patch_upstream.py --src ./src
+```
+
+This is idempotent and safe to run multiple times.
 
 ## Pipeline
 

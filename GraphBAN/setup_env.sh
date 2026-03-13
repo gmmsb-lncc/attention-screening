@@ -145,36 +145,11 @@ else
     echo "[INFO] GraphBAN cloned to ${GRAPHBAN_SRC}"
 fi
 
-# ── Step 6b: Patch GraphBAN models.py (Colab-only IPythonConsole import) ──
-# GraphBAN's models.py was written for Google Colab and calls exit() when
-# rdkit.Chem.Draw.IPythonConsole is not importable (fails outside Jupyter).
-for MODELS_PY in \
-    "${GRAPHBAN_SRC}/inductive_mode/models.py" \
-    "${GRAPHBAN_SRC}/case_study/models.py"; do
-    if [ -f "${MODELS_PY}" ]; then
-        python3 - << PYEOF
-import pathlib
-path = pathlib.Path("${MODELS_PY}")
-content = path.read_text()
-old = """try:
-  from rdkit import Chem
-  from rdkit.Chem.Draw import IPythonConsole
-except ImportError:
-  print('Stopping RUNTIME. Colaboratory will restart automatically. Please run again.')
-  exit()"""
-new = """from rdkit import Chem
-try:
-  from rdkit.Chem.Draw import IPythonConsole
-except ImportError:
-  pass  # IPythonConsole only available in Jupyter/Colab"""
-if old in content:
-    path.write_text(content.replace(old, new))
-    print(f"[INFO] Patched Colab exit() in {path}")
-else:
-    print(f"[INFO] {path} already patched or pattern not found — skipping.")
-PYEOF
-    fi
-done
+# ── Step 6b: Patch upstream source for known runtime issues ───────────────
+# Applies idempotent fixes:
+# - Colab-only exit() in models.py
+# - Mutable graph reuse bug in inductive_mode/dataloader.py (negative virtual nodes)
+python3 "${SCRIPT_DIR}/patch_upstream.py" --src "${GRAPHBAN_SRC}"
 
 # ── Verification ──────────────────────────────────────────────────────────
 echo ""
