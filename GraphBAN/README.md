@@ -42,6 +42,19 @@ python patch_upstream.py --src ./src
 
 This is idempotent and safe to run multiple times.
 
+## Troubleshooting
+
+If environment creation fails with `LibMambaUnsatisfiableError` mentioning
+`dgl` vs `pytorch` and a pinned `python=3.11`, recreate with Python 3.10:
+
+```bash
+conda remove -n graphban --all -y
+PYTHON_VERSION=3.10 bash setup_env.sh
+```
+
+The setup script now defaults to Python 3.10 and forces DGL resolution from
+`dglteam` channels to avoid incompatible `conda-forge` DGL builds.
+
 ## Pipeline
 
 ```
