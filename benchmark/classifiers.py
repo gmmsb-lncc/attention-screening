@@ -27,6 +27,7 @@ Evaluation protocol:
 
 from __future__ import annotations
 
+import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -175,6 +176,136 @@ def _split_fit_for_calibration(
     return x[fit_idx], y[fit_idx], x[cal_idx], y[cal_idx]
 
 
+def _mlp_candidate_space() -> list[dict[str, object]]:
+    """Return a compact but expressive MLP hyperparameter space."""
+    return [
+        {
+            "hidden_layer_sizes": (512, 256),
+            "alpha": 1e-3,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 1500,
+        },
+        {
+            "hidden_layer_sizes": (768, 384),
+            "alpha": 5e-4,
+            "learning_rate_init": 8e-4,
+            "early_stopping": True,
+            "max_iter": 1800,
+        },
+        {
+            "hidden_layer_sizes": (1024, 512, 256),
+            "alpha": 3e-4,
+            "learning_rate_init": 6e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+        },
+        {
+            "hidden_layer_sizes": (512, 256, 128),
+            "alpha": 1e-4,
+            "learning_rate_init": 6e-4,
+            "early_stopping": True,
+            "max_iter": 1800,
+        },
+        {
+            "hidden_layer_sizes": (256, 128),
+            "alpha": 1e-5,
+            "learning_rate_init": 4e-4,
+            "early_stopping": False,
+            "max_iter": 2200,
+        },
+    ]
+
+
+def _fit_mlp_from_cfg(
+    cfg: dict[str, object],
+    x_fit: np.ndarray,
+    y_fit: np.ndarray,
+    random_state: int,
+) -> MLPClassifier:
+    """Instantiate and fit an MLP from a candidate config."""
+    mlp = MLPClassifier(
+        hidden_layer_sizes=cfg["hidden_layer_sizes"],
+        activation="relu",
+        solver="adam",
+        alpha=float(cfg["alpha"]),
+        learning_rate="adaptive",
+        learning_rate_init=float(cfg["learning_rate_init"]),
+        max_iter=int(cfg["max_iter"]),
+        early_stopping=bool(cfg["early_stopping"]),
+        validation_fraction=0.1,
+        n_iter_no_change=35,
+        random_state=random_state,
+    )
+    mlp.fit(x_fit, y_fit)
+    return mlp
+
+
+def _select_best_mlp_by_mcc(
+    x_fit: np.ndarray,
+    y_fit: np.ndarray,
+    x_cal: np.ndarray,
+    y_cal: np.ndarray,
+    seed: int,
+) -> tuple[dict[str, object], float, float, float]:
+    """Select MLP config by calibration MCC using restart ensemble on calibration."""
+    candidates = _mlp_candidate_space()
+    n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3")))
+
+    best_cfg = candidates[0]
+    best_thr = 0.5
+    best_mcc = -1.0
+    best_std = 1.0
+    best_score = -999.0
+
+    for cfg_idx, cfg in enumerate(candidates):
+        probs_per_restart: list[np.ndarray] = []
+        mccs: list[float] = []
+
+        for restart in range(n_restarts):
+            rs = seed + (cfg_idx * 101) + restart
+            candidate = _fit_mlp_from_cfg(cfg, x_fit, y_fit, random_state=rs)
+            cal_proba_single = candidate.predict_proba(x_cal)[:, 1]
+            thr_single, mcc_single = _optimize_threshold_mcc(y_cal, cal_proba_single)
+            probs_per_restart.append(cal_proba_single)
+            mccs.append(mcc_single)
+
+        # Threshold on averaged probabilities across restarts is typically more stable.
+        cal_proba_mean = np.mean(np.stack(probs_per_restart, axis=0), axis=0)
+        thr, mcc = _optimize_threshold_mcc(y_cal, cal_proba_mean)
+        mcc_std = float(np.std(np.array(mccs), ddof=1)) if len(mccs) > 1 else 0.0
+
+        # Stability-aware objective: prioritize high MCC with low restart variance.
+        score = float(mcc) - (0.15 * mcc_std)
+        if score > best_score:
+            best_score = score
+            best_cfg = cfg
+            best_thr = thr
+            best_mcc = float(mcc)
+            best_std = mcc_std
+
+    return best_cfg, best_thr, best_mcc, best_std
+
+
+def _fit_mlp_ensemble_predict(
+    cfg: dict[str, object],
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_eval: np.ndarray,
+    seed: int,
+) -> np.ndarray:
+    """Fit an ensemble of MLP restarts and return mean probabilities."""
+    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
+    probs: list[np.ndarray] = []
+
+    for member in range(n_members):
+        rs = seed + (member * 53)
+        model = _fit_mlp_from_cfg(cfg, x_train, y_train, random_state=rs)
+        probs.append(model.predict_proba(x_eval)[:, 1])
+
+    return np.mean(np.stack(probs, axis=0), axis=0)
+
+
 # ------------------------------------------------------------------ #
 # Public API
 # ------------------------------------------------------------------ #
@@ -225,70 +356,26 @@ def train_knn_mlp(
     # ---------- MLP tuned for MCC (model + threshold selected on calibration) --
     x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
 
-    mlp_candidates = [
-        {
-            "hidden_layer_sizes": (512, 256),
-            "alpha": 1e-3,
-            "learning_rate_init": 1e-3,
-        },
-        {
-            "hidden_layer_sizes": (768, 384),
-            "alpha": 5e-4,
-            "learning_rate_init": 8e-4,
-        },
-        {
-            "hidden_layer_sizes": (512, 256, 128),
-            "alpha": 1e-4,
-            "learning_rate_init": 6e-4,
-        },
-    ]
-
-    best_cfg = mlp_candidates[0]
-    best_thr = 0.5
-    best_mcc = -1.0
-
-    for idx, cfg in enumerate(mlp_candidates):
-        candidate = MLPClassifier(
-            hidden_layer_sizes=cfg["hidden_layer_sizes"],
-            activation="relu",
-            solver="adam",
-            alpha=cfg["alpha"],
-            learning_rate="adaptive",
-            learning_rate_init=cfg["learning_rate_init"],
-            max_iter=1200,
-            early_stopping=True,
-            validation_fraction=0.1,
-            n_iter_no_change=30,
-            random_state=seed + idx,
-        )
-        candidate.fit(x_fit, y_fit)
-        cal_proba = candidate.predict_proba(x_cal)[:, 1]
-        thr, cal_mcc = _optimize_threshold_mcc(y_cal, cal_proba)
-
-        if cal_mcc > best_mcc:
-            best_mcc = cal_mcc
-            best_cfg = cfg
-            best_thr = thr
-
-    # Refit best architecture on full training features, keep calibrated threshold.
-    mlp = MLPClassifier(
-        hidden_layer_sizes=best_cfg["hidden_layer_sizes"],
-        activation="relu",
-        solver="adam",
-        alpha=best_cfg["alpha"],
-        learning_rate="adaptive",
-        learning_rate_init=best_cfg["learning_rate_init"],
-        max_iter=1200,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=30,
-        random_state=seed,
+    best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
+        x_fit=x_fit,
+        y_fit=y_fit,
+        x_cal=x_cal,
+        y_cal=y_cal,
+        seed=seed,
     )
-    mlp.fit(x_train_sc, y_train)
-    mlp_proba = mlp.predict_proba(x_test_sc)[:, 1]
+
+    # Refit best architecture on full training features as a restart ensemble.
+    mlp_proba = _fit_mlp_ensemble_predict(
+        cfg=best_cfg,
+        x_train=x_train_sc,
+        y_train=y_train,
+        x_eval=x_test_sc,
+        seed=seed,
+    )
     mlp_pred = (mlp_proba >= best_thr).astype(int)
     mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
     mlp_metrics["decision_threshold"] = float(best_thr)
     mlp_metrics["calibration_mcc"] = float(best_mcc)
+    mlp_metrics["calibration_mcc_std"] = float(best_mcc_std)
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}
