@@ -177,42 +177,66 @@ def _split_fit_for_calibration(
 
 
 def _mlp_candidate_space() -> list[dict[str, object]]:
-    """Return a compact but expressive MLP hyperparameter space."""
+    """Return an MCC-oriented MLP hyperparameter space.
+
+    Focuses on convergence controls (max_iter, n_iter_no_change, tol)
+    and learning-rate scale, which are the most impactful knobs for
+    the current underfitting profile.
+    """
     return [
         {
             "hidden_layer_sizes": (512, 256),
-            "alpha": 1e-3,
-            "learning_rate_init": 1e-3,
+            "alpha": 8e-4,
+            "learning_rate_init": 1.2e-3,
             "early_stopping": True,
-            "max_iter": 1500,
+            "max_iter": 1600,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
         },
         {
             "hidden_layer_sizes": (768, 384),
             "alpha": 5e-4,
-            "learning_rate_init": 8e-4,
+            "learning_rate_init": 9e-4,
             "early_stopping": True,
-            "max_iter": 1800,
+            "max_iter": 2200,
+            "n_iter_no_change": 80,
+            "tol": 8e-6,
         },
         {
             "hidden_layer_sizes": (1024, 512, 256),
             "alpha": 3e-4,
-            "learning_rate_init": 6e-4,
+            "learning_rate_init": 7e-4,
             "early_stopping": True,
-            "max_iter": 2000,
+            "max_iter": 2600,
+            "n_iter_no_change": 90,
+            "tol": 6e-6,
         },
         {
             "hidden_layer_sizes": (512, 256, 128),
             "alpha": 1e-4,
-            "learning_rate_init": 6e-4,
+            "learning_rate_init": 5e-4,
             "early_stopping": True,
-            "max_iter": 1800,
+            "max_iter": 2800,
+            "n_iter_no_change": 110,
+            "tol": 5e-6,
         },
         {
             "hidden_layer_sizes": (256, 128),
             "alpha": 1e-5,
-            "learning_rate_init": 4e-4,
-            "early_stopping": False,
-            "max_iter": 2200,
+            "learning_rate_init": 3.5e-4,
+            "early_stopping": True,
+            "max_iter": 3200,
+            "n_iter_no_change": 130,
+            "tol": 4e-6,
+        },
+        {
+            "hidden_layer_sizes": (768, 384, 192),
+            "alpha": 2e-4,
+            "learning_rate_init": 4.5e-4,
+            "early_stopping": True,
+            "max_iter": 3000,
+            "n_iter_no_change": 120,
+            "tol": 4e-6,
         },
     ]
 
@@ -229,12 +253,13 @@ def _fit_mlp_from_cfg(
         activation="relu",
         solver="adam",
         alpha=float(cfg["alpha"]),
-        learning_rate="adaptive",
+        learning_rate="constant",
         learning_rate_init=float(cfg["learning_rate_init"]),
         max_iter=int(cfg["max_iter"]),
         early_stopping=bool(cfg["early_stopping"]),
         validation_fraction=0.1,
-        n_iter_no_change=35,
+        n_iter_no_change=int(cfg["n_iter_no_change"]),
+        tol=float(cfg["tol"]),
         random_state=random_state,
     )
     mlp.fit(x_fit, y_fit)

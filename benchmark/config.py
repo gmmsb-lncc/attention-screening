@@ -155,7 +155,7 @@ class BenchmarkConfig:
     # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
-    patience: int = 5
+    patience: Optional[int] = None
     learning_rate: float = 1e-4
 
     # --- fine-tuning ---
@@ -185,8 +185,12 @@ class BenchmarkConfig:
 
     @property
     def resolved_patience(self) -> Optional[int]:
-        """Return ``None`` when patience is disabled (0)."""
-        return self.patience if self.patience > 0 else None
+        """Early-stopping patience standardized as 10% of total epochs.
+
+        The benchmark uses a global rule to keep training budgets
+        comparable across levels and runs.
+        """
+        return max(1, int(round(self.epochs * 0.1)))
 
     @property
     def resolved_seeds(self) -> List[int]:
