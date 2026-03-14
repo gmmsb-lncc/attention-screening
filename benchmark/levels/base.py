@@ -6,6 +6,7 @@ a reusable multi-seed aggregation helper.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from abc import ABC, abstractmethod
@@ -15,6 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from benchmark.config import METRICS_ORDER, BenchmarkConfig
+from benchmark.runtime import get_seed_workers
 
 
 class BaseLevelRunner(ABC):
@@ -107,36 +109,89 @@ class BaseLevelRunner(ABC):
         mlp_train_mcc_history: List[float] = []
         mlp_eval_mcc_history: List[float] = []
 
-        for idx, seed in enumerate(self.seeds):
-            seed_dir = os.path.join(level_dir, f"seed_{seed}")
-            tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
+        seed_worker_count = get_seed_workers(len(self.seeds))
+        if seed_worker_count <= 1:
+            for idx, seed in enumerate(self.seeds):
+                seed_dir = os.path.join(level_dir, f"seed_{seed}")
+                tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
 
-            result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
+                result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
 
-            if result is None:
-                result = self._load_cached_results(seed_dir)
+                if result is None:
+                    result = self._load_cached_results(seed_dir)
 
-            if result is None:
-                tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                continue
+                if result is None:
+                    tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                    continue
 
-            self._accumulate_seed(result, seed_results_per_model)
-            processed_seeds.append(seed)
+                self._accumulate_seed(result, seed_results_per_model)
+                processed_seeds.append(seed)
 
-            train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-            if train_mcc is not None:
-                mlp_train_mcc_history.append(train_mcc)
-            if eval_mcc is not None:
-                mlp_eval_mcc_history.append(eval_mcc)
+                train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+                if train_mcc is not None:
+                    mlp_train_mcc_history.append(train_mcc)
+                if eval_mcc is not None:
+                    mlp_eval_mcc_history.append(eval_mcc)
 
-            partial = self._aggregate(seed_results_per_model)
-            self._save_intermediate(
-                level_dir,
-                partial,
-                processed_seeds,
-                mlp_train_mcc_history,
-                mlp_eval_mcc_history,
+                partial = self._aggregate(seed_results_per_model)
+                self._save_intermediate(
+                    level_dir,
+                    partial,
+                    processed_seeds,
+                    mlp_train_mcc_history,
+                    mlp_eval_mcc_history,
+                )
+        else:
+            tqdm.write(
+                f"  Parallel seed execution enabled: {seed_worker_count} workers "
+                f"for {len(self.seeds)} seeds"
             )
+            futures = {}
+            with ThreadPoolExecutor(max_workers=seed_worker_count) as executor:
+                for seed in self.seeds:
+                    seed_dir = os.path.join(level_dir, f"seed_{seed}")
+                    futures[
+                        executor.submit(
+                            self.run_single_seed,
+                            seed=seed,
+                            output_dir=seed_dir,
+                            **kwargs,
+                        )
+                    ] = (seed, seed_dir)
+
+                for done_idx, future in enumerate(as_completed(futures), start=1):
+                    seed, seed_dir = futures[future]
+                    tqdm.write(f"  Seed done {done_idx}/{len(self.seeds)}: {seed}")
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
+                        continue
+
+                    if result is None:
+                        result = self._load_cached_results(seed_dir)
+
+                    if result is None:
+                        tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                        continue
+
+                    self._accumulate_seed(result, seed_results_per_model)
+                    processed_seeds.append(seed)
+
+                    train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+                    if train_mcc is not None:
+                        mlp_train_mcc_history.append(train_mcc)
+                    if eval_mcc is not None:
+                        mlp_eval_mcc_history.append(eval_mcc)
+
+                    partial = self._aggregate(seed_results_per_model)
+                    self._save_intermediate(
+                        level_dir,
+                        partial,
+                        processed_seeds,
+                        mlp_train_mcc_history,
+                        mlp_eval_mcc_history,
+                    )
 
         if not seed_results_per_model:
             return None

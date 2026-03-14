@@ -47,3 +47,21 @@ def get_dataloader_workers(default_cap: int = 4) -> int:
     cpu_count = os.cpu_count() or 1
     # Leave one core for the main process/UI responsiveness.
     return max(0, min(default_cap, cpu_count - 1))
+
+
+def get_seed_workers(n_seeds: int) -> int:
+    """Resolve how many seeds can run in parallel.
+
+    Environment override:
+      BENCHMARK_SEED_WORKERS=<int>
+
+    Defaults to sequential execution (1) when no auto-configuration has
+    set ``BENCHMARK_SEED_WORKERS``.
+    """
+    env = os.getenv("BENCHMARK_SEED_WORKERS")
+    if env is not None:
+        try:
+            return max(1, min(int(env), max(1, n_seeds)))
+        except ValueError:
+            pass
+    return 1

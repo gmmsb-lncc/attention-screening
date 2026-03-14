@@ -14,6 +14,7 @@ Design:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import sys
@@ -34,6 +35,11 @@ from benchmark.levels.level4 import Level4Runner
 from benchmark.metrics import aggregate_benchmark_metrics
 from benchmark.progress import BenchmarkProgress
 from benchmark.reporting import print_comparison_table, save_benchmark_json
+from benchmark.seed_parallelism import (
+    auto_configure_seed_workers,
+    is_cpu_gpu_parallel_enabled,
+    prioritize_gpu_level_three,
+)
 from benchmark.splits import ensure_scaffold_splits
 from benchmark.visualization import generate_all
 
@@ -63,6 +69,11 @@ class BenchmarkOrchestrator:
         self._print_banner()
         os.makedirs(config.resolved_output_dir, exist_ok=True)
 
+        seed_workers = auto_configure_seed_workers(len(config.resolved_seeds))
+        tqdm.write(
+            f"  Seed workers auto-configured: BENCHMARK_SEED_WORKERS={seed_workers}"
+        )
+
         self._t_start = time.time()
         progress = BenchmarkProgress(config)
 
@@ -79,14 +90,7 @@ class BenchmarkOrchestrator:
 
         # --- Level runners ------------------------------------------
         runners = self._build_runners()
-
-        for level, runner, step_name in runners:
-            self._run_step(
-                progress,
-                step_name,
-                lambda r=runner: self._run_level(r, level),
-            )
-            self._save_global_intermediate(step_name)
+        self._run_level_steps(progress, runners)
 
         # --- Report + Visualization ---------------------------------
         self._run_step(progress, "Report + Visualizations", self._generate_report)
@@ -96,6 +100,73 @@ class BenchmarkOrchestrator:
         self._print_summary(total_elapsed)
 
         return self._aggregated
+
+    def _run_level_steps(
+        self,
+        progress: BenchmarkProgress,
+        runners: List[tuple[str, BaseLevelRunner, str]],
+    ) -> None:
+        """Execute level steps with optional CPU/GPU overlap."""
+        if not is_cpu_gpu_parallel_enabled(self._config.levels):
+            for level, runner, step_name in runners:
+                self._run_step(
+                    progress,
+                    step_name,
+                    lambda r=runner, lv=level: self._run_level(r, lv),
+                )
+                self._save_global_intermediate(step_name)
+            return
+
+        runner_map = {level: (runner, step_name) for level, runner, step_name in runners}
+        if "3" not in runner_map:
+            for level, runner, step_name in runners:
+                self._run_step(
+                    progress,
+                    step_name,
+                    lambda r=runner, lv=level: self._run_level(r, lv),
+                )
+                self._save_global_intermediate(step_name)
+            return
+
+        tqdm.write("  CPU/GPU overlap enabled: running L3 (GPU) alongside L1a/L1b/L1c (CPU)")
+
+        cpu_levels = [lv for lv in ("1a", "1b", "1c") if lv in runner_map]
+        remaining_levels = [lv for lv, _, _ in runners if lv not in cpu_levels and lv != "3"]
+        l3_runner, l3_step = runner_map["3"]
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future_l3 = executor.submit(self._run_level, l3_runner, "3")
+
+            for lv in cpu_levels:
+                runner, step_name = runner_map[lv]
+                self._run_step(
+                    progress,
+                    step_name,
+                    lambda r=runner, level=lv: self._run_level(r, level),
+                )
+                self._save_global_intermediate(step_name)
+
+            # Join GPU run and account for the step in progress tracking.
+            l3_error: Optional[BaseException] = None
+            try:
+                future_l3.result()
+            except BaseException as exc:  # noqa: BLE001
+                l3_error = exc
+
+            self._run_step(progress, f"{l3_step} (parallel)", lambda: None)
+            self._save_global_intermediate(l3_step)
+
+            if l3_error is not None:
+                raise RuntimeError(f"Parallel L3 execution failed: {l3_error}") from l3_error
+
+        for lv in remaining_levels:
+            runner, step_name = runner_map[lv]
+            self._run_step(
+                progress,
+                step_name,
+                lambda r=runner, level=lv: self._run_level(r, level),
+            )
+            self._save_global_intermediate(step_name)
 
     # ------------------------------------------------------------------
     # Pipeline steps
@@ -191,26 +262,29 @@ class BenchmarkOrchestrator:
         """Instantiate level runners for the configured levels."""
         config = self._config
         runners: List[tuple[str, BaseLevelRunner, str]] = []
+        ordered_levels = prioritize_gpu_level_three(config.levels)
 
-        if "1a" in config.levels:
+        if "1a" in ordered_levels:
             runners.append(("1a", Level1Runner(config), "Step 1a: L1a (FP+KNN/MLP)"))
 
-        if "1b" in config.levels:
+        if "1b" in ordered_levels:
             runners.append(("1b", Level1bRunner(config), "Step 1b: L1b (LigMeanPool+KNN/MLP)"))
 
-        if "1c" in config.levels:
+        if "1c" in ordered_levels:
             runners.append(("1c", Level1cRunner(config), "Step 1c: L1c (LigAttnPool+KNN/MLP)"))
 
-        if "2" in config.levels:
+        if "2" in ordered_levels:
             runners.append(("2", Level2Runner(config), "Step 2: L2 (MeanPool+KNN/MLP)"))
 
-        if "3" in config.levels:
+        if "3" in ordered_levels:
             runners.append(("3", Level3Runner(config), "Step 3: L3 (AttnPool+KNN/MLP)"))
 
-        if "4" in config.levels:
+        if "4" in ordered_levels:
             runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
 
-        return runners
+        # Preserve per-level tuple construction and only reorder execution.
+        order_map = {lv: idx for idx, lv in enumerate(ordered_levels)}
+        return sorted(runners, key=lambda item: order_map.get(item[0], 999))
 
     # ------------------------------------------------------------------
     # Fine-tuned embedding resolution (reserved for future use)
