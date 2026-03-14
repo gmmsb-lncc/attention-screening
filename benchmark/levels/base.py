@@ -103,6 +103,9 @@ class BaseLevelRunner(ABC):
         tqdm.write(f"  Output: {level_dir}")
 
         seed_results_per_model: Dict[str, Dict[str, List[float]]] = {}
+        processed_seeds: List[int] = []
+        mlp_train_mcc_history: List[float] = []
+        mlp_eval_mcc_history: List[float] = []
 
         for idx, seed in enumerate(self.seeds):
             seed_dir = os.path.join(level_dir, f"seed_{seed}")
@@ -118,6 +121,22 @@ class BaseLevelRunner(ABC):
                 continue
 
             self._accumulate_seed(result, seed_results_per_model)
+            processed_seeds.append(seed)
+
+            train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+            if train_mcc is not None:
+                mlp_train_mcc_history.append(train_mcc)
+            if eval_mcc is not None:
+                mlp_eval_mcc_history.append(eval_mcc)
+
+            partial = self._aggregate(seed_results_per_model)
+            self._save_intermediate(
+                level_dir,
+                partial,
+                processed_seeds,
+                mlp_train_mcc_history,
+                mlp_eval_mcc_history,
+            )
 
         if not seed_results_per_model:
             return None
@@ -221,6 +240,104 @@ class BaseLevelRunner(ABC):
                 indent=2,
             )
         tqdm.write(f"  Aggregated results saved: {agg_path}")
+
+    def _save_intermediate(
+        self,
+        level_dir: str,
+        aggregated_partial: Dict[str, Dict],
+        processed_seeds: List[int],
+        mlp_train_mcc_history: List[float],
+        mlp_eval_mcc_history: List[float],
+    ) -> None:
+        """Persist partial aggregation after each completed seed.
+
+        This snapshot is overwritten at every successful seed and enables
+        real-time monitoring of trend evolution during long benchmark runs.
+        """
+        os.makedirs(level_dir, exist_ok=True)
+        inter_path = os.path.join(level_dir, "split_comparison_results.intermediate.json")
+        alerts = self._build_mlp_alerts(mlp_train_mcc_history, mlp_eval_mcc_history)
+        with open(inter_path, "w") as fh:
+            json.dump(
+                {
+                    "dataset": self.dataset,
+                    "level": self.level_tag,
+                    "embedding_name": self.embedding_name,
+                    "seeds_configured": self.seeds,
+                    "seeds_processed": processed_seeds,
+                    "progress": {
+                        "completed": len(processed_seeds),
+                        "total": len(self.seeds),
+                    },
+                    "alerts": alerts,
+                    "results": {"Split by Scaffold": aggregated_partial},
+                },
+                fh,
+                indent=2,
+            )
+        tqdm.write(f"    Intermediate snapshot saved: {inter_path}")
+
+    @staticmethod
+    def _extract_mlp_train_eval_mcc(result: Dict) -> tuple[Optional[float], Optional[float]]:
+        """Extract per-seed MLP train/eval MCC diagnostics from raw result dict."""
+        if not isinstance(result, dict):
+            return None, None
+
+        sc_key = next((k for k in result if "scaffold" in str(k).lower()), None)
+        if sc_key is None:
+            sc_key = next(iter(result), None)
+        if sc_key is None:
+            return None, None
+
+        sc = result.get(sc_key, {})
+        mlp = sc.get("MLP", {}) if isinstance(sc, dict) else {}
+        if not isinstance(mlp, dict):
+            return None, None
+
+        eval_mcc_raw = mlp.get("mcc")
+        eval_mcc = float(eval_mcc_raw) if isinstance(eval_mcc_raw, (int, float)) else None
+
+        details = mlp.get("details", {})
+        if not isinstance(details, dict):
+            return None, eval_mcc
+
+        model_train = details.get("model_train", {})
+        if not isinstance(model_train, dict):
+            return None, eval_mcc
+
+        train_mcc_raw = model_train.get("mcc_at_default_threshold")
+        train_mcc = float(train_mcc_raw) if isinstance(train_mcc_raw, (int, float)) else None
+        return train_mcc, eval_mcc
+
+    @staticmethod
+    def _build_mlp_alerts(
+        mlp_train_mcc_history: List[float],
+        mlp_eval_mcc_history: List[float],
+    ) -> Dict[str, object]:
+        """Build lightweight automated alert flags for intermediate monitoring."""
+        if not mlp_train_mcc_history:
+            return {
+                "mlp_underfitting_suspected": False,
+                "reason": "insufficient_train_diagnostics",
+            }
+
+        mean_train_mcc = float(np.mean(np.array(mlp_train_mcc_history, dtype=np.float64)))
+        mean_eval_mcc = (
+            float(np.mean(np.array(mlp_eval_mcc_history, dtype=np.float64)))
+            if mlp_eval_mcc_history
+            else None
+        )
+
+        # Underfitting heuristic: persistently weak training fit.
+        underfitting = mean_train_mcc < 0.90
+
+        return {
+            "mlp_underfitting_suspected": underfitting,
+            "mlp_train_mcc_mean": mean_train_mcc,
+            "mlp_eval_mcc_mean": mean_eval_mcc,
+            "processed_points": len(mlp_train_mcc_history),
+            "rule": "underfitting_if_mean_train_mcc_below_0.90",
+        }
 
     @staticmethod
     def _load_cached_results(directory: str) -> Optional[Dict]:
