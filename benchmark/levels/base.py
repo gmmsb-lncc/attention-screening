@@ -115,6 +115,17 @@ class BaseLevelRunner(ABC):
         mlp_train_mcc_history: List[float] = []
         mlp_eval_mcc_history: List[float] = []
 
+        # Write an immediate progress snapshot so long runs never look idle.
+        self._save_intermediate(
+            level_dir,
+            aggregated_partial={},
+            processed_seeds=processed_seeds,
+            mlp_train_mcc_history=mlp_train_mcc_history,
+            mlp_eval_mcc_history=mlp_eval_mcc_history,
+            status="started",
+            running_seeds=[],
+        )
+
         seed_worker_count = get_seed_workers(len(self.seeds))
         if self.uses_gpu and seed_worker_count > 1:
             if os.getenv("BENCHMARK_ALLOW_GPU_SEED_PARALLEL", "0").strip().lower() not in {
@@ -195,10 +206,25 @@ class BaseLevelRunner(ABC):
                     if not done:
                         elapsed_level = (time.time() - level_start) / 60.0
                         running = len(pending)
+                        running_seeds = sorted(
+                            futures[f][0]
+                            for f in pending
+                            if f in futures
+                        )
                         tqdm.write(
                             f"  [Heartbeat] elapsed={elapsed_level:.1f} min, "
                             f"completed={completed_count}/{len(self.seeds)}, "
                             f"running={running}"
+                        )
+                        partial = self._aggregate(seed_results_per_model) if seed_results_per_model else {}
+                        self._save_intermediate(
+                            level_dir,
+                            partial,
+                            processed_seeds,
+                            mlp_train_mcc_history,
+                            mlp_eval_mcc_history,
+                            status="running",
+                            running_seeds=running_seeds,
                         )
                         continue
 
@@ -351,6 +377,8 @@ class BaseLevelRunner(ABC):
         processed_seeds: List[int],
         mlp_train_mcc_history: List[float],
         mlp_eval_mcc_history: List[float],
+        status: str = "running",
+        running_seeds: Optional[List[int]] = None,
     ) -> None:
         """Persist partial aggregation after each completed seed.
 
@@ -360,6 +388,7 @@ class BaseLevelRunner(ABC):
         os.makedirs(level_dir, exist_ok=True)
         inter_path = os.path.join(level_dir, "split_comparison_results.intermediate.json")
         alerts = self._build_mlp_alerts(mlp_train_mcc_history, mlp_eval_mcc_history)
+        effective_status = "completed" if len(processed_seeds) >= len(self.seeds) and self.seeds else status
         with open(inter_path, "w") as fh:
             json.dump(
                 {
@@ -371,6 +400,8 @@ class BaseLevelRunner(ABC):
                     "progress": {
                         "completed": len(processed_seeds),
                         "total": len(self.seeds),
+                        "status": effective_status,
+                        "running_seeds": running_seeds or [],
                     },
                     "alerts": alerts,
                     "results": {"Split by Scaffold": aggregated_partial},
