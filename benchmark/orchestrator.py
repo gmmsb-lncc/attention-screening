@@ -14,7 +14,6 @@ Design:
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, wait
 import json
 import os
 import sys
@@ -38,7 +37,6 @@ from benchmark.reporting import print_comparison_table, save_benchmark_json
 from benchmark.seed_parallelism import (
     auto_configure_seed_workers,
     is_cpu_gpu_parallel_enabled,
-    prioritize_gpu_level_three,
 )
 from benchmark.splits import ensure_scaffold_splits
 from benchmark.visualization import generate_all
@@ -106,84 +104,11 @@ class BenchmarkOrchestrator:
         progress: BenchmarkProgress,
         runners: List[tuple[str, BaseLevelRunner, str]],
     ) -> None:
-        """Execute level steps with optional CPU/GPU overlap."""
-        if not is_cpu_gpu_parallel_enabled(self._config.levels):
-            for level, runner, step_name in runners:
-                self._run_step(
-                    progress,
-                    step_name,
-                    lambda r=runner, lv=level: self._run_level(r, lv),
-                )
-                self._save_global_intermediate(step_name)
-            return
+        """Execute level steps strictly sequentially for stability."""
+        if is_cpu_gpu_parallel_enabled(self._config.levels):
+            tqdm.write("  NOTE: CPU/GPU overlap requested, but strict sequential mode is active.")
 
-        runner_map = {level: (runner, step_name) for level, runner, step_name in runners}
-        if "3" not in runner_map:
-            for level, runner, step_name in runners:
-                self._run_step(
-                    progress,
-                    step_name,
-                    lambda r=runner, lv=level: self._run_level(r, lv),
-                )
-                self._save_global_intermediate(step_name)
-            return
-
-        cpu_levels = [
-            lv
-            for lv, _, _ in runners
-            if lv != "3" and lv in runner_map and not runner_map[lv][0].uses_gpu
-        ]
-        remaining_levels = [lv for lv, _, _ in runners if lv not in cpu_levels and lv != "3"]
-        l3_runner, l3_step = runner_map["3"]
-
-        if cpu_levels:
-            tqdm.write(
-                "  CPU/GPU overlap enabled: running L3 (GPU) alongside "
-                f"CPU levels {cpu_levels}"
-            )
-        else:
-            tqdm.write("  CPU/GPU overlap enabled: no CPU-only level to overlap with L3")
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future_l3 = executor.submit(self._run_level, l3_runner, "3")
-
-            for lv in cpu_levels:
-                runner, step_name = runner_map[lv]
-                self._run_step(
-                    progress,
-                    step_name,
-                    lambda r=runner, level=lv: self._run_level(r, level),
-                )
-                self._save_global_intermediate(step_name)
-
-            # Join GPU run with heartbeat to avoid looking stalled.
-            wait_start = time.time()
-            while True:
-                done, _ = wait({future_l3}, timeout=60)
-                if done:
-                    break
-                elapsed = (time.time() - wait_start) / 60.0
-                tqdm.write(
-                    "  [Parallel wait] CPU levels finished; waiting for L3 to finish "
-                    f"({elapsed:.1f} min elapsed)"
-                )
-                self._save_global_intermediate("L3 waiting")
-
-            # Account for L3 completion in progress tracking.
-            l3_error: Optional[BaseException] = None
-            try:
-                future_l3.result()
-            except BaseException as exc:  # noqa: BLE001
-                l3_error = exc
-
-            self._run_step(progress, f"{l3_step} (parallel)", lambda: None)
-            self._save_global_intermediate(l3_step)
-
-            if l3_error is not None:
-                raise RuntimeError(f"Parallel L3 execution failed: {l3_error}") from l3_error
-
-        for lv in remaining_levels:
-            runner, step_name = runner_map[lv]
+        for lv, runner, step_name in runners:
             self._run_step(
                 progress,
                 step_name,
@@ -285,7 +210,7 @@ class BenchmarkOrchestrator:
         """Instantiate level runners for the configured levels."""
         config = self._config
         runners: List[tuple[str, BaseLevelRunner, str]] = []
-        ordered_levels = prioritize_gpu_level_three(config.levels)
+        ordered_levels = list(config.levels)
 
         if "1a" in ordered_levels:
             runners.append(("1a", Level1Runner(config), "Step 1a: L1a (FP+KNN/MLP)"))
@@ -305,9 +230,7 @@ class BenchmarkOrchestrator:
         if "4" in ordered_levels:
             runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
 
-        # Preserve per-level tuple construction and only reorder execution.
-        order_map = {lv: idx for idx, lv in enumerate(ordered_levels)}
-        return sorted(runners, key=lambda item: order_map.get(item[0], 999))
+        return runners
 
     # ------------------------------------------------------------------
     # Fine-tuned embedding resolution (reserved for future use)

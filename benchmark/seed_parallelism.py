@@ -28,9 +28,8 @@ def auto_configure_seed_workers(n_seeds: int) -> int:
         except ValueError:
             pass
 
-    cpu_count = os.cpu_count() or 1
-    recommended = max(1, cpu_count // 2)
-    recommended = min(recommended, max(1, n_seeds))
+    # Default to strict sequential mode for stability.
+    recommended = 1
     os.environ["BENCHMARK_SEED_WORKERS"] = str(recommended)
     return recommended
 

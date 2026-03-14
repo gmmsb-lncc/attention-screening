@@ -38,6 +38,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import matthews_corrcoef
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -226,6 +227,7 @@ def _train_attention_pooling(
     criterion = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")
+    best_val_mcc = float("-inf")
     best_state = None
     wait = 0
 
@@ -237,12 +239,20 @@ def _train_attention_pooling(
         f"log_every={log_every}"
     )
 
-    for epoch in range(1, epochs + 1):
+    epoch_bar = tqdm(
+        range(1, epochs + 1),
+        desc=f"{log_prefix} epochs",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    for epoch in epoch_bar:
         # --- train ---
         model.train()
         aux_head.train()
         train_loss = 0.0
         n_batches = 0
+        train_true: list[np.ndarray] = []
+        train_pred: list[np.ndarray] = []
         for batch in train_loader:
             p = batch["protein_matrix"].to(device)
             l = batch["ligand_matrix"].to(device)
@@ -262,6 +272,11 @@ def _train_attention_pooling(
             train_loss += loss.item()
             n_batches += 1
 
+            y_true = y.detach().cpu().numpy().astype(int).ravel()
+            y_hat = (torch.sigmoid(logits).detach().cpu().numpy().ravel() >= 0.5).astype(int)
+            train_true.append(y_true)
+            train_pred.append(y_hat)
+
         scheduler.step()
 
         # --- validate ---
@@ -269,6 +284,8 @@ def _train_attention_pooling(
         aux_head.eval()
         val_loss = 0.0
         val_n = 0
+        val_true: list[np.ndarray] = []
+        val_pred: list[np.ndarray] = []
         with torch.no_grad():
             for batch in val_loader:
                 p = batch["protein_matrix"].to(device)
@@ -282,21 +299,35 @@ def _train_attention_pooling(
                 val_loss += criterion(logits, y).item()
                 val_n += 1
 
+                y_true = y.detach().cpu().numpy().astype(int).ravel()
+                y_hat = (torch.sigmoid(logits).detach().cpu().numpy().ravel() >= 0.5).astype(int)
+                val_true.append(y_true)
+                val_pred.append(y_hat)
+
         avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
+        train_mcc = _safe_mcc(train_true, train_pred)
+        val_mcc = _safe_mcc(val_true, val_pred)
 
         if epoch == 1 or epoch == epochs or epoch % log_every == 0:
             elapsed = time.time() - start_time
             eta = (elapsed / max(epoch, 1)) * max(epochs - epoch, 0)
             progress = 100.0 * epoch / max(epochs, 1)
-            best_so_far = min(best_val_loss, avg_val)
+            best_mcc_so_far = max(best_val_mcc, val_mcc)
+            epoch_bar.set_postfix_str(
+                f"train_mcc={train_mcc:.4f} val_mcc={val_mcc:.4f} best_mcc={best_mcc_so_far:.4f} wait={wait} eta={eta/60:.1f}m"
+            )
             tqdm.write(
                 f"{log_prefix} Epoch {epoch}/{epochs} ({progress:5.1f}%) "
-                f"train={avg_train:.4f} val={avg_val:.4f} best={best_so_far:.4f} "
+                f"train_mcc={train_mcc:.4f} val_mcc={val_mcc:.4f} "
+                f"train_loss={avg_train:.4f} val_loss={avg_val:.4f} best_val_mcc={best_mcc_so_far:.4f} "
                 f"wait={wait} eta={eta/60:.1f}m"
             )
 
-        if avg_val < best_val_loss:
+        improved_mcc = val_mcc > best_val_mcc
+        tie_better_loss = np.isclose(val_mcc, best_val_mcc) and avg_val < best_val_loss
+        if improved_mcc or tie_better_loss:
+            best_val_mcc = val_mcc
             best_val_loss = avg_val
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
@@ -305,9 +336,11 @@ def _train_attention_pooling(
             if patience and wait >= patience:
                 tqdm.write(
                     f"{log_prefix} Early stopping at epoch {epoch}/{epochs} "
-                    f"(val={avg_val:.4f}, best={best_val_loss:.4f})"
+                    f"(val_mcc={val_mcc:.4f}, best_mcc={best_val_mcc:.4f})"
                 )
                 break
+
+    epoch_bar.close()
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -315,6 +348,17 @@ def _train_attention_pooling(
     model.to(device)
     model.eval()
     return model
+
+
+def _safe_mcc(y_true_parts: list[np.ndarray], y_pred_parts: list[np.ndarray]) -> float:
+    """Compute MCC safely for potentially single-class batches."""
+    if not y_true_parts or not y_pred_parts:
+        return 0.0
+    y_true = np.concatenate(y_true_parts)
+    y_pred = np.concatenate(y_pred_parts)
+    if y_true.size == 0 or len(np.unique(y_true)) < 2:
+        return 0.0
+    return float(matthews_corrcoef(y_true, y_pred))
 
 
 # ---------------------------------------------------------------------------
