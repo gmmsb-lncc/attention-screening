@@ -40,6 +40,7 @@ from sklearn.metrics import (
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedShuffleSplit
 
 
 # ------------------------------------------------------------------ #
@@ -125,6 +126,55 @@ def _compute_metrics(
     }
 
 
+def _optimize_threshold_mcc(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+) -> tuple[float, float]:
+    """Find decision threshold that maximizes MCC on calibration data."""
+    if y_true.size == 0 or len(np.unique(y_true)) < 2:
+        return 0.5, 0.0
+
+    # Include robust fixed grid + unique probability anchors.
+    grid = np.linspace(0.05, 0.95, 37)
+    anchors = np.unique(np.clip(y_proba, 0.0, 1.0))
+    thresholds = np.unique(np.concatenate([grid, anchors]))
+
+    best_thr = 0.5
+    best_mcc = -1.0
+    for thr in thresholds:
+        pred = (y_proba >= thr).astype(int)
+        mcc = float(matthews_corrcoef(y_true, pred))
+        if mcc > best_mcc:
+            best_mcc = mcc
+            best_thr = float(thr)
+        elif mcc == best_mcc and abs(float(thr) - 0.5) < abs(best_thr - 0.5):
+            # Tie-break towards conservative operating point.
+            best_thr = float(thr)
+
+    return best_thr, best_mcc
+
+
+def _split_fit_for_calibration(
+    x: np.ndarray,
+    y: np.ndarray,
+    seed: int,
+    calibration_fraction: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Create fit/calibration split for threshold and model selection."""
+    y = np.asarray(y)
+    if len(np.unique(y)) < 2 or y.shape[0] < 20:
+        # Small or single-class fallback: skip calibration split.
+        return x, y, x, y
+
+    splitter = StratifiedShuffleSplit(
+        n_splits=1,
+        test_size=calibration_fraction,
+        random_state=seed,
+    )
+    fit_idx, cal_idx = next(splitter.split(x, y))
+    return x[fit_idx], y[fit_idx], x[cal_idx], y[cal_idx]
+
+
 # ------------------------------------------------------------------ #
 # Public API
 # ------------------------------------------------------------------ #
@@ -172,23 +222,73 @@ def train_knn_mlp(
     knn_pred, knn_proba = _faiss_knn_predict(x_train_sc, y_train, x_test_sc, k=5)
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
 
-    # ---------- MLP (two hidden layers, early stopping, adaptive LR) --
+    # ---------- MLP tuned for MCC (model + threshold selected on calibration) --
+    x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
+
+    mlp_candidates = [
+        {
+            "hidden_layer_sizes": (512, 256),
+            "alpha": 1e-3,
+            "learning_rate_init": 1e-3,
+        },
+        {
+            "hidden_layer_sizes": (768, 384),
+            "alpha": 5e-4,
+            "learning_rate_init": 8e-4,
+        },
+        {
+            "hidden_layer_sizes": (512, 256, 128),
+            "alpha": 1e-4,
+            "learning_rate_init": 6e-4,
+        },
+    ]
+
+    best_cfg = mlp_candidates[0]
+    best_thr = 0.5
+    best_mcc = -1.0
+
+    for idx, cfg in enumerate(mlp_candidates):
+        candidate = MLPClassifier(
+            hidden_layer_sizes=cfg["hidden_layer_sizes"],
+            activation="relu",
+            solver="adam",
+            alpha=cfg["alpha"],
+            learning_rate="adaptive",
+            learning_rate_init=cfg["learning_rate_init"],
+            max_iter=1200,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=30,
+            random_state=seed + idx,
+        )
+        candidate.fit(x_fit, y_fit)
+        cal_proba = candidate.predict_proba(x_cal)[:, 1]
+        thr, cal_mcc = _optimize_threshold_mcc(y_cal, cal_proba)
+
+        if cal_mcc > best_mcc:
+            best_mcc = cal_mcc
+            best_cfg = cfg
+            best_thr = thr
+
+    # Refit best architecture on full training features, keep calibrated threshold.
     mlp = MLPClassifier(
-        hidden_layer_sizes=(512, 256),
+        hidden_layer_sizes=best_cfg["hidden_layer_sizes"],
         activation="relu",
         solver="adam",
-        alpha=1e-3,
+        alpha=best_cfg["alpha"],
         learning_rate="adaptive",
-        learning_rate_init=1e-3,
-        max_iter=1000,
+        learning_rate_init=best_cfg["learning_rate_init"],
+        max_iter=1200,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=20,
+        n_iter_no_change=30,
         random_state=seed,
     )
     mlp.fit(x_train_sc, y_train)
-    mlp_pred = mlp.predict(x_test_sc)
     mlp_proba = mlp.predict_proba(x_test_sc)[:, 1]
+    mlp_pred = (mlp_proba >= best_thr).astype(int)
     mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
+    mlp_metrics["decision_threshold"] = float(best_thr)
+    mlp_metrics["calibration_mcc"] = float(best_mcc)
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}
