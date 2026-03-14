@@ -53,6 +53,11 @@ from benchmark.levels.matrix_utils import (
 )
 from benchmark.levels.protocol import sanitize_features
 from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
+from benchmark.runtime import (
+    batch_size_fallbacks,
+    is_cuda_oom_error,
+    resolve_effective_batch_size,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -346,65 +351,94 @@ class Level1cRunner(BaseLevelRunner):
                 f"  [SE3] Structural vectors loaded: dim={se3_loader.dim}. Ligand concatenation enabled."
             )
 
-        train_loader, val_loader, test_loader = build_matrix_dataloaders(
-            dataset_type=self.dataset,
-            embedding_name=self.embedding_name,
-            scaffold_split_dir=self.scaffold_split_dir,
-            dataset_source_filter=self._config.dataset_source_filter,
-            mode=self.mode,
-            ligand_model=self._config.ligand_model,
-        )
-
-        tqdm.write(
-            f"  Dataloaders: train={len(train_loader)} batches ({len(train_loader.dataset)} samples), "
-            f"val={len(val_loader)} batches ({len(val_loader.dataset)} samples)"
-        )
-
-        # In train mode, split training data to avoid train-set optimism:
-        # model trains on 80% of train, KNN features from the held-out 20%.
-        feat_extract_loader = None
-        if self.mode == "train":
-            model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
-                train_loader, seed=seed,
-            )
-        else:
-            model_train_loader = train_loader
-
-        # Train ligand-only attention pooling
         log_prefix = f"[L1c|seed {seed}]"
-        tqdm.write(f"{log_prefix} Training ligand projection + attention pooling...")
-        model = _train_ligand_attention_pooling(
-            train_loader=model_train_loader,
-            val_loader=val_loader,
-            ligand_dim=self._config.ligand_dim,
-            lr=self._config.learning_rate,
-            epochs=self._config.epochs,
-            patience=self._config.resolved_patience,
-            seed=seed,
-            log_prefix=log_prefix,
-        )
+        start_batch_size = resolve_effective_batch_size(self._config.batch_size)
+        candidates = batch_size_fallbacks(start_batch_size)
+        last_oom: RuntimeError | None = None
 
-        device = next(model.parameters()).device
+        for attempt_idx, batch_size in enumerate(candidates, start=1):
+            try:
+                tqdm.write(
+                    f"{log_prefix} Attempt {attempt_idx}/{len(candidates)} with batch_size={batch_size}"
+                )
 
-        if self.mode == "train":
-            tqdm.write("  Extracting ligand attention-pooled features (held-out train + val)...")
-            x_fit, y_fit = _extract_features(model, feat_extract_loader, device, se3_loader=se3_loader)
-            x_eval, y_eval = _extract_features(model, val_loader, device, se3_loader=se3_loader)
+                train_loader, val_loader, test_loader = build_matrix_dataloaders(
+                    dataset_type=self.dataset,
+                    embedding_name=self.embedding_name,
+                    scaffold_split_dir=self.scaffold_split_dir,
+                    batch_size=batch_size,
+                    dataset_source_filter=self._config.dataset_source_filter,
+                    mode=self.mode,
+                    ligand_model=self._config.ligand_model,
+                )
+
+                tqdm.write(
+                    f"  Dataloaders: train={len(train_loader)} batches ({len(train_loader.dataset)} samples), "
+                    f"val={len(val_loader)} batches ({len(val_loader.dataset)} samples)"
+                )
+
+                # In train mode, split training data to avoid train-set optimism:
+                # model trains on 80% of train, KNN features from held-out 20%.
+                feat_extract_loader = None
+                if self.mode == "train":
+                    model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
+                        train_loader, seed=seed,
+                    )
+                else:
+                    model_train_loader = train_loader
+
+                tqdm.write(f"{log_prefix} Training ligand projection + attention pooling...")
+                model = _train_ligand_attention_pooling(
+                    train_loader=model_train_loader,
+                    val_loader=val_loader,
+                    ligand_dim=self._config.ligand_dim,
+                    lr=self._config.learning_rate,
+                    epochs=self._config.epochs,
+                    patience=self._config.resolved_patience,
+                    seed=seed,
+                    log_prefix=log_prefix,
+                )
+
+                device = next(model.parameters()).device
+
+                if self.mode == "train":
+                    tqdm.write("  Extracting ligand attention-pooled features (held-out train + val)...")
+                    x_fit, y_fit = _extract_features(model, feat_extract_loader, device, se3_loader=se3_loader)
+                    x_eval, y_eval = _extract_features(model, val_loader, device, se3_loader=se3_loader)
+                else:
+                    tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
+                    x_fit, y_fit = _extract_features(model, val_loader, device, se3_loader=se3_loader)
+                    x_eval, y_eval = _extract_features(model, test_loader, device, se3_loader=se3_loader)
+
+                # Sanitize
+                for name, arr in [("fit", x_fit), ("eval", x_eval)]:
+                    arr_sanitized, bad = sanitize_features(arr)
+                    if bad:
+                        tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
+                        arr[:] = arr_sanitized
+
+                # Train canonical KNN/MLP on fit features
+                tqdm.write("  Training KNN + MLP (canonical classifiers)...")
+                models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+                break
+            except RuntimeError as exc:
+                if not is_cuda_oom_error(exc):
+                    raise
+                last_oom = exc
+                if batch_size == 1:
+                    raise RuntimeError(
+                        f"{log_prefix} CUDA OOM even with batch_size=1"
+                    ) from exc
+                next_batch = max(1, batch_size // 2)
+                tqdm.write(
+                    f"{log_prefix} CUDA OOM with batch_size={batch_size}; retrying with {next_batch}"
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         else:
-            tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
-            x_fit, y_fit = _extract_features(model, val_loader, device, se3_loader=se3_loader)
-            x_eval, y_eval = _extract_features(model, test_loader, device, se3_loader=se3_loader)
-
-        # Sanitize
-        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            arr_sanitized, bad = sanitize_features(arr)
-            if bad:
-                tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = arr_sanitized
-
-        # Train canonical KNN/MLP on fit features
-        tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+            raise RuntimeError(
+                f"{log_prefix} Failed all batch-size attempts due to CUDA OOM"
+            ) from last_oom
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

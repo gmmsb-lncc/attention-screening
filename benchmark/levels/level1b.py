@@ -125,6 +125,7 @@ class Level1bRunner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
+            batch_size=self._config.batch_size,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
             ligand_model=self._config.ligand_model,

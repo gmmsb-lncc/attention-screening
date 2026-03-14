@@ -6,7 +6,7 @@ a reusable multi-seed aggregation helper.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import os
 import time
@@ -149,6 +149,9 @@ class BaseLevelRunner(ABC):
             )
             futures = {}
             seed_start_times: Dict[int, float] = {}
+            level_start = time.time()
+            heartbeat_seconds = 60.0
+            completed_count = 0
             with ThreadPoolExecutor(max_workers=seed_worker_count) as executor:
                 for seed in self.seeds:
                     seed_dir = os.path.join(level_dir, f"seed_{seed}")
@@ -163,11 +166,30 @@ class BaseLevelRunner(ABC):
                         )
                     ] = (seed, seed_dir)
 
-                for done_idx, future in enumerate(as_completed(futures), start=1):
+                pending = set(futures.keys())
+                while pending:
+                    done, pending = wait(
+                        pending,
+                        timeout=heartbeat_seconds,
+                        return_when=FIRST_COMPLETED,
+                    )
+
+                    if not done:
+                        elapsed_level = (time.time() - level_start) / 60.0
+                        running = len(pending)
+                        tqdm.write(
+                            f"  [Heartbeat] elapsed={elapsed_level:.1f} min, "
+                            f"completed={completed_count}/{len(self.seeds)}, "
+                            f"running={running}"
+                        )
+                        continue
+
+                    for future in done:
+                        completed_count += 1
                     seed, seed_dir = futures[future]
                     elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
                     tqdm.write(
-                        f"  Seed done {done_idx}/{len(self.seeds)}: {seed} "
+                        f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
                         f"({elapsed_seed/60:.1f} min)"
                     )
                     try:
