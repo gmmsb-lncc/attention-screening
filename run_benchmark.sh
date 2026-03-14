@@ -16,6 +16,11 @@ DATASET="${DATASET:-non_human}"
 EMBEDDING="${EMBEDDING:-8M}"
 LEVELS=("2" "3")
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_l2_l3}"
+BENCHMARK_MLP_CAL_RESTARTS="${BENCHMARK_MLP_CAL_RESTARTS:-5}"
+BENCHMARK_MLP_ENSEMBLE="${BENCHMARK_MLP_ENSEMBLE:-7}"
+
+export BENCHMARK_MLP_CAL_RESTARTS
+export BENCHMARK_MLP_ENSEMBLE
 
 run_phase() {
     local mode="$1"
@@ -31,6 +36,7 @@ run_phase() {
 echo "============================================================"
 echo " Benchmark automation | dataset=${DATASET} embedding=${EMBEDDING}"
 echo " Levels: ${LEVELS[*]} | patience=10% of epochs (auto)"
+echo " MLP tuning: cal_restarts=${BENCHMARK_MLP_CAL_RESTARTS}, ensemble=${BENCHMARK_MLP_ENSEMBLE}"
 echo " Output root: ${OUTPUT_ROOT}"
 echo "============================================================"
 
