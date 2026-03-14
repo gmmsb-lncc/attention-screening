@@ -128,11 +128,21 @@ class BenchmarkOrchestrator:
                 self._save_global_intermediate(step_name)
             return
 
-        tqdm.write("  CPU/GPU overlap enabled: running L3 (GPU) alongside L1a/L1b/L1c (CPU)")
-
-        cpu_levels = [lv for lv in ("1a", "1b", "1c") if lv in runner_map]
+        cpu_levels = [
+            lv
+            for lv, _, _ in runners
+            if lv != "3" and lv in runner_map and not runner_map[lv][0].uses_gpu
+        ]
         remaining_levels = [lv for lv, _, _ in runners if lv not in cpu_levels and lv != "3"]
         l3_runner, l3_step = runner_map["3"]
+
+        if cpu_levels:
+            tqdm.write(
+                "  CPU/GPU overlap enabled: running L3 (GPU) alongside "
+                f"CPU levels {cpu_levels}"
+            )
+        else:
+            tqdm.write("  CPU/GPU overlap enabled: no CPU-only level to overlap with L3")
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             future_l3 = executor.submit(self._run_level, l3_runner, "3")

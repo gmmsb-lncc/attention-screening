@@ -57,5 +57,5 @@ def is_cpu_gpu_parallel_enabled(levels: list[str]) -> bool:
         return False
 
     has_gpu_level = "3" in levels
-    has_cpu_levels = any(lv in levels for lv in ("1a", "1b", "1c"))
+    has_cpu_levels = any(lv in levels for lv in ("1a", "1b", "2"))
     return has_gpu_level and has_cpu_levels
