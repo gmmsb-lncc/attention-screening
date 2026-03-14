@@ -14,7 +14,7 @@ Design:
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import json
 import os
 import sys
@@ -156,7 +156,20 @@ class BenchmarkOrchestrator:
                 )
                 self._save_global_intermediate(step_name)
 
-            # Join GPU run and account for the step in progress tracking.
+            # Join GPU run with heartbeat to avoid looking stalled.
+            wait_start = time.time()
+            while True:
+                done, _ = wait({future_l3}, timeout=60)
+                if done:
+                    break
+                elapsed = (time.time() - wait_start) / 60.0
+                tqdm.write(
+                    "  [Parallel wait] CPU levels finished; waiting for L3 to finish "
+                    f"({elapsed:.1f} min elapsed)"
+                )
+                self._save_global_intermediate("L3 waiting")
+
+            # Account for L3 completion in progress tracking.
             l3_error: Optional[BaseException] = None
             try:
                 future_l3.result()
