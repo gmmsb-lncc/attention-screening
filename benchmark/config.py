@@ -181,7 +181,7 @@ class BenchmarkConfig:
     # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
-    patience: int = 5
+    patience: int = 25
     learning_rate: float = 1e-4
 
     # --- fine-tuning ---
