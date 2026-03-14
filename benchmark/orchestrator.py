@@ -14,6 +14,7 @@ Design:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -85,6 +86,7 @@ class BenchmarkOrchestrator:
                 step_name,
                 lambda r=runner: self._run_level(r, level),
             )
+            self._save_global_intermediate(step_name)
 
         # --- Report + Visualization ---------------------------------
         self._run_step(progress, "Report + Visualizations", self._generate_report)
@@ -140,6 +142,44 @@ class BenchmarkOrchestrator:
         elapsed = time.time() - self._t_start
         self._json_path = save_benchmark_json(self._aggregated, config, elapsed)
         self._viz_paths = generate_all(self._aggregated, config)
+
+    def _save_global_intermediate(self, step_name: str) -> None:
+        """Persist a cross-level partial snapshot after each completed level."""
+        config = self._config
+        partial = aggregate_benchmark_metrics(
+            level1a_results=self._level_results.get("1a"),
+            level1b_results=self._level_results.get("1b"),
+            level1c_results=self._level_results.get("1c"),
+            level2_results=self._level_results.get("2"),
+            level3_results=self._level_results.get("3"),
+            level4_results=self._level_results.get("4"),
+            level5_results=self._level_results.get("5a"),
+            level5b_results=self._level_results.get("5b"),
+            level6a_results=self._level_results.get("6a"),
+            level6b_results=self._level_results.get("6b"),
+        )
+
+        output = {
+            "metadata": {
+                "dataset": config.dataset,
+                "embedding": config.embedding,
+                "embedding_full": config.embedding_name,
+                "mode": config.mode,
+                "levels_requested": config.levels,
+                "levels_completed": sorted(list(self._level_results.keys())),
+                "seeds": config.resolved_seeds,
+                "elapsed_seconds": round(time.time() - self._t_start, 3),
+                "last_completed_step": step_name,
+                "is_intermediate": True,
+            },
+            "results": partial,
+        }
+
+        inter_path = os.path.join(config.resolved_output_dir, "benchmark_comparison.intermediate.json")
+        with open(inter_path, "w") as fh:
+            json.dump(output, fh, indent=2)
+
+        tqdm.write(f"  Intermediate benchmark snapshot saved: {inter_path}")
 
     # ------------------------------------------------------------------
     # Runner construction
