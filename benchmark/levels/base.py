@@ -85,6 +85,11 @@ class BaseLevelRunner(ABC):
         return self._config.mode
 
     @property
+    def uses_gpu(self) -> bool:
+        """Whether this level is primarily GPU-bound."""
+        return False
+
+    @property
     def scaffold_split_dir(self) -> str:
         return self._config.scaffold_split_dir
 
@@ -111,6 +116,19 @@ class BaseLevelRunner(ABC):
         mlp_eval_mcc_history: List[float] = []
 
         seed_worker_count = get_seed_workers(len(self.seeds))
+        if self.uses_gpu and seed_worker_count > 1:
+            if os.getenv("BENCHMARK_ALLOW_GPU_SEED_PARALLEL", "0").strip().lower() not in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }:
+                tqdm.write(
+                    "  GPU level detected: forcing sequential seed execution "
+                    "(set BENCHMARK_ALLOW_GPU_SEED_PARALLEL=1 to override)."
+                )
+                seed_worker_count = 1
+
         if seed_worker_count <= 1:
             for idx, seed in enumerate(self.seeds):
                 seed_dir = os.path.join(level_dir, f"seed_{seed}")
@@ -186,42 +204,42 @@ class BaseLevelRunner(ABC):
 
                     for future in done:
                         completed_count += 1
-                    seed, seed_dir = futures[future]
-                    elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
-                    tqdm.write(
-                        f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
-                        f"({elapsed_seed/60:.1f} min)"
-                    )
-                    try:
-                        result = future.result()
-                    except Exception as exc:
-                        tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
-                        continue
+                        seed, seed_dir = futures[future]
+                        elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
+                        tqdm.write(
+                            f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
+                            f"({elapsed_seed/60:.1f} min)"
+                        )
+                        try:
+                            result = future.result()
+                        except Exception as exc:
+                            tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
+                            continue
 
-                    if result is None:
-                        result = self._load_cached_results(seed_dir)
+                        if result is None:
+                            result = self._load_cached_results(seed_dir)
 
-                    if result is None:
-                        tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                        continue
+                        if result is None:
+                            tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                            continue
 
-                    self._accumulate_seed(result, seed_results_per_model)
-                    processed_seeds.append(seed)
+                        self._accumulate_seed(result, seed_results_per_model)
+                        processed_seeds.append(seed)
 
-                    train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-                    if train_mcc is not None:
-                        mlp_train_mcc_history.append(train_mcc)
-                    if eval_mcc is not None:
-                        mlp_eval_mcc_history.append(eval_mcc)
+                        train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+                        if train_mcc is not None:
+                            mlp_train_mcc_history.append(train_mcc)
+                        if eval_mcc is not None:
+                            mlp_eval_mcc_history.append(eval_mcc)
 
-                    partial = self._aggregate(seed_results_per_model)
-                    self._save_intermediate(
-                        level_dir,
-                        partial,
-                        processed_seeds,
-                        mlp_train_mcc_history,
-                        mlp_eval_mcc_history,
-                    )
+                        partial = self._aggregate(seed_results_per_model)
+                        self._save_intermediate(
+                            level_dir,
+                            partial,
+                            processed_seeds,
+                            mlp_train_mcc_history,
+                            mlp_eval_mcc_history,
+                        )
 
         if not seed_results_per_model:
             return None

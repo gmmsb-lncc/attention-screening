@@ -396,6 +396,10 @@ class Level3Runner(BaseLevelRunner):
         return False  # Learned feature extractor → KNN input varies per seed
 
     @property
+    def uses_gpu(self) -> bool:
+        return True
+
+    @property
     def level_tag(self) -> str:
         return "level3_attnpool"
 
