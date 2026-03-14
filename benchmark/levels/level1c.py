@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Dict, Optional
 
 import numpy as np
@@ -138,6 +139,7 @@ def _train_ligand_attention_pooling(
     epochs: int = 500,
     patience: int | None = 5,
     seed: int = 42,
+    log_prefix: str = "",
 ) -> _LigandAttentionPoolingModel:
     """Train ligand-only projection + attention pooling.
 
@@ -173,7 +175,12 @@ def _train_ligand_attention_pooling(
     best_state = None
     wait = 0
 
-    tqdm.write(f"    Training: {epochs} epochs, patience={patience}, device={device}, ligand_dim={ligand_dim}")
+    start_time = time.time()
+    log_every = max(1, epochs // 20)
+    tqdm.write(
+        f"{log_prefix} Training start: epochs={epochs}, patience={patience}, "
+        f"device={device}, ligand_dim={ligand_dim}, log_every={log_every}"
+    )
 
     for epoch in range(1, epochs + 1):
         # --- train ---
@@ -219,8 +226,16 @@ def _train_ligand_attention_pooling(
         avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
 
-        if epoch <= 3 or epoch % 10 == 0:
-            tqdm.write(f"    Epoch {epoch}/{epochs}  train_loss={avg_train:.4f}  val_loss={avg_val:.4f}  wait={wait}")
+        if epoch == 1 or epoch == epochs or epoch % log_every == 0:
+            elapsed = time.time() - start_time
+            eta = (elapsed / max(epoch, 1)) * max(epochs - epoch, 0)
+            progress = 100.0 * epoch / max(epochs, 1)
+            best_so_far = min(best_val_loss, avg_val)
+            tqdm.write(
+                f"{log_prefix} Epoch {epoch}/{epochs} ({progress:5.1f}%) "
+                f"train={avg_train:.4f} val={avg_val:.4f} best={best_so_far:.4f} "
+                f"wait={wait} eta={eta/60:.1f}m"
+            )
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val
@@ -229,7 +244,10 @@ def _train_ligand_attention_pooling(
         else:
             wait += 1
             if patience and wait >= patience:
-                tqdm.write(f"    Early stopping at epoch {epoch} (val_loss={avg_val:.4f})")
+                tqdm.write(
+                    f"{log_prefix} Early stopping at epoch {epoch}/{epochs} "
+                    f"(val={avg_val:.4f}, best={best_val_loss:.4f})"
+                )
                 break
 
     if best_state is not None:
@@ -353,7 +371,8 @@ class Level1cRunner(BaseLevelRunner):
             model_train_loader = train_loader
 
         # Train ligand-only attention pooling
-        tqdm.write("  Training ligand projection + attention pooling...")
+        log_prefix = f"[L1c|seed {seed}]"
+        tqdm.write(f"{log_prefix} Training ligand projection + attention pooling...")
         model = _train_ligand_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
@@ -362,6 +381,7 @@ class Level1cRunner(BaseLevelRunner):
             epochs=self._config.epochs,
             patience=self._config.resolved_patience,
             seed=seed,
+            log_prefix=log_prefix,
         )
 
         device = next(model.parameters()).device

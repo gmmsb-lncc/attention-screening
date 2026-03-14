@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
@@ -147,9 +148,12 @@ class BaseLevelRunner(ABC):
                 f"for {len(self.seeds)} seeds"
             )
             futures = {}
+            seed_start_times: Dict[int, float] = {}
             with ThreadPoolExecutor(max_workers=seed_worker_count) as executor:
                 for seed in self.seeds:
                     seed_dir = os.path.join(level_dir, f"seed_{seed}")
+                    seed_start_times[seed] = time.time()
+                    tqdm.write(f"  Dispatch seed {seed} -> {seed_dir}")
                     futures[
                         executor.submit(
                             self.run_single_seed,
@@ -161,7 +165,11 @@ class BaseLevelRunner(ABC):
 
                 for done_idx, future in enumerate(as_completed(futures), start=1):
                     seed, seed_dir = futures[future]
-                    tqdm.write(f"  Seed done {done_idx}/{len(self.seeds)}: {seed}")
+                    elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
+                    tqdm.write(
+                        f"  Seed done {done_idx}/{len(self.seeds)}: {seed} "
+                        f"({elapsed_seed/60:.1f} min)"
+                    )
                     try:
                         result = future.result()
                     except Exception as exc:
