@@ -366,6 +366,13 @@ def train_knn_mlp(
     mlp_pred = (mlp_proba >= mlp_threshold).astype(int)
     mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
     mlp_metrics["threshold"] = float(mlp_threshold)
+    best_val_score_raw = getattr(mlp, "best_validation_score_", None)
+    best_val_score = (
+        float(best_val_score_raw)
+        if isinstance(best_val_score_raw, (int, float))
+        else None
+    )
+
     mlp_metrics["details"] = {
         "fit": {
             "n_rows": int(len(y_train)),
@@ -386,9 +393,7 @@ def train_knn_mlp(
             "final_loss": float(getattr(mlp, "loss_", np.nan)),
             "n_iter": int(getattr(mlp, "n_iter_", 0)),
             "hit_max_iter": bool(getattr(mlp, "n_iter_", 0) >= MLP_MAX_ITER),
-            "best_validation_score": float(getattr(mlp, "best_validation_score_", np.nan))
-            if hasattr(mlp, "best_validation_score_")
-            else None,
+            "best_validation_score": best_val_score,
         },
         "calibration": {
             "n_rows": int(len(y_cal)),
