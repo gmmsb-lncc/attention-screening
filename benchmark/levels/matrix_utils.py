@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
@@ -25,6 +26,7 @@ from benchmark.config import (
     PCHEMBL_ACTIVITY_THRESHOLD,
 )
 from benchmark.runtime import get_dataloader_workers
+from benchmark.runtime import resolve_effective_batch_size
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +225,11 @@ def build_matrix_dataloaders(
     train_loader, val_loader, test_loader (or None when mode="train")
     """
     protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name, ligand_model)
+    effective_batch_size = resolve_effective_batch_size(batch_size)
+    if effective_batch_size != batch_size:
+        tqdm.write(
+            f"  [Batch] Auto-adjusted batch_size: requested={batch_size} -> effective={effective_batch_size}"
+        )
 
     train_df = read_split_file(
         os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv")
@@ -249,14 +256,14 @@ def build_matrix_dataloaders(
             df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
 
     test_loader = (
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False)
+        _make_loader(test_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=False)
         if test_df is not None
         else None
     )
 
     return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
+        _make_loader(train_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=True),
+        _make_loader(val_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=False),
         test_loader,
     )
 

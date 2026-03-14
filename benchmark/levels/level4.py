@@ -250,7 +250,7 @@ class Level4Runner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=64,
+            batch_size=self._config.batch_size,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self._config.mode,
             ligand_model=self._config.ligand_model,
