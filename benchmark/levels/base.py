@@ -143,53 +143,62 @@ class BaseLevelRunner(ABC):
                 seed_worker_count = 1
 
         if seed_worker_count <= 1:
-            for idx, seed in enumerate(self.seeds):
-                seed_dir = os.path.join(level_dir, f"seed_{seed}")
-                tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
-                self._save_seed_status(seed_dir, seed, "running")
-                self._save_intermediate(
-                    level_dir,
-                    aggregated_partial=self._aggregate(seed_results_per_model) if seed_results_per_model else {},
-                    processed_seeds=processed_seeds,
-                    completed_seed_summaries=completed_seed_summaries,
-                    mlp_train_mcc_history=mlp_train_mcc_history,
-                    mlp_eval_mcc_history=mlp_eval_mcc_history,
-                    status="running",
-                    running_seeds=[seed],
-                )
+            with tqdm(
+                total=len(self.seeds),
+                desc=f"{self.level_tag} seeds",
+                leave=False,
+                dynamic_ncols=True,
+            ) as seed_bar:
+                for idx, seed in enumerate(self.seeds):
+                    seed_dir = os.path.join(level_dir, f"seed_{seed}")
+                    seed_bar.set_postfix_str(f"seed={seed}")
+                    tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
+                    self._save_seed_status(seed_dir, seed, "running")
+                    self._save_intermediate(
+                        level_dir,
+                        aggregated_partial=self._aggregate(seed_results_per_model) if seed_results_per_model else {},
+                        processed_seeds=processed_seeds,
+                        completed_seed_summaries=completed_seed_summaries,
+                        mlp_train_mcc_history=mlp_train_mcc_history,
+                        mlp_eval_mcc_history=mlp_eval_mcc_history,
+                        status="running",
+                        running_seeds=[seed],
+                    )
 
-                result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
+                    result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
 
-                if result is None:
-                    result = self._load_cached_results(seed_dir)
+                    if result is None:
+                        result = self._load_cached_results(seed_dir)
 
-                if result is None:
-                    tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                    self._save_seed_status(seed_dir, seed, "no_results")
-                    continue
+                    if result is None:
+                        tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                        self._save_seed_status(seed_dir, seed, "no_results")
+                        seed_bar.update(1)
+                        continue
 
-                self._accumulate_seed(result, seed_results_per_model)
-                processed_seeds.append(seed)
-                completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
-                self._save_seed_status(seed_dir, seed, "completed")
+                    self._accumulate_seed(result, seed_results_per_model)
+                    processed_seeds.append(seed)
+                    completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
+                    self._save_seed_status(seed_dir, seed, "completed")
 
-                train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-                if train_mcc is not None:
-                    mlp_train_mcc_history.append(train_mcc)
-                if eval_mcc is not None:
-                    mlp_eval_mcc_history.append(eval_mcc)
+                    train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+                    if train_mcc is not None:
+                        mlp_train_mcc_history.append(train_mcc)
+                    if eval_mcc is not None:
+                        mlp_eval_mcc_history.append(eval_mcc)
 
-                partial = self._aggregate(seed_results_per_model)
-                self._save_intermediate(
-                    level_dir,
-                    partial,
-                    processed_seeds,
-                    completed_seed_summaries,
-                    mlp_train_mcc_history,
-                    mlp_eval_mcc_history,
-                    status="running",
-                    running_seeds=[],
-                )
+                    partial = self._aggregate(seed_results_per_model)
+                    self._save_intermediate(
+                        level_dir,
+                        partial,
+                        processed_seeds,
+                        completed_seed_summaries,
+                        mlp_train_mcc_history,
+                        mlp_eval_mcc_history,
+                        status="running",
+                        running_seeds=[],
+                    )
+                    seed_bar.update(1)
         else:
             tqdm.write(
                 f"  Parallel seed execution enabled: {seed_worker_count} workers "
@@ -227,84 +236,92 @@ class BaseLevelRunner(ABC):
                 )
 
                 pending = set(futures.keys())
-                while pending:
-                    done, pending = wait(
-                        pending,
-                        timeout=heartbeat_seconds,
-                        return_when=FIRST_COMPLETED,
-                    )
+                with tqdm(
+                    total=len(self.seeds),
+                    desc=f"{self.level_tag} seeds",
+                    leave=False,
+                    dynamic_ncols=True,
+                ) as seed_bar:
+                    while pending:
+                        done, pending = wait(
+                            pending,
+                            timeout=heartbeat_seconds,
+                            return_when=FIRST_COMPLETED,
+                        )
 
-                    if not done:
-                        elapsed_level = (time.time() - level_start) / 60.0
-                        running = len(pending)
-                        running_seeds = sorted(
-                            futures[f][0]
-                            for f in pending
-                            if f in futures
-                        )
-                        tqdm.write(
-                            f"  [Heartbeat] elapsed={elapsed_level:.1f} min, "
-                            f"completed={completed_count}/{len(self.seeds)}, "
-                            f"running={running}"
-                        )
-                        partial = self._aggregate(seed_results_per_model) if seed_results_per_model else {}
-                        self._save_intermediate(
-                            level_dir,
-                            partial,
-                            processed_seeds,
-                            completed_seed_summaries,
-                            mlp_train_mcc_history,
-                            mlp_eval_mcc_history,
-                            status="running",
-                            running_seeds=running_seeds,
-                        )
-                        continue
-
-                    for future in done:
-                        completed_count += 1
-                        seed, seed_dir = futures[future]
-                        elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
-                        tqdm.write(
-                            f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
-                            f"({elapsed_seed/60:.1f} min)"
-                        )
-                        try:
-                            result = future.result()
-                        except Exception as exc:
-                            tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
-                            self._save_seed_status(seed_dir, seed, "failed", error=str(exc))
+                        if not done:
+                            elapsed_level = (time.time() - level_start) / 60.0
+                            running = len(pending)
+                            running_seeds = sorted(
+                                futures[f][0]
+                                for f in pending
+                                if f in futures
+                            )
+                            tqdm.write(
+                                f"  [Heartbeat] elapsed={elapsed_level:.1f} min, "
+                                f"completed={completed_count}/{len(self.seeds)}, "
+                                f"running={running}"
+                            )
+                            partial = self._aggregate(seed_results_per_model) if seed_results_per_model else {}
+                            self._save_intermediate(
+                                level_dir,
+                                partial,
+                                processed_seeds,
+                                completed_seed_summaries,
+                                mlp_train_mcc_history,
+                                mlp_eval_mcc_history,
+                                status="running",
+                                running_seeds=running_seeds,
+                            )
                             continue
 
-                        if result is None:
-                            result = self._load_cached_results(seed_dir)
+                        for future in done:
+                            completed_count += 1
+                            seed_bar.update(1)
+                            seed, seed_dir = futures[future]
+                            seed_bar.set_postfix_str(f"last_done={seed}")
+                            elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
+                            tqdm.write(
+                                f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
+                                f"({elapsed_seed/60:.1f} min)"
+                            )
+                            try:
+                                result = future.result()
+                            except Exception as exc:
+                                tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
+                                self._save_seed_status(seed_dir, seed, "failed", error=str(exc))
+                                continue
 
-                        if result is None:
-                            tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                            self._save_seed_status(seed_dir, seed, "no_results")
-                            continue
+                            if result is None:
+                                result = self._load_cached_results(seed_dir)
 
-                        self._accumulate_seed(result, seed_results_per_model)
-                        processed_seeds.append(seed)
-                        completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
-                        self._save_seed_status(seed_dir, seed, "completed")
+                            if result is None:
+                                tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                                self._save_seed_status(seed_dir, seed, "no_results")
+                                continue
 
-                        train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-                        if train_mcc is not None:
-                            mlp_train_mcc_history.append(train_mcc)
-                        if eval_mcc is not None:
-                            mlp_eval_mcc_history.append(eval_mcc)
+                            self._accumulate_seed(result, seed_results_per_model)
+                            processed_seeds.append(seed)
+                            completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
+                            self._save_seed_status(seed_dir, seed, "completed")
 
-                        partial = self._aggregate(seed_results_per_model)
-                        self._save_intermediate(
-                            level_dir,
-                            partial,
-                            processed_seeds,
-                            completed_seed_summaries,
-                            mlp_train_mcc_history,
-                            mlp_eval_mcc_history,
-                            status="running",
-                            running_seeds=sorted(futures[f][0] for f in pending if f in futures),
-                        )
+                            train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
+                            if train_mcc is not None:
+                                mlp_train_mcc_history.append(train_mcc)
+                            if eval_mcc is not None:
+                                mlp_eval_mcc_history.append(eval_mcc)
+
+                            partial = self._aggregate(seed_results_per_model)
+                            self._save_intermediate(
+                                level_dir,
+                                partial,
+                                processed_seeds,
+                                completed_seed_summaries,
+                                mlp_train_mcc_history,
+                                mlp_eval_mcc_history,
+                                status="running",
+                                running_seeds=sorted(futures[f][0] for f in pending if f in futures),
+                            )
 
         if not seed_results_per_model:
             return None
