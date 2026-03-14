@@ -24,6 +24,7 @@ from benchmark.config import (
     LIGAND_MATRIX_DIRS,
     PCHEMBL_ACTIVITY_THRESHOLD,
 )
+from benchmark.runtime import get_dataloader_workers
 
 
 # ---------------------------------------------------------------------------
@@ -297,12 +298,15 @@ def _make_loader(
     shuffle: bool,
 ) -> DataLoader:
     _validate_matrix_coverage(df, protein_dirs, ligand_dirs)
+    num_workers = get_dataloader_workers()
+    use_persistent = num_workers > 0
     return DataLoader(
         MatrixDataset(df, protein_dirs, ligand_dirs),
         batch_size=batch_size,
         shuffle=shuffle,
         collate_fn=collate_matrices,
-        num_workers=0,
+        num_workers=num_workers,
+        persistent_workers=use_persistent,
     )
 
 
@@ -412,18 +416,22 @@ def split_loader_for_feature_extraction(
     rng.shuffle(feat_idx)
 
     bs = loader.batch_size or 32
+    num_workers = get_dataloader_workers()
+    use_persistent = num_workers > 0
     model_loader = _DL(
         Subset(dataset, model_idx.tolist()),
         batch_size=bs,
         shuffle=True,
         collate_fn=collate_matrices,
-        num_workers=0,
+        num_workers=num_workers,
+        persistent_workers=use_persistent,
     )
     feature_loader = _DL(
         Subset(dataset, feat_idx.tolist()),
         batch_size=bs,
         shuffle=False,
         collate_fn=collate_matrices,
-        num_workers=0,
+        num_workers=num_workers,
+        persistent_workers=use_persistent,
     )
     return model_loader, feature_loader
