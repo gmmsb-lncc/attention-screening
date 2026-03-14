@@ -34,6 +34,7 @@ Evaluation protocol
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -63,6 +64,33 @@ MLP_EARLY_STOPPING = False
 MLP_VALIDATION_FRACTION = 0.10
 MLP_N_ITER_NO_CHANGE = 60
 MLP_BATCH_SIZE = 64
+
+
+def _resolve_knn_n_jobs() -> int:
+    """Resolve KNN CPU parallelism to avoid oversubscription.
+
+    Environment override:
+      BENCHMARK_KNN_N_JOBS=<int>
+
+    If seed-level parallelism is active and no explicit override exists,
+    defaults to 1 thread per seed worker.
+    """
+    env = os.getenv("BENCHMARK_KNN_N_JOBS")
+    if env is not None:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+
+    seed_workers_env = os.getenv("BENCHMARK_SEED_WORKERS")
+    if seed_workers_env is not None:
+        try:
+            if int(seed_workers_env) > 1:
+                return 1
+        except ValueError:
+            pass
+
+    return -1
 
 
 # ------------------------------------------------------------------ #
@@ -132,11 +160,12 @@ def _sklearn_knn_proba(
     """
     from sklearn.neighbors import KNeighborsClassifier
 
+    knn_n_jobs = _resolve_knn_n_jobs()
     knn = KNeighborsClassifier(
         n_neighbors=k,
         metric="cosine",
         weights="distance",
-        n_jobs=-1,
+        n_jobs=knn_n_jobs,
     )
     knn.fit(x_train, y_train)
     proba_matrix = knn.predict_proba(x_test)
