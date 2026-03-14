@@ -66,6 +66,12 @@ MLP_N_ITER_NO_CHANGE = 60
 MLP_BATCH_SIZE = 64
 
 
+def _store_full_details() -> bool:
+    """Whether to store per-sample arrays in result JSON details."""
+    raw = os.getenv("BENCHMARK_STORE_FULL_DETAILS", "0").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _resolve_knn_n_jobs() -> int:
     """Resolve KNN CPU parallelism to avoid oversubscription.
 
@@ -359,17 +365,22 @@ def train_knn_mlp(
         },
         "calibration": {
             "n_rows": int(len(y_cal)),
-            "y_true": y_cal.astype(int).tolist(),
-            "y_proba": np.asarray(knn_cal_proba, dtype=np.float64).tolist(),
-            "y_pred": (np.asarray(knn_cal_proba, dtype=np.float64) >= knn_threshold).astype(int).tolist(),
         },
         "evaluation": {
             "n_rows": int(len(y_test)),
+        },
+    }
+    if _store_full_details():
+        knn_metrics["details"]["calibration"].update({
+            "y_true": y_cal.astype(int).tolist(),
+            "y_proba": np.asarray(knn_cal_proba, dtype=np.float64).tolist(),
+            "y_pred": (np.asarray(knn_cal_proba, dtype=np.float64) >= knn_threshold).astype(int).tolist(),
+        })
+        knn_metrics["details"]["evaluation"].update({
             "y_true": y_test.astype(int).tolist(),
             "y_proba": np.asarray(knn_proba, dtype=np.float64).tolist(),
             "y_pred": knn_pred.astype(int).tolist(),
-        },
-    }
+        })
 
     # ---------- MLP (deeper fixed architecture) -----------------------
     mlp_arch = MLP_HIDDEN_LAYER_SIZES
@@ -426,16 +437,21 @@ def train_knn_mlp(
         },
         "calibration": {
             "n_rows": int(len(y_cal)),
-            "y_true": y_cal.astype(int).tolist(),
-            "y_proba": np.asarray(mlp_cal_proba, dtype=np.float64).tolist(),
-            "y_pred": (np.asarray(mlp_cal_proba, dtype=np.float64) >= mlp_threshold).astype(int).tolist(),
         },
         "evaluation": {
             "n_rows": int(len(y_test)),
+        },
+    }
+    if _store_full_details():
+        mlp_metrics["details"]["calibration"].update({
+            "y_true": y_cal.astype(int).tolist(),
+            "y_proba": np.asarray(mlp_cal_proba, dtype=np.float64).tolist(),
+            "y_pred": (np.asarray(mlp_cal_proba, dtype=np.float64) >= mlp_threshold).astype(int).tolist(),
+        })
+        mlp_metrics["details"]["evaluation"].update({
             "y_true": y_test.astype(int).tolist(),
             "y_proba": np.asarray(mlp_proba, dtype=np.float64).tolist(),
             "y_pred": mlp_pred.astype(int).tolist(),
-        },
-    }
+        })
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}
