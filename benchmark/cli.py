@@ -14,7 +14,6 @@ from typing import List
 from benchmark.config import (
     DEFAULT_SCAFFOLD_SPLIT_DIR,
     LEVEL_0_EXPANSION,
-    OBSOLETE_LEVELS,
     VALID_LEVELS,
     BenchmarkConfig,
 )
@@ -27,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
             "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
         ),
     )
@@ -50,16 +49,17 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3,4",
+        default="1a,1b,1c,2,3,4,5a,5b,6a,6b",
         nargs="*",
         help=(
             "Levels to run: "
             "0=ClassicalML(1a+1b+1c+3), "
             "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool. "
-            "Levels after 4 (5a, 5b, 6a, 6b) are obsolete. "
-            "(default: 1a,1b,1c,2,3,4). "
-            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4"
+            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool, "
+            "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
+            "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
+            "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b"
         ),
     )
 
@@ -109,10 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
 
     # --- deep-learning hyper-parameters ---
-    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for learned pooling levels (default: 500)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for learned pooling levels (default: 32)")
-    parser.add_argument("--patience", type=int, default=25, help="Early stopping patience (default: 25, 0=disable)")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for learned pooling levels (default: 1e-4)")
+    parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
+    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")
@@ -120,56 +120,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--finetune_epochs", type=int, default=100, help="Fine-tuning epochs (default: 100)")
     parser.add_argument("--finetune_lr", type=float, default=1e-5, help="Fine-tuning learning rate (default: 1e-5)")
     parser.add_argument("--finetune_batch_size", type=int, default=8, help="Fine-tuning batch size (default: 8)")
-
-    # --- ligand model ---
-    parser.add_argument(
-        "--ligand-model",
-        dest="ligand_model",
-        default="molformer",
-        choices=["molformer", "smited", "chemberta"],
-        help="Ligand embedding model: molformer (768d), smited (768d), chemberta (384d). Default: molformer",
-    )
-    parser.add_argument(
-        "--ligand-weight",
-        dest="ligand_weight",
-        type=float,
-        default=1.0,
-        help=(
-            "Relative weight for ligand feature block vs protein feature block in KNN/MLP. "
-            "Applied after StandardScaler in levels with protein+ligand features (L2/L3). Default: 1.0"
-        ),
-    )
-    parser.add_argument(
-        "--esmfold",
-        dest="use_esmfold_protein",
-        action="store_true",
-        help="Enable protein structural vectors (e.g., ESMFold) concatenated with protein semantic features.",
-    )
-    parser.add_argument(
-        "--esmfold-features-dir",
-        dest="esmfold_features_dir",
-        default=None,
-        help=(
-            "Directory with per-protein structure vectors named {seq_id}_esmfold.npy, "
-            "{seq_id}_structure.npy, or {seq_id}.npy. If omitted with --esmfold, "
-            "uses the standardized default under each embedding build dir: build/protein_structure_features/."
-        ),
-    )
-    parser.add_argument(
-        "--se3",
-        dest="use_se3_ligand",
-        action="store_true",
-        help="Enable SE(3)-Transformer structural ligand vectors concatenated with LLM ligand features.",
-    )
-    parser.add_argument(
-        "--se3-features-dir",
-        dest="se3_features_dir",
-        default=None,
-        help=(
-            "Directory with per-ligand SE3 vectors named {chembl_id}_se3.npy or {chembl_id}.npy. "
-            "If omitted with --se3, uses the standardized default under each embedding build dir: build/se3_features/."
-        ),
-    )
 
     return parser
 
@@ -195,12 +145,6 @@ def parse_levels(levels_arg: object) -> List[str]:
         levels = sorted({x.strip().lower() for x in parts if x.strip()})
 
         for level in levels:
-            if level in OBSOLETE_LEVELS:
-                msg = (
-                    f"Obsolete level: {level}. "
-                    "Supported levels are up to 4: 0, 1a, 1b, 1c, 2, 3, 4"
-                )
-                raise ValueError(msg)
             if level not in VALID_LEVELS:
                 msg = f"Invalid level: {level}. Valid: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)
@@ -221,12 +165,6 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
     return BenchmarkConfig(
         dataset=args.dataset,
         embedding=args.embedding,
-        ligand_model=args.ligand_model,
-        ligand_weight=args.ligand_weight,
-        use_esmfold_protein=args.use_esmfold_protein,
-        esmfold_features_dir=args.esmfold_features_dir,
-        use_se3_ligand=args.use_se3_ligand,
-        se3_features_dir=args.se3_features_dir,
         levels=parse_levels(args.levels),
         output_dir=args.output_dir,
         scaffold_split_dir=args.scaffold_split_dir,

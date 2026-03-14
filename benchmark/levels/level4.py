@@ -47,17 +47,13 @@ from tqdm import tqdm
 from benchmark.classifiers import train_knn_mlp
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
-    LIGAND_MODEL_DIMS,
     METRICS_ORDER,
+    MOLFORMER_DIM,
     PROTEIN_DIMS,
     SUPPORTED_EMBEDDINGS,
     BenchmarkConfig,
 )
 from benchmark.levels.base import BaseLevelRunner
-from benchmark.levels.protein_structure_features import (
-    ProteinStructureFeatureLoader,
-    build_protein_structure_loader,
-)
 from benchmark.levels.matrix_utils import build_matrix_dataloaders
 
 
@@ -116,35 +112,21 @@ class Level4Runner(BaseLevelRunner):
             dropout=0.25,
             classifier_dropout=0.25,
             classification_only=True,
-            use_molformer_ligand=(self._config.ligand_model != "smited"),
+            use_molformer_ligand=True,
             scaffold_split_dir=self.scaffold_split_dir,
             model_variant="level5_lite",
             optimize_threshold=False,
             fixed_threshold=0.5,
             weight_decay=0.05,
-            ligand_model=self._config.ligand_model,
         )
 
         # --- Step 2: Extract features from trained model -----------------
         tqdm.write("  Extracting cross-attention representations...")
 
-        protein_structure_loader = build_protein_structure_loader(
-            feature_dir=self._config.esmfold_features_dir,
-            use_esmfold_protein=self._config.use_esmfold_protein,
-            default_feature_dirs=self._config.resolved_esmfold_feature_dirs,
-        )
-        if self._config.use_esmfold_protein and protein_structure_loader is None:
-            tqdm.write("  WARNING: ESMFold protein fusion requested, but no valid .npy structure vectors were found. Proceeding with semantic protein features only.")
-        elif protein_structure_loader is not None:
-            tqdm.write(
-                f"  [ESMFold] Structural vectors loaded: dim={protein_structure_loader.dim}. Protein concatenation enabled."
-            )
-
         try:
             x_fit, y_fit, x_eval, y_eval = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
-                protein_structure_loader=protein_structure_loader,
             )
         except Exception as exc:
             tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
@@ -183,7 +165,6 @@ class Level4Runner(BaseLevelRunner):
         self,
         output_dir: str,
         seed: int,
-        protein_structure_loader: ProteinStructureFeatureLoader | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Load checkpoint, rebuild model/data, extract pre-head features.
 
@@ -212,13 +193,10 @@ class Level4Runner(BaseLevelRunner):
         # --- Resolve embedding name / dims ---
         full_emb = CA_SUPPORTED_EMBEDDINGS.get(self.embedding_name, self.embedding_name)
         protein_dim = PROTEIN_DIMS.get(full_emb, 640)
-        ligand_dim = self._config.ligand_dim
 
         # --- Locate checkpoint ---
         short_emb = full_emb.replace("esm2_", "").replace("_UR50D", "")
-        ligand_prefix_map = {"molformer": "molformer_", "smited": "", "chemberta": "chemberta_"}
-        ligand_tag = ligand_prefix_map.get(self._config.ligand_model, "molformer_")
-        prefix = f"{self.dataset}_{ligand_tag}{short_emb}_seed{seed}_"
+        prefix = f"{self.dataset}_molformer_{short_emb}_seed{seed}_"
         checkpoint_path = get_checkpoint_path(output_dir, prefix, "Split by Scaffold")
 
         if not os.path.exists(checkpoint_path):
@@ -232,7 +210,7 @@ class Level4Runner(BaseLevelRunner):
 
         model = Level5LiteModel(
             protein_input_dim=protein_dim,
-            ligand_input_dim=ligand_dim,
+            ligand_input_dim=MOLFORMER_DIM,
             hidden_dim=384,
             num_cross_attn_layers=1,
             num_heads=12,
@@ -250,39 +228,18 @@ class Level4Runner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=self._config.batch_size,
+            batch_size=64,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self._config.mode,
-            ligand_model=self._config.ligand_model,
         )
 
         # --- Forward pass to collect features based on mode ---
         if self._config.mode == "train":
-            x_fit, y_fit = self._collect_features(
-                model,
-                train_loader,
-                device,
-                protein_structure_loader=protein_structure_loader,
-            )
-            x_eval, y_eval = self._collect_features(
-                model,
-                val_loader,
-                device,
-                protein_structure_loader=protein_structure_loader,
-            )
+            x_fit, y_fit = self._collect_features(model, train_loader, device)
+            x_eval, y_eval = self._collect_features(model, val_loader, device)
         else:
-            x_fit, y_fit = self._collect_features(
-                model,
-                val_loader,
-                device,
-                protein_structure_loader=protein_structure_loader,
-            )
-            x_eval, y_eval = self._collect_features(
-                model,
-                test_loader,
-                device,
-                protein_structure_loader=protein_structure_loader,
-            )
+            x_fit, y_fit = self._collect_features(model, val_loader, device)
+            x_eval, y_eval = self._collect_features(model, test_loader, device)
 
         return x_fit, y_fit, x_eval, y_eval
 
@@ -292,12 +249,10 @@ class Level4Runner(BaseLevelRunner):
         model: "torch.nn.Module",
         loader: "torch.utils.data.DataLoader",
         device: torch.device,
-        protein_structure_loader: ProteinStructureFeatureLoader | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Run forward passes and collect pre-head feature vectors."""
         all_features: list[np.ndarray] = []
         all_labels: list[np.ndarray] = []
-        esmfold_logged = False
 
         for batch in loader:
             protein = batch["protein_matrix"].to(device)
@@ -314,22 +269,6 @@ class Level4Runner(BaseLevelRunner):
                 return_features=True,
             )
             features = output["features"].cpu().numpy()
-
-            if protein_structure_loader is not None:
-                seq_ids = batch.get("seq_id")
-                if seq_ids is not None:
-                    prot_struct_batch = protein_structure_loader.get_batch(seq_ids)
-                    if prot_struct_batch.shape[1] > 0:
-                        if not esmfold_logged:
-                            sem_dim = int(features.shape[1])
-                            struct_dim = int(prot_struct_batch.shape[1])
-                            fused_dim = sem_dim + struct_dim
-                            tqdm.write(
-                                f"  [ESMFold] Active fusion (Level 4): semantic_dim={sem_dim}, protein_struct_dim={struct_dim}, fused_feature_dim={fused_dim}"
-                            )
-                            esmfold_logged = True
-                        features = np.concatenate([features, prot_struct_batch], axis=-1)
-
             labels = batch["label"].numpy()
 
             all_features.append(features)
@@ -394,14 +333,11 @@ def load_crossattention_results(
     level_dir: str,
     dataset: str,
     embedding_short: str,
-    ligand_model: str = "molformer",
 ) -> Optional[Dict]:
     """Load cached ``crossattention_analysis_results.json`` if available."""
     full_name = SUPPORTED_EMBEDDINGS.get(embedding_short, embedding_short)
     short_name = full_name.replace("esm2_", "").replace("_UR50D", "")
-    ligand_prefix_map = {"molformer": "molformer_", "smited": "", "chemberta": "chemberta_"}
-    ligand_tag = ligand_prefix_map.get(ligand_model, "molformer_")
-    prefix = f"{dataset}_{ligand_tag}{short_name}_"
+    prefix = f"{dataset}_molformer_{short_name}_"
     json_path = os.path.join(level_dir, f"{prefix}crossattention_analysis_results.json")
 
     if not os.path.exists(json_path):

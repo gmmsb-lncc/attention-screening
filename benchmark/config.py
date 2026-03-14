@@ -32,22 +32,7 @@ PROTEIN_DIMS: Dict[str, int] = {
     "esm2_t33_650M_UR50D": 1280,
 }
 
-MOLFORMER_DIM: int = 768  # MoLFormer per-token embeddings (kept for backward compat)
-CHEMBERTA_DIM: int = 384  # ChemBERTa-77M-MTR per-token embeddings
-
-LIGAND_MODEL_DIMS: Dict[str, int] = {
-    "molformer": 768,
-    "smited": 768,
-    "chemberta": 384,
-}
-
-LIGAND_MATRIX_DIRS: Dict[str, List[str]] = {
-    "molformer": ["ligand_matrices", "molformer_matrix"],
-    "smited": ["ligand_matrices"],
-    "chemberta": ["chemberta_matrix"],
-}
-
-VALID_LIGAND_MODELS = frozenset({"molformer", "smited", "chemberta"})
+MOLFORMER_DIM: int = 768  # MoLFormer per-token embeddings
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -55,8 +40,6 @@ VALID_LIGAND_MODELS = frozenset({"molformer", "smited", "chemberta"})
 
 EMBEDDING_BASE_PATH = "./results/protein_model_benchmark_{dataset_type}_v2"
 DEFAULT_SCAFFOLD_SPLIT_DIR = "scaffolds_splits/output"
-DEFAULT_SE3_FEATURES_SUBDIR = "se3_features"
-DEFAULT_ESMFOLD_FEATURES_SUBDIR = "protein_structure_features"
 
 # ---------------------------------------------------------------------------
 # Metrics
@@ -122,8 +105,7 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "4"})
-OBSOLETE_LEVELS = frozenset({"5a", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
 
 # Level 0 is a shortcut for the classical ML baseline subset
 LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
@@ -152,16 +134,8 @@ class BenchmarkConfig:
     dataset: str
     embedding: str  # shorthand: "8M", "150M", "650M"
 
-    # --- ligand model ---
-    ligand_model: str = "molformer"  # "molformer", "smited", or "chemberta"
-    ligand_weight: float = 1.0
-    use_esmfold_protein: bool = False
-    esmfold_features_dir: Optional[str] = None
-    use_se3_ligand: bool = False
-    se3_features_dir: Optional[str] = None
-
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"])
 
     # --- output ---
     output_dir: Optional[str] = None
@@ -181,7 +155,7 @@ class BenchmarkConfig:
     # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
-    patience: int = 25
+    patience: int = 5
     learning_rate: float = 1e-4
 
     # --- fine-tuning ---
@@ -199,11 +173,6 @@ class BenchmarkConfig:
         return SUPPORTED_EMBEDDINGS[self.embedding]
 
     @property
-    def ligand_dim(self) -> int:
-        """Ligand embedding dimension for the selected ligand model."""
-        return LIGAND_MODEL_DIMS.get(self.ligand_model, 768)
-
-    @property
     def resolved_output_dir(self) -> str:
         """Compute actual output directory.
 
@@ -213,26 +182,6 @@ class BenchmarkConfig:
         """
         base = self.output_dir if self.output_dir else f"./results/benchmark_{self.dataset}_{self.embedding}"
         return os.path.join(base, self.mode)
-
-    @property
-    def resolved_se3_feature_dirs(self) -> List[str]:
-        """Default SE3 feature directories following embedding build layout."""
-        dirs: List[str] = []
-        for ds in self.datasets_to_process():
-            dirs.append(
-                os.path.join(self.build_dir(ds), DEFAULT_SE3_FEATURES_SUBDIR)
-            )
-        return dirs
-
-    @property
-    def resolved_esmfold_feature_dirs(self) -> List[str]:
-        """Default ESMFold feature directories following embedding build layout."""
-        dirs: List[str] = []
-        for ds in self.datasets_to_process():
-            dirs.append(
-                os.path.join(self.build_dir(ds), DEFAULT_ESMFOLD_FEATURES_SUBDIR)
-            )
-        return dirs
 
     @property
     def resolved_patience(self) -> Optional[int]:
@@ -294,28 +243,7 @@ class BenchmarkConfig:
         if self.mode not in {"train", "test"}:
             msg = f"Invalid mode '{self.mode}'. Choose from: train, test"
             raise ValueError(msg)
-        if self.ligand_model not in VALID_LIGAND_MODELS:
-            msg = (
-                f"Invalid ligand_model '{self.ligand_model}'. "
-                f"Choose from: {sorted(VALID_LIGAND_MODELS)}"
-            )
-            raise ValueError(msg)
-        if self.ligand_weight <= 0:
-            msg = "--ligand-weight must be > 0"
-            raise ValueError(msg)
-        if self.esmfold_features_dir is not None and not self.esmfold_features_dir.strip():
-            msg = "--esmfold-features-dir cannot be empty when provided"
-            raise ValueError(msg)
-        if self.se3_features_dir is not None and not self.se3_features_dir.strip():
-            msg = "--se3-features-dir cannot be empty when provided"
-            raise ValueError(msg)
         for level in self.levels:
-            if level in OBSOLETE_LEVELS:
-                msg = (
-                    f"Level '{level}' is obsolete and no longer supported. "
-                    "Use levels up to 3: 0, 1a, 1b, 1c, 2, 3."
-                )
-                raise ValueError(msg)
             if level not in VALID_LEVELS:
                 msg = f"Invalid level '{level}'. Valid levels: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)

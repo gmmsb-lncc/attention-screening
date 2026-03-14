@@ -6,10 +6,8 @@ a reusable multi-seed aggregation helper.
 
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import os
-import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
@@ -17,7 +15,6 @@ import numpy as np
 from tqdm import tqdm
 
 from benchmark.config import METRICS_ORDER, BenchmarkConfig
-from benchmark.runtime import get_seed_workers
 
 
 class BaseLevelRunner(ABC):
@@ -85,11 +82,6 @@ class BaseLevelRunner(ABC):
         return self._config.mode
 
     @property
-    def uses_gpu(self) -> bool:
-        """Whether this level is primarily GPU-bound."""
-        return False
-
-    @property
     def scaffold_split_dir(self) -> str:
         return self._config.scaffold_split_dir
 
@@ -111,217 +103,21 @@ class BaseLevelRunner(ABC):
         tqdm.write(f"  Output: {level_dir}")
 
         seed_results_per_model: Dict[str, Dict[str, List[float]]] = {}
-        processed_seeds: List[int] = []
-        completed_seed_summaries: Dict[str, Dict[str, object]] = {}
-        mlp_train_mcc_history: List[float] = []
-        mlp_eval_mcc_history: List[float] = []
 
-        # Write an immediate progress snapshot so long runs never look idle.
-        self._save_intermediate(
-            level_dir,
-            aggregated_partial={},
-            processed_seeds=processed_seeds,
-            completed_seed_summaries=completed_seed_summaries,
-            mlp_train_mcc_history=mlp_train_mcc_history,
-            mlp_eval_mcc_history=mlp_eval_mcc_history,
-            status="started",
-            running_seeds=[],
-        )
+        for idx, seed in enumerate(self.seeds):
+            seed_dir = os.path.join(level_dir, f"seed_{seed}")
+            tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
 
-        seed_worker_count = get_seed_workers(len(self.seeds))
-        if self.uses_gpu and seed_worker_count > 1:
-            if os.getenv("BENCHMARK_ALLOW_GPU_SEED_PARALLEL", "0").strip().lower() not in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }:
-                tqdm.write(
-                    "  GPU level detected: forcing sequential seed execution "
-                    "(set BENCHMARK_ALLOW_GPU_SEED_PARALLEL=1 to override)."
-                )
-                seed_worker_count = 1
+            result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
 
-        if seed_worker_count <= 1:
-            with tqdm(
-                total=len(self.seeds),
-                desc=f"{self.level_tag} seeds",
-                leave=False,
-                dynamic_ncols=True,
-            ) as seed_bar:
-                for idx, seed in enumerate(self.seeds):
-                    seed_dir = os.path.join(level_dir, f"seed_{seed}")
-                    seed_bar.set_postfix_str(f"seed={seed}")
-                    tqdm.write(f"  Seed {idx + 1}/{len(self.seeds)}: {seed}")
-                    self._save_seed_status(seed_dir, seed, "running")
-                    self._save_intermediate(
-                        level_dir,
-                        aggregated_partial=self._aggregate(seed_results_per_model) if seed_results_per_model else {},
-                        processed_seeds=processed_seeds,
-                        completed_seed_summaries=completed_seed_summaries,
-                        mlp_train_mcc_history=mlp_train_mcc_history,
-                        mlp_eval_mcc_history=mlp_eval_mcc_history,
-                        status="running",
-                        running_seeds=[seed],
-                    )
+            if result is None:
+                result = self._load_cached_results(seed_dir)
 
-                    result = self.run_single_seed(seed=seed, output_dir=seed_dir, **kwargs)
+            if result is None:
+                tqdm.write(f"    WARNING: seed {seed} returned no results.")
+                continue
 
-                    if result is None:
-                        result = self._load_cached_results(seed_dir)
-
-                    if result is None:
-                        tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                        self._save_seed_status(seed_dir, seed, "no_results")
-                        seed_bar.update(1)
-                        continue
-
-                    self._accumulate_seed(result, seed_results_per_model)
-                    processed_seeds.append(seed)
-                    completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
-                    self._save_seed_status(seed_dir, seed, "completed")
-
-                    train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-                    if train_mcc is not None:
-                        mlp_train_mcc_history.append(train_mcc)
-                    if eval_mcc is not None:
-                        mlp_eval_mcc_history.append(eval_mcc)
-
-                    partial = self._aggregate(seed_results_per_model)
-                    self._save_intermediate(
-                        level_dir,
-                        partial,
-                        processed_seeds,
-                        completed_seed_summaries,
-                        mlp_train_mcc_history,
-                        mlp_eval_mcc_history,
-                        status="running",
-                        running_seeds=[],
-                    )
-                    seed_bar.update(1)
-        else:
-            tqdm.write(
-                f"  Parallel seed execution enabled: {seed_worker_count} workers "
-                f"for {len(self.seeds)} seeds"
-            )
-            futures = {}
-            seed_start_times: Dict[int, float] = {}
-            level_start = time.time()
-            heartbeat_seconds = 60.0
-            completed_count = 0
-            with ThreadPoolExecutor(max_workers=seed_worker_count) as executor:
-                for seed in self.seeds:
-                    seed_dir = os.path.join(level_dir, f"seed_{seed}")
-                    seed_start_times[seed] = time.time()
-                    tqdm.write(f"  Dispatch seed {seed} -> {seed_dir}")
-                    self._save_seed_status(seed_dir, seed, "running")
-                    futures[
-                        executor.submit(
-                            self.run_single_seed,
-                            seed=seed,
-                            output_dir=seed_dir,
-                            **kwargs,
-                        )
-                    ] = (seed, seed_dir)
-
-                self._save_intermediate(
-                    level_dir,
-                    aggregated_partial=self._aggregate(seed_results_per_model) if seed_results_per_model else {},
-                    processed_seeds=processed_seeds,
-                    completed_seed_summaries=completed_seed_summaries,
-                    mlp_train_mcc_history=mlp_train_mcc_history,
-                    mlp_eval_mcc_history=mlp_eval_mcc_history,
-                    status="running",
-                    running_seeds=sorted(futures[f][0] for f in futures),
-                )
-
-                pending = set(futures.keys())
-                with tqdm(
-                    total=len(self.seeds),
-                    desc=f"{self.level_tag} seeds",
-                    leave=False,
-                    dynamic_ncols=True,
-                ) as seed_bar:
-                    while pending:
-                        done, pending = wait(
-                            pending,
-                            timeout=heartbeat_seconds,
-                            return_when=FIRST_COMPLETED,
-                        )
-
-                        if not done:
-                            elapsed_level = (time.time() - level_start) / 60.0
-                            running = len(pending)
-                            running_seeds = sorted(
-                                futures[f][0]
-                                for f in pending
-                                if f in futures
-                            )
-                            tqdm.write(
-                                f"  [Heartbeat] elapsed={elapsed_level:.1f} min, "
-                                f"completed={completed_count}/{len(self.seeds)}, "
-                                f"running={running}"
-                            )
-                            partial = self._aggregate(seed_results_per_model) if seed_results_per_model else {}
-                            self._save_intermediate(
-                                level_dir,
-                                partial,
-                                processed_seeds,
-                                completed_seed_summaries,
-                                mlp_train_mcc_history,
-                                mlp_eval_mcc_history,
-                                status="running",
-                                running_seeds=running_seeds,
-                            )
-                            continue
-
-                        for future in done:
-                            completed_count += 1
-                            seed_bar.update(1)
-                            seed, seed_dir = futures[future]
-                            seed_bar.set_postfix_str(f"last_done={seed}")
-                            elapsed_seed = time.time() - seed_start_times.get(seed, time.time())
-                            tqdm.write(
-                                f"  Seed done {completed_count}/{len(self.seeds)}: {seed} "
-                                f"({elapsed_seed/60:.1f} min)"
-                            )
-                            try:
-                                result = future.result()
-                            except Exception as exc:
-                                tqdm.write(f"    ERROR: seed {seed} failed: {exc}")
-                                self._save_seed_status(seed_dir, seed, "failed", error=str(exc))
-                                continue
-
-                            if result is None:
-                                result = self._load_cached_results(seed_dir)
-
-                            if result is None:
-                                tqdm.write(f"    WARNING: seed {seed} returned no results.")
-                                self._save_seed_status(seed_dir, seed, "no_results")
-                                continue
-
-                            self._accumulate_seed(result, seed_results_per_model)
-                            processed_seeds.append(seed)
-                            completed_seed_summaries[str(seed)] = self._build_seed_summary(result)
-                            self._save_seed_status(seed_dir, seed, "completed")
-
-                            train_mcc, eval_mcc = self._extract_mlp_train_eval_mcc(result)
-                            if train_mcc is not None:
-                                mlp_train_mcc_history.append(train_mcc)
-                            if eval_mcc is not None:
-                                mlp_eval_mcc_history.append(eval_mcc)
-
-                            partial = self._aggregate(seed_results_per_model)
-                            self._save_intermediate(
-                                level_dir,
-                                partial,
-                                processed_seeds,
-                                completed_seed_summaries,
-                                mlp_train_mcc_history,
-                                mlp_eval_mcc_history,
-                                status="running",
-                                running_seeds=sorted(futures[f][0] for f in pending if f in futures),
-                            )
+            self._accumulate_seed(result, seed_results_per_model)
 
         if not seed_results_per_model:
             return None
@@ -425,175 +221,6 @@ class BaseLevelRunner(ABC):
                 indent=2,
             )
         tqdm.write(f"  Aggregated results saved: {agg_path}")
-
-    def _save_intermediate(
-        self,
-        level_dir: str,
-        aggregated_partial: Dict[str, Dict],
-        processed_seeds: List[int],
-        completed_seed_summaries: Dict[str, Dict[str, object]],
-        mlp_train_mcc_history: List[float],
-        mlp_eval_mcc_history: List[float],
-        status: str = "running",
-        running_seeds: Optional[List[int]] = None,
-    ) -> None:
-        """Persist partial aggregation after each completed seed.
-
-        This snapshot is overwritten at every successful seed and enables
-        real-time monitoring of trend evolution during long benchmark runs.
-        """
-        os.makedirs(level_dir, exist_ok=True)
-        inter_path = os.path.join(level_dir, "split_comparison_results.intermediate.json")
-        alerts = self._build_mlp_alerts(mlp_train_mcc_history, mlp_eval_mcc_history)
-        effective_status = "completed" if len(processed_seeds) >= len(self.seeds) and self.seeds else status
-        with open(inter_path, "w") as fh:
-            json.dump(
-                {
-                    "dataset": self.dataset,
-                    "level": self.level_tag,
-                    "embedding_name": self.embedding_name,
-                    "seeds_configured": self.seeds,
-                    "seeds_processed": processed_seeds,
-                    "progress": {
-                        "completed": len(processed_seeds),
-                        "total": len(self.seeds),
-                        "status": effective_status,
-                        "running_seeds": running_seeds or [],
-                    },
-                    "seed_metrics": completed_seed_summaries,
-                    "alerts": alerts,
-                    "results": {"Split by Scaffold": aggregated_partial},
-                },
-                fh,
-                indent=2,
-            )
-        tqdm.write(f"    Intermediate snapshot saved: {inter_path}")
-
-    @staticmethod
-    def _extract_mlp_train_eval_mcc(result: Dict) -> tuple[Optional[float], Optional[float]]:
-        """Extract per-seed MLP train/eval MCC diagnostics from raw result dict."""
-        if not isinstance(result, dict):
-            return None, None
-
-        sc_key = next((k for k in result if "scaffold" in str(k).lower()), None)
-        if sc_key is None:
-            sc_key = next(iter(result), None)
-        if sc_key is None:
-            return None, None
-
-        sc = result.get(sc_key, {})
-        mlp = sc.get("MLP", {}) if isinstance(sc, dict) else {}
-        if not isinstance(mlp, dict):
-            return None, None
-
-        eval_mcc_raw = mlp.get("mcc")
-        eval_mcc = float(eval_mcc_raw) if isinstance(eval_mcc_raw, (int, float)) else None
-
-        details = mlp.get("details", {})
-        if not isinstance(details, dict):
-            return None, eval_mcc
-
-        model_train = details.get("model_train", {})
-        if not isinstance(model_train, dict):
-            return None, eval_mcc
-
-        train_mcc_raw = model_train.get("mcc_at_default_threshold")
-        train_mcc = float(train_mcc_raw) if isinstance(train_mcc_raw, (int, float)) else None
-        return train_mcc, eval_mcc
-
-    @staticmethod
-    def _build_seed_summary(result: Dict) -> Dict[str, object]:
-        """Build lightweight per-seed summary with train/eval diagnostics."""
-        summary: Dict[str, object] = {}
-        if not isinstance(result, dict):
-            return summary
-
-        sc_key = next((k for k in result if "scaffold" in str(k).lower()), None)
-        if sc_key is None:
-            sc_key = next(iter(result), None)
-        if sc_key is None:
-            return summary
-
-        sc = result.get(sc_key, {})
-        if not isinstance(sc, dict):
-            return summary
-
-        for model_name in ("KNN", "MLP"):
-            model = sc.get(model_name, {})
-            if not isinstance(model, dict):
-                continue
-
-            model_summary: Dict[str, object] = {}
-            for metric in METRICS_ORDER:
-                val = model.get(metric)
-                if isinstance(val, (int, float)):
-                    model_summary[f"eval_{metric}"] = float(val)
-
-            details = model.get("details", {})
-            if isinstance(details, dict):
-                model_train = details.get("model_train", {})
-                if isinstance(model_train, dict):
-                    train_mcc = model_train.get("mcc_at_default_threshold")
-                    if isinstance(train_mcc, (int, float)):
-                        model_summary["train_mcc_default_threshold"] = float(train_mcc)
-                calibration = details.get("calibration", {})
-                if isinstance(calibration, dict):
-                    model_summary["calibration_rows"] = int(calibration.get("n_rows", 0) or 0)
-
-            summary[model_name] = model_summary
-
-        return summary
-
-    @staticmethod
-    def _save_seed_status(
-        seed_dir: str,
-        seed: int,
-        status: str,
-        error: str | None = None,
-    ) -> None:
-        """Persist per-seed execution status for real-time diagnostics."""
-        os.makedirs(seed_dir, exist_ok=True)
-        payload: Dict[str, object] = {
-            "seed": int(seed),
-            "status": status,
-            "timestamp": time.time(),
-        }
-        if error:
-            payload["error"] = error
-
-        path = os.path.join(seed_dir, "seed_status.json")
-        with open(path, "w") as fh:
-            json.dump(payload, fh, indent=2)
-
-    @staticmethod
-    def _build_mlp_alerts(
-        mlp_train_mcc_history: List[float],
-        mlp_eval_mcc_history: List[float],
-    ) -> Dict[str, object]:
-        """Build lightweight automated alert flags for intermediate monitoring."""
-        if not mlp_train_mcc_history:
-            return {
-                "mlp_underfitting_suspected": False,
-                "reason": "insufficient_train_diagnostics",
-            }
-
-        mean_train_mcc = float(np.mean(np.array(mlp_train_mcc_history, dtype=np.float64)))
-        mean_eval_mcc = (
-            float(np.mean(np.array(mlp_eval_mcc_history, dtype=np.float64)))
-            if mlp_eval_mcc_history
-            else None
-        )
-
-        # Underfitting heuristic: persistently weak training fit.
-        underfitting = mean_train_mcc < 0.90
-
-        return {
-            "mlp_underfitting_suspected": underfitting,
-            "mlp_train_mcc_mean": mean_train_mcc,
-            "mlp_eval_mcc_mean": mean_eval_mcc,
-            "processed_points": len(mlp_train_mcc_history),
-            "rule": "underfitting_if_mean_train_mcc_below_0.90",
-        }
 
     @staticmethod
     def _load_cached_results(directory: str) -> Optional[Dict]:

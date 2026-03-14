@@ -18,15 +18,11 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
-    LIGAND_MATRIX_DIRS,
     PCHEMBL_ACTIVITY_THRESHOLD,
 )
-from benchmark.runtime import get_dataloader_workers
-from benchmark.runtime import resolve_effective_batch_size
 
 
 # ---------------------------------------------------------------------------
@@ -90,21 +86,18 @@ class MatrixDataset(Dataset):
     ) -> np.ndarray:
         """Search across multiple directories for a ``.npy`` file.
 
-        Tries ``{id}_matrix.npy``, ``{id}_molformer_matrix.npy``, and
-        ``{id}_chemberta_matrix.npy`` naming conventions.
+        Tries both ``{id}_matrix.npy`` and ``{id}_molformer_matrix.npy``
+        naming conventions to handle cross-machine inconsistencies.
         """
-        alt_filenames = [
-            filename.replace("_matrix.npy", "_molformer_matrix.npy"),
-            filename.replace("_matrix.npy", "_chemberta_matrix.npy"),
-        ]
+        # Build alternate filename: foo_matrix.npy -> foo_molformer_matrix.npy
+        alt_filename = filename.replace("_matrix.npy", "_molformer_matrix.npy")
         for d in dirs:
             path = d / filename
             if path.exists():
                 return np.load(path).astype(np.float32)
-            for alt in alt_filenames:
-                alt_path = d / alt
-                if alt_path.exists():
-                    return np.load(alt_path).astype(np.float32)
+            alt_path = d / alt_filename
+            if alt_path.exists():
+                return np.load(alt_path).astype(np.float32)
         return np.zeros(fallback_shape, dtype=np.float32)
 
 
@@ -206,7 +199,6 @@ def build_matrix_dataloaders(
     batch_size: int = 32,
     dataset_source_filter: str | None = None,
     mode: str = "test",
-    ligand_model: str = "molformer",
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     """Build train / val / test ``DataLoader`` instances from universal splits.
 
@@ -224,12 +216,7 @@ def build_matrix_dataloaders(
     -------
     train_loader, val_loader, test_loader (or None when mode="train")
     """
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name, ligand_model)
-    effective_batch_size = resolve_effective_batch_size(batch_size)
-    if effective_batch_size != batch_size:
-        tqdm.write(
-            f"  [Batch] Auto-adjusted batch_size: requested={batch_size} -> effective={effective_batch_size}"
-        )
+    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
 
     train_df = read_split_file(
         os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv")
@@ -256,14 +243,14 @@ def build_matrix_dataloaders(
             df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
 
     test_loader = (
-        _make_loader(test_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=False)
+        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False)
         if test_df is not None
         else None
     )
 
     return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, effective_batch_size, shuffle=False),
+        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
+        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
         test_loader,
     )
 
@@ -271,12 +258,11 @@ def build_matrix_dataloaders(
 def _resolve_matrix_dirs(
     dataset_type: str,
     embedding_name: str,
-    ligand_model: str = "molformer",
 ) -> tuple[list[Path], list[Path]]:
     """Return lists of protein and ligand matrix directories.
 
-    For ligands, uses ``LIGAND_MATRIX_DIRS`` to resolve which subdirectories
-    to search based on the selected ligand model.
+    For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
+    because naming conventions vary across machines and datasets.
     """
     if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
@@ -287,13 +273,11 @@ def _resolve_matrix_dirs(
         Path(bp) / embedding_name / "build" / "protein_matrices"
         for bp in base_paths
     ]
-
-    ligand_subdirs = LIGAND_MATRIX_DIRS.get(ligand_model, ["ligand_matrices", "molformer_matrix"])
     ligand_dirs = []
     for bp in base_paths:
         build = Path(bp) / embedding_name / "build"
-        for subdir in ligand_subdirs:
-            ligand_dirs.append(build / subdir)
+        ligand_dirs.append(build / "ligand_matrices")
+        ligand_dirs.append(build / "molformer_matrix")
     return protein_dirs, ligand_dirs
 
 
@@ -305,15 +289,12 @@ def _make_loader(
     shuffle: bool,
 ) -> DataLoader:
     _validate_matrix_coverage(df, protein_dirs, ligand_dirs)
-    num_workers = get_dataloader_workers()
-    use_persistent = num_workers > 0
     return DataLoader(
         MatrixDataset(df, protein_dirs, ligand_dirs),
         batch_size=batch_size,
         shuffle=shuffle,
         collate_fn=collate_matrices,
-        num_workers=num_workers,
-        persistent_workers=use_persistent,
+        num_workers=0,
     )
 
 
@@ -339,9 +320,7 @@ def _validate_matrix_coverage(
         str(cid)
         for cid in unique_chembls
         if not any(
-            (d / f"{cid}_matrix.npy").exists()
-            or (d / f"{cid}_molformer_matrix.npy").exists()
-            or (d / f"{cid}_chemberta_matrix.npy").exists()
+            (d / f"{cid}_matrix.npy").exists() or (d / f"{cid}_molformer_matrix.npy").exists()
             for d in ligand_dirs
         )
     ]
@@ -423,22 +402,18 @@ def split_loader_for_feature_extraction(
     rng.shuffle(feat_idx)
 
     bs = loader.batch_size or 32
-    num_workers = get_dataloader_workers()
-    use_persistent = num_workers > 0
     model_loader = _DL(
         Subset(dataset, model_idx.tolist()),
         batch_size=bs,
         shuffle=True,
         collate_fn=collate_matrices,
-        num_workers=num_workers,
-        persistent_workers=use_persistent,
+        num_workers=0,
     )
     feature_loader = _DL(
         Subset(dataset, feat_idx.tolist()),
         batch_size=bs,
         shuffle=False,
         collate_fn=collate_matrices,
-        num_workers=num_workers,
-        persistent_workers=use_persistent,
+        num_workers=0,
     )
     return model_loader, feature_loader
