@@ -111,7 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     # --- deep-learning hyper-parameters ---
     parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
-    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Deprecated: patience is auto-computed as 10%% of --epochs.",
+    )
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
 
     # --- fine-tuning ---

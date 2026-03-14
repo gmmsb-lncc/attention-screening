@@ -15,7 +15,6 @@ set -euo pipefail
 DATASET="${DATASET:-non_human}"
 EMBEDDING="${EMBEDDING:-8M}"
 LEVELS=("2" "3")
-PATIENCE="${PATIENCE:-30}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_l2_l3}"
 
 run_phase() {
@@ -25,14 +24,13 @@ run_phase() {
         --dataset "${DATASET}" \
         --embedding "${EMBEDDING}" \
         --levels "${LEVELS[@]}" \
-        --patience "${PATIENCE}" \
         --output_dir "${OUTPUT_ROOT}" \
         "--${mode}"
 }
 
 echo "============================================================"
 echo " Benchmark automation | dataset=${DATASET} embedding=${EMBEDDING}"
-echo " Levels: ${LEVELS[*]} | patience=${PATIENCE}"
+echo " Levels: ${LEVELS[*]} | patience=10% of epochs (auto)"
 echo " Output root: ${OUTPUT_ROOT}"
 echo "============================================================"
 
