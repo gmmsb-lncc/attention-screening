@@ -13,9 +13,10 @@ Comparison axes:
     (both compound-only, simple aggregation)
   - **1b vs 2**: Compound-only vs compound+protein (both mean pooling)
 
-Training protocol (consistent with active levels):
-    - In ``train`` mode: fit on train features, evaluate on val features.
-    - In ``test`` mode: fit on val features, evaluate on test features.
+Training protocol (consistent with all levels):
+  - Features extracted from the **validation** split.
+  - KNN/MLP classifiers trained on val features.
+  - Evaluation on the hold-out **test** split.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
 to guarantee identical hyperparameters across all levels.
@@ -38,37 +39,19 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     mean_pool,
 )
-from benchmark.levels.protocol import sanitize_features, select_fit_eval
-from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 
 # ---------------------------------------------------------------------------
 # Feature extraction (ligand-only mean pooling)
 # ---------------------------------------------------------------------------
 
-def _extract_ligand_features(
-    loader: DataLoader,
-    se3_loader: SE3FeatureLoader | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+def _extract_ligand_features(loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
     """Extract mean-pooled **ligand-only** features from a dataloader."""
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
-    se3_logged = False
 
     for batch in loader:
         ligand_pooled = mean_pool(batch["ligand_matrix"], batch["ligand_mask"])
-        if se3_loader is not None:
-            se3_batch = se3_loader.get_batch(batch["chembl_id"])
-            if se3_batch.shape[1] > 0:
-                if not se3_logged:
-                    sem_dim = int(ligand_pooled.shape[1])
-                    se3_dim = int(se3_batch.shape[1])
-                    fused_dim = sem_dim + se3_dim
-                    tqdm.write(
-                        f"  [SE3] Active fusion (Level 1b): semantic_dim={sem_dim}, se3_dim={se3_dim}, fused_ligand_dim={fused_dim}"
-                    )
-                    se3_logged = True
-                ligand_pooled = np.concatenate([ligand_pooled, se3_batch], axis=-1)
         ligand_pooled = np.nan_to_num(
             ligand_pooled, nan=0.0, posinf=0.0, neginf=0.0,
         )
@@ -109,41 +92,29 @@ class Level1bRunner(BaseLevelRunner):
 
         tqdm.write(f"  Extracting Level 1b ligand features (seed {seed})...")
 
-        se3_loader = build_se3_loader(
-            feature_dir=self._config.se3_features_dir,
-            use_se3_ligand=self._config.use_se3_ligand,
-            default_feature_dirs=self._config.resolved_se3_feature_dirs,
-        )
-        if self._config.use_se3_ligand and se3_loader is None:
-            tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
-        elif se3_loader is not None:
-            tqdm.write(
-                f"  [SE3] Structural vectors loaded: dim={se3_loader.dim}. Ligand concatenation enabled."
-            )
-
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=self._config.batch_size,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
-            ligand_model=self._config.ligand_model,
         )
 
-        split_selection = select_fit_eval(self.mode, train_loader, val_loader, test_loader)
-        tqdm.write(
-            f"  Mean-pooling ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
-        )
-        x_fit, y_fit = _extract_ligand_features(split_selection.fit, se3_loader=se3_loader)
-        x_eval, y_eval = _extract_ligand_features(split_selection.eval, se3_loader=se3_loader)
+        if self.mode == "train":
+            tqdm.write("  Mean-pooling ligand matrices (train + val)...")
+            x_fit, y_fit = _extract_ligand_features(train_loader)
+            x_eval, y_eval = _extract_ligand_features(val_loader)
+        else:
+            tqdm.write("  Mean-pooling ligand matrices (val + test)...")
+            x_fit, y_fit = _extract_ligand_features(val_loader)
+            x_eval, y_eval = _extract_ligand_features(test_loader)
 
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            arr_sanitized, bad = sanitize_features(arr)
+            bad = np.isnan(arr).sum() + np.isinf(arr).sum()
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = arr_sanitized
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
         models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)

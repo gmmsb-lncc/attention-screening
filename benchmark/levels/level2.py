@@ -7,17 +7,19 @@ trains KNN and MLP classifiers.
 This is the simplest matrix-based level — no learned pooling, just
 averaging over the sequence dimension.
 
-Input matrices are the **same** as those used by Level 3.
+Input matrices are the **same** as those used by Levels 3 and 4.
 The only difference is the pooling strategy:
   - Level 2: mean pooling (no parameters)
   - Level 3: learned attention pooling
+  - Level 4: full cross-attention encoder
 
-Training protocol (consistent with active levels):
-    - In ``train`` mode: fit on train features, evaluate on val features.
-    - In ``test`` mode: fit on val features, evaluate on test features.
+Training protocol (consistent with all levels):
+  - Features extracted from the **validation** split.
+  - KNN/MLP classifiers trained on val features.
+  - Evaluation on the hold-out **test** split.
 
 Classifier note: KNN and MLP are provided by ``benchmark.classifiers``
-to guarantee identical hyperparameters across all active levels.
+to guarantee identical hyperparameters across all four levels.
 """
 
 from __future__ import annotations
@@ -31,64 +33,26 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from benchmark.classifiers import train_knn_mlp
-from benchmark.config import BenchmarkConfig, PROTEIN_DIMS
+from benchmark.config import BenchmarkConfig
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     mean_pool,
 )
-from benchmark.levels.protocol import sanitize_features, select_fit_eval
-from benchmark.levels.protein_structure_features import (
-    ProteinStructureFeatureLoader,
-    build_protein_structure_loader,
-)
-from benchmark.levels.se3_features import SE3FeatureLoader, build_se3_loader
 
 
 # ---------------------------------------------------------------------------
 # Feature extraction (mean pooling — no training required)
 # ---------------------------------------------------------------------------
 
-def _extract_features(
-    loader: DataLoader,
-    protein_structure_loader: ProteinStructureFeatureLoader | None = None,
-    se3_loader: SE3FeatureLoader | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+def _extract_features(loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
     """Extract mean-pooled protein+ligand features from a dataloader."""
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
-    esmfold_logged = False
-    se3_logged = False
 
     for batch in loader:
         protein_pooled = mean_pool(batch["protein_matrix"], batch["protein_mask"])
-        if protein_structure_loader is not None:
-            prot_struct_batch = protein_structure_loader.get_batch(batch["seq_id"])
-            if prot_struct_batch.shape[1] > 0:
-                if not esmfold_logged:
-                    prot_sem_dim = int(protein_pooled.shape[1])
-                    prot_str_dim = int(prot_struct_batch.shape[1])
-                    prot_fused_dim = prot_sem_dim + prot_str_dim
-                    tqdm.write(
-                        f"  [ESMFold] Active fusion (Level 2): protein_sem_dim={prot_sem_dim}, protein_struct_dim={prot_str_dim}, fused_protein_dim={prot_fused_dim}"
-                    )
-                    esmfold_logged = True
-                protein_pooled = np.concatenate([protein_pooled, prot_struct_batch], axis=-1)
-
         ligand_pooled = mean_pool(batch["ligand_matrix"], batch["ligand_mask"])
-        if se3_loader is not None:
-            se3_batch = se3_loader.get_batch(batch["chembl_id"])
-            if se3_batch.shape[1] > 0:
-                if not se3_logged:
-                    lig_sem_dim = int(ligand_pooled.shape[1])
-                    se3_dim = int(se3_batch.shape[1])
-                    lig_fused_dim = lig_sem_dim + se3_dim
-                    total_dim = int(protein_pooled.shape[1]) + lig_fused_dim
-                    tqdm.write(
-                        f"  [SE3] Active fusion (Level 2): ligand_sem_dim={lig_sem_dim}, se3_dim={se3_dim}, fused_ligand_dim={lig_fused_dim}, total_feature_dim={total_dim}"
-                    )
-                    se3_logged = True
-                ligand_pooled = np.concatenate([ligand_pooled, se3_batch], axis=-1)
         combined = np.nan_to_num(
             np.concatenate([protein_pooled, ligand_pooled], axis=-1),
             nan=0.0,
@@ -132,83 +96,32 @@ class Level2Runner(BaseLevelRunner):
 
         tqdm.write(f"  Extracting Level 2 features (seed {seed})...")
 
-        se3_loader = build_se3_loader(
-            feature_dir=self._config.se3_features_dir,
-            use_se3_ligand=self._config.use_se3_ligand,
-            default_feature_dirs=self._config.resolved_se3_feature_dirs,
-        )
-
-        protein_structure_loader = build_protein_structure_loader(
-            feature_dir=self._config.esmfold_features_dir,
-            use_esmfold_protein=self._config.use_esmfold_protein,
-            default_feature_dirs=self._config.resolved_esmfold_feature_dirs,
-        )
-
-        if self._config.use_esmfold_protein and protein_structure_loader is None:
-            tqdm.write("  WARNING: ESMFold protein fusion requested, but no valid .npy structure vectors were found. Proceeding with semantic protein features only.")
-        elif protein_structure_loader is not None:
-            tqdm.write(
-                f"  [ESMFold] Structural vectors loaded: dim={protein_structure_loader.dim}. Protein concatenation enabled."
-            )
-
-        if self._config.use_se3_ligand and se3_loader is None:
-            tqdm.write("  WARNING: SE3 ligand fusion requested, but no valid .npy structural vectors were found. Proceeding with semantic ligand features only.")
-        elif se3_loader is not None:
-            tqdm.write(
-                f"  [SE3] Structural vectors loaded: dim={se3_loader.dim}. Ligand concatenation enabled."
-            )
-
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=self._config.batch_size,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
-            ligand_model=self._config.ligand_model,
         )
 
-        split_selection = select_fit_eval(self.mode, train_loader, val_loader, test_loader)
-        tqdm.write(
-            f"  Mean-pooling protein + ligand matrices ({split_selection.fit_name} + {split_selection.eval_name})..."
-        )
-        x_fit, y_fit = _extract_features(
-            split_selection.fit,
-            protein_structure_loader=protein_structure_loader,
-            se3_loader=se3_loader,
-        )
-        x_eval, y_eval = _extract_features(
-            split_selection.eval,
-            protein_structure_loader=protein_structure_loader,
-            se3_loader=se3_loader,
-        )
-
-        protein_dim = PROTEIN_DIMS.get(self.embedding_name, 640)
-        if protein_structure_loader is not None:
-            protein_dim += protein_structure_loader.dim
-
-        if self._config.ligand_weight != 1.0:
-            tqdm.write(
-                f"  [Fusion] Ligand block weighting enabled: ligand_weight={self._config.ligand_weight:.3f} (protein block weight=1.000)"
-            )
+        if self.mode == "train":
+            tqdm.write("  Mean-pooling protein + ligand matrices (train + val)...")
+            x_fit, y_fit = _extract_features(train_loader)
+            x_eval, y_eval = _extract_features(val_loader)
+        else:
+            tqdm.write("  Mean-pooling protein + ligand matrices (val + test)...")
+            x_fit, y_fit = _extract_features(val_loader)
+            x_eval, y_eval = _extract_features(test_loader)
 
         # Sanitize features
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            arr_sanitized, bad = sanitize_features(arr)
+            bad = np.isnan(arr).sum() + np.isinf(arr).sum()
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = arr_sanitized
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(
-            x_fit,
-            y_fit,
-            x_eval,
-            y_eval,
-            seed,
-            protein_dim=protein_dim,
-            ligand_weight=self._config.ligand_weight,
-        )
+        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

@@ -5,9 +5,9 @@ Uses Morgan fingerprints (radius 2, 1024 bits) as compound descriptors.
 ensuring the only independent variable across levels is the molecular
 representation strategy.
 
-Training protocol (consistent with active levels):
-    - In ``train`` mode: fit on train, evaluate on val.
-    - In ``test`` mode: fit on val, evaluate on test.
+Training protocol (consistent with Levels 2–4):
+  - Classifiers trained on **validation-split** features.
+  - Evaluation on the hold-out **test** split.
   - Classifiers provided by ``benchmark.classifiers`` (same as all levels).
 
 This eliminates the threshold-optimisation advantage that the legacy
@@ -29,7 +29,6 @@ from benchmark.classifiers import train_knn_mlp
 from benchmark.config import PCHEMBL_ACTIVITY_THRESHOLD, BenchmarkConfig
 from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import read_split_file
-from benchmark.levels.protocol import sanitize_features, select_fit_eval
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +129,7 @@ class Level1Runner(BaseLevelRunner):
 
         tqdm.write(f"  Computing Level 1a fingerprint features (seed {seed})...")
 
-        train_df, val_df, test_df = self._load_splits()
-        split_selection = select_fit_eval(self.mode, train_df, val_df, test_df)
-        fit_df = split_selection.fit
-        eval_df = split_selection.eval
-
-        tqdm.write(
-            f"  Computing fingerprints ({split_selection.fit_name} + {split_selection.eval_name})..."
-        )
+        fit_df, eval_df = self._load_splits()
 
         x_fit, y_fit = _prepare_fp_features(fit_df)
         x_eval, y_eval = _prepare_fp_features(eval_df)
@@ -148,10 +140,10 @@ class Level1Runner(BaseLevelRunner):
 
         # Sanitise
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
-            arr_sanitized, bad = sanitize_features(arr)
+            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
-                arr[:] = arr_sanitized
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
         models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
@@ -173,28 +165,38 @@ class Level1Runner(BaseLevelRunner):
     # Split loading
     # ------------------------------------------------------------------
 
-    def _load_splits(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Load train/val/test DataFrames from universal scaffold splits."""
+    def _load_splits(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Load fit / eval DataFrames from universal scaffold splits.
+
+        In **train** mode (default): fit=train (80%), eval=val (10%).
+        Test is never loaded.
+
+        In **test** mode: fit=val (10%), eval=test (10%).
+        """
         scaffold_dir = self.scaffold_split_dir
         source_filter = self._config.dataset_source_filter
 
-        train_df = read_split_file(
-            os.path.join(scaffold_dir, "scenarios/Sc", "universal_train.tsv")
-        )
-        val_df = read_split_file(
-            os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
-        )
-        test_df = read_split_file(
-            os.path.join(scaffold_dir, "universal_test.tsv")
-        )
+        if self.mode == "train":
+            fit_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_train.tsv")
+            )
+            eval_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
+            )
+        else:  # test
+            fit_df = read_split_file(
+                os.path.join(scaffold_dir, "scenarios/Sc", "universal_val.tsv")
+            )
+            eval_df = read_split_file(
+                os.path.join(scaffold_dir, "universal_test.tsv")
+            )
 
         if source_filter is not None:
-            train_df = train_df[train_df["dataset_source"] == source_filter].reset_index(drop=True)
-            val_df = val_df[val_df["dataset_source"] == source_filter].reset_index(drop=True)
-            test_df = test_df[test_df["dataset_source"] == source_filter].reset_index(drop=True)
+            fit_df = fit_df[fit_df["dataset_source"] == source_filter].reset_index(drop=True)
+            eval_df = eval_df[eval_df["dataset_source"] == source_filter].reset_index(drop=True)
 
-        for df in (train_df, val_df, test_df):
+        for df in (fit_df, eval_df):
             if "label" not in df.columns:
                 df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
 
-        return train_df, val_df, test_df
+        return fit_df, eval_df

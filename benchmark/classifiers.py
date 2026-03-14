@@ -3,38 +3,30 @@
 Every level in the benchmark must use the **exact same** classifier
 configuration so that the only independent variable across levels is
 the molecular representation.  This module provides a single
-``train_knn_mlp`` function that **all active levels** call.
+``train_knn_mlp`` function that **all four levels** call.
 
-Classifier specifications
--------------------------
+Classifier specifications:
+
  * **KNN** — FAISS inner-product index on L2-normalised features
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
- * **MLP** — classic ``sklearn.neural_network.MLPClassifier`` with
-     fixed architecture and hyperparameters shared by all active levels:
-         ``hidden_layer_sizes=(1024, 512, 256)``, ReLU, Adam,
-         ``alpha=3e-4``, ``learning_rate_init=1e-3``,
-         ``max_iter=2500``, ``early_stopping=False``.
-
- * **Decision threshold** — adaptive per seed/model.
-     A calibration split is carved from the fit partition; threshold is
-     chosen by maximizing MCC on that calibration subset, then frozen and
-     applied to the evaluation split.
-
+ * **MLP** — ``sklearn.neural_network.MLPClassifier`` with two hidden
+   layers of (512, 256) units, ReLU activation, Adam solver, adaptive
+   learning rate, α = 1 × 10⁻³, max 1000 iterations.  Early stopping
+   is **enabled** (10 % held-out, patience = 20) to prevent overfitting
+   and mirror the implicit regularisation of KNN distance-weighted voting.
  * Both classifiers receive features after ``StandardScaler``.
 
-Evaluation protocol
--------------------
- * All levels pass **fit** features as ``x_train`` / ``y_train`` and
-     **evaluation** features as ``x_test`` / ``y_test``.
- * Split selection is mode-dependent in each level runner:
-     train mode uses train→val; test mode uses val→test.
- * Threshold adaptation never peeks at evaluation labels.
+Evaluation protocol:
+
+ * All levels pass **validation-split** features as ``x_train`` / ``y_train``
+   and **test-split** features as ``x_test`` / ``y_test``.
+ * This eliminates train-set optimism for levels with learned feature
+   extractors (Levels 3 and 4) and ensures a consistent protocol across
+   all four levels.
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -48,77 +40,37 @@ from sklearn.metrics import (
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-
-logger = logging.getLogger(__name__)
-
-DEFAULT_THRESHOLD = 0.5
-CALIBRATION_FRACTION = 0.1
-
-# Canonical MLP hyperparameters shared across all active levels.
-MLP_HIDDEN_LAYER_SIZES = (1024, 512, 256)
-MLP_ALPHA = 3e-4
-MLP_LEARNING_RATE_INIT = 1e-3
-MLP_MAX_ITER = 2500
-MLP_EARLY_STOPPING = False
-MLP_VALIDATION_FRACTION = 0.10
-MLP_N_ITER_NO_CHANGE = 60
-MLP_BATCH_SIZE = 64
-
-
-def _store_full_details() -> bool:
-    """Whether to store per-sample arrays in result JSON details."""
-    raw = os.getenv("BENCHMARK_STORE_FULL_DETAILS", "0").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _resolve_knn_n_jobs() -> int:
-    """Resolve KNN CPU parallelism to avoid oversubscription.
-
-    Environment override:
-      BENCHMARK_KNN_N_JOBS=<int>
-
-    If seed-level parallelism is active and no explicit override exists,
-    defaults to 1 thread per seed worker.
-    """
-    env = os.getenv("BENCHMARK_KNN_N_JOBS")
-    if env is not None:
-        try:
-            return int(env)
-        except ValueError:
-            pass
-
-    seed_workers_env = os.getenv("BENCHMARK_SEED_WORKERS")
-    if seed_workers_env is not None:
-        try:
-            if int(seed_workers_env) > 1:
-                return 1
-        except ValueError:
-            pass
-
-    return -1
 
 
 # ------------------------------------------------------------------ #
 # FAISS-based KNN (matches split_comparison_analysis.faiss_knn_predict)
 # ------------------------------------------------------------------ #
 
-def _faiss_knn_proba(
+def _faiss_knn_predict(
     x_train: np.ndarray,
     y_train: np.ndarray,
     x_test: np.ndarray,
     k: int = 5,
-) -> np.ndarray:
-    """Return positive-class probabilities from FAISS/scikit KNN.
+) -> Tuple[np.ndarray, np.ndarray]:
+    """KNN classification via FAISS cosine similarity with distance-weighted voting.
 
     Identical to ``split_comparison_analysis.faiss_knn_predict``:
     L2-normalise → inner-product search → distance-weighted voting.
+
+    Returns
+    -------
+    predictions : np.ndarray
+        Predicted class labels.
+    probabilities : np.ndarray
+        Probability estimate for the positive class (class = 1).
     """
     try:
         import faiss  # type: ignore[import-untyped]
-    except ImportError:
-        logger.info("FAISS not available — falling back to sklearn KNeighborsClassifier")
-        return _sklearn_knn_proba(x_train, y_train, x_test, k=k)
+    except ImportError as exc:
+        raise ImportError(
+            "FAISS is required for KNN classification. "
+            "Install it with: pip install faiss-cpu"
+        ) from exc
 
     x_train_f32 = np.ascontiguousarray(x_train, dtype=np.float32)
     x_test_f32 = np.ascontiguousarray(x_test, dtype=np.float32)
@@ -141,101 +93,14 @@ def _faiss_knn_proba(
         mask = neighbor_labels == cls
         class_scores[:, ci] = np.where(mask, weights, 0.0).sum(axis=1)
 
+    best_class_idx = class_scores.argmax(axis=1)
+    predictions = classes[best_class_idx]
+
     # Probability for positive class
-    if len(classes) == 1:
-        return np.ones(n_test, dtype=np.float64) if int(classes[0]) == 1 else np.zeros(n_test, dtype=np.float64)
-
     row_sums = np.maximum(class_scores.sum(axis=1, keepdims=True), 1e-12)
-    pos_idx = np.where(classes == 1)[0]
-    if len(pos_idx) == 0:
-        return np.zeros(n_test, dtype=np.float64)
+    probabilities = class_scores[:, -1] / row_sums.ravel()
 
-    return class_scores[:, int(pos_idx[0])] / row_sums.ravel()
-
-
-def _sklearn_knn_proba(
-    x_train: np.ndarray,
-    y_train: np.ndarray,
-    x_test: np.ndarray,
-    k: int = 5,
-) -> np.ndarray:
-    """Fallback KNN using sklearn when FAISS is not installed.
-
-    Uses cosine metric with distance-weighted voting to match
-    the FAISS implementation behaviour.
-    """
-    from sklearn.neighbors import KNeighborsClassifier
-
-    knn_n_jobs = _resolve_knn_n_jobs()
-    knn = KNeighborsClassifier(
-        n_neighbors=k,
-        metric="cosine",
-        weights="distance",
-        n_jobs=knn_n_jobs,
-    )
-    knn.fit(x_train, y_train)
-    proba_matrix = knn.predict_proba(x_test)
-    class_labels = knn.classes_
-    pos_idx = np.where(class_labels == 1)[0]
-    if len(pos_idx) == 0:
-        return np.zeros(len(x_test), dtype=np.float64)
-    return proba_matrix[:, int(pos_idx[0])]
-
-
-def _optimize_threshold_mcc(
-    y_true: np.ndarray,
-    y_proba: np.ndarray,
-) -> float:
-    """Select threshold that maximizes MCC on calibration labels."""
-    if len(y_true) == 0 or len(np.unique(y_true)) < 2:
-        return DEFAULT_THRESHOLD
-
-    clipped = np.clip(y_proba, 0.0, 1.0)
-    if len(clipped) <= 200:
-        candidates = np.unique(clipped)
-    else:
-        candidates = np.linspace(0.01, 0.99, 99)
-
-    candidates = np.unique(np.append(candidates, DEFAULT_THRESHOLD))
-
-    best_thr = DEFAULT_THRESHOLD
-    best_mcc = -np.inf
-
-    for thr in candidates:
-        pred = (clipped >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        is_better = mcc > best_mcc
-        is_tie_better = np.isclose(mcc, best_mcc) and abs(thr - DEFAULT_THRESHOLD) < abs(best_thr - DEFAULT_THRESHOLD)
-        if is_better or is_tie_better:
-            best_mcc = mcc
-            best_thr = float(thr)
-
-    return best_thr
-
-
-def _split_fit_for_calibration(
-    x_fit: np.ndarray,
-    y_fit: np.ndarray,
-    seed: int,
-    fraction: float = CALIBRATION_FRACTION,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Split fit data into model-train and threshold-calibration partitions."""
-    # Avoid starving model training when fit partition is already small.
-    if len(x_fit) < 120 or len(np.unique(y_fit)) < 2:
-        return x_fit, y_fit, x_fit, y_fit
-
-    x_model, x_cal, y_model, y_cal = train_test_split(
-        x_fit,
-        y_fit,
-        test_size=fraction,
-        random_state=seed,
-        stratify=y_fit,
-    )
-
-    if len(np.unique(y_model)) < 2 or len(np.unique(y_cal)) < 2:
-        return x_fit, y_fit, x_fit, y_fit
-
-    return x_model, y_model, x_cal, y_cal
+    return predictions, probabilities
 
 
 # ------------------------------------------------------------------ #
@@ -260,39 +125,6 @@ def _compute_metrics(
     }
 
 
-def _apply_ligand_block_weight(
-    x: np.ndarray,
-    protein_dim: int | None,
-    ligand_weight: float,
-) -> np.ndarray:
-    """Apply relative ligand block weight on already-scaled features.
-
-    Parameters
-    ----------
-    x : ndarray [n_samples, n_features]
-        Feature matrix after StandardScaler.
-    protein_dim : int | None
-        Number of leading protein features. Remaining columns are ligand features.
-        If ``None`` or invalid, no weighting is applied.
-    ligand_weight : float
-        Multiplicative factor for ligand block.
-    """
-    if ligand_weight == 1.0 or protein_dim is None:
-        return x
-
-    if protein_dim <= 0 or protein_dim >= x.shape[1]:
-        logger.warning(
-            "Skipping ligand weighting: invalid protein_dim=%s for n_features=%s",
-            protein_dim,
-            x.shape[1],
-        )
-        return x
-
-    xw = np.asarray(x, dtype=np.float32).copy()
-    xw[:, protein_dim:] *= float(ligand_weight)
-    return xw
-
-
 # ------------------------------------------------------------------ #
 # Public API
 # ------------------------------------------------------------------ #
@@ -303,21 +135,21 @@ def train_knn_mlp(
     x_test: np.ndarray,
     y_test: np.ndarray,
     seed: int,
-    protein_dim: int | None = None,
-    ligand_weight: float = 1.0,
 ) -> Dict[str, Dict[str, float]]:
     """Train canonical KNN and MLP classifiers and return metric dicts.
 
     **Both classifiers use the exact same hyperparameters** across all
-    active benchmark levels so that the comparison is scientifically valid.
+    four benchmark levels so that the comparison is scientifically valid.
 
     Parameters
     ----------
     x_train, y_train : array-like
-        Features and labels for classifier fitting.
-        The concrete split depends on runner mode.
+        Features and labels for classifier training.  In the benchmark
+        protocol these come from the **validation** split — not the
+        training split — to avoid train-set optimism when the upstream
+        feature extractor was trained on the training data.
     x_test, y_test : array-like
-        Features and labels for evaluation.
+        Hold-out test features and labels for evaluation.
     seed : int
         Random seed for MLP reproducibility.
 
@@ -331,127 +163,32 @@ def train_knn_mlp(
     y_train = np.asarray(y_train)
     y_test = np.asarray(y_test)
 
-    x_model, y_model, x_cal, y_cal = _split_fit_for_calibration(
-        x_train, y_train, seed=seed,
-    )
-
-    # StandardScaler fitted on model-train partition only.
+    # StandardScaler — same as split_comparison_analysis
     scaler = StandardScaler()
-    x_model_sc = scaler.fit_transform(x_model).astype(np.float32)
-    x_cal_sc = scaler.transform(x_cal).astype(np.float32)
+    x_train_sc = scaler.fit_transform(x_train).astype(np.float32)
     x_test_sc = scaler.transform(x_test).astype(np.float32)
 
-    # Apply ligand block weighting after feature standardization.
-    x_model_sc = _apply_ligand_block_weight(x_model_sc, protein_dim, ligand_weight)
-    x_cal_sc = _apply_ligand_block_weight(x_cal_sc, protein_dim, ligand_weight)
-    x_test_sc = _apply_ligand_block_weight(x_test_sc, protein_dim, ligand_weight)
-
     # ---------- KNN (FAISS, k=5, cosine, distance-weighted) ----------
-    knn_cal_proba = _faiss_knn_proba(x_model_sc, y_model, x_cal_sc, k=5)
-    knn_threshold = _optimize_threshold_mcc(y_cal, knn_cal_proba)
-    knn_proba = _faiss_knn_proba(x_model_sc, y_model, x_test_sc, k=5)
-    knn_pred = (knn_proba >= knn_threshold).astype(int)
+    knn_pred, knn_proba = _faiss_knn_predict(x_train_sc, y_train, x_test_sc, k=5)
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
-    knn_metrics["threshold"] = float(knn_threshold)
-    knn_metrics["details"] = {
-        "fit": {
-            "n_rows": int(len(y_train)),
-            "protein_dim": int(protein_dim) if protein_dim is not None else None,
-            "ligand_weight": float(ligand_weight),
-        },
-        "model_train": {
-            "n_rows": int(len(y_model)),
-            "class_balance": float(np.mean(y_model)) if len(y_model) > 0 else 0.0,
-        },
-        "calibration": {
-            "n_rows": int(len(y_cal)),
-        },
-        "evaluation": {
-            "n_rows": int(len(y_test)),
-        },
-    }
-    if _store_full_details():
-        knn_metrics["details"]["calibration"].update({
-            "y_true": y_cal.astype(int).tolist(),
-            "y_proba": np.asarray(knn_cal_proba, dtype=np.float64).tolist(),
-            "y_pred": (np.asarray(knn_cal_proba, dtype=np.float64) >= knn_threshold).astype(int).tolist(),
-        })
-        knn_metrics["details"]["evaluation"].update({
-            "y_true": y_test.astype(int).tolist(),
-            "y_proba": np.asarray(knn_proba, dtype=np.float64).tolist(),
-            "y_pred": knn_pred.astype(int).tolist(),
-        })
 
-    # ---------- MLP (deeper fixed architecture) -----------------------
-    mlp_arch = MLP_HIDDEN_LAYER_SIZES
+    # ---------- MLP (two hidden layers, early stopping, adaptive LR) --
     mlp = MLPClassifier(
-        hidden_layer_sizes=mlp_arch,
+        hidden_layer_sizes=(512, 256),
         activation="relu",
         solver="adam",
-        alpha=MLP_ALPHA,
-        learning_rate_init=MLP_LEARNING_RATE_INIT,
-        max_iter=MLP_MAX_ITER,
-        early_stopping=MLP_EARLY_STOPPING,
-        validation_fraction=MLP_VALIDATION_FRACTION,
-        n_iter_no_change=MLP_N_ITER_NO_CHANGE,
-        batch_size=MLP_BATCH_SIZE,
+        alpha=1e-3,
+        learning_rate="adaptive",
+        learning_rate_init=1e-3,
+        max_iter=1000,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=20,
         random_state=seed,
     )
-    mlp.fit(x_model_sc, y_model)
-    mlp_train_proba = mlp.predict_proba(x_model_sc)[:, 1]
-    mlp_train_pred = (mlp_train_proba >= DEFAULT_THRESHOLD).astype(int)
-    mlp_cal_proba = mlp.predict_proba(x_cal_sc)[:, 1]
-    mlp_threshold = _optimize_threshold_mcc(y_cal, mlp_cal_proba)
+    mlp.fit(x_train_sc, y_train)
+    mlp_pred = mlp.predict(x_test_sc)
     mlp_proba = mlp.predict_proba(x_test_sc)[:, 1]
-    mlp_pred = (mlp_proba >= mlp_threshold).astype(int)
     mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
-    mlp_metrics["threshold"] = float(mlp_threshold)
-    best_val_score_raw = getattr(mlp, "best_validation_score_", None)
-    best_val_score = (
-        float(best_val_score_raw)
-        if isinstance(best_val_score_raw, (int, float))
-        else None
-    )
-
-    mlp_metrics["details"] = {
-        "fit": {
-            "n_rows": int(len(y_train)),
-            "protein_dim": int(protein_dim) if protein_dim is not None else None,
-            "ligand_weight": float(ligand_weight),
-            "mlp_architecture": list(mlp_arch),
-            "mlp_alpha": float(MLP_ALPHA),
-            "mlp_learning_rate_init": float(MLP_LEARNING_RATE_INIT),
-            "mlp_max_iter": int(MLP_MAX_ITER),
-            "mlp_early_stopping": bool(MLP_EARLY_STOPPING),
-        },
-        "model_train": {
-            "n_rows": int(len(y_model)),
-            "class_balance": float(np.mean(y_model)) if len(y_model) > 0 else 0.0,
-            "mcc_at_default_threshold": float(matthews_corrcoef(y_model, mlp_train_pred))
-            if len(np.unique(y_model)) > 1
-            else 0.0,
-            "final_loss": float(getattr(mlp, "loss_", np.nan)),
-            "n_iter": int(getattr(mlp, "n_iter_", 0)),
-            "hit_max_iter": bool(getattr(mlp, "n_iter_", 0) >= MLP_MAX_ITER),
-            "best_validation_score": best_val_score,
-        },
-        "calibration": {
-            "n_rows": int(len(y_cal)),
-        },
-        "evaluation": {
-            "n_rows": int(len(y_test)),
-        },
-    }
-    if _store_full_details():
-        mlp_metrics["details"]["calibration"].update({
-            "y_true": y_cal.astype(int).tolist(),
-            "y_proba": np.asarray(mlp_cal_proba, dtype=np.float64).tolist(),
-            "y_pred": (np.asarray(mlp_cal_proba, dtype=np.float64) >= mlp_threshold).astype(int).tolist(),
-        })
-        mlp_metrics["details"]["evaluation"].update({
-            "y_true": y_test.astype(int).tolist(),
-            "y_proba": np.asarray(mlp_proba, dtype=np.float64).tolist(),
-            "y_pred": mlp_pred.astype(int).tolist(),
-        })
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}

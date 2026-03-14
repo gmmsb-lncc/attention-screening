@@ -170,7 +170,7 @@ class Level6bRunner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=self._config.batch_size,
+            batch_size=64,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self._config.mode,
         )
