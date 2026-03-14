@@ -11,9 +11,9 @@ Classifier specifications
    (equivalent to cosine similarity), *k = 5*, distance-weighted voting.
  * **MLP** — classic ``sklearn.neural_network.MLPClassifier`` with
      fixed architecture and hyperparameters shared by all active levels:
-     ``hidden_layer_sizes=(1024, 512, 256)``, ReLU, Adam,
-     ``alpha=1e-3``, ``learning_rate_init=5e-4``,
-     ``max_iter=1200``, ``early_stopping=True``.
+         ``hidden_layer_sizes=(1024, 512, 256)``, ReLU, Adam,
+         ``alpha=3e-4``, ``learning_rate_init=1e-3``,
+         ``max_iter=2500``, ``early_stopping=False``.
 
  * **Decision threshold** — adaptive per seed/model.
      A calibration split is carved from the fit partition; threshold is
@@ -52,7 +52,17 @@ from sklearn.model_selection import train_test_split
 logger = logging.getLogger(__name__)
 
 DEFAULT_THRESHOLD = 0.5
-CALIBRATION_FRACTION = 0.2
+CALIBRATION_FRACTION = 0.1
+
+# Canonical MLP hyperparameters shared across all active levels.
+MLP_HIDDEN_LAYER_SIZES = (1024, 512, 256)
+MLP_ALPHA = 3e-4
+MLP_LEARNING_RATE_INIT = 1e-3
+MLP_MAX_ITER = 2500
+MLP_EARLY_STOPPING = False
+MLP_VALIDATION_FRACTION = 0.10
+MLP_N_ITER_NO_CHANGE = 60
+MLP_BATCH_SIZE = 64
 
 
 # ------------------------------------------------------------------ #
@@ -175,7 +185,8 @@ def _split_fit_for_calibration(
     fraction: float = CALIBRATION_FRACTION,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Split fit data into model-train and threshold-calibration partitions."""
-    if len(x_fit) < 50 or len(np.unique(y_fit)) < 2:
+    # Avoid starving model training when fit partition is already small.
+    if len(x_fit) < 120 or len(np.unique(y_fit)) < 2:
         return x_fit, y_fit, x_fit, y_fit
 
     x_model, x_cal, y_model, y_cal = train_test_split(
@@ -332,21 +343,23 @@ def train_knn_mlp(
     }
 
     # ---------- MLP (deeper fixed architecture) -----------------------
-    mlp_arch = (1024, 512, 256)
+    mlp_arch = MLP_HIDDEN_LAYER_SIZES
     mlp = MLPClassifier(
         hidden_layer_sizes=mlp_arch,
         activation="relu",
         solver="adam",
-        alpha=1e-3,
-        learning_rate_init=5e-4,
-        max_iter=1200,
-        early_stopping=True,
-        validation_fraction=0.15,
-        n_iter_no_change=30,
-        batch_size=64,
+        alpha=MLP_ALPHA,
+        learning_rate_init=MLP_LEARNING_RATE_INIT,
+        max_iter=MLP_MAX_ITER,
+        early_stopping=MLP_EARLY_STOPPING,
+        validation_fraction=MLP_VALIDATION_FRACTION,
+        n_iter_no_change=MLP_N_ITER_NO_CHANGE,
+        batch_size=MLP_BATCH_SIZE,
         random_state=seed,
     )
     mlp.fit(x_model_sc, y_model)
+    mlp_train_proba = mlp.predict_proba(x_model_sc)[:, 1]
+    mlp_train_pred = (mlp_train_proba >= DEFAULT_THRESHOLD).astype(int)
     mlp_cal_proba = mlp.predict_proba(x_cal_sc)[:, 1]
     mlp_threshold = _optimize_threshold_mcc(y_cal, mlp_cal_proba)
     mlp_proba = mlp.predict_proba(x_test_sc)[:, 1]
@@ -359,10 +372,23 @@ def train_knn_mlp(
             "protein_dim": int(protein_dim) if protein_dim is not None else None,
             "ligand_weight": float(ligand_weight),
             "mlp_architecture": list(mlp_arch),
+            "mlp_alpha": float(MLP_ALPHA),
+            "mlp_learning_rate_init": float(MLP_LEARNING_RATE_INIT),
+            "mlp_max_iter": int(MLP_MAX_ITER),
+            "mlp_early_stopping": bool(MLP_EARLY_STOPPING),
         },
         "model_train": {
             "n_rows": int(len(y_model)),
             "class_balance": float(np.mean(y_model)) if len(y_model) > 0 else 0.0,
+            "mcc_at_default_threshold": float(matthews_corrcoef(y_model, mlp_train_pred))
+            if len(np.unique(y_model)) > 1
+            else 0.0,
+            "final_loss": float(getattr(mlp, "loss_", np.nan)),
+            "n_iter": int(getattr(mlp, "n_iter_", 0)),
+            "hit_max_iter": bool(getattr(mlp, "n_iter_", 0) >= MLP_MAX_ITER),
+            "best_validation_score": float(getattr(mlp, "best_validation_score_", np.nan))
+            if hasattr(mlp, "best_validation_score_")
+            else None,
         },
         "calibration": {
             "n_rows": int(len(y_cal)),
