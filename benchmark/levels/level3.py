@@ -44,6 +44,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import matthews_corrcoef
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -256,6 +258,7 @@ class _AttentionPool(nn.Module):
 def _train_attention_pooling(
     train_loader: DataLoader,
     val_loader: DataLoader,
+    downstream_fit_loader: DataLoader | None,
     protein_dim: int,
     hidden_dim: int = 256,
     num_heads: int = 8,
@@ -313,9 +316,11 @@ def _train_attention_pooling(
     best_val_loss = float("inf")
     best_val_mcc = -1.0
     best_selection_score = float("inf") if model_selection_metric == "val_loss" else -1.0
+    best_downstream_mcc = -1.0
     best_state = None
     best_aux_state = None
     wait = 0
+    eval_every = max(1, int(os.getenv("BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY", "10")))
 
     epoch_iter = tqdm(
         range(1, epochs + 1),
@@ -393,10 +398,32 @@ def _train_attention_pooling(
 
         thr_mcc, tuned_val_mcc = _best_mcc_threshold(targets.astype(int), probs)
 
+        downstream_mcc = -1.0
+        if model_selection_metric == "downstream_mcc":
+            should_eval_downstream = (epoch == 1) or (epoch % eval_every == 0)
+            if should_eval_downstream:
+                fit_loader = downstream_fit_loader if downstream_fit_loader is not None else train_loader
+                x_fit_ds, y_fit_ds = _extract_features(model, fit_loader, device)
+                x_val_ds, y_val_ds = _extract_features(model, val_loader, device)
+                downstream_mcc = _compute_downstream_mcc_proxy(
+                    x_fit=x_fit_ds,
+                    y_fit=y_fit_ds,
+                    x_val=x_val_ds,
+                    y_val=y_val_ds,
+                    seed=seed + epoch,
+                )
+            else:
+                downstream_mcc = best_downstream_mcc
+
         if model_selection_metric == "val_loss":
             current_score = avg_val
             improved = current_score < (best_selection_score - 1e-12)
             if (not improved) and abs(current_score - best_selection_score) <= 1e-12:
+                improved = tuned_val_mcc > best_val_mcc
+        elif model_selection_metric == "downstream_mcc":
+            current_score = downstream_mcc
+            improved = current_score > best_selection_score
+            if (not improved) and np.isclose(current_score, best_selection_score):
                 improved = tuned_val_mcc > best_val_mcc
         else:
             current_score = tuned_val_mcc
@@ -406,6 +433,8 @@ def _train_attention_pooling(
             best_selection_score = current_score
             best_val_loss = avg_val
             best_val_mcc = tuned_val_mcc
+            if model_selection_metric == "downstream_mcc":
+                best_downstream_mcc = downstream_mcc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             best_aux_state = {k: v.cpu().clone() for k, v in aux_head.state_dict().items()}
             wait = 0
@@ -415,6 +444,7 @@ def _train_attention_pooling(
                 tqdm.write(
                     f"    Early stopping at epoch {epoch} "
                     f"(val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, tuned_mcc={tuned_val_mcc:.4f}, "
+                    f"downstream_mcc={downstream_mcc:.4f}, "
                     f"best_sel={best_selection_score:.6f}, thr={thr_mcc:.3f})"
                 )
                 break
@@ -479,6 +509,41 @@ def _extract_features(
         all_labels.append(batch["label"].numpy())
 
     return np.concatenate(all_features), np.concatenate(all_labels)
+
+
+def _compute_downstream_mcc_proxy(
+    x_fit: np.ndarray,
+    y_fit: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    seed: int,
+) -> float:
+    """Estimate downstream MCC using a lightweight MLP on extracted features."""
+    if x_fit.size == 0 or x_val.size == 0 or len(np.unique(y_fit.astype(int))) < 2:
+        return -1.0
+
+    scaler = StandardScaler()
+    x_fit_sc = scaler.fit_transform(x_fit).astype(np.float32)
+    x_val_sc = scaler.transform(x_val).astype(np.float32)
+
+    mlp = MLPClassifier(
+        hidden_layer_sizes=(256, 128),
+        activation="relu",
+        solver="adam",
+        alpha=1e-4,
+        learning_rate="adaptive",
+        learning_rate_init=8e-4,
+        max_iter=700,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=30,
+        tol=1e-5,
+        random_state=seed,
+    )
+    mlp.fit(x_fit_sc, y_fit)
+    val_proba = mlp.predict_proba(x_val_sc)[:, 1]
+    _, val_mcc = _best_mcc_threshold(y_val.astype(int), val_proba)
+    return float(val_mcc)
 
 
 # ---------------------------------------------------------------------------
@@ -550,15 +615,25 @@ class Level3Runner(BaseLevelRunner):
 
         # Train projection + attention pooling
         tqdm.write("  Training projection + attention pooling...")
+        local_selection_metric = os.getenv(
+            "BENCHMARK_LEVEL3_SELECTION_METRIC",
+            self._config.model_selection_metric,
+        ).strip().lower()
+        if local_selection_metric not in {"val_loss", "mcc", "downstream_mcc"}:
+            raise ValueError(
+                "BENCHMARK_LEVEL3_SELECTION_METRIC must be one of: "
+                "val_loss, mcc, downstream_mcc"
+            )
         model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
+            downstream_fit_loader=feat_extract_loader,
             protein_dim=protein_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,
             seed=seed,
-            model_selection_metric=self._config.model_selection_metric,
+            model_selection_metric=local_selection_metric,
         )
 
         use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
@@ -714,15 +789,25 @@ class Level3aRunner(Level3Runner):
             model_train_loader = train_loader
 
         tqdm.write("  Training projection + attention pooling...")
+        local_selection_metric = os.getenv(
+            "BENCHMARK_LEVEL3_SELECTION_METRIC",
+            self._config.model_selection_metric,
+        ).strip().lower()
+        if local_selection_metric not in {"val_loss", "mcc", "downstream_mcc"}:
+            raise ValueError(
+                "BENCHMARK_LEVEL3_SELECTION_METRIC must be one of: "
+                "val_loss, mcc, downstream_mcc"
+            )
         model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
+            downstream_fit_loader=feat_extract_loader,
             protein_dim=protein_dim,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,
             seed=seed,
-            model_selection_metric=self._config.model_selection_metric,
+            model_selection_metric=local_selection_metric,
         )
 
         use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
