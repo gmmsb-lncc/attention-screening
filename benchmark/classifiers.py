@@ -160,7 +160,7 @@ def _split_fit_for_calibration(
     x: np.ndarray,
     y: np.ndarray,
     seed: int,
-    calibration_fraction: float = 0.2,
+    calibration_fraction: float = 0.25,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Create fit/calibration split for threshold and model selection."""
     y = np.asarray(y)
@@ -239,6 +239,34 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "n_iter_no_change": 120,
             "tol": 4e-6,
         },
+        # --- New candidates targeting ~512-dim representations ---
+        {
+            "hidden_layer_sizes": (768, 256),
+            "alpha": 5e-4,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 70,
+            "tol": 7e-6,
+        },
+        {
+            "hidden_layer_sizes": (384, 192, 96),
+            "alpha": 3e-4,
+            "learning_rate_init": 6e-4,
+            "early_stopping": True,
+            "max_iter": 2800,
+            "n_iter_no_change": 100,
+            "tol": 5e-6,
+        },
+        {
+            "hidden_layer_sizes": (512,),
+            "alpha": 1e-3,
+            "learning_rate_init": 1.5e-3,
+            "early_stopping": True,
+            "max_iter": 1800,
+            "n_iter_no_change": 50,
+            "tol": 1e-5,
+        },
     ]
 
 
@@ -263,7 +291,7 @@ def _fit_mlp_from_cfg(
         activation="relu",
         solver="adam",
         alpha=float(cfg["alpha"]),
-        learning_rate="constant",
+        learning_rate="adaptive",
         learning_rate_init=float(cfg["learning_rate_init"]),
         max_iter=int(cfg["max_iter"]),
         early_stopping=bool(cfg["early_stopping"]),
@@ -451,12 +479,41 @@ def _train_mlp_pipeline(
         x_eval=x_test_sc,
         seed=seed,
     )
-    mlp_pred = (mlp_proba >= best_thr).astype(int)
+
+    # --- Threshold refinement on full training set (OOF) ---
+    # Re-optimize threshold using OOF predictions from the ensemble on the
+    # full training data, which is more representative than the small
+    # calibration split used during model selection.
+    refined_thr = best_thr
+    use_oof_refinement = os.getenv(
+        "BENCHMARK_MLP_OOF_THRESHOLD", "1"
+    ).strip().lower() not in {"0", "false", "no"}
+    if use_oof_refinement and y_train.size >= 40 and len(np.unique(y_train.astype(int))) >= 2:
+        n_oof_folds = max(2, int(os.getenv("BENCHMARK_MLP_OOF_FOLDS", "5")))
+        min_class_count = int(np.bincount(y_train.astype(int)).min())
+        if min_class_count >= n_oof_folds:
+            skf_oof = StratifiedKFold(
+                n_splits=n_oof_folds, shuffle=True, random_state=seed,
+            )
+            oof_proba = np.zeros(y_train.shape[0], dtype=np.float64)
+            for oof_train_idx, oof_val_idx in skf_oof.split(x_train_sc, y_train):
+                oof_model = _fit_mlp_from_cfg(
+                    best_cfg, x_train_sc[oof_train_idx], y_train[oof_train_idx],
+                    random_state=seed,
+                )
+                oof_proba[oof_val_idx] = oof_model.predict_proba(
+                    x_train_sc[oof_val_idx],
+                )[:, 1]
+            refined_thr, _ = _optimize_threshold_mcc(y_train.astype(int), oof_proba)
+
+    mlp_pred = (mlp_proba >= refined_thr).astype(int)
     mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
-    mlp_metrics["decision_threshold"] = float(best_thr)
+    mlp_metrics["decision_threshold"] = float(refined_thr)
+    mlp_metrics["selection_threshold"] = float(best_thr)
     mlp_metrics["calibration_mcc"] = float(best_mcc)
     mlp_metrics["calibration_mcc_std"] = float(best_mcc_std)
     mlp_metrics["selection_source"] = selection_source
+    mlp_metrics["oof_threshold_refinement"] = use_oof_refinement
     mlp_metrics["mlp_selection"] = {
         "best_cfg": best_cfg,
         "best_thr": float(best_thr),
