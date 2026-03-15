@@ -42,6 +42,7 @@ from sklearn.metrics import (
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
+from tqdm import tqdm
 
 
 # ------------------------------------------------------------------ #
@@ -327,6 +328,15 @@ def _select_best_mlp_by_mcc(
     best_std = 1.0
     best_score = -999.0
 
+    total_search_steps = len(candidates) * n_restarts
+    search_bar = tqdm(
+        total=total_search_steps,
+        desc="    MLP search",
+        unit="fit",
+        leave=False,
+        dynamic_ncols=True,
+    )
+
     for cfg_idx, cfg in enumerate(candidates):
         mccs: list[float] = []
         thr_values: list[float] = []
@@ -354,6 +364,7 @@ def _select_best_mlp_by_mcc(
 
             thr_values.append(thr_single)
             mccs.append(mcc_single)
+            search_bar.update(1)
 
         # Robust aggregation across restarts.
         thr = float(np.median(np.array(thr_values)))
@@ -362,12 +373,15 @@ def _select_best_mlp_by_mcc(
 
         # Stability-aware objective: prioritize high MCC with low restart variance.
         score = mcc - (0.10 * mcc_std)
+        search_bar.set_postfix(mcc=f"{mcc:.3f}", std=f"{mcc_std:.3f}")
         if score > best_score:
             best_score = score
             best_cfg = cfg
             best_thr = thr
             best_mcc = float(mcc)
             best_std = mcc_std
+
+    search_bar.close()
 
     return best_cfg, best_thr, best_mcc, best_std
 
@@ -383,7 +397,14 @@ def _fit_mlp_ensemble_predict(
     n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
     probs: list[np.ndarray] = []
 
-    for member in range(n_members):
+    ensemble_iter = tqdm(
+        range(n_members),
+        desc="    MLP ensemble",
+        unit="model",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    for member in ensemble_iter:
         rs = seed + (member * 53)
         model = _fit_mlp_from_cfg(cfg, x_train, y_train, random_state=rs)
         probs.append(model.predict_proba(x_eval)[:, 1])
