@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# run_benchmark.sh — Automated train/test benchmark for Levels 2 and 3
+# run_benchmark.sh — Automated train/test benchmark for Levels 3 and 3a
 #
 # Usage:
 #   bash run_benchmark.sh
@@ -21,6 +21,10 @@ EPOCHS="${EPOCHS:-500}"
 MODEL_SELECTION_METRIC="${MODEL_SELECTION_METRIC:-mcc}"
 BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-downstream_mcc}"
 BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY="${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY:-10}"
+FOCUS_MODEL="${FOCUS_MODEL:-level3a_attnpool_mlp}"
+TARGET_TEST_MCC="${TARGET_TEST_MCC:-0.6}"
+MAX_TEST_MCC_STD="${MAX_TEST_MCC_STD:-0.08}"
+BENCHMARK_ENFORCE_RIGOR="${BENCHMARK_ENFORCE_RIGOR:-1}"
 
 # Strong MCC profile (fast to adopt, no code changes required).
 BENCHMARK_MLP_USE_CV="${BENCHMARK_MLP_USE_CV:-1}"
@@ -66,8 +70,16 @@ echo " MLP tuning: cv=${BENCHMARK_MLP_USE_CV}, folds=${BENCHMARK_MLP_FOLDS}, cal
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
 echo " Level3 checkpoint selection: ${BENCHMARK_LEVEL3_SELECTION_METRIC} (eval_every=${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY})"
 echo " Rigor: require_train_selection=${BENCHMARK_REQUIRE_TRAIN_SELECTION}, strict_completeness=${BENCHMARK_STRICT_LEVEL_COMPLETENESS}"
+echo " Acceptance gate: focus_model=${FOCUS_MODEL}, target_test_mcc>=${TARGET_TEST_MCC}, max_test_mcc_std<=${MAX_TEST_MCC_STD}"
 echo " Output root: ${OUTPUT_ROOT}"
 echo "============================================================"
+
+if [[ "${BENCHMARK_ENFORCE_RIGOR}" == "1" ]]; then
+    if [[ "${BENCHMARK_REQUIRE_TRAIN_SELECTION}" != "1" || "${BENCHMARK_STRICT_LEVEL_COMPLETENESS}" != "1" ]]; then
+        echo "ERROR: BENCHMARK_ENFORCE_RIGOR=1 requires BENCHMARK_REQUIRE_TRAIN_SELECTION=1 and BENCHMARK_STRICT_LEVEL_COMPLETENESS=1"
+        exit 2
+    fi
+fi
 
 echo ""
 echo "============================================================"
@@ -85,7 +97,11 @@ echo ""
 echo "============================================================"
 echo " MCC summary from train/test benchmark_comparison.json"
 echo "============================================================"
-OUTPUT_ROOT_ENV="${OUTPUT_ROOT}" python - <<'PY'
+OUTPUT_ROOT_ENV="${OUTPUT_ROOT}" \
+FOCUS_MODEL_ENV="${FOCUS_MODEL}" \
+TARGET_TEST_MCC_ENV="${TARGET_TEST_MCC}" \
+MAX_TEST_MCC_STD_ENV="${MAX_TEST_MCC_STD}" \
+python - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -106,6 +122,13 @@ paths = {
 print(f"{'phase':>6}  {'model':<20} {'MCC':>8} {'MCC_std':>8}")
 print("-" * 52)
 
+focus_model = os.environ["FOCUS_MODEL_ENV"]
+target_test_mcc = float(os.environ["TARGET_TEST_MCC_ENV"])
+max_test_mcc_std = float(os.environ["MAX_TEST_MCC_STD_ENV"])
+
+test_focus_mcc = None
+test_focus_std = None
+
 for phase, path in paths.items():
     if not path.exists():
         print(f"{phase:>6}  {'(missing benchmark_comparison.json)':<20}")
@@ -125,13 +148,51 @@ for phase, path in paths.items():
         mcc_txt = f"{mcc:.4f}" if isinstance(mcc, (float, int)) else "N/A"
         std_txt = f"{mcc_std:.4f}" if isinstance(mcc_std, (float, int)) else "N/A"
         print(f"{phase:>6}  {model:<20} {mcc_txt:>8} {std_txt:>8}")
+        if phase == "test" and model == focus_model:
+            test_focus_mcc = mcc if isinstance(mcc, (float, int)) else None
+            test_focus_std = mcc_std if isinstance(mcc_std, (float, int)) else None
 
     if missing_in_phase:
         print(f"{phase:>6}  missing_models: {missing_in_phase}")
         print(f"{phase:>6}  available_keys: {sorted(results.keys())[:12]}")
 
 print("")
-print("Focus model: level3a_attnpool_mlp (primary MCC target).")
+print(f"Focus model: {focus_model} (primary MCC target).")
+
+gate_ok = True
+if test_focus_mcc is None:
+    gate_ok = False
+    print(f"GATE FAIL: Missing test MCC for focus model '{focus_model}'.")
+else:
+    if test_focus_mcc < target_test_mcc:
+        gate_ok = False
+        print(
+            f"GATE FAIL: test MCC for {focus_model} is {test_focus_mcc:.4f} "
+            f"(< target {target_test_mcc:.4f})."
+        )
+    else:
+        print(
+            f"GATE PASS: test MCC for {focus_model} is {test_focus_mcc:.4f} "
+            f"(>= target {target_test_mcc:.4f})."
+        )
+
+if test_focus_std is None:
+    gate_ok = False
+    print(f"GATE FAIL: Missing test MCC std for focus model '{focus_model}'.")
+elif test_focus_std > max_test_mcc_std:
+    gate_ok = False
+    print(
+        f"GATE FAIL: test MCC std for {focus_model} is {test_focus_std:.4f} "
+        f"(> max {max_test_mcc_std:.4f})."
+    )
+else:
+    print(
+        f"GATE PASS: test MCC std for {focus_model} is {test_focus_std:.4f} "
+        f"(<= max {max_test_mcc_std:.4f})."
+    )
+
+if not gate_ok:
+    raise SystemExit(2)
 PY
 
 echo ""

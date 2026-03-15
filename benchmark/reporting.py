@@ -10,6 +10,8 @@ import os
 from datetime import datetime
 from typing import Dict, List
 
+import numpy as np
+
 from benchmark.config import (
     LEVEL_LABELS,
     METRICS_ORDER,
@@ -116,6 +118,9 @@ def save_benchmark_json(
                 "BENCHMARK_MLP_CAL_RESTARTS": os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3"),
                 "BENCHMARK_MLP_ENSEMBLE": os.getenv("BENCHMARK_MLP_ENSEMBLE", "5"),
                 "BENCHMARK_MLP_OVERSAMPLE": os.getenv("BENCHMARK_MLP_OVERSAMPLE", "1"),
+                "BENCHMARK_LEVEL3_SELECTION_METRIC": os.getenv("BENCHMARK_LEVEL3_SELECTION_METRIC", ""),
+                "BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY": os.getenv("BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY", ""),
+                "BENCHMARK_LEVEL3_USE_AUX_CHANNEL": os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", ""),
             },
         },
         "results": {},
@@ -129,6 +134,20 @@ def save_benchmark_json(
             entry[metric] = round(val, 6) if val is not None else None
             std = row.get(f"{metric}_std")
             entry[f"{metric}_std"] = round(std, 6) if std is not None else None
+
+        seed_results = row.get("seed_results")
+        if isinstance(seed_results, dict):
+            mcc_values = []
+            for seed_payload in seed_results.values():
+                if isinstance(seed_payload, dict):
+                    mcc = seed_payload.get("mcc")
+                    if isinstance(mcc, (int, float)):
+                        mcc_values.append(float(mcc))
+            if len(mcc_values) >= 2:
+                low, high = _bootstrap_ci95(mcc_values)
+                entry["mcc_ci95_low"] = round(low, 6)
+                entry["mcc_ci95_high"] = round(high, 6)
+                entry["mcc_n_seeds"] = len(mcc_values)
         output["results"][model_key] = entry
 
     output_dir = config.resolved_output_dir
@@ -140,3 +159,21 @@ def save_benchmark_json(
 
     print(f"\nBenchmark JSON saved: {path}")
     return path
+
+
+def _bootstrap_ci95(values: List[float], n_boot: int = 2000) -> tuple[float, float]:
+    """Percentile bootstrap 95% CI for the mean."""
+    arr = np.asarray(values, dtype=float)
+    if arr.size < 2:
+        v = float(arr.mean()) if arr.size == 1 else 0.0
+        return v, v
+
+    rng = np.random.default_rng(42)
+    means = np.empty(n_boot, dtype=float)
+    n = arr.size
+    for i in range(n_boot):
+        sample = rng.choice(arr, size=n, replace=True)
+        means[i] = float(sample.mean())
+    low = float(np.percentile(means, 2.5))
+    high = float(np.percentile(means, 97.5))
+    return low, high

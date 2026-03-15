@@ -118,6 +118,14 @@ def aggregate_benchmark_metrics(
             for metric in METRICS_ORDER:
                 row[metric] = extract_metric(sc, model_key, metric)
                 row[f"{metric}_std"] = extract_metric_std(sc, model_key, metric)
+            model_block = sc.get(model_key, {}) if isinstance(sc, dict) else {}
+            if isinstance(model_block, dict):
+                seed_results = model_block.get("seed_results")
+                if isinstance(seed_results, dict):
+                    row["seed_results"] = seed_results
+                n_seeds = model_block.get("n_seeds")
+                if isinstance(n_seeds, int):
+                    row["n_seeds"] = float(n_seeds)
             aggregated[label_key] = row
 
     return aggregated
