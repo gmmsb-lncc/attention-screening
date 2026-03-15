@@ -781,11 +781,19 @@ class Level3aRunner(Level3Runner):
         )
 
         feat_extract_loader = None
-        if self.mode == "train":
+        use_full_train_features = os.getenv(
+            "BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES", "1"
+        ).strip().lower() not in {"0", "false", "no"}
+
+        if self.mode == "train" and not use_full_train_features:
+            # Conservative: split train 80/20 to avoid train-set optimism.
             model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
                 train_loader, seed=seed,
             )
         else:
+            # Transfer learning mode: attention pooling learns a latent-space
+            # projection (not classification), so extracting features from the
+            # same data is standard practice.  Val/test remain unseen.
             model_train_loader = train_loader
 
         tqdm.write("  Training projection + attention pooling...")
@@ -818,12 +826,14 @@ class Level3aRunner(Level3Runner):
 
         device = next(model.parameters()).device
         if self.mode == "train":
-            tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
+            fit_loader = train_loader if use_full_train_features else feat_extract_loader
+            fit_desc = "full train" if use_full_train_features else "held-out train"
+            tqdm.write(f"  Extracting attention-pooled features ({fit_desc} + val)...")
             x_fit, y_fit = _extract_features(
                 model,
-                feat_extract_loader,
+                fit_loader,
                 device,
-                desc="    Feature extraction (fit)",
+                desc=f"    Feature extraction (fit — {fit_desc})",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
             )
