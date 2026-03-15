@@ -275,8 +275,16 @@ def _fit_mlp_from_cfg(
     x_fit: np.ndarray,
     y_fit: np.ndarray,
     random_state: int,
+    final_refit: bool = False,
 ) -> MLPClassifier:
-    """Instantiate and fit an MLP from a candidate config."""
+    """Instantiate and fit an MLP from a candidate config.
+
+    When *final_refit* is True, early stopping is disabled so the model
+    trains on 100% of the data for the full ``max_iter`` budget.  This
+    mirrors scikit-learn's ``GridSearchCV.refit`` behaviour: model
+    selection uses early stopping (CV phase), but the final model is
+    trained to full convergence.
+    """
     x_fit_use, y_fit_use = x_fit, y_fit
     use_oversample = os.getenv("BENCHMARK_MLP_OVERSAMPLE", "1").strip().lower() not in {
         "0",
@@ -286,6 +294,8 @@ def _fit_mlp_from_cfg(
     if use_oversample:
         x_fit_use, y_fit_use = _oversample_minority_binary(x_fit, y_fit, random_state)
 
+    use_early_stopping = bool(cfg["early_stopping"]) and (not final_refit)
+
     mlp = MLPClassifier(
         hidden_layer_sizes=cfg["hidden_layer_sizes"],
         activation="relu",
@@ -294,8 +304,8 @@ def _fit_mlp_from_cfg(
         learning_rate="adaptive",
         learning_rate_init=float(cfg["learning_rate_init"]),
         max_iter=int(cfg["max_iter"]),
-        early_stopping=bool(cfg["early_stopping"]),
-        validation_fraction=0.1,
+        early_stopping=use_early_stopping,
+        validation_fraction=0.1 if use_early_stopping else 0.0,
         n_iter_no_change=int(cfg["n_iter_no_change"]),
         tol=float(cfg["tol"]),
         random_state=random_state,
@@ -421,20 +431,31 @@ def _fit_mlp_ensemble_predict(
     x_eval: np.ndarray,
     seed: int,
 ) -> np.ndarray:
-    """Fit an ensemble of MLP restarts and return mean probabilities."""
+    """Fit an ensemble of MLP restarts and return mean probabilities.
+
+    When ``BENCHMARK_MLP_FULL_REFIT=1`` (default), each ensemble member
+    trains on 100% of the data without early stopping — the model
+    selection was already done via CV, so the final refit should
+    maximize convergence.
+    """
     n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
+    full_refit = os.getenv(
+        "BENCHMARK_MLP_FULL_REFIT", "1"
+    ).strip().lower() not in {"0", "false", "no"}
     probs: list[np.ndarray] = []
 
     ensemble_iter = tqdm(
         range(n_members),
-        desc="    MLP ensemble",
+        desc="    MLP ensemble" + (" (full refit)" if full_refit else ""),
         unit="model",
         leave=False,
         dynamic_ncols=True,
     )
     for member in ensemble_iter:
         rs = seed + (member * 53)
-        model = _fit_mlp_from_cfg(cfg, x_train, y_train, random_state=rs)
+        model = _fit_mlp_from_cfg(
+            cfg, x_train, y_train, random_state=rs, final_refit=full_refit,
+        )
         probs.append(model.predict_proba(x_eval)[:, 1])
 
     return np.mean(np.stack(probs, axis=0), axis=0)
