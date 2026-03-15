@@ -222,7 +222,15 @@ def _train_attention_pooling(
     best_state = None
     wait = 0
 
-    for epoch in range(1, epochs + 1):
+    epoch_iter = tqdm(
+        range(1, epochs + 1),
+        desc=f"    AttnPool seed {seed}",
+        unit="epoch",
+        leave=False,
+        dynamic_ncols=True,
+    )
+
+    for epoch in epoch_iter:
         # --- train ---
         model.train()
         aux_head.train()
@@ -267,7 +275,13 @@ def _train_attention_pooling(
                 val_loss += criterion(logits, y).item()
                 val_n += 1
 
+        avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
+        epoch_iter.set_postfix(
+            train_loss=f"{avg_train:.4f}",
+            val_loss=f"{avg_val:.4f}",
+            best=f"{best_val_loss:.4f}" if np.isfinite(best_val_loss) else "inf",
+        )
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val
@@ -296,13 +310,24 @@ def _extract_features(
     model: _AttentionPoolingModel,
     loader: DataLoader,
     device: torch.device,
+    desc: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract attention-pooled features from a dataloader."""
     model.eval()
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
 
-    for batch in loader:
+    batch_iter = loader
+    if desc:
+        batch_iter = tqdm(
+            loader,
+            desc=desc,
+            unit="batch",
+            leave=False,
+            dynamic_ncols=True,
+        )
+
+    for batch in batch_iter:
         p = batch["protein_matrix"].to(device)
         l = batch["ligand_matrix"].to(device)
         pm = batch["protein_mask"].to(device)
@@ -389,12 +414,32 @@ class Level3Runner(BaseLevelRunner):
 
         if self.mode == "train":
             tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
-            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
-            x_eval, y_eval = _extract_features(model, val_loader, device)
+            x_fit, y_fit = _extract_features(
+                model,
+                feat_extract_loader,
+                device,
+                desc="    Feature extraction (fit)",
+            )
+            x_eval, y_eval = _extract_features(
+                model,
+                val_loader,
+                device,
+                desc="    Feature extraction (eval)",
+            )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
-            x_fit, y_fit = _extract_features(model, val_loader, device)
-            x_eval, y_eval = _extract_features(model, test_loader, device)
+            x_fit, y_fit = _extract_features(
+                model,
+                val_loader,
+                device,
+                desc="    Feature extraction (fit)",
+            )
+            x_eval, y_eval = _extract_features(
+                model,
+                test_loader,
+                device,
+                desc="    Feature extraction (eval)",
+            )
 
         # Sanitize
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
@@ -481,12 +526,32 @@ class Level3aRunner(Level3Runner):
         device = next(model.parameters()).device
         if self.mode == "train":
             tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
-            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
-            x_eval, y_eval = _extract_features(model, val_loader, device)
+            x_fit, y_fit = _extract_features(
+                model,
+                feat_extract_loader,
+                device,
+                desc="    Feature extraction (fit)",
+            )
+            x_eval, y_eval = _extract_features(
+                model,
+                val_loader,
+                device,
+                desc="    Feature extraction (eval)",
+            )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
-            x_fit, y_fit = _extract_features(model, val_loader, device)
-            x_eval, y_eval = _extract_features(model, test_loader, device)
+            x_fit, y_fit = _extract_features(
+                model,
+                val_loader,
+                device,
+                desc="    Feature extraction (fit)",
+            )
+            x_eval, y_eval = _extract_features(
+                model,
+                test_loader,
+                device,
+                desc="    Feature extraction (eval)",
+            )
 
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
