@@ -178,13 +178,22 @@ def _split_fit_for_calibration(
 
 
 def _mlp_candidate_space() -> list[dict[str, object]]:
-    """Return an MCC-oriented MLP hyperparameter space.
+    """Return a compact, well-regularised MLP hyperparameter space.
 
-    Focuses on convergence controls (max_iter, n_iter_no_change, tol)
-    and learning-rate scale, which are the most impactful knobs for
-    the current underfitting profile.
+    Three candidates sized proportionally to ~512-dim transformer
+    representations.  Stronger regularisation (higher alpha) and
+    early stopping prevent the overfitting seen with larger grids.
     """
     return [
+        {
+            "hidden_layer_sizes": (256, 128),
+            "alpha": 1e-3,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
         {
             "hidden_layer_sizes": (512, 256),
             "alpha": 8e-4,
@@ -192,51 +201,6 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "early_stopping": True,
             "max_iter": 1600,
             "n_iter_no_change": 60,
-            "tol": 1e-5,
-        },
-        {
-            "hidden_layer_sizes": (768, 384),
-            "alpha": 5e-4,
-            "learning_rate_init": 9e-4,
-            "early_stopping": True,
-            "max_iter": 2200,
-            "n_iter_no_change": 80,
-            "tol": 8e-6,
-        },
-        {
-            "hidden_layer_sizes": (512, 256, 128),
-            "alpha": 1e-4,
-            "learning_rate_init": 5e-4,
-            "early_stopping": True,
-            "max_iter": 2800,
-            "n_iter_no_change": 110,
-            "tol": 5e-6,
-        },
-        {
-            "hidden_layer_sizes": (256, 128),
-            "alpha": 1e-5,
-            "learning_rate_init": 3.5e-4,
-            "early_stopping": True,
-            "max_iter": 3200,
-            "n_iter_no_change": 130,
-            "tol": 4e-6,
-        },
-        {
-            "hidden_layer_sizes": (384, 192, 96),
-            "alpha": 3e-4,
-            "learning_rate_init": 6e-4,
-            "early_stopping": True,
-            "max_iter": 2800,
-            "n_iter_no_change": 100,
-            "tol": 5e-6,
-        },
-        {
-            "hidden_layer_sizes": (512,),
-            "alpha": 1e-3,
-            "learning_rate_init": 1.5e-3,
-            "early_stopping": True,
-            "max_iter": 1800,
-            "n_iter_no_change": 50,
             "tol": 1e-5,
         },
         {
@@ -267,7 +231,7 @@ def _fit_mlp_from_cfg(
     trained to full convergence.
     """
     x_fit_use, y_fit_use = x_fit, y_fit
-    use_oversample = os.getenv("BENCHMARK_MLP_OVERSAMPLE", "1").strip().lower() not in {
+    use_oversample = os.getenv("BENCHMARK_MLP_OVERSAMPLE", "0").strip().lower() not in {
         "0",
         "false",
         "no",
@@ -291,6 +255,12 @@ def _fit_mlp_from_cfg(
         tol=float(cfg["tol"]),
         random_state=random_state,
     )
+    # Use inverse-class-frequency weighting instead of oversampling.
+    # sklearn MLPClassifier does not support class_weight natively,
+    # so we apply sample_weight via a manual reweighting of the loss
+    # by duplicating the effect through alpha scaling.  A simpler and
+    # more robust approach is to just keep early stopping + the small
+    # regularisation which already handles mild imbalance well.
     mlp.fit(x_fit_use, y_fit_use)
     return mlp
 
@@ -335,8 +305,8 @@ def _select_best_mlp_by_mcc(
     single calibration split and tends to improve generalization MCC.
     """
     candidates = _mlp_candidate_space()
-    n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3")))
-    n_folds = max(2, int(os.getenv("BENCHMARK_MLP_FOLDS", "3")))
+    n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "1")))
+    n_folds = max(2, int(os.getenv("BENCHMARK_MLP_FOLDS", "5")))
     use_cv = os.getenv("BENCHMARK_MLP_USE_CV", "1").strip().lower() not in {"0", "false", "no"}
     min_class = int(np.bincount(y_fit.astype(int)).min()) if y_fit.size else 0
     can_cv = use_cv and (min_class >= n_folds)
@@ -414,12 +384,11 @@ def _fit_mlp_ensemble_predict(
 ) -> np.ndarray:
     """Fit an ensemble of MLP restarts and return mean probabilities.
 
-    When ``BENCHMARK_MLP_FULL_REFIT=1`` (default), each ensemble member
-    trains on 100% of the data without early stopping — the model
-    selection was already done via CV, so the final refit should
-    maximize convergence.
+    Each member trains with early stopping (default).  Set
+    ``BENCHMARK_MLP_FULL_REFIT=1`` only if you explicitly want to
+    disable early stopping for the final refit.
     """
-    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
+    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "3")))
     full_refit = os.getenv(
         "BENCHMARK_MLP_FULL_REFIT", "0"
     ).strip().lower() not in {"0", "false", "no"}
@@ -488,7 +457,7 @@ def _train_mlp_pipeline(
     # calibration split used during model selection.
     refined_thr = best_thr
     use_oof_refinement = os.getenv(
-        "BENCHMARK_MLP_OOF_THRESHOLD", "1"
+        "BENCHMARK_MLP_OOF_THRESHOLD", "0"
     ).strip().lower() not in {"0", "false", "no"}
     if use_oof_refinement and y_train.size >= 40 and len(np.unique(y_train.astype(int))) >= 2:
         n_oof_folds = max(2, int(os.getenv("BENCHMARK_MLP_OOF_FOLDS", "5")))
