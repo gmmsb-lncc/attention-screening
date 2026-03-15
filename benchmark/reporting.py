@@ -33,6 +33,7 @@ MODEL_DISPLAY_ORDER = [
     "level2_meanpool_mlp",
     "level3_attnpool_knn",
     "level3_attnpool_mlp",
+    "level3a_attnpool_mlp",
     "level4_crossatt_knn",
     "level4_crossatt_mlp",
     "level5_da_knn",

@@ -248,6 +248,15 @@ def _fit_mlp_from_cfg(
     random_state: int,
 ) -> MLPClassifier:
     """Instantiate and fit an MLP from a candidate config."""
+    x_fit_use, y_fit_use = x_fit, y_fit
+    use_oversample = os.getenv("BENCHMARK_MLP_OVERSAMPLE", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    if use_oversample:
+        x_fit_use, y_fit_use = _oversample_minority_binary(x_fit, y_fit, random_state)
+
     mlp = MLPClassifier(
         hidden_layer_sizes=cfg["hidden_layer_sizes"],
         activation="relu",
@@ -262,8 +271,35 @@ def _fit_mlp_from_cfg(
         tol=float(cfg["tol"]),
         random_state=random_state,
     )
-    mlp.fit(x_fit, y_fit)
+    mlp.fit(x_fit_use, y_fit_use)
     return mlp
+
+
+def _oversample_minority_binary(
+    x: np.ndarray,
+    y: np.ndarray,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Randomly oversample minority class to balance binary labels."""
+    y = np.asarray(y).astype(int)
+    classes, counts = np.unique(y, return_counts=True)
+    if len(classes) != 2 or counts[0] == counts[1]:
+        return x, y
+
+    rng = np.random.RandomState(seed)
+    maj_class = int(classes[np.argmax(counts)])
+    min_class = int(classes[np.argmin(counts)])
+
+    idx_maj = np.where(y == maj_class)[0]
+    idx_min = np.where(y == min_class)[0]
+    n_to_add = len(idx_maj) - len(idx_min)
+    if n_to_add <= 0:
+        return x, y
+
+    sampled_min = rng.choice(idx_min, size=n_to_add, replace=True)
+    new_idx = np.concatenate([np.arange(len(y)), sampled_min])
+    rng.shuffle(new_idx)
+    return x[new_idx], y[new_idx]
 
 
 def _select_best_mlp_by_mcc(
@@ -325,7 +361,7 @@ def _select_best_mlp_by_mcc(
         mcc_std = float(np.std(np.array(mccs), ddof=1)) if len(mccs) > 1 else 0.0
 
         # Stability-aware objective: prioritize high MCC with low restart variance.
-        score = mcc - (0.20 * mcc_std)
+        score = mcc - (0.10 * mcc_std)
         if score > best_score:
             best_score = score
             best_cfg = cfg
@@ -353,6 +389,40 @@ def _fit_mlp_ensemble_predict(
         probs.append(model.predict_proba(x_eval)[:, 1])
 
     return np.mean(np.stack(probs, axis=0), axis=0)
+
+
+def _train_mlp_pipeline(
+    x_train_sc: np.ndarray,
+    y_train: np.ndarray,
+    x_test_sc: np.ndarray,
+    y_test: np.ndarray,
+    seed: int,
+) -> Dict[str, float]:
+    """Train/evaluate MLP pipeline optimized for MCC."""
+    x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
+
+    best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
+        x_fit=x_fit,
+        y_fit=y_fit,
+        x_cal=x_cal,
+        y_cal=y_cal,
+        seed=seed,
+    )
+
+    # Refit best architecture on full training features as a restart ensemble.
+    mlp_proba = _fit_mlp_ensemble_predict(
+        cfg=best_cfg,
+        x_train=x_train_sc,
+        y_train=y_train,
+        x_eval=x_test_sc,
+        seed=seed,
+    )
+    mlp_pred = (mlp_proba >= best_thr).astype(int)
+    mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
+    mlp_metrics["decision_threshold"] = float(best_thr)
+    mlp_metrics["calibration_mcc"] = float(best_mcc)
+    mlp_metrics["calibration_mcc_std"] = float(best_mcc_std)
+    return mlp_metrics
 
 
 # ------------------------------------------------------------------ #
@@ -402,29 +472,27 @@ def train_knn_mlp(
     knn_pred, knn_proba = _faiss_knn_predict(x_train_sc, y_train, x_test_sc, k=5)
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
 
-    # ---------- MLP tuned for MCC (model + threshold selected on calibration) --
-    x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
-
-    best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
-        x_fit=x_fit,
-        y_fit=y_fit,
-        x_cal=x_cal,
-        y_cal=y_cal,
-        seed=seed,
-    )
-
-    # Refit best architecture on full training features as a restart ensemble.
-    mlp_proba = _fit_mlp_ensemble_predict(
-        cfg=best_cfg,
-        x_train=x_train_sc,
-        y_train=y_train,
-        x_eval=x_test_sc,
-        seed=seed,
-    )
-    mlp_pred = (mlp_proba >= best_thr).astype(int)
-    mlp_metrics = _compute_metrics(y_test, mlp_pred, mlp_proba)
-    mlp_metrics["decision_threshold"] = float(best_thr)
-    mlp_metrics["calibration_mcc"] = float(best_mcc)
-    mlp_metrics["calibration_mcc_std"] = float(best_mcc_std)
+    # ---------- MLP tuned for MCC ----------
+    mlp_metrics = _train_mlp_pipeline(x_train_sc, y_train, x_test_sc, y_test, seed)
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}
+
+
+def train_mlp_only(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    y_test: np.ndarray,
+    seed: int,
+) -> Dict[str, float]:
+    """Train and evaluate only MLP (skip KNN entirely)."""
+    x_train = np.asarray(x_train, dtype=np.float32)
+    x_test = np.asarray(x_test, dtype=np.float32)
+    y_train = np.asarray(y_train)
+    y_test = np.asarray(y_test)
+
+    scaler = StandardScaler()
+    x_train_sc = scaler.fit_transform(x_train).astype(np.float32)
+    x_test_sc = scaler.transform(x_test).astype(np.float32)
+
+    return _train_mlp_pipeline(x_train_sc, y_train, x_test_sc, y_test, seed)

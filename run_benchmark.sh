@@ -87,13 +87,20 @@ for phase, path in paths.items():
         payload = json.load(fh)
 
     results = payload.get("results", {})
+    missing_in_phase = []
     for model in targets:
         row = results.get(model, {})
+        if not row:
+            missing_in_phase.append(model)
         mcc = row.get("mcc")
         mcc_std = row.get("mcc_std")
         mcc_txt = f"{mcc:.4f}" if isinstance(mcc, (float, int)) else "N/A"
         std_txt = f"{mcc_std:.4f}" if isinstance(mcc_std, (float, int)) else "N/A"
         print(f"{phase:>6}  {model:<20} {mcc_txt:>8} {std_txt:>8}")
+
+    if missing_in_phase:
+        print(f"{phase:>6}  missing_models: {missing_in_phase}")
+        print(f"{phase:>6}  available_keys: {sorted(results.keys())[:12]}")
 
 print("")
 print("Focus model: level3_attnpool_mlp (primary MCC target).")

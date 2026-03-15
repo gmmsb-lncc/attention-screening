@@ -62,6 +62,7 @@ LEVEL_LABELS: Dict[str, str] = {
     "level2_meanpool_mlp": "L2 (MeanPool+MLP)",
     "level3_attnpool_knn": "L3 (AttnPool+KNN)",
     "level3_attnpool_mlp": "L3 (AttnPool+MLP)",
+    "level3a_attnpool_mlp": "L3a (AttnPool+MLP only)",
     "level4_crossatt_knn": "L4 (CrossAttn+AttnPool+KNN)",
     "level4_crossatt_mlp": "L4 (CrossAttn+AttnPool+MLP)",
     "level5_da_knn": "L5a (CrossAttn+AttnPool+GRL+KNN)",
@@ -89,6 +90,7 @@ LEVEL_COLORS: Dict[str, str] = {
     "level2_meanpool_mlp": "#a6a3d9",
     "level3_attnpool_knn": "#d95f02",
     "level3_attnpool_mlp": "#e78e3f",
+    "level3a_attnpool_mlp": "#c76e1f",
     "level4_crossatt_knn": "#e7298a",
     "level4_crossatt_mlp": "#f06ab6",
     "level5_da_knn": "#e41a1c",
@@ -105,7 +107,7 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "3a", "4", "5a", "5b", "6a", "6b"})
 
 # Level 0 is a shortcut for the classical ML baseline subset
 LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
