@@ -41,6 +41,31 @@ from benchmark.levels.matrix_utils import (
 )
 
 
+def _load_frozen_mlp_selection_from_train(
+    output_dir: str,
+    cache_filename: str,
+) -> dict[str, object] | None:
+    """Load frozen MLP selection from corresponding train artifact for same seed."""
+    test_token = f"{os.sep}test{os.sep}"
+    train_token = f"{os.sep}train{os.sep}"
+    if test_token not in output_dir:
+        return None
+
+    train_seed_dir = output_dir.replace(test_token, train_token, 1)
+    train_cache_path = os.path.join(train_seed_dir, cache_filename)
+    if not os.path.exists(train_cache_path):
+        return None
+
+    with open(train_cache_path) as fh:
+        payload = json.load(fh)
+    scaffold_key = next(iter(payload.keys()), None)
+    if not scaffold_key:
+        return None
+    mlp_block = payload.get(scaffold_key, {}).get("MLP", {})
+    selection = mlp_block.get("mlp_selection")
+    return selection if isinstance(selection, dict) else None
+
+
 # ---------------------------------------------------------------------------
 # Feature extraction (ligand-only mean pooling)
 # ---------------------------------------------------------------------------
@@ -117,7 +142,31 @@ class Level1bRunner(BaseLevelRunner):
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level1b_knn_mlp_results.json",
+            )
+            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 1b test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
