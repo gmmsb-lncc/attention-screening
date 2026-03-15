@@ -55,11 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Levels to run: "
             "0=ClassicalML(1a+1b+1c+3), "
             "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAttn+AttnPool, "
+            "2=MeanPool, 3=AttnPool(KNN+MLP), 3a=AttnPool(MLP only), 4=CrossAttn+AttnPool, "
             "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
             "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
             "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
-            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3 4 5a 5b 6a 6b"
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3a 4 5a 5b 6a 6b"
         ),
     )
 

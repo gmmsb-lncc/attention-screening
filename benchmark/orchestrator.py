@@ -28,7 +28,7 @@ from benchmark.levels.level1 import Level1Runner
 from benchmark.levels.level1b import Level1bRunner
 from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
-from benchmark.levels.level3 import Level3Runner
+from benchmark.levels.level3 import Level3Runner, Level3aRunner
 from benchmark.levels.level4 import Level4Runner
 from benchmark.levels.level5 import Level5Runner
 from benchmark.levels.level5b import Level5bRunner
@@ -128,6 +128,7 @@ class BenchmarkOrchestrator:
             level1c_results=self._level_results.get("1c"),
             level2_results=self._level_results.get("2"),
             level3_results=self._level_results.get("3"),
+            level3a_results=self._level_results.get("3a"),
             level4_results=self._level_results.get("4"),
             level5_results=self._level_results.get("5a"),
             level5b_results=self._level_results.get("5b"),
@@ -170,6 +171,9 @@ class BenchmarkOrchestrator:
 
         if "3" in config.levels:
             runners.append(("3", Level3Runner(config), "Step 3: L3 (AttnPool+KNN/MLP)"))
+
+        if "3a" in config.levels:
+            runners.append(("3a", Level3aRunner(config), "Step 3a: L3a (AttnPool+MLP only)"))
 
         if "4" in config.levels:
             runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))

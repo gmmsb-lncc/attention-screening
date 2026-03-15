@@ -46,7 +46,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from benchmark.classifiers import train_knn_mlp
+from benchmark.classifiers import train_knn_mlp, train_mlp_only
 from benchmark.config import (
     MOLFORMER_DIM,
     PROTEIN_DIMS,
@@ -422,4 +422,89 @@ class Level3Runner(BaseLevelRunner):
             f"KNN MCC={models['KNN']['mcc']:.4f}, "
             f"MLP MCC={models['MLP']['mcc']:.4f}"
         )
+        return result
+
+
+class Level3aRunner(Level3Runner):
+    """Level 3a — attention pooling + MLP only (skip KNN for speed)."""
+
+    @property
+    def level_tag(self) -> str:
+        return "level3a_attnpool_mlp"
+
+    def run_single_seed(
+        self,
+        seed: int,
+        output_dir: str,
+        **kwargs: object,
+    ) -> Optional[Dict]:
+        """Train attention pooling, extract features, run MLP only."""
+        os.makedirs(output_dir, exist_ok=True)
+
+        cache_path = os.path.join(output_dir, "level3a_mlp_results.json")
+        if os.path.exists(cache_path) and not self.force:
+            tqdm.write(f"  Loading cached Level 3a results (seed {seed})")
+            with open(cache_path) as fh:
+                return json.load(fh)
+
+        tqdm.write(f"  Building Level 3a attention pooling (seed {seed})...")
+
+        protein_dim = PROTEIN_DIMS.get(self.embedding_name, 640)
+        train_loader, val_loader, test_loader = build_matrix_dataloaders(
+            dataset_type=self.dataset,
+            embedding_name=self.embedding_name,
+            scaffold_split_dir=self.scaffold_split_dir,
+            batch_size=self._config.batch_size,
+            dataset_source_filter=self._config.dataset_source_filter,
+            mode=self.mode,
+        )
+
+        feat_extract_loader = None
+        if self.mode == "train":
+            model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
+                train_loader, seed=seed,
+            )
+        else:
+            model_train_loader = train_loader
+
+        tqdm.write("  Training projection + attention pooling...")
+        model = _train_attention_pooling(
+            train_loader=model_train_loader,
+            val_loader=val_loader,
+            protein_dim=protein_dim,
+            lr=self._config.learning_rate,
+            epochs=self._config.epochs,
+            patience=self._config.resolved_patience or 10,
+            seed=seed,
+        )
+
+        device = next(model.parameters()).device
+        if self.mode == "train":
+            tqdm.write("  Extracting attention-pooled features (held-out train + val)...")
+            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
+            x_eval, y_eval = _extract_features(model, val_loader, device)
+        else:
+            tqdm.write("  Extracting attention-pooled features (val + test)...")
+            x_fit, y_fit = _extract_features(model, val_loader, device)
+            x_eval, y_eval = _extract_features(model, test_loader, device)
+
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
+            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
+            if bad:
+                tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+        tqdm.write("  Training MLP only (KNN skipped)...")
+        mlp_metrics = train_mlp_only(x_fit, y_fit, x_eval, y_eval, seed)
+
+        sc_key = "Split by Scaffold"
+        result = {sc_key: {"MLP": mlp_metrics}}
+
+        checkpoint_path = os.path.join(output_dir, "level3a_attnpool_model.pt")
+        torch.save(model.state_dict(), checkpoint_path)
+
+        with open(cache_path, "w") as fh:
+            json.dump(result, fh, indent=2)
+
+        tqdm.write(f"  Level 3a (seed {seed}): MLP MCC={mlp_metrics['mcc']:.4f}")
         return result
