@@ -14,7 +14,7 @@ set -euo pipefail
 
 DATASET="${DATASET:-non_human}"
 EMBEDDING="${EMBEDDING:-8M}"
-LEVELS_CSV="${LEVELS_CSV:-3,3a}"
+LEVELS_CSV="${LEVELS_CSV:-3a}"
 IFS=',' read -r -a LEVELS <<< "${LEVELS_CSV}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_15_03_2026}"
 EPOCHS="${EPOCHS:-500}"
