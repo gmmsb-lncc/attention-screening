@@ -177,6 +177,7 @@ class TrainingConfig:
     optimize_threshold: bool = True
     threshold_metric: str = 'mcc'
     fixed_threshold: float = 0.5
+    model_selection_metric: str = 'val_loss'
 
     # Reproducibility
     affinity_threshold: AffinityThresholdConfig = field(
@@ -224,6 +225,7 @@ class TrainingConfig:
             'optimize_threshold': self.optimize_threshold,
             'threshold_metric': self.threshold_metric,
             'fixed_threshold': self.fixed_threshold,
+            'model_selection_metric': self.model_selection_metric,
             'affinity_threshold': self.affinity_threshold.to_dict()
         }
 

@@ -264,7 +264,8 @@ def _train_attention_pooling(
     epochs: int = 30,
     patience: int = 10,
     seed: int = 42,
-) -> _AttentionPoolingModel:
+    model_selection_metric: str = "val_loss",
+) -> tuple[_AttentionPoolingModel, nn.Module]:
     """Train the projection + attention pooling model.
 
     Uses a lightweight binary cross-entropy objective just to learn
@@ -311,7 +312,9 @@ def _train_attention_pooling(
 
     best_val_loss = float("inf")
     best_val_mcc = -1.0
+    best_selection_score = float("inf") if model_selection_metric == "val_loss" else -1.0
     best_state = None
+    best_aux_state = None
     wait = 0
 
     epoch_iter = tqdm(
@@ -384,36 +387,48 @@ def _train_attention_pooling(
             train_loss=f"{avg_train:.4f}",
             val_loss=f"{avg_val:.4f}",
             val_mcc=f"{val_mcc:.3f}",
-            best_mcc=f"{best_val_mcc:.3f}",
+            best_sel=f"{best_selection_score:.4f}",
             pos_w=f"{pos_weight:.2f}",
         )
 
         thr_mcc, tuned_val_mcc = _best_mcc_threshold(targets.astype(int), probs)
 
-        if (tuned_val_mcc > best_val_mcc) or (
-            np.isclose(tuned_val_mcc, best_val_mcc) and
-            (val_mcc > best_val_mcc or avg_val < best_val_loss)
-        ):
+        if model_selection_metric == "val_loss":
+            current_score = avg_val
+            improved = current_score < (best_selection_score - 1e-12)
+            if (not improved) and abs(current_score - best_selection_score) <= 1e-12:
+                improved = tuned_val_mcc > best_val_mcc
+        else:
+            current_score = tuned_val_mcc
+            improved = current_score > best_selection_score
+
+        if improved:
+            best_selection_score = current_score
             best_val_loss = avg_val
             best_val_mcc = tuned_val_mcc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_aux_state = {k: v.cpu().clone() for k, v in aux_head.state_dict().items()}
             wait = 0
         else:
             wait += 1
             if patience and wait >= patience:
                 tqdm.write(
                     f"    Early stopping at epoch {epoch} "
-                    f"(val_mcc={val_mcc:.4f}, tuned_mcc={tuned_val_mcc:.4f}, "
-                    f"best_mcc={best_val_mcc:.4f}, thr={thr_mcc:.3f})"
+                    f"(val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, tuned_mcc={tuned_val_mcc:.4f}, "
+                    f"best_sel={best_selection_score:.6f}, thr={thr_mcc:.3f})"
                 )
                 break
 
     if best_state is not None:
         model.load_state_dict(best_state)
+    if best_aux_state is not None:
+        aux_head.load_state_dict(best_aux_state)
 
     model.to(device)
     model.eval()
-    return model
+    aux_head.to(device)
+    aux_head.eval()
+    return model, aux_head
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +441,8 @@ def _extract_features(
     loader: DataLoader,
     device: torch.device,
     desc: str | None = None,
+    aux_head: nn.Module | None = None,
+    include_aux_channel: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract attention-pooled features from a dataloader."""
     model.eval()
@@ -442,13 +459,21 @@ def _extract_features(
             dynamic_ncols=True,
         )
 
+    if aux_head is not None:
+        aux_head.eval()
+
     for batch in batch_iter:
         p = batch["protein_matrix"].to(device)
         l = batch["ligand_matrix"].to(device)
         pm = batch["protein_mask"].to(device)
         lm = batch["ligand_mask"].to(device)
 
-        features = model(p, l, pm, lm).cpu().numpy()
+        features_t = model(p, l, pm, lm)
+        if include_aux_channel and aux_head is not None:
+            aux_proba = torch.sigmoid(aux_head(features_t))
+            features_t = torch.cat([features_t, aux_proba], dim=1)
+
+        features = features_t.cpu().numpy()
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         all_features.append(features)
         all_labels.append(batch["label"].numpy())
@@ -484,10 +509,20 @@ class Level3Runner(BaseLevelRunner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level3_knn_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 3 results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 3 results and recomputing.")
 
         tqdm.write(f"  Building Level 3 attention pooling (seed {seed})...")
 
@@ -515,7 +550,7 @@ class Level3Runner(BaseLevelRunner):
 
         # Train projection + attention pooling
         tqdm.write("  Training projection + attention pooling...")
-        model = _train_attention_pooling(
+        model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
@@ -523,7 +558,14 @@ class Level3Runner(BaseLevelRunner):
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,
             seed=seed,
+            model_selection_metric=self._config.model_selection_metric,
         )
+
+        use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
 
         device = next(model.parameters()).device
 
@@ -534,12 +576,16 @@ class Level3Runner(BaseLevelRunner):
                 feat_extract_loader,
                 device,
                 desc="    Feature extraction (fit)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
             x_eval, y_eval = _extract_features(
                 model,
                 val_loader,
                 device,
                 desc="    Feature extraction (eval)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -548,12 +594,16 @@ class Level3Runner(BaseLevelRunner):
                 val_loader,
                 device,
                 desc="    Feature extraction (fit)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
             x_eval, y_eval = _extract_features(
                 model,
                 test_loader,
                 device,
                 desc="    Feature extraction (eval)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
 
         # Sanitize
@@ -571,11 +621,6 @@ class Level3Runner(BaseLevelRunner):
                 output_dir=output_dir,
                 cache_filename="level3_knn_mlp_results.json",
             )
-            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
-                "0",
-                "false",
-                "no",
-            }
             if strict_freeze and frozen_selection is None:
                 raise RuntimeError(
                     "Missing frozen train selection for Level 3 test run. "
@@ -596,7 +641,14 @@ class Level3Runner(BaseLevelRunner):
 
         # Save checkpoint
         checkpoint_path = os.path.join(output_dir, "level3_attnpool_model.pt")
-        torch.save(model.state_dict(), checkpoint_path)
+        torch.save(
+            {
+                "encoder": model.state_dict(),
+                "aux_head": aux_head.state_dict(),
+                "use_aux_channel": use_aux_channel,
+            },
+            checkpoint_path,
+        )
 
         with open(cache_path, "w") as fh:
             json.dump(result, fh, indent=2)
@@ -626,10 +678,20 @@ class Level3aRunner(Level3Runner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level3a_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 3a results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 3a results and recomputing.")
 
         tqdm.write(f"  Building Level 3a attention pooling (seed {seed})...")
 
@@ -652,7 +714,7 @@ class Level3aRunner(Level3Runner):
             model_train_loader = train_loader
 
         tqdm.write("  Training projection + attention pooling...")
-        model = _train_attention_pooling(
+        model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
@@ -660,7 +722,14 @@ class Level3aRunner(Level3Runner):
             epochs=self._config.epochs,
             patience=self._config.resolved_patience or 10,
             seed=seed,
+            model_selection_metric=self._config.model_selection_metric,
         )
+
+        use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
 
         device = next(model.parameters()).device
         if self.mode == "train":
@@ -670,12 +739,16 @@ class Level3aRunner(Level3Runner):
                 feat_extract_loader,
                 device,
                 desc="    Feature extraction (fit)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
             x_eval, y_eval = _extract_features(
                 model,
                 val_loader,
                 device,
                 desc="    Feature extraction (eval)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -684,12 +757,16 @@ class Level3aRunner(Level3Runner):
                 val_loader,
                 device,
                 desc="    Feature extraction (fit)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
             x_eval, y_eval = _extract_features(
                 model,
                 test_loader,
                 device,
                 desc="    Feature extraction (eval)",
+                aux_head=aux_head,
+                include_aux_channel=use_aux_channel,
             )
 
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
@@ -705,11 +782,6 @@ class Level3aRunner(Level3Runner):
                 output_dir=output_dir,
                 cache_filename="level3a_mlp_results.json",
             )
-            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
-                "0",
-                "false",
-                "no",
-            }
             if strict_freeze and frozen_selection is None:
                 raise RuntimeError(
                     "Missing frozen train selection for Level 3a test run. "
@@ -729,7 +801,14 @@ class Level3aRunner(Level3Runner):
         result = {sc_key: {"MLP": mlp_metrics}}
 
         checkpoint_path = os.path.join(output_dir, "level3a_attnpool_model.pt")
-        torch.save(model.state_dict(), checkpoint_path)
+        torch.save(
+            {
+                "encoder": model.state_dict(),
+                "aux_head": aux_head.state_dict(),
+                "use_aux_channel": use_aux_channel,
+            },
+            checkpoint_path,
+        )
 
         with open(cache_path, "w") as fh:
             json.dump(result, fh, indent=2)
