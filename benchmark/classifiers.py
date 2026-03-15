@@ -204,15 +204,6 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "tol": 8e-6,
         },
         {
-            "hidden_layer_sizes": (1024, 512, 256),
-            "alpha": 3e-4,
-            "learning_rate_init": 7e-4,
-            "early_stopping": True,
-            "max_iter": 2600,
-            "n_iter_no_change": 90,
-            "tol": 6e-6,
-        },
-        {
             "hidden_layer_sizes": (512, 256, 128),
             "alpha": 1e-4,
             "learning_rate_init": 5e-4,
@@ -231,25 +222,6 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "tol": 4e-6,
         },
         {
-            "hidden_layer_sizes": (768, 384, 192),
-            "alpha": 2e-4,
-            "learning_rate_init": 4.5e-4,
-            "early_stopping": True,
-            "max_iter": 3000,
-            "n_iter_no_change": 120,
-            "tol": 4e-6,
-        },
-        # --- New candidates targeting ~512-dim representations ---
-        {
-            "hidden_layer_sizes": (768, 256),
-            "alpha": 5e-4,
-            "learning_rate_init": 1e-3,
-            "early_stopping": True,
-            "max_iter": 2000,
-            "n_iter_no_change": 70,
-            "tol": 7e-6,
-        },
-        {
             "hidden_layer_sizes": (384, 192, 96),
             "alpha": 3e-4,
             "learning_rate_init": 6e-4,
@@ -266,6 +238,15 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "max_iter": 1800,
             "n_iter_no_change": 50,
             "tol": 1e-5,
+        },
+        {
+            "hidden_layer_sizes": (256,),
+            "alpha": 5e-4,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 8e-6,
         },
     ]
 
@@ -440,7 +421,7 @@ def _fit_mlp_ensemble_predict(
     """
     n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
     full_refit = os.getenv(
-        "BENCHMARK_MLP_FULL_REFIT", "1"
+        "BENCHMARK_MLP_FULL_REFIT", "0"
     ).strip().lower() not in {"0", "false", "no"}
     probs: list[np.ndarray] = []
 
