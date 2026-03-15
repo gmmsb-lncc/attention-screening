@@ -26,6 +26,21 @@ from benchmark.config import (
 
 
 # ---------------------------------------------------------------------------
+# DataLoader tuning
+# ---------------------------------------------------------------------------
+
+def _loader_kwargs() -> dict:
+    """Return optimal DataLoader keyword arguments for current hardware."""
+    use_cuda = torch.cuda.is_available()
+    n_workers = min(4, os.cpu_count() or 0) if use_cuda else 0
+    return {
+        "num_workers": n_workers,
+        "pin_memory": use_cuda,
+        "persistent_workers": n_workers > 0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -294,7 +309,7 @@ def _make_loader(
         batch_size=batch_size,
         shuffle=shuffle,
         collate_fn=collate_matrices,
-        num_workers=0,
+        **_loader_kwargs(),
     )
 
 
@@ -407,13 +422,13 @@ def split_loader_for_feature_extraction(
         batch_size=bs,
         shuffle=True,
         collate_fn=collate_matrices,
-        num_workers=0,
+        **_loader_kwargs(),
     )
     feature_loader = _DL(
         Subset(dataset, feat_idx.tolist()),
         batch_size=bs,
         shuffle=False,
         collate_fn=collate_matrices,
-        num_workers=0,
+        **_loader_kwargs(),
     )
     return model_loader, feature_loader

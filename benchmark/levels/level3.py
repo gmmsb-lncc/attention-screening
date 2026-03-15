@@ -279,6 +279,9 @@ def _train_attention_pooling(
     np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = device.type == "cuda"
+    scaler = torch.amp.GradScaler(enabled=use_amp)
+    torch.backends.cudnn.benchmark = True
 
     model = _AttentionPoolingModel(
         protein_input_dim=protein_dim,
@@ -343,14 +346,16 @@ def _train_attention_pooling(
             lm = batch["ligand_mask"].to(device)
             y = batch["label"].to(device).unsqueeze(1)
 
-            features = model(p, l, pm, lm)
-            logits = aux_head(features)
-            loss = criterion(logits, y)
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                features = model(p, l, pm, lm)
+                logits = aux_head(features)
+                loss = criterion(logits, y)
 
-            optimizer.zero_grad()
-            loss.backward()
+            optimizer.zero_grad(set_to_none=True)
+            scaler.scale(loss).backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += loss.item()
             n_batches += 1
@@ -364,7 +369,7 @@ def _train_attention_pooling(
         val_n = 0
         val_probs: list[np.ndarray] = []
         val_targets: list[np.ndarray] = []
-        with torch.no_grad():
+        with torch.inference_mode():
             for batch in val_loader:
                 p = batch["protein_matrix"].to(device)
                 l = batch["ligand_matrix"].to(device)
@@ -372,11 +377,12 @@ def _train_attention_pooling(
                 lm = batch["ligand_mask"].to(device)
                 y = batch["label"].to(device).unsqueeze(1)
 
-                features = model(p, l, pm, lm)
-                logits = aux_head(features)
-                val_loss += criterion(logits, y).item()
+                with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                    features = model(p, l, pm, lm)
+                    logits = aux_head(features)
+                    val_loss += criterion(logits, y).item()
                 val_n += 1
-                val_probs.append(torch.sigmoid(logits).cpu().numpy().ravel())
+                val_probs.append(torch.sigmoid(logits.float()).cpu().numpy().ravel())
                 val_targets.append(y.cpu().numpy().ravel())
 
         avg_train = train_loss / max(n_batches, 1)
@@ -465,7 +471,7 @@ def _train_attention_pooling(
 # Feature extraction with trained attention pooling
 # ---------------------------------------------------------------------------
 
-@torch.no_grad()
+@torch.inference_mode()
 def _extract_features(
     model: _AttentionPoolingModel,
     loader: DataLoader,

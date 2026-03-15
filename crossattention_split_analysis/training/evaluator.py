@@ -68,7 +68,7 @@ def _collect_predictions(
     all_probs = []
     all_labels = []
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch in data_loader:
             protein_matrix = batch["protein_matrix"].to(device)
             ligand_matrix = batch["ligand_matrix"].to(device)

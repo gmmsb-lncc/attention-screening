@@ -221,7 +221,7 @@ def _train_ligand_attention_pooling(
         aux_head.eval()
         val_loss = 0.0
         val_n = 0
-        with torch.no_grad():
+        with torch.inference_mode():
             for batch in val_loader:
                 l = batch["ligand_matrix"].to(device)
                 lm = batch["ligand_mask"].to(device)
@@ -256,7 +256,7 @@ def _train_ligand_attention_pooling(
 # Feature extraction
 # ---------------------------------------------------------------------------
 
-@torch.no_grad()
+@torch.inference_mode()
 def _extract_features(
     model: _LigandAttentionPoolingModel,
     loader: DataLoader,
