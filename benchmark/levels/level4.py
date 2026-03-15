@@ -112,10 +112,20 @@ class Level4Runner(BaseLevelRunner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level4_knn_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 4 results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 4 results and recomputing.")
 
         # --- Step 1: Train the cross-attention model ---------------------
         tqdm.write(f"  Training Level 4 cross-attention encoder (seed {seed})...")
@@ -142,6 +152,7 @@ class Level4Runner(BaseLevelRunner):
             model_variant="level5_lite",
             optimize_threshold=False,
             fixed_threshold=0.5,
+            model_selection_metric=self._config.model_selection_metric,
             weight_decay=0.05,
         )
 
@@ -154,6 +165,10 @@ class Level4Runner(BaseLevelRunner):
                 seed=seed,
             )
         except Exception as exc:
+            if strict_freeze:
+                raise RuntimeError(
+                    "Level 4 strict test mode forbids fallback metrics on feature extraction failure."
+                ) from exc
             tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
             tqdm.write("  Falling back to training metrics only.")
             return self._fallback_from_training_results(_training_results)
@@ -173,11 +188,6 @@ class Level4Runner(BaseLevelRunner):
                 output_dir=output_dir,
                 cache_filename="level4_knn_mlp_results.json",
             )
-            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
-                "0",
-                "false",
-                "no",
-            }
             if strict_freeze and frozen_selection is None:
                 raise RuntimeError(
                     "Missing frozen train selection for Level 4 test run. "

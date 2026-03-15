@@ -55,6 +55,49 @@ python semantic_screening_models.py --dataset human --embedding 650M --levels 1 
 python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 --finetune
 ```
 
+## Operator Runbook: Anti-Leakage Hardening
+
+### What changed
+
+- Train-to-test MLP selection freeze is enforced for levels `1a`, `1b`, `1c`, `2`, `3`, `3a`, `4`, `5a`, `5b`, `6a`, `6b`.
+- In strict test mode, test runs reuse the train-phase MLP selection (`best_cfg`, threshold, and selection stats) instead of re-selecting on test-side data.
+- `BENCHMARK_REQUIRE_TRAIN_SELECTION` defaults to ON (`1`): test mode now raises if the corresponding train artifact has no frozen selection.
+- In strict test mode, cached per-level test artifacts are ignored and recomputed to avoid stale-cache leakage.
+- Levels `4`, `5a`, `5b`, `6a`, `6b` now fail closed in strict test mode if feature extraction fails (no fallback metrics).
+
+### Required env vars
+
+| Variable | Default | Operator guidance |
+|---|---|---|
+| `BENCHMARK_REQUIRE_TRAIN_SELECTION` | `1` (strict ON) | Keep enabled for production benchmarking. Set to `0` only for controlled diagnostics when train artifacts are unavailable. |
+
+### Recommended execution order (train -> test)
+
+Use the same dataset, embedding, levels, seeds, and output root for both phases.
+
+```bash
+# 1) Train phase: generate frozen train selections
+python semantic_screening_models.py \
+    --dataset non_human \
+    --embedding 8M \
+    --levels 1a 1b 1c 2 3 3a 4 5a 5b 6a 6b \
+    --train
+
+# 2) Test phase: consume frozen train selections
+BENCHMARK_REQUIRE_TRAIN_SELECTION=1 \
+python semantic_screening_models.py \
+    --dataset non_human \
+    --embedding 8M \
+    --levels 1a 1b 1c 2 3 3a 4 5a 5b 6a 6b \
+    --test
+```
+
+### What failures mean
+
+- `Missing frozen train selection for Level X test run`: test phase started before a valid train artifact existed for that level/seed, or paths do not match between phases.
+- `Strict test mode: ignoring cached Level X results and recomputing`: expected behavior; test cache bypass is active to prevent stale artifacts.
+- `Level X strict test mode forbids fallback metrics on feature extraction failure`: fail-closed guard triggered (levels `4`, `5a`, `5b`, `6a`, `6b`); investigate checkpoint/data/feature extraction instead of trusting fallback scores.
+
 ## The Four Levels
 
 Each level represents a progressively richer molecular representation.  

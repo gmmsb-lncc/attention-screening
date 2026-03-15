@@ -989,6 +989,7 @@ def run_single_analysis(
     optimize_threshold: bool = True,
     threshold_metric: str = "mcc",
     fixed_threshold: float = 0.5,
+    model_selection_metric: str = "val_loss",
     use_molformer_ligand: bool = True,
     use_ligand_vectors: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
@@ -1069,6 +1070,12 @@ def run_single_analysis(
         )
     if not (0.0 <= fixed_threshold <= 1.0):
         raise ValueError(f"fixed_threshold must be in [0, 1], got {fixed_threshold}")
+    supported_selection_metrics = {"val_loss", "mcc"}
+    if model_selection_metric not in supported_selection_metrics:
+        raise ValueError(
+            f"Unsupported model_selection_metric={model_selection_metric!r}. "
+            f"Expected one of {sorted(supported_selection_metrics)}"
+        )
     if diffusion_snr_sampling_gamma <= 0:
         raise ValueError(
             f"diffusion_snr_sampling_gamma must be > 0, got {diffusion_snr_sampling_gamma}"
@@ -1141,6 +1148,7 @@ def run_single_analysis(
         print(f"DECISION THRESHOLD: OPTIMIZED ON VALIDATION ({threshold_metric})")
     else:
         print(f"DECISION THRESHOLD: FIXED ({fixed_threshold})")
+    print(f"MODEL SELECTION METRIC: {model_selection_metric}")
     if patience is None:
         print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
     else:
@@ -1196,6 +1204,7 @@ def run_single_analysis(
         optimize_threshold=optimize_threshold,
         threshold_metric=threshold_metric,
         fixed_threshold=fixed_threshold,
+        model_selection_metric=model_selection_metric,
     )
 
     # Create output directory

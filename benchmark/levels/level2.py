@@ -114,10 +114,20 @@ class Level2Runner(BaseLevelRunner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level2_knn_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 2 results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 2 results and recomputing.")
 
         tqdm.write(f"  Extracting Level 2 features (seed {seed})...")
 
@@ -152,11 +162,6 @@ class Level2Runner(BaseLevelRunner):
                 output_dir=output_dir,
                 cache_filename="level2_knn_mlp_results.json",
             )
-            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
-                "0",
-                "false",
-                "no",
-            }
             if strict_freeze and frozen_selection is None:
                 raise RuntimeError(
                     "Missing frozen train selection for Level 2 test run. "

@@ -118,6 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deprecated: patience is auto-computed as 10%% of --epochs.",
     )
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
+    parser.add_argument(
+        "--model_selection_metric",
+        choices=["val_loss", "mcc"],
+        default="val_loss",
+        help="Primary metric for model selection/early stop in learned levels (default: val_loss)",
+    )
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")
@@ -182,6 +188,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         batch_size=args.batch_size,
         patience=args.patience,
         learning_rate=args.learning_rate,
+        model_selection_metric=args.model_selection_metric,
         finetune=args.finetune,
         use_finetuned=args.use_finetuned,
         finetune_epochs=args.finetune_epochs,

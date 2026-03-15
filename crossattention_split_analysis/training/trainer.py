@@ -190,11 +190,13 @@ def train_model(
     
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    best_val_mcc = -1
+    model_selection_metric = getattr(config, 'model_selection_metric', 'val_loss')
+    best_val_mcc = -1.0
+    best_selection_score = float('inf') if model_selection_metric == 'val_loss' else -1.0
     best_model_state = None
     best_epoch = 0
     patience_counter = 0
-    history = {'train_loss': [], 'val_mcc': [], 'val_acc': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_mcc': [], 'val_acc': []}
     start_epoch = 0
 
     # Load checkpoint if exists
@@ -212,10 +214,18 @@ def train_model(
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             best_val_mcc = checkpoint['best_val_mcc']
+            if 'best_selection_score' in checkpoint:
+                best_selection_score = checkpoint['best_selection_score']
+            elif model_selection_metric == 'val_loss':
+                val_losses = checkpoint.get('history', {}).get('val_loss', [])
+                best_selection_score = min(val_losses) if val_losses else float('inf')
+            else:
+                best_selection_score = best_val_mcc
             best_epoch = checkpoint.get('best_epoch', 0)
             best_model_state = checkpoint['best_model_state']
             patience_counter = checkpoint['patience_counter']
             history = checkpoint['history']
+            history.setdefault('val_loss', [])
             start_epoch = checkpoint['epoch'] + 1
             print(f"  [CHECKPOINT] Resuming from epoch {start_epoch}")
 
@@ -260,7 +270,7 @@ def train_model(
                 )
                 if not threshold_result.is_valid:
                     warnings.warn(f"Invalid threshold optimization at epoch {epoch+1}")
-                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                    val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                 else:
                     decision_threshold = float(threshold_result.metrics["decision_threshold"])
                     val_result = evaluate(
@@ -272,7 +282,7 @@ def train_model(
                     )
                     if not val_result.is_valid:
                         warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
-                        val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                        val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                     else:
                         val_metrics = val_result.metrics
             else:
@@ -285,22 +295,31 @@ def train_model(
                 )
                 if not val_result.is_valid:
                     warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
-                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                    val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                 else:
                     val_metrics = val_result.metrics
         except EvaluationError as e:
             warnings.warn(f"Evaluation failed at epoch {epoch+1}: {e}")
-            val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+            val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
 
         scheduler.step()
 
         history['train_loss'].append(train_metrics['total'])
+        history['val_loss'].append(float(val_metrics.get('loss', float('inf'))))
         history['val_mcc'].append(val_metrics['mcc'])
         history['val_acc'].append(val_metrics['accuracy'])
 
         # Track best model
-        improved = val_metrics['mcc'] > best_val_mcc
+        if model_selection_metric == 'val_loss':
+            current_score = float(val_metrics.get('loss', float('inf')))
+            improved = current_score < (best_selection_score - 1e-12)
+            if (not improved) and abs(current_score - best_selection_score) <= 1e-12:
+                improved = val_metrics['mcc'] > best_val_mcc
+        else:
+            current_score = float(val_metrics['mcc'])
+            improved = current_score > best_selection_score
         if improved:
+            best_selection_score = current_score
             best_val_mcc = val_metrics['mcc']
             best_epoch = epoch + 1
             best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -308,9 +327,10 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Print progress every epoch (AUC instead of loss)
+        # Print progress every epoch
         print(
-            f"    Epoch {epoch+1}: val_auc={val_metrics['auc']:.4f}, "
+            f"    Epoch {epoch+1}: val_loss={val_metrics.get('loss', float('inf')):.6f}, "
+            f"val_auc={val_metrics['auc']:.4f}, "
             f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}"
         )
 
@@ -325,6 +345,8 @@ def train_model(
                     scheduler=scheduler,
                     epoch=epoch,
                     best_val_mcc=best_val_mcc,
+                    best_selection_score=best_selection_score,
+                    model_selection_metric=model_selection_metric,
                     best_epoch=best_epoch,
                     best_model_state=best_model_state,
                     patience_counter=patience_counter,
@@ -340,7 +362,10 @@ def train_model(
     # Load best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        print(f"  Best model from epoch {best_epoch} (val_mcc={best_val_mcc:.4f})")
+        print(
+            f"  Best model from epoch {best_epoch} "
+            f"({model_selection_metric}={best_selection_score:.6f}, val_mcc={best_val_mcc:.4f})"
+        )
 
     # Save final checkpoint
     if checkpoint_path is not None:
@@ -351,6 +376,8 @@ def train_model(
             scheduler=scheduler,
             epoch=epoch,
             best_val_mcc=best_val_mcc,
+            best_selection_score=best_selection_score,
+            model_selection_metric=model_selection_metric,
             best_epoch=best_epoch,
             best_model_state=best_model_state,
             patience_counter=patience_counter,

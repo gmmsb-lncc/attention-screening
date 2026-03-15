@@ -159,6 +159,7 @@ class BenchmarkConfig:
     batch_size: int = 32
     patience: Optional[int] = None
     learning_rate: float = 1e-4
+    model_selection_metric: str = "val_loss"  # "val_loss" or "mcc"
 
     # --- fine-tuning ---
     finetune: bool = False
@@ -248,6 +249,12 @@ class BenchmarkConfig:
             raise ValueError(msg)
         if self.mode not in {"train", "test"}:
             msg = f"Invalid mode '{self.mode}'. Choose from: train, test"
+            raise ValueError(msg)
+        if self.model_selection_metric not in {"val_loss", "mcc"}:
+            msg = (
+                f"Invalid model_selection_metric '{self.model_selection_metric}'. "
+                "Choose from: val_loss, mcc"
+            )
             raise ValueError(msg)
         for level in self.levels:
             if level not in VALID_LEVELS:
