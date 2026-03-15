@@ -43,6 +43,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import matthews_corrcoef
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -57,6 +58,31 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     split_loader_for_feature_extraction,
 )
+
+
+def _load_frozen_mlp_selection_from_train(
+    output_dir: str,
+    cache_filename: str,
+) -> dict[str, object] | None:
+    """Load frozen MLP selection from corresponding train artifact for same seed."""
+    test_token = f"{os.sep}test{os.sep}"
+    train_token = f"{os.sep}train{os.sep}"
+    if test_token not in output_dir:
+        return None
+
+    train_seed_dir = output_dir.replace(test_token, train_token, 1)
+    train_cache_path = os.path.join(train_seed_dir, cache_filename)
+    if not os.path.exists(train_cache_path):
+        return None
+
+    with open(train_cache_path) as fh:
+        payload = json.load(fh)
+    scaffold_key = next(iter(payload.keys()), None)
+    if not scaffold_key:
+        return None
+    mlp_block = payload.get(scaffold_key, {}).get("MLP", {})
+    selection = mlp_block.get("mlp_selection")
+    return selection if isinstance(selection, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +245,7 @@ def _train_attention_pooling(
     criterion = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")
+    best_val_mcc = -1.0
     best_state = None
     wait = 0
 
@@ -262,6 +289,8 @@ def _train_attention_pooling(
         aux_head.eval()
         val_loss = 0.0
         val_n = 0
+        val_probs: list[np.ndarray] = []
+        val_targets: list[np.ndarray] = []
         with torch.no_grad():
             for batch in val_loader:
                 p = batch["protein_matrix"].to(device)
@@ -274,23 +303,39 @@ def _train_attention_pooling(
                 logits = aux_head(features)
                 val_loss += criterion(logits, y).item()
                 val_n += 1
+                val_probs.append(torch.sigmoid(logits).cpu().numpy().ravel())
+                val_targets.append(y.cpu().numpy().ravel())
 
         avg_train = train_loss / max(n_batches, 1)
         avg_val = val_loss / max(val_n, 1)
+        probs = np.concatenate(val_probs) if val_probs else np.array([], dtype=np.float32)
+        targets = np.concatenate(val_targets) if val_targets else np.array([], dtype=np.float32)
+        if targets.size > 0 and len(np.unique(targets.astype(int))) > 1:
+            preds = (probs >= 0.5).astype(int)
+            val_mcc = float(matthews_corrcoef(targets.astype(int), preds))
+        else:
+            val_mcc = 0.0
         epoch_iter.set_postfix(
             train_loss=f"{avg_train:.4f}",
             val_loss=f"{avg_val:.4f}",
-            best=f"{best_val_loss:.4f}" if np.isfinite(best_val_loss) else "inf",
+            val_mcc=f"{val_mcc:.3f}",
+            best_mcc=f"{best_val_mcc:.3f}",
         )
 
-        if avg_val < best_val_loss:
+        if (val_mcc > best_val_mcc) or (
+            np.isclose(val_mcc, best_val_mcc) and avg_val < best_val_loss
+        ):
             best_val_loss = avg_val
+            best_val_mcc = val_mcc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
         else:
             wait += 1
             if patience and wait >= patience:
-                tqdm.write(f"    Early stopping at epoch {epoch} (val_loss={avg_val:.4f})")
+                tqdm.write(
+                    f"    Early stopping at epoch {epoch} "
+                    f"(val_mcc={val_mcc:.4f}, best_mcc={best_val_mcc:.4f})"
+                )
                 break
 
     if best_state is not None:
@@ -450,7 +495,31 @@ class Level3Runner(BaseLevelRunner):
 
         # Train canonical KNN/MLP (same as all levels)
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_fit, y_fit, x_eval, y_eval, seed)
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level3_knn_mlp_results.json",
+            )
+            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 3 test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -560,7 +629,31 @@ class Level3aRunner(Level3Runner):
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         tqdm.write("  Training MLP only (KNN skipped)...")
-        mlp_metrics = train_mlp_only(x_fit, y_fit, x_eval, y_eval, seed)
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level3a_mlp_results.json",
+            )
+            strict_freeze = os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 3a test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        mlp_metrics = train_mlp_only(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: {"MLP": mlp_metrics}}
