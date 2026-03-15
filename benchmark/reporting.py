@@ -105,6 +105,18 @@ def save_benchmark_json(
             "levels_executed": config.levels,
             "seeds": config.resolved_seeds,
             "elapsed_seconds": round(elapsed_seconds, 1),
+            "rigor": {
+                "strict_level_completeness": os.getenv("BENCHMARK_STRICT_LEVEL_COMPLETENESS", "1"),
+                "require_train_selection_for_test": os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1"),
+                "early_stopping_patience_rule": "10% of epochs",
+            },
+            "mlp_runtime_settings": {
+                "BENCHMARK_MLP_USE_CV": os.getenv("BENCHMARK_MLP_USE_CV", "1"),
+                "BENCHMARK_MLP_FOLDS": os.getenv("BENCHMARK_MLP_FOLDS", "3"),
+                "BENCHMARK_MLP_CAL_RESTARTS": os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3"),
+                "BENCHMARK_MLP_ENSEMBLE": os.getenv("BENCHMARK_MLP_ENSEMBLE", "5"),
+                "BENCHMARK_MLP_OVERSAMPLE": os.getenv("BENCHMARK_MLP_OVERSAMPLE", "1"),
+            },
         },
         "results": {},
     }

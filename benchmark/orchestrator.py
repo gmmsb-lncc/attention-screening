@@ -140,6 +140,38 @@ class BenchmarkOrchestrator:
             tqdm.write("  No results to compare. At least one level must produce results.")
             sys.exit(1)
 
+        # Rigor gate: block partial comparisons when requested levels are missing.
+        strict = os.getenv("BENCHMARK_STRICT_LEVEL_COMPLETENESS", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        if strict:
+            expected = {
+                "1a": ["level1a_fp_knn", "level1a_fp_mlp"],
+                "1b": ["level1b_ligmean_knn", "level1b_ligmean_mlp"],
+                "1c": ["level1c_ligattn_knn", "level1c_ligattn_mlp"],
+                "2": ["level2_meanpool_knn", "level2_meanpool_mlp"],
+                "3": ["level3_attnpool_knn", "level3_attnpool_mlp"],
+                "3a": ["level3a_attnpool_mlp"],
+                "4": ["level4_crossatt_knn", "level4_crossatt_mlp"],
+                "5a": ["level5_da_knn", "level5_da_mlp"],
+                "5b": ["level5b_da_knn", "level5b_da_mlp"],
+                "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
+                "6b": ["level6b_ban_knn", "level6b_ban_mlp"],
+            }
+            missing_models: list[str] = []
+            for lv in config.levels:
+                for key in expected.get(lv, []):
+                    row = self._aggregated.get(key)
+                    if not row or row.get("mcc") is None:
+                        missing_models.append(key)
+            if missing_models:
+                tqdm.write("FATAL: Strict completeness gate failed.")
+                tqdm.write(f"  Missing model rows: {missing_models}")
+                tqdm.write("  Set BENCHMARK_STRICT_LEVEL_COMPLETENESS=0 to bypass.")
+                sys.exit(1)
+
         print_comparison_table(self._aggregated, config)
 
         elapsed = time.time() - self._t_start

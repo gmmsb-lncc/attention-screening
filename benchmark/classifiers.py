@@ -418,17 +418,30 @@ def _train_mlp_pipeline(
     x_test_sc: np.ndarray,
     y_test: np.ndarray,
     seed: int,
+    frozen_selection: dict[str, object] | None = None,
 ) -> Dict[str, float]:
     """Train/evaluate MLP pipeline optimized for MCC."""
-    x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
+    if frozen_selection is None:
+        x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
 
-    best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
-        x_fit=x_fit,
-        y_fit=y_fit,
-        x_cal=x_cal,
-        y_cal=y_cal,
-        seed=seed,
-    )
+        best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
+            x_fit=x_fit,
+            y_fit=y_fit,
+            x_cal=x_cal,
+            y_cal=y_cal,
+            seed=seed,
+        )
+        selection_source = "validation_search"
+    else:
+        required = {"best_cfg", "best_thr", "best_mcc", "best_mcc_std"}
+        missing = sorted(required.difference(frozen_selection.keys()))
+        if missing:
+            raise ValueError(f"Frozen MLP selection missing keys: {missing}")
+        best_cfg = dict(frozen_selection["best_cfg"])
+        best_thr = float(frozen_selection["best_thr"])
+        best_mcc = float(frozen_selection["best_mcc"])
+        best_mcc_std = float(frozen_selection["best_mcc_std"])
+        selection_source = "frozen_train_selection"
 
     # Refit best architecture on full training features as a restart ensemble.
     mlp_proba = _fit_mlp_ensemble_predict(
@@ -443,6 +456,13 @@ def _train_mlp_pipeline(
     mlp_metrics["decision_threshold"] = float(best_thr)
     mlp_metrics["calibration_mcc"] = float(best_mcc)
     mlp_metrics["calibration_mcc_std"] = float(best_mcc_std)
+    mlp_metrics["selection_source"] = selection_source
+    mlp_metrics["mlp_selection"] = {
+        "best_cfg": best_cfg,
+        "best_thr": float(best_thr),
+        "best_mcc": float(best_mcc),
+        "best_mcc_std": float(best_mcc_std),
+    }
     return mlp_metrics
 
 
@@ -456,6 +476,7 @@ def train_knn_mlp(
     x_test: np.ndarray,
     y_test: np.ndarray,
     seed: int,
+    frozen_mlp_selection: dict[str, object] | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """Train canonical KNN and MLP classifiers and return metric dicts.
 
@@ -494,7 +515,14 @@ def train_knn_mlp(
     knn_metrics = _compute_metrics(y_test, knn_pred, knn_proba)
 
     # ---------- MLP tuned for MCC ----------
-    mlp_metrics = _train_mlp_pipeline(x_train_sc, y_train, x_test_sc, y_test, seed)
+    mlp_metrics = _train_mlp_pipeline(
+        x_train_sc,
+        y_train,
+        x_test_sc,
+        y_test,
+        seed,
+        frozen_selection=frozen_mlp_selection,
+    )
 
     return {"KNN": knn_metrics, "MLP": mlp_metrics}
 
@@ -505,6 +533,7 @@ def train_mlp_only(
     x_test: np.ndarray,
     y_test: np.ndarray,
     seed: int,
+    frozen_mlp_selection: dict[str, object] | None = None,
 ) -> Dict[str, float]:
     """Train and evaluate only MLP (skip KNN entirely)."""
     x_train = np.asarray(x_train, dtype=np.float32)
@@ -516,4 +545,11 @@ def train_mlp_only(
     x_train_sc = scaler.fit_transform(x_train).astype(np.float32)
     x_test_sc = scaler.transform(x_test).astype(np.float32)
 
-    return _train_mlp_pipeline(x_train_sc, y_train, x_test_sc, y_test, seed)
+    return _train_mlp_pipeline(
+        x_train_sc,
+        y_train,
+        x_test_sc,
+        y_test,
+        seed,
+        frozen_selection=frozen_mlp_selection,
+    )
