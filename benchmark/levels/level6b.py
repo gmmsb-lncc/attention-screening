@@ -244,7 +244,7 @@ class Level6bRunner(BaseLevelRunner):
         return x_fit, y_fit, x_eval, y_eval
 
     @staticmethod
-    @torch.no_grad()
+    @torch.inference_mode()
     def _collect_features(
         model: torch.nn.Module,
         loader: torch.utils.data.DataLoader,

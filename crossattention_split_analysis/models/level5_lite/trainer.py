@@ -258,7 +258,7 @@ class Level5LiteTrainer:
         
         return total_loss / num_batches
     
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluate(
         self,
         loader: DataLoader,
