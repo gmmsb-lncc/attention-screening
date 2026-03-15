@@ -85,6 +85,60 @@ def _load_frozen_mlp_selection_from_train(
     return selection if isinstance(selection, dict) else None
 
 
+def _extract_binary_labels_from_loader(loader: DataLoader) -> np.ndarray:
+    """Extract labels from loader dataset without materializing matrices when possible."""
+    ds = loader.dataset
+
+    # Subset(MatrixDataset)
+    if hasattr(ds, "dataset") and hasattr(ds, "indices"):
+        base = ds.dataset
+        if hasattr(base, "_df") and "label" in base._df.columns:
+            return base._df.iloc[ds.indices]["label"].to_numpy(dtype=np.int64)
+
+    # MatrixDataset fast path
+    if hasattr(ds, "_df") and "label" in ds._df.columns:
+        return ds._df["label"].to_numpy(dtype=np.int64)
+
+    # Fallback (may touch dataset items)
+    labels = []
+    for i in range(len(ds)):
+        item = ds[i]
+        labels.append(int(item[2]))
+    return np.asarray(labels, dtype=np.int64)
+
+
+def _compute_pos_weight(labels: np.ndarray) -> float:
+    """Compute BCE pos_weight = N_negative / N_positive with clipping."""
+    n_pos = int((labels == 1).sum())
+    n_neg = int((labels == 0).sum())
+    if n_pos <= 0 or n_neg <= 0:
+        return 1.0
+    return float(np.clip(n_neg / max(n_pos, 1), 1.0, 20.0))
+
+
+def _best_mcc_threshold(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+) -> tuple[float, float]:
+    """Return threshold that maximizes MCC on a validation vector."""
+    if y_true.size == 0 or len(np.unique(y_true)) < 2:
+        return 0.5, 0.0
+
+    grid = np.linspace(0.05, 0.95, 37)
+    anchors = np.unique(np.clip(y_proba, 0.0, 1.0))
+    thresholds = np.unique(np.concatenate([grid, anchors]))
+
+    best_thr = 0.5
+    best_mcc = -1.0
+    for thr in thresholds:
+        pred = (y_proba >= thr).astype(int)
+        mcc = float(matthews_corrcoef(y_true, pred))
+        if mcc > best_mcc:
+            best_mcc = mcc
+            best_thr = float(thr)
+    return best_thr, best_mcc
+
+
 # ---------------------------------------------------------------------------
 # Attention-pooling model (no cross-attention — isolation experiment)
 # ---------------------------------------------------------------------------
@@ -230,11 +284,18 @@ def _train_attention_pooling(
         dropout=dropout,
     ).to(device)
 
-    # Lightweight classification head used ONLY for training the pooling
-    # (discarded afterwards — KNN/MLP are the real classifiers)
-    aux_head = nn.Linear(hidden_dim * 2, 1).to(device)
-    nn.init.xavier_uniform_(aux_head.weight)
-    nn.init.zeros_(aux_head.bias)
+    # Auxiliary supervision head used ONLY to shape representations
+    # (discarded afterwards — KNN/MLP remain the real classifiers).
+    aux_head = nn.Sequential(
+        nn.Linear(hidden_dim * 2, hidden_dim),
+        nn.GELU(),
+        nn.Dropout(dropout),
+        nn.Linear(hidden_dim, 1),
+    ).to(device)
+    nn.init.xavier_uniform_(aux_head[0].weight)
+    nn.init.zeros_(aux_head[0].bias)
+    nn.init.xavier_uniform_(aux_head[3].weight)
+    nn.init.zeros_(aux_head[3].bias)
 
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(aux_head.parameters()),
@@ -242,7 +303,11 @@ def _train_attention_pooling(
         weight_decay=0.01,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = nn.BCEWithLogitsLoss()
+    train_labels = _extract_binary_labels_from_loader(train_loader)
+    pos_weight = _compute_pos_weight(train_labels)
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device),
+    )
 
     best_val_loss = float("inf")
     best_val_mcc = -1.0
@@ -320,13 +385,17 @@ def _train_attention_pooling(
             val_loss=f"{avg_val:.4f}",
             val_mcc=f"{val_mcc:.3f}",
             best_mcc=f"{best_val_mcc:.3f}",
+            pos_w=f"{pos_weight:.2f}",
         )
 
-        if (val_mcc > best_val_mcc) or (
-            np.isclose(val_mcc, best_val_mcc) and avg_val < best_val_loss
+        thr_mcc, tuned_val_mcc = _best_mcc_threshold(targets.astype(int), probs)
+
+        if (tuned_val_mcc > best_val_mcc) or (
+            np.isclose(tuned_val_mcc, best_val_mcc) and
+            (val_mcc > best_val_mcc or avg_val < best_val_loss)
         ):
             best_val_loss = avg_val
-            best_val_mcc = val_mcc
+            best_val_mcc = tuned_val_mcc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
         else:
@@ -334,7 +403,8 @@ def _train_attention_pooling(
             if patience and wait >= patience:
                 tqdm.write(
                     f"    Early stopping at epoch {epoch} "
-                    f"(val_mcc={val_mcc:.4f}, best_mcc={best_val_mcc:.4f})"
+                    f"(val_mcc={val_mcc:.4f}, tuned_mcc={tuned_val_mcc:.4f}, "
+                    f"best_mcc={best_val_mcc:.4f}, thr={thr_mcc:.3f})"
                 )
                 break
 
