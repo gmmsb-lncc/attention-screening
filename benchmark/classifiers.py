@@ -41,7 +41,7 @@ from sklearn.metrics import (
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 
 # ------------------------------------------------------------------ #
@@ -273,9 +273,17 @@ def _select_best_mlp_by_mcc(
     y_cal: np.ndarray,
     seed: int,
 ) -> tuple[dict[str, object], float, float, float]:
-    """Select MLP config by calibration MCC using restart ensemble on calibration."""
+    """Select MLP config by MCC with stratified CV (fallback: holdout calibration).
+
+    Using OOF probabilities for threshold selection is more robust than a
+    single calibration split and tends to improve generalization MCC.
+    """
     candidates = _mlp_candidate_space()
     n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3")))
+    n_folds = max(2, int(os.getenv("BENCHMARK_MLP_FOLDS", "3")))
+    use_cv = os.getenv("BENCHMARK_MLP_USE_CV", "1").strip().lower() not in {"0", "false", "no"}
+    min_class = int(np.bincount(y_fit.astype(int)).min()) if y_fit.size else 0
+    can_cv = use_cv and (min_class >= n_folds)
 
     best_cfg = candidates[0]
     best_thr = 0.5
@@ -284,24 +292,40 @@ def _select_best_mlp_by_mcc(
     best_score = -999.0
 
     for cfg_idx, cfg in enumerate(candidates):
-        probs_per_restart: list[np.ndarray] = []
         mccs: list[float] = []
+        thr_values: list[float] = []
 
         for restart in range(n_restarts):
             rs = seed + (cfg_idx * 101) + restart
-            candidate = _fit_mlp_from_cfg(cfg, x_fit, y_fit, random_state=rs)
-            cal_proba_single = candidate.predict_proba(x_cal)[:, 1]
-            thr_single, mcc_single = _optimize_threshold_mcc(y_cal, cal_proba_single)
-            probs_per_restart.append(cal_proba_single)
+            if can_cv:
+                skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=rs)
+                oof_proba = np.zeros(y_fit.shape[0], dtype=np.float64)
+
+                for fold_train_idx, fold_val_idx in skf.split(x_fit, y_fit):
+                    fold_model = _fit_mlp_from_cfg(
+                        cfg,
+                        x_fit[fold_train_idx],
+                        y_fit[fold_train_idx],
+                        random_state=rs,
+                    )
+                    oof_proba[fold_val_idx] = fold_model.predict_proba(x_fit[fold_val_idx])[:, 1]
+
+                thr_single, mcc_single = _optimize_threshold_mcc(y_fit, oof_proba)
+            else:
+                candidate = _fit_mlp_from_cfg(cfg, x_fit, y_fit, random_state=rs)
+                cal_proba_single = candidate.predict_proba(x_cal)[:, 1]
+                thr_single, mcc_single = _optimize_threshold_mcc(y_cal, cal_proba_single)
+
+            thr_values.append(thr_single)
             mccs.append(mcc_single)
 
-        # Threshold on averaged probabilities across restarts is typically more stable.
-        cal_proba_mean = np.mean(np.stack(probs_per_restart, axis=0), axis=0)
-        thr, mcc = _optimize_threshold_mcc(y_cal, cal_proba_mean)
+        # Robust aggregation across restarts.
+        thr = float(np.median(np.array(thr_values)))
+        mcc = float(np.mean(np.array(mccs)))
         mcc_std = float(np.std(np.array(mccs), ddof=1)) if len(mccs) > 1 else 0.0
 
         # Stability-aware objective: prioritize high MCC with low restart variance.
-        score = float(mcc) - (0.15 * mcc_std)
+        score = mcc - (0.20 * mcc_std)
         if score > best_score:
             best_score = score
             best_cfg = cfg
