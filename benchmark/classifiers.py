@@ -180,11 +180,30 @@ def _split_fit_for_calibration(
 def _mlp_candidate_space() -> list[dict[str, object]]:
     """Return a compact, well-regularised MLP hyperparameter space.
 
-    Three candidates sized proportionally to ~512-dim transformer
-    representations.  Stronger regularisation (higher alpha) and
-    early stopping prevent the overfitting seen with larger grids.
+    Five candidates: two wider architectures (512-unit) proportional to
+    ~1024-dim interaction-enriched features, plus three original ones
+    for the plain 512-dim case.  Stronger regularisation (higher alpha)
+    and early stopping prevent overfitting.
     """
     return [
+        {   # Wide single-layer (good for high-D interaction features)
+            "hidden_layer_sizes": (512,),
+            "alpha": 1e-2,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
+        {   # Deep funnel proportional to 1024-D input
+            "hidden_layer_sizes": (512, 256),
+            "alpha": 5e-3,
+            "learning_rate_init": 8e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 8e-6,
+        },
         {
             "hidden_layer_sizes": (256, 128),
             "alpha": 5e-3,
