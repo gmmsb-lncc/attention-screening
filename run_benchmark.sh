@@ -54,9 +54,12 @@ BENCHMARK_LEVEL3_USE_AUX_CHANNEL="${BENCHMARK_LEVEL3_USE_AUX_CHANNEL:-1}"
 BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES="${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES:-0}"
 BENCHMARK_LEVEL4_INTERACTION_FEATURES="${BENCHMARK_LEVEL4_INTERACTION_FEATURES:-1}"
 
-# OOF threshold refinement (re-calibrates decision threshold on full training set).
-BENCHMARK_MLP_OOF_THRESHOLD="${BENCHMARK_MLP_OOF_THRESHOLD:-0}"
+# OOF threshold refinement (re-calibrates decision threshold on training set OOF predictions).
+BENCHMARK_MLP_OOF_THRESHOLD="${BENCHMARK_MLP_OOF_THRESHOLD:-1}"
 BENCHMARK_MLP_OOF_FOLDS="${BENCHMARK_MLP_OOF_FOLDS:-5}"
+
+# Isotonic probability calibration (corrects probability distribution for better threshold transfer).
+BENCHMARK_MLP_ISOTONIC_CAL="${BENCHMARK_MLP_ISOTONIC_CAL:-1}"
 
 # Full refit: final ensemble trains on 100% of data without early stopping.
 BENCHMARK_MLP_FULL_REFIT="${BENCHMARK_MLP_FULL_REFIT:-0}"
@@ -84,6 +87,7 @@ export BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY
 export BENCHMARK_LEVEL4_INTERACTION_FEATURES
 export BENCHMARK_MLP_OOF_THRESHOLD
 export BENCHMARK_MLP_OOF_FOLDS
+export BENCHMARK_MLP_ISOTONIC_CAL
 export BENCHMARK_MLP_FULL_REFIT
 export BENCHMARK_REQUIRE_TRAIN_SELECTION
 export BENCHMARK_STRICT_LEVEL_COMPLETENESS
@@ -110,6 +114,7 @@ echo " Levels: ${LEVELS[*]} | epochs=${EPOCHS} | patience=10% of epochs (auto)"
 echo " Model selection metric: ${MODEL_SELECTION_METRIC}"
 echo " MLP tuning: cv=${BENCHMARK_MLP_USE_CV}, folds=${BENCHMARK_MLP_FOLDS}, cal_restarts=${BENCHMARK_MLP_CAL_RESTARTS}, ensemble=${BENCHMARK_MLP_ENSEMBLE}, oversample=${BENCHMARK_MLP_OVERSAMPLE}"
 echo " MLP OOF threshold: enabled=${BENCHMARK_MLP_OOF_THRESHOLD}, oof_folds=${BENCHMARK_MLP_OOF_FOLDS}"
+echo " MLP isotonic calibration: ${BENCHMARK_MLP_ISOTONIC_CAL}"
 echo " MLP full refit: ${BENCHMARK_MLP_FULL_REFIT} (final ensemble trains without early stopping)"
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
 echo " Level3 full train features: ${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES} (transfer learning mode)"
