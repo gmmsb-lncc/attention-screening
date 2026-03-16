@@ -164,6 +164,11 @@ class _AttentionPoolingModel(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
 
+        # Dropout applied to the final concatenated representation to
+        # reduce overfitting when downstream classifiers are trained on
+        # the extracted features.
+        self.feature_dropout = nn.Dropout(dropout)
+
         # Projection layers (identical to Level5LiteModel encoders)
         self.protein_proj = nn.Sequential(
             nn.Linear(protein_input_dim, hidden_dim),
@@ -221,7 +226,8 @@ class _AttentionPoolingModel(nn.Module):
         protein_vec = self.protein_pool(protein, p_attn)  # [B, hidden]
         ligand_vec = self.ligand_pool(ligand, l_attn)      # [B, hidden]
 
-        return torch.cat([protein_vec, ligand_vec], dim=-1)  # [B, 2*hidden]
+        combined = torch.cat([protein_vec, ligand_vec], dim=-1)  # [B, 2*hidden]
+        return self.feature_dropout(combined)
 
 
 class _AttentionPool(nn.Module):
@@ -788,7 +794,7 @@ class Level3aRunner(Level3Runner):
 
         feat_extract_loader = None
         use_full_train_features = os.getenv(
-            "BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES", "1"
+            "BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES", "0"
         ).strip().lower() not in {"0", "false", "no"}
 
         if self.mode == "train" and not use_full_train_features:
