@@ -44,7 +44,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from benchmark.classifiers import train_knn_mlp
+from benchmark.classifiers import train_knn_mlp, train_mlp_only
 from benchmark.config import (
     EMBEDDING_BASE_PATH,
     METRICS_ORDER,
@@ -57,11 +57,40 @@ from benchmark.levels.base import BaseLevelRunner
 from benchmark.levels.matrix_utils import build_matrix_dataloaders
 
 
+def _load_frozen_mlp_selection_from_train(
+    output_dir: str,
+    cache_filename: str,
+) -> dict[str, object] | None:
+    """Load frozen MLP selection from corresponding train artifact for same seed."""
+    test_token = f"{os.sep}test{os.sep}"
+    train_token = f"{os.sep}train{os.sep}"
+    if test_token not in output_dir:
+        return None
+
+    train_seed_dir = output_dir.replace(test_token, train_token, 1)
+    train_cache_path = os.path.join(train_seed_dir, cache_filename)
+    if not os.path.exists(train_cache_path):
+        return None
+
+    with open(train_cache_path) as fh:
+        payload = json.load(fh)
+    scaffold_key = next(iter(payload.keys()), None)
+    if not scaffold_key:
+        return None
+    mlp_block = payload.get(scaffold_key, {}).get("MLP", {})
+    selection = mlp_block.get("mlp_selection")
+    return selection if isinstance(selection, dict) else None
+
+
 class Level4Runner(BaseLevelRunner):
     """Full Cross-Attention encoder → canonical KNN/MLP."""
 
     def __init__(self, config: BenchmarkConfig) -> None:
         super().__init__(config)
+
+    @property
+    def knn_is_deterministic(self) -> bool:
+        return False  # Learned feature extractor → KNN input varies per seed
 
     @property
     def level_tag(self) -> str:
@@ -83,10 +112,20 @@ class Level4Runner(BaseLevelRunner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level4_knn_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 4 results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 4 results and recomputing.")
 
         # --- Step 1: Train the cross-attention model ---------------------
         tqdm.write(f"  Training Level 4 cross-attention encoder (seed {seed})...")
@@ -113,6 +152,7 @@ class Level4Runner(BaseLevelRunner):
             model_variant="level5_lite",
             optimize_threshold=False,
             fixed_threshold=0.5,
+            model_selection_metric=self._config.model_selection_metric,
             weight_decay=0.05,
         )
 
@@ -120,25 +160,48 @@ class Level4Runner(BaseLevelRunner):
         tqdm.write("  Extracting cross-attention representations...")
 
         try:
-            x_val, y_val, x_test, y_test = self._extract_features(
+            x_fit, y_fit, x_eval, y_eval = self._extract_features(
                 output_dir=output_dir,
                 seed=seed,
             )
         except Exception as exc:
+            if strict_freeze:
+                raise RuntimeError(
+                    "Level 4 strict test mode forbids fallback metrics on feature extraction failure."
+                ) from exc
             tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
             tqdm.write("  Falling back to training metrics only.")
             return self._fallback_from_training_results(_training_results)
 
         # Sanitise features
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # --- Step 3: Train canonical KNN/MLP on val features -------------
+        # --- Step 3: Train canonical KNN/MLP on fit features -------------
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level4_knn_mlp_results.json",
+            )
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 4 test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}
@@ -168,13 +231,14 @@ class Level4Runner(BaseLevelRunner):
         **same** data pipeline as Levels 2 and 3, ensuring that all
         matrix-based levels receive identical inputs.
 
-        Features are extracted from the **validation** split (not training)
-        to avoid train-set optimism — the model was only exposed to val
-        for early stopping, not for gradient updates.
+        In **train** mode, features are extracted from the training split
+        (for KNN/MLP fitting) and validation split (for evaluation).
+        In **test** mode, features are extracted from validation (fitting)
+        and test (evaluation).
 
         Returns
         -------
-        x_val, y_val, x_test, y_test : np.ndarray
+        x_fit, y_fit, x_eval, y_eval : np.ndarray
             Feature arrays from the cross-attention encoder.
         """
         from crossattention_split_analysis.config import (
@@ -219,28 +283,46 @@ class Level4Runner(BaseLevelRunner):
         # --- Build dataloaders (same as L2/L3 — shared matrix_utils) ---
         # For dataset="all" this correctly concatenates human + non_human
         # splits and searches matrices in both directories.
-        _train_loader, val_loader, test_loader = build_matrix_dataloaders(
+        train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=full_emb,
             scaffold_split_dir=self.scaffold_split_dir,
             batch_size=64,
+            dataset_source_filter=self._config.dataset_source_filter,
+            mode=self._config.mode,
         )
 
-        # --- Forward pass to collect features (val + test only) ---
-        # Val features are used for KNN/MLP training (no train-set optimism).
-        x_val, y_val = self._collect_features(model, val_loader, device)
-        x_test, y_test = self._collect_features(model, test_loader, device)
+        # --- Forward pass to collect features based on mode ---
+        if self._config.mode == "train":
+            x_fit, y_fit = self._collect_features(model, train_loader, device)
+            x_eval, y_eval = self._collect_features(model, val_loader, device)
+        else:
+            x_fit, y_fit = self._collect_features(model, val_loader, device)
+            x_eval, y_eval = self._collect_features(model, test_loader, device)
 
-        return x_val, y_val, x_test, y_test
+        return x_fit, y_fit, x_eval, y_eval
 
     @staticmethod
-    @torch.no_grad()
+    @torch.inference_mode()
     def _collect_features(
         model: "torch.nn.Module",
         loader: "torch.utils.data.DataLoader",
         device: torch.device,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Run forward passes and collect pre-head feature vectors."""
+        """Run forward passes and collect enriched feature vectors.
+
+        Mirrors Level 3's interaction features: splits the concatenated
+        ``[protein_vec ‖ ligand_vec]`` representation into its two halves,
+        then appends element-wise product and absolute difference for
+        explicit interaction signals (4×hidden_dim total).
+
+        Controlled by ``BENCHMARK_LEVEL4_INTERACTION_FEATURES`` env var
+        (default ``"1"``).
+        """
+        use_interactions = os.getenv(
+            "BENCHMARK_LEVEL4_INTERACTION_FEATURES", "1",
+        ).strip().lower() not in {"0", "false", "no"}
+
         all_features: list[np.ndarray] = []
         all_labels: list[np.ndarray] = []
 
@@ -258,7 +340,20 @@ class Level4Runner(BaseLevelRunner):
                 protein, ligand, protein_mask, ligand_mask,
                 return_features=True,
             )
-            features = output["features"].cpu().numpy()
+            feats = output["features"]  # [B, 2*hidden_dim]
+
+            if use_interactions:
+                half = feats.shape[-1] // 2
+                prot_vec = feats[:, :half]
+                lig_vec = feats[:, half:]
+                feats = torch.cat([
+                    prot_vec,
+                    lig_vec,
+                    prot_vec * lig_vec,                 # co-activation
+                    torch.abs(prot_vec - lig_vec),      # complementarity
+                ], dim=-1)  # [B, 4*hidden_dim]
+
+            features = feats.cpu().numpy()
             labels = batch["label"].numpy()
 
             all_features.append(features)
@@ -343,3 +438,155 @@ def load_crossattention_results(
         return data.get("model_results")
     except (json.JSONDecodeError, KeyError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Level 4a — Cross-Attention encoder + MLP only (no KNN)
+# ---------------------------------------------------------------------------
+
+
+class Level4aRunner(Level4Runner):
+    """Cross-Attention encoder → MLP only (KNN skipped).
+
+    Inherits the full cross-attention training and feature-extraction
+    pipeline from :class:`Level4Runner` but swaps ``train_knn_mlp``
+    for ``train_mlp_only`` to cut runtime when only the MLP metric
+    is needed (mirrors the Level3a / Level3 relationship).
+    """
+
+    @property
+    def level_tag(self) -> str:
+        return "level4a_crossatt"
+
+    # ------------------------------------------------------------------
+    # Overridden entry point
+    # ------------------------------------------------------------------
+
+    def run_single_seed(
+        self,
+        seed: int,
+        output_dir: str,
+        **kwargs: object,
+    ) -> Optional[Dict]:
+        """Train cross-attention model, extract features, run MLP only."""
+        from crossattention_split_analysis.experiment import run_single_analysis
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        cache_path = os.path.join(output_dir, "level4a_mlp_results.json")
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
+            tqdm.write(f"  Loading cached Level 4a results (seed {seed})")
+            with open(cache_path) as fh:
+                return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 4a results and recomputing.")
+
+        # --- Step 1: Train the cross-attention model ---------------------
+        tqdm.write(f"  Training Level 4a cross-attention encoder (seed {seed})...")
+
+        _training_results = run_single_analysis(
+            embedding_name=self.embedding_name,
+            dataset_type=self.dataset,
+            output_dir=output_dir,
+            seeds=[seed],
+            force=self.force,
+            scenarios=["scaffold"],
+            num_epochs=self._config.epochs,
+            patience=self._config.resolved_patience or 10,
+            batch_size=32,
+            learning_rate=1e-4,
+            hidden_dim=384,
+            num_cross_attn_layers=1,
+            num_heads=12,
+            dropout=0.25,
+            classifier_dropout=0.25,
+            classification_only=True,
+            use_molformer_ligand=True,
+            scaffold_split_dir=self.scaffold_split_dir,
+            model_variant="level5_lite",
+            optimize_threshold=False,
+            fixed_threshold=0.5,
+            model_selection_metric=self._config.model_selection_metric,
+            weight_decay=0.05,
+        )
+
+        # --- Step 2: Extract features from trained model -----------------
+        tqdm.write("  Extracting cross-attention representations...")
+
+        try:
+            x_fit, y_fit, x_eval, y_eval = self._extract_features(
+                output_dir=output_dir,
+                seed=seed,
+            )
+        except Exception as exc:
+            if strict_freeze:
+                raise RuntimeError(
+                    "Level 4a strict test mode forbids fallback metrics on feature extraction failure."
+                ) from exc
+            tqdm.write(f"  WARNING: Feature extraction failed: {exc}")
+            tqdm.write("  Falling back to training metrics only.")
+            return self._fallback_from_training_results_mlp_only(_training_results)
+
+        # Sanitise features
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
+            bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
+            if bad:
+                tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
+                arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # --- Step 3: Train MLP only (KNN skipped) ------------------------
+        tqdm.write("  Training MLP only (KNN skipped)...")
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level4a_mlp_results.json",
+            )
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 4a test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        mlp_metrics = train_mlp_only(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
+
+        sc_key = "Split by Scaffold"
+        result = {sc_key: {"MLP": mlp_metrics}}
+
+        with open(cache_path, "w") as fh:
+            json.dump(result, fh, indent=2)
+
+        tqdm.write(f"  Level 4a (seed {seed}): MLP MCC={mlp_metrics['mcc']:.4f}")
+        return result
+
+    # ------------------------------------------------------------------
+    # Fallback (MLP-only variant)
+    # ------------------------------------------------------------------
+
+    def _fallback_from_training_results_mlp_only(
+        self,
+        results: Optional[Dict],
+    ) -> Optional[Dict]:
+        """Extract metrics from training results as a last resort (MLP only)."""
+        if results is None:
+            return None
+
+        mlp_metrics = self._extract_mlp_metrics(results)
+        tqdm.write("  WARNING: Using model head metrics as fallback (not canonical classifier)")
+        sc_key = self._find_scaffold_key(results) or "Split by Scaffold"
+        return {sc_key: {"MLP": mlp_metrics}}

@@ -54,16 +54,25 @@ METRICS_ORDER: List[str] = ["accuracy", "mcc", "f1", "precision", "recall", "auc
 LEVEL_LABELS: Dict[str, str] = {
     "level1a_fp_knn": "L1a (FP+KNN)",
     "level1a_fp_mlp": "L1a (FP+MLP)",
-    "level1b_ligmean_knn": "L1b (LigMean+KNN)",
-    "level1b_ligmean_mlp": "L1b (LigMean+MLP)",
-    "level1c_ligattn_knn": "L1c (LigAttn+KNN)",
-    "level1c_ligattn_mlp": "L1c (LigAttn+MLP)",
+    "level1b_ligmean_knn": "L1b (LigMeanPool+KNN)",
+    "level1b_ligmean_mlp": "L1b (LigMeanPool+MLP)",
+    "level1c_ligattn_knn": "L1c (LigAttnPool+KNN)",
+    "level1c_ligattn_mlp": "L1c (LigAttnPool+MLP)",
     "level2_meanpool_knn": "L2 (MeanPool+KNN)",
     "level2_meanpool_mlp": "L2 (MeanPool+MLP)",
     "level3_attnpool_knn": "L3 (AttnPool+KNN)",
     "level3_attnpool_mlp": "L3 (AttnPool+MLP)",
-    "level4_crossatt_knn": "L4 (CrossAtt+KNN)",
-    "level4_crossatt_mlp": "L4 (CrossAtt+MLP)",
+    "level3a_attnpool_mlp": "L3a (AttnPool+MLP only)",
+    "level4_crossatt_knn": "L4 (CrossAttn+AttnPool+KNN)",
+    "level4_crossatt_mlp": "L4 (CrossAttn+AttnPool+MLP)",
+    "level5_da_knn": "L5a (CrossAttn+AttnPool+GRL+KNN)",
+    "level5_da_mlp": "L5a (CrossAttn+AttnPool+GRL+MLP)",
+    "level5b_da_knn": "L5b (AttnPool+GRL+KNN)",
+    "level5b_da_mlp": "L5b (AttnPool+GRL+MLP)",
+    "level6a_ban_knn": "L6a (CrossAttn+BAN+GRL+KNN)",
+    "level6a_ban_mlp": "L6a (CrossAttn+BAN+GRL+MLP)",
+    "level6b_ban_knn": "L6b (AttnPool+BAN+GRL+KNN)",
+    "level6b_ban_mlp": "L6b (AttnPool+BAN+GRL+MLP)",
 }
 
 # ---------------------------------------------------------------------------
@@ -81,15 +90,27 @@ LEVEL_COLORS: Dict[str, str] = {
     "level2_meanpool_mlp": "#a6a3d9",
     "level3_attnpool_knn": "#d95f02",
     "level3_attnpool_mlp": "#e78e3f",
+    "level3a_attnpool_mlp": "#c76e1f",
     "level4_crossatt_knn": "#e7298a",
     "level4_crossatt_mlp": "#f06ab6",
+    "level5_da_knn": "#e41a1c",
+    "level5_da_mlp": "#fb6a4a",
+    "level5b_da_knn": "#ff7f00",
+    "level5b_da_mlp": "#fdbf6f",
+    "level6a_ban_knn": "#984ea3",
+    "level6a_ban_mlp": "#cab2d6",
+    "level6b_ban_knn": "#a65628",
+    "level6b_ban_mlp": "#d2a679",
 }
 
 # ---------------------------------------------------------------------------
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"1a", "1b", "1c", "2", "3", "4"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "3a", "4", "4a", "5a", "5b", "6a", "6b"})
+
+# Level 0 is a shortcut for the classical ML baseline subset
+LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
 
 # ---------------------------------------------------------------------------
 # Activity threshold
@@ -116,7 +137,7 @@ class BenchmarkConfig:
     embedding: str  # shorthand: "8M", "150M", "650M"
 
     # --- level selection ---
-    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4"])
+    levels: List[str] = field(default_factory=lambda: ["1a", "1b", "1c", "2", "3", "4", "5a", "5b", "6a", "6b"])
 
     # --- output ---
     output_dir: Optional[str] = None
@@ -124,6 +145,9 @@ class BenchmarkConfig:
 
     # --- reproducibility ---
     seeds: Optional[List[int]] = None
+
+    # --- mode ---
+    mode: str = "train"  # "train" = fit on train, eval on val; "test" = fit on val, eval on test
 
     # --- flags ---
     force: bool = False
@@ -133,8 +157,9 @@ class BenchmarkConfig:
     # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
     batch_size: int = 32
-    patience: int = 5
+    patience: Optional[int] = None
     learning_rate: float = 1e-4
+    model_selection_metric: str = "val_loss"  # "val_loss" or "mcc"
 
     # --- fine-tuning ---
     finetune: bool = False
@@ -152,15 +177,23 @@ class BenchmarkConfig:
 
     @property
     def resolved_output_dir(self) -> str:
-        """Compute actual output directory."""
-        if self.output_dir:
-            return self.output_dir
-        return f"./results/benchmark_{self.dataset}_{self.embedding}"
+        """Compute actual output directory.
+
+        Always appends ``/{mode}`` so that train and test phases
+        write to separate directories even when the user provides
+        the same ``--output_dir``.
+        """
+        base = self.output_dir if self.output_dir else f"./results/benchmark_{self.dataset}_{self.embedding}"
+        return os.path.join(base, self.mode)
 
     @property
     def resolved_patience(self) -> Optional[int]:
-        """Return ``None`` when patience is disabled (0)."""
-        return self.patience if self.patience > 0 else None
+        """Early-stopping patience standardized as 10% of total epochs.
+
+        The benchmark uses a global rule to keep training budgets
+        comparable across levels and runs.
+        """
+        return max(1, int(round(self.epochs * 0.1)))
 
     @property
     def resolved_seeds(self) -> List[int]:
@@ -182,10 +215,26 @@ class BenchmarkConfig:
         )
 
     def datasets_to_process(self) -> List[str]:
-        """List of concrete datasets (expands 'all' → ['human', 'non_human'])."""
+        """List of concrete datasets for embedding directory iteration.
+
+        Expands ``'all'`` → ``['human', 'non_human']`` because embedding
+        files are stored per-corpus.  Split loading always uses the
+        universal scaffold files (see ``dataset_source_filter``).
+        """
         if self.dataset == "all":
             return ["human", "non_human"]
         return [self.dataset]
+
+    @property
+    def dataset_source_filter(self) -> Optional[str]:
+        """Filter value for the ``dataset_source`` column in universal splits.
+
+        Returns ``None`` for ``'all'`` (no filtering — use every row),
+        or the corpus name (``'human'`` / ``'non_human'``) otherwise.
+        """
+        if self.dataset == "all":
+            return None
+        return self.dataset
 
     def __post_init__(self) -> None:
         """Validate configuration at construction time."""
@@ -197,6 +246,15 @@ class BenchmarkConfig:
             raise ValueError(msg)
         if self.dataset not in {"human", "non_human", "all"}:
             msg = f"Invalid dataset '{self.dataset}'. Choose from: human, non_human, all"
+            raise ValueError(msg)
+        if self.mode not in {"train", "test"}:
+            msg = f"Invalid mode '{self.mode}'. Choose from: train, test"
+            raise ValueError(msg)
+        if self.model_selection_metric not in {"val_loss", "mcc"}:
+            msg = (
+                f"Invalid model_selection_metric '{self.model_selection_metric}'. "
+                "Choose from: val_loss, mcc"
+            )
             raise ValueError(msg)
         for level in self.levels:
             if level not in VALID_LEVELS:

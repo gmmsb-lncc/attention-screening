@@ -29,33 +29,27 @@ def _exists_tsv_or_gz(path: str) -> str:
 def ensure_scaffold_splits(config: BenchmarkConfig) -> bool:
     """Verify or generate scaffold splits.
 
-    Returns ``True`` on success, ``False`` on failure.
+    All ``--dataset`` values now route through the **universal** split
+    files (``universal_train.tsv``, ``universal_val.tsv``,
+    ``universal_test.tsv``).  Returns ``True`` on success, ``False`` on
+    failure.
     """
-    datasets_to_check = config.datasets_to_process()
     scaffold_split_dir = config.scaffold_split_dir
     scenario_dir = os.path.join(scaffold_split_dir, "scenarios", "Sc")
 
-    all_found = True
-    found_paths: list[tuple[str, str, str]] = []
+    train = _exists_tsv_or_gz(os.path.join(scenario_dir, "universal_train.tsv"))
+    val = _exists_tsv_or_gz(os.path.join(scenario_dir, "universal_val.tsv"))
+    test = _exists_tsv_or_gz(os.path.join(scaffold_split_dir, "universal_test.tsv"))
 
-    for ds in datasets_to_check:
-        train = _exists_tsv_or_gz(os.path.join(scenario_dir, f"{ds}_train.tsv"))
-        val = _exists_tsv_or_gz(os.path.join(scenario_dir, f"{ds}_val.tsv"))
-        test = _exists_tsv_or_gz(os.path.join(scaffold_split_dir, f"{ds}_test.tsv"))
-
-        if train and val and test:
-            found_paths.extend([
-                ("train", ds, train),
-                ("val", ds, val),
-                ("test", ds, test),
-            ])
-        else:
-            all_found = False
+    all_found = train and val and test
 
     if all_found and not config.force_split:
-        print("  [OK] Scaffold splits found:")
-        for label, ds, path in found_paths:
-            print(f"       {ds} {label}: {path}")
+        print("  [OK] Universal scaffold splits found:")
+        print(f"       train: {train}")
+        print(f"       val:   {val}")
+        print(f"       test:  {test}")
+        if config.dataset != "all":
+            print(f"       (will filter to dataset_source='{config.dataset}')")
         return True
 
     reason = "--force_split requested" if config.force_split else "missing split files"

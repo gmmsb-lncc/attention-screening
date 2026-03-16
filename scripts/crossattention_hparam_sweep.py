@@ -279,7 +279,9 @@ def _build_main_command(
     ]
     if args.external_test_mode:
         cmd.append("--external_test_mode")
-    if args.molformer_ligand:
+    if hasattr(args, '_resolved_ligand_model'):
+        cmd.append(f"--ligand_model {args._resolved_ligand_model}")
+    elif args.molformer_ligand:
         cmd.append("--molformer_ligand")
     if args.no_early_stopping:
         cmd.append("--no-early-stopping")
@@ -381,6 +383,7 @@ def _run_phase(
                 use_molformer_ligand=args.molformer_ligand,
                 scaffold_split_dir=args.scaffold_split_dir,
                 external_test_mode=args.external_test_mode,
+                ligand_model=args._resolved_ligand_model,
             )
             if result is None:
                 cached = _extract_metrics_from_saved_json(trial_dir)
@@ -568,6 +571,9 @@ def main():
     parser.add_argument("--external_test_mode", action="store_true", default=True)
     parser.add_argument("--molformer_ligand", action="store_true", default=True)
     parser.add_argument("--smited_ligand", action="store_true", help="Use SMI-TED instead of MoLFormer ligand matrices.")
+    parser.add_argument("--chemberta_ligand", action="store_true", help="Use ChemBERTa-77M-MTR (384-d) ligand matrices.")
+    parser.add_argument("--ligand_model", type=str, default=None, choices=["molformer", "smited", "chemberta"],
+                        help="Explicit ligand model selection (overrides --molformer_ligand/--smited_ligand/--chemberta_ligand).")
 
     parser.add_argument("--output_dir", "-o", type=str, default="results/crossattention_hparam_sweep")
     parser.add_argument("--run_name", type=str, default=None)
@@ -575,8 +581,18 @@ def main():
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
 
-    if args.smited_ligand:
+    # Resolve ligand model: explicit flag takes precedence
+    if args.ligand_model is not None:
+        args._resolved_ligand_model = args.ligand_model
+        args.molformer_ligand = (args.ligand_model == 'molformer')
+    elif args.chemberta_ligand:
+        args._resolved_ligand_model = 'chemberta'
         args.molformer_ligand = False
+    elif args.smited_ligand:
+        args._resolved_ligand_model = 'smited'
+        args.molformer_ligand = False
+    else:
+        args._resolved_ligand_model = 'molformer'
 
     if args.max_trials is not None and args.max_trials <= 0:
         raise ValueError("--max_trials must be > 0 when provided")
@@ -606,7 +622,7 @@ def main():
     print(f"Pruning mode: {args.pruning_mode}")
     print(f"Pruning stages (epochs): {stage_epochs_preview}")
     print(f"External test mode: {args.external_test_mode}")
-    print(f"MoLFormer ligand: {args.molformer_ligand}")
+    print(f"Ligand model: {args._resolved_ligand_model}")
     print("=" * 80)
 
     if args.dry_run:

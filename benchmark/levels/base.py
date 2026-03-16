@@ -78,6 +78,10 @@ class BaseLevelRunner(ABC):
         return self._config.force
 
     @property
+    def mode(self) -> str:
+        return self._config.mode
+
+    @property
     def scaffold_split_dir(self) -> str:
         return self._config.scaffold_split_dir
 
@@ -127,6 +131,20 @@ class BaseLevelRunner(ABC):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @property
+    def knn_is_deterministic(self) -> bool:
+        """Whether KNN results are identical across seeds for this level.
+
+        True for levels without learned feature extractors (1a, 1b, 2):
+        same input → same KNN output regardless of seed.
+
+        False for levels with learned extractors (1c, 3, 4+): the
+        upstream model is seed-dependent, so KNN input varies per seed.
+
+        Subclasses with learned components should override to return False.
+        """
+        return True
+
     def _uses_embedding(self) -> bool:
         """Whether this level's directory needs the embedding shorthand."""
         return True
@@ -144,7 +162,13 @@ class BaseLevelRunner(ABC):
         result: Dict,
         accumulator: Dict[str, Dict[str, List[float]]],
     ) -> None:
-        """Extract per-model metrics from a single seed and append."""
+        """Extract per-model metrics from a single seed and append.
+
+        KNN is deterministic (no random component) so its results are
+        identical across seeds.  Only the **first** seed is accumulated
+        for KNN to avoid redundant computation and a misleading std of 0.
+        MLP varies with the seed and is accumulated normally.
+        """
         sc_key = self._find_scaffold_key(result)
         if sc_key is None:
             return
@@ -152,6 +176,10 @@ class BaseLevelRunner(ABC):
         sc = result[sc_key]
         for model in ("KNN", "MLP"):
             if model not in sc:
+                continue
+            # KNN is deterministic for levels without learned feature
+            # extractors.  Skip re-accumulation only when safe.
+            if model == "KNN" and model in accumulator and self.knn_is_deterministic:
                 continue
             if model not in accumulator:
                 accumulator[model] = {}

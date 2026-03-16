@@ -1,0 +1,9 @@
+# GraphBAN integration artifacts
+datasets/
+results/
+src/
+__pycache__/
+*.pyc
+*.pth
+*.parquet
+feature_cache/

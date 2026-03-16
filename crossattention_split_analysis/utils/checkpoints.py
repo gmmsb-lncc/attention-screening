@@ -36,6 +36,8 @@ def save_checkpoint(
     scheduler: optim.lr_scheduler._LRScheduler,
     epoch: int,
     best_val_mcc: float,
+    best_selection_score: float,
+    model_selection_metric: str,
     best_epoch: int,
     best_model_state: Optional[dict],
     patience_counter: int,
@@ -69,6 +71,8 @@ def save_checkpoint(
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
         'best_val_mcc': best_val_mcc,
+        'best_selection_score': best_selection_score,
+        'model_selection_metric': model_selection_metric,
         'best_epoch': best_epoch,
         'best_model_state': best_model_state,
         'patience_counter': patience_counter,
@@ -107,6 +111,12 @@ def load_checkpoint(
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         print(f"  [CHECKPOINT] Loaded from epoch {checkpoint['epoch']+1}")
         print(f"               Best val_mcc: {checkpoint['best_val_mcc']:.4f}")
+        if 'best_selection_score' in checkpoint and 'model_selection_metric' in checkpoint:
+            print(
+                "               Best "
+                f"{checkpoint['model_selection_metric']}: "
+                f"{checkpoint['best_selection_score']:.6f}"
+            )
         print(f"               Saved at: {checkpoint['timestamp']}")
         return checkpoint
     except Exception as e:

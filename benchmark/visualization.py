@@ -38,8 +38,17 @@ _MODEL_ORDER = [
     "level2_meanpool_mlp",
     "level3_attnpool_knn",
     "level3_attnpool_mlp",
+    "level3a_attnpool_mlp",
     "level4_crossatt_knn",
     "level4_crossatt_mlp",
+    "level5_da_knn",
+    "level5_da_mlp",
+    "level5b_da_knn",
+    "level5b_da_mlp",
+    "level6a_ban_knn",
+    "level6a_ban_mlp",
+    "level6b_ban_knn",
+    "level6b_ban_mlp",
 ]
 
 

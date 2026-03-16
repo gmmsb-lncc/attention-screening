@@ -26,7 +26,7 @@ class ScenarioSplitConfig:
     s4_restarts: int = 192
     class_penalty: float = 10.0
     class_rate_weight: float = 2.0
-    min_val_groups: int = 15
+    min_val_groups: int = 50
     monotonic_group_penalty: float = 1.0
 
 
@@ -89,9 +89,12 @@ def _split_loss(
     mono_pen = monotonic_group_penalty * mono_frac
 
     # Penalize low diversity (too few groups in validation).
+    # Strong penalty to prevent the algorithm from selecting only a few
+    # very large scaffolds, which hurts chemical diversity in val/test.
     diversity_pen = 0.0
     if min_val_groups > 0 and n_val_groups < min_val_groups:
-        diversity_pen = 0.5 * (min_val_groups - n_val_groups) / max(min_val_groups, 1)
+        shortfall = (min_val_groups - n_val_groups) / max(min_val_groups, 1)
+        diversity_pen = 5.0 * shortfall ** 2
 
     return float(
         err_fraction
@@ -164,7 +167,9 @@ def _select_validation_groups(
         val_pos = 0.0
         val_neg = 0.0
 
-        jitter = rng.uniform(0.0, 1e-6, size=len(groups))
+        # Randomize traversal order: mix size-based and random orderings
+        # so restarts explore diverse scaffold combinations (small + large).
+        jitter = rng.uniform(0.0, float(np.median(n_rows) + 1), size=len(groups))
         order = np.argsort(-(n_rows + jitter))
 
         for idx in order:

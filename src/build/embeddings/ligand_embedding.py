@@ -53,6 +53,11 @@ class LigandEmbedding(BaseEmbedding):
         self._molformer_tokenizer = None
         self._molformer_model_loaded = False
 
+        # Cache do modelo ChemBERTa
+        self._chemberta_model = None
+        self._chemberta_tokenizer = None
+        self._chemberta_model_loaded = False
+
         super().__init__(model_name=model_name, config=config, **kwargs)
         
         # Verificar dependências
@@ -179,6 +184,23 @@ class LigandEmbedding(BaseEmbedding):
                 self.logger.info("✅ MoLFormer model pre-loaded and cached!")
 
                 return self._molformer_model
+            # Load ChemBERTa model (same as GraphBAN: DeepChem/ChemBERTa-77M-MTR, 384-d)
+            elif self.model_name.upper() == "CHEMBERTA":
+                import torch
+                from transformers import AutoTokenizer, RobertaModel
+
+                model_name = "DeepChem/ChemBERTa-77M-MTR"
+                self.logger.info(f"Pre-loading ChemBERTa model ({model_name})...")
+
+                self._chemberta_tokenizer = AutoTokenizer.from_pretrained(model_name)
+                self._chemberta_model = RobertaModel.from_pretrained(
+                    model_name, add_pooling_layer=False, use_safetensors=True
+                )
+                self._chemberta_model_loaded = True
+                self.logger.info("ChemBERTa model pre-loaded and cached!")
+
+                return self._chemberta_model
+
             else:
                 # For other models, try importing fm4m (may fail)
                 try:
@@ -203,8 +225,8 @@ class LigandEmbedding(BaseEmbedding):
         super()._do_initialize()
 
         # Update fm4m_available flag based on model type
-        if self.model_name.upper() == "MOLFORMER":
-            # For MoLFormer, we don't use the generic fm4m, but the model is available
+        if self.model_name.upper() in ("MOLFORMER", "CHEMBERTA"):
+            # For MoLFormer/ChemBERTa, we don't use the generic fm4m, but the model is available
             self.fm4m_available = True
         # For SMI-TED and other FM4M models, fm4m_available is already set in _load_model
 
@@ -316,6 +338,29 @@ class LigandEmbedding(BaseEmbedding):
             )
             return embedding_matrix
 
+        # ChemBERTa supports per-token representations (384-d)
+        elif self.model_name.upper() == "CHEMBERTA":
+            import torch
+
+            device = next(self._chemberta_model.parameters()).device
+            inputs = self._chemberta_tokenizer(
+                smiles,
+                return_tensors="pt",
+                padding=False,
+                truncation=True,
+                max_length=290
+            )
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                output = self._chemberta_model(**inputs)
+            # last_hidden_state: [1, seq_len, 384]
+            embedding_matrix = output.last_hidden_state[0].cpu().numpy()
+            self.logger.debug(
+                f"Generated per-token embedding matrix for ChemBERTa: "
+                f"shape {embedding_matrix.shape}"
+            )
+            return embedding_matrix
+
         # For other models, check if they support per-token representations
         # For now, return None for all other FM4M models
         else:
@@ -411,6 +456,33 @@ class LigandEmbedding(BaseEmbedding):
                         raise EmbeddingError(f"Error processing SMILES: {e}")
 
                 return embeddings
+            # If model is cached (ChemBERTa), use directly
+            elif self._chemberta_model_loaded and self.model_name.upper() == "CHEMBERTA":
+                import torch
+
+                device = next(self._chemberta_model.parameters()).device
+                embeddings = []
+                for smiles in valid_smiles:
+                    try:
+                        inputs = self._chemberta_tokenizer(
+                            smiles,
+                            return_tensors="pt",
+                            padding="max_length",
+                            max_length=290,
+                            truncation=True,
+                        )
+                        inputs = {k: v.to(device) for k, v in inputs.items()}
+                        with torch.no_grad():
+                            output = self._chemberta_model(**inputs)
+                        # CLS token embedding (index 0) — same as GraphBAN
+                        embedding = output.last_hidden_state[0, 0, :].cpu().numpy()
+                        embeddings.append(embedding)
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.warning(f"Failed to process SMILES '{smiles[:50]}...': {e}")
+                        raise EmbeddingError(f"Error processing SMILES: {e}")
+                return embeddings
+
             else:
                 # Fallback: use original method (for other models)
                 representations = self._get_representation_with_retry(valid_smiles)
@@ -860,7 +932,7 @@ class LigandEmbedding(BaseEmbedding):
             'dimension': self.embedding_dim,
             'matrix_output_path': None,
             'matrix_count': 0,
-            'matrix_supported': self.model_name.upper() == "MOLFORMER"  # MoLFormer supports matrices
+            'matrix_supported': self.model_name.upper() in ("MOLFORMER", "CHEMBERTA")
         }
         
         if output_path and output_path.exists():

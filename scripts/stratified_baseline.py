@@ -105,7 +105,7 @@ def create_mlp_model(random_state: int = RANDOM_SEED) -> Pipeline:
     return Pipeline([
         ('scaler', StandardScaler()),
         ('model', MLPClassifier(
-            hidden_layer_sizes=(256, 128, 64),
+            hidden_layer_sizes=(512,),
             activation='relu',
             solver='adam',
             alpha=0.0001,

@@ -47,7 +47,35 @@ from tqdm import tqdm
 from benchmark.classifiers import train_knn_mlp
 from benchmark.config import MOLFORMER_DIM, BenchmarkConfig
 from benchmark.levels.base import BaseLevelRunner
-from benchmark.levels.matrix_utils import build_matrix_dataloaders
+from benchmark.levels.matrix_utils import (
+    build_matrix_dataloaders,
+    split_loader_for_feature_extraction,
+)
+
+
+def _load_frozen_mlp_selection_from_train(
+    output_dir: str,
+    cache_filename: str,
+) -> dict[str, object] | None:
+    """Load frozen MLP selection from corresponding train artifact for same seed."""
+    test_token = f"{os.sep}test{os.sep}"
+    train_token = f"{os.sep}train{os.sep}"
+    if test_token not in output_dir:
+        return None
+
+    train_seed_dir = output_dir.replace(test_token, train_token, 1)
+    train_cache_path = os.path.join(train_seed_dir, cache_filename)
+    if not os.path.exists(train_cache_path):
+        return None
+
+    with open(train_cache_path) as fh:
+        payload = json.load(fh)
+    scaffold_key = next(iter(payload.keys()), None)
+    if not scaffold_key:
+        return None
+    mlp_block = payload.get(scaffold_key, {}).get("MLP", {})
+    selection = mlp_block.get("mlp_selection")
+    return selection if isinstance(selection, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +221,7 @@ def _train_ligand_attention_pooling(
         aux_head.eval()
         val_loss = 0.0
         val_n = 0
-        with torch.no_grad():
+        with torch.inference_mode():
             for batch in val_loader:
                 l = batch["ligand_matrix"].to(device)
                 lm = batch["ligand_mask"].to(device)
@@ -228,7 +256,7 @@ def _train_ligand_attention_pooling(
 # Feature extraction
 # ---------------------------------------------------------------------------
 
-@torch.no_grad()
+@torch.inference_mode()
 def _extract_features(
     model: _LigandAttentionPoolingModel,
     loader: DataLoader,
@@ -262,6 +290,10 @@ class Level1cRunner(BaseLevelRunner):
         super().__init__(config)
 
     @property
+    def knn_is_deterministic(self) -> bool:
+        return False  # Learned feature extractor → KNN input varies per seed
+
+    @property
     def level_tag(self) -> str:
         return "level1c_ligattn"
 
@@ -275,10 +307,20 @@ class Level1cRunner(BaseLevelRunner):
         os.makedirs(output_dir, exist_ok=True)
 
         cache_path = os.path.join(output_dir, "level1c_knn_mlp_results.json")
-        if os.path.exists(cache_path) and not self.force:
+        strict_freeze = (
+            self.mode == "test"
+            and os.getenv("BENCHMARK_REQUIRE_TRAIN_SELECTION", "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+        )
+        if os.path.exists(cache_path) and not self.force and not strict_freeze:
             tqdm.write(f"  Loading cached Level 1c results (seed {seed})")
             with open(cache_path) as fh:
                 return json.load(fh)
+        if os.path.exists(cache_path) and not self.force and strict_freeze:
+            tqdm.write("  Strict test mode: ignoring cached Level 1c results and recomputing.")
 
         tqdm.write(f"  Building Level 1c ligand attention pooling (seed {seed})...")
 
@@ -286,12 +328,24 @@ class Level1cRunner(BaseLevelRunner):
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
+            dataset_source_filter=self._config.dataset_source_filter,
+            mode=self.mode,
         )
+
+        # In train mode, split training data to avoid train-set optimism:
+        # model trains on 80% of train, KNN features from the held-out 20%.
+        feat_extract_loader = None
+        if self.mode == "train":
+            model_train_loader, feat_extract_loader = split_loader_for_feature_extraction(
+                train_loader, seed=seed,
+            )
+        else:
+            model_train_loader = train_loader
 
         # Train ligand-only attention pooling
         tqdm.write("  Training ligand projection + attention pooling...")
         model = _train_ligand_attention_pooling(
-            train_loader=train_loader,
+            train_loader=model_train_loader,
             val_loader=val_loader,
             lr=self._config.learning_rate,
             epochs=self._config.epochs,
@@ -301,21 +355,44 @@ class Level1cRunner(BaseLevelRunner):
 
         device = next(model.parameters()).device
 
-        # Extract features from val (not train — avoids train-set optimism)
-        tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
-        x_val, y_val = _extract_features(model, val_loader, device)
-        x_test, y_test = _extract_features(model, test_loader, device)
+        if self.mode == "train":
+            tqdm.write("  Extracting ligand attention-pooled features (held-out train + val)...")
+            x_fit, y_fit = _extract_features(model, feat_extract_loader, device)
+            x_eval, y_eval = _extract_features(model, val_loader, device)
+        else:
+            tqdm.write("  Extracting ligand attention-pooled features (val + test)...")
+            x_fit, y_fit = _extract_features(model, val_loader, device)
+            x_eval, y_eval = _extract_features(model, test_loader, device)
 
         # Sanitize
-        for name, arr in [("val", x_val), ("test", x_test)]:
+        for name, arr in [("fit", x_fit), ("eval", x_eval)]:
             bad = int(np.isnan(arr).sum() + np.isinf(arr).sum())
             if bad:
                 tqdm.write(f"  WARNING: {name} has {bad} NaN/Inf values -> replaced with 0")
                 arr[:] = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Train canonical KNN/MLP on val features
+        # Train canonical KNN/MLP on fit features
         tqdm.write("  Training KNN + MLP (canonical classifiers)...")
-        models = train_knn_mlp(x_val, y_val, x_test, y_test, seed)
+        frozen_selection = None
+        if self.mode == "test":
+            frozen_selection = _load_frozen_mlp_selection_from_train(
+                output_dir=output_dir,
+                cache_filename="level1c_knn_mlp_results.json",
+            )
+            if strict_freeze and frozen_selection is None:
+                raise RuntimeError(
+                    "Missing frozen train selection for Level 1c test run. "
+                    "Run train phase first or set BENCHMARK_REQUIRE_TRAIN_SELECTION=0."
+                )
+
+        models = train_knn_mlp(
+            x_fit,
+            y_fit,
+            x_eval,
+            y_eval,
+            seed,
+            frozen_mlp_selection=frozen_selection,
+        )
 
         sc_key = "Split by Scaffold"
         result = {sc_key: models}

@@ -96,7 +96,7 @@ def _extract_ligand_vectors(
     pooling_model.eval()
 
     processed = skipped = errors = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         for mf in matrix_files:
             chembl_id = _chembl_id_from_filename(mf)
             out_path = output_dir / f"{chembl_id}_embedding.npy"

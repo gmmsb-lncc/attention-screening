@@ -28,8 +28,12 @@ from benchmark.levels.level1 import Level1Runner
 from benchmark.levels.level1b import Level1bRunner
 from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
-from benchmark.levels.level3 import Level3Runner
-from benchmark.levels.level4 import Level4Runner
+from benchmark.levels.level3 import Level3Runner, Level3aRunner
+from benchmark.levels.level4 import Level4Runner, Level4aRunner
+from benchmark.levels.level5 import Level5Runner
+from benchmark.levels.level5b import Level5bRunner
+from benchmark.levels.level6a import Level6aRunner
+from benchmark.levels.level6b import Level6bRunner
 from benchmark.metrics import aggregate_benchmark_metrics
 from benchmark.progress import BenchmarkProgress
 from benchmark.reporting import print_comparison_table, save_benchmark_json
@@ -124,12 +128,51 @@ class BenchmarkOrchestrator:
             level1c_results=self._level_results.get("1c"),
             level2_results=self._level_results.get("2"),
             level3_results=self._level_results.get("3"),
+            level3a_results=self._level_results.get("3a"),
             level4_results=self._level_results.get("4"),
+            level4a_results=self._level_results.get("4a"),
+            level5_results=self._level_results.get("5a"),
+            level5b_results=self._level_results.get("5b"),
+            level6a_results=self._level_results.get("6a"),
+            level6b_results=self._level_results.get("6b"),
         )
 
         if not self._aggregated:
             tqdm.write("  No results to compare. At least one level must produce results.")
             sys.exit(1)
+
+        # Rigor gate: block partial comparisons when requested levels are missing.
+        strict = os.getenv("BENCHMARK_STRICT_LEVEL_COMPLETENESS", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        if strict:
+            expected = {
+                "1a": ["level1a_fp_knn", "level1a_fp_mlp"],
+                "1b": ["level1b_ligmean_knn", "level1b_ligmean_mlp"],
+                "1c": ["level1c_ligattn_knn", "level1c_ligattn_mlp"],
+                "2": ["level2_meanpool_knn", "level2_meanpool_mlp"],
+                "3": ["level3_attnpool_knn", "level3_attnpool_mlp"],
+                "3a": ["level3a_attnpool_mlp"],
+                "4": ["level4_crossatt_knn", "level4_crossatt_mlp"],
+                "4a": ["level4a_crossatt_mlp"],
+                "5a": ["level5_da_knn", "level5_da_mlp"],
+                "5b": ["level5b_da_knn", "level5b_da_mlp"],
+                "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
+                "6b": ["level6b_ban_knn", "level6b_ban_mlp"],
+            }
+            missing_models: list[str] = []
+            for lv in config.levels:
+                for key in expected.get(lv, []):
+                    row = self._aggregated.get(key)
+                    if not row or row.get("mcc") is None:
+                        missing_models.append(key)
+            if missing_models:
+                tqdm.write("FATAL: Strict completeness gate failed.")
+                tqdm.write(f"  Missing model rows: {missing_models}")
+                tqdm.write("  Set BENCHMARK_STRICT_LEVEL_COMPLETENESS=0 to bypass.")
+                sys.exit(1)
 
         print_comparison_table(self._aggregated, config)
 
@@ -149,22 +192,40 @@ class BenchmarkOrchestrator:
         runners: List[tuple[str, BaseLevelRunner, str]] = []
 
         if "1a" in config.levels:
-            runners.append(("1a", Level1Runner(config), "Step 1a: Level 1a (FP+KNN/MLP)"))
+            runners.append(("1a", Level1Runner(config), "Step 1a: L1a (FP+KNN/MLP)"))
 
         if "1b" in config.levels:
-            runners.append(("1b", Level1bRunner(config), "Step 1b: Level 1b (LigandMeanPool+KNN/MLP)"))
+            runners.append(("1b", Level1bRunner(config), "Step 1b: L1b (LigMeanPool+KNN/MLP)"))
 
         if "1c" in config.levels:
-            runners.append(("1c", Level1cRunner(config), "Step 1c: Level 1c (LigandAttnPool+KNN/MLP)"))
+            runners.append(("1c", Level1cRunner(config), "Step 1c: L1c (LigAttnPool+KNN/MLP)"))
 
         if "2" in config.levels:
-            runners.append(("2", Level2Runner(config), "Step 2: Level 2 (MeanPool+KNN/MLP)"))
+            runners.append(("2", Level2Runner(config), "Step 2: L2 (MeanPool+KNN/MLP)"))
 
         if "3" in config.levels:
-            runners.append(("3", Level3Runner(config), "Step 3: Level 3 (AttnPool+KNN/MLP)"))
+            runners.append(("3", Level3Runner(config), "Step 3: L3 (AttnPool+KNN/MLP)"))
+
+        if "3a" in config.levels:
+            runners.append(("3a", Level3aRunner(config), "Step 3a: L3a (AttnPool+MLP only)"))
 
         if "4" in config.levels:
-            runners.append(("4", Level4Runner(config), "Step 4: Level 4 (CrossAtt+KNN/MLP)"))
+            runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
+
+        if "4a" in config.levels:
+            runners.append(("4a", Level4aRunner(config), "Step 4a: L4a (CrossAttn+AttnPool+MLP only)"))
+
+        if "5a" in config.levels:
+            runners.append(("5a", Level5Runner(config), "Step 5a: L5a (CrossAttn+AttnPool+GRL+KNN/MLP)"))
+
+        if "5b" in config.levels:
+            runners.append(("5b", Level5bRunner(config), "Step 5b: L5b (AttnPool+GRL+KNN/MLP)"))
+
+        if "6a" in config.levels:
+            runners.append(("6a", Level6aRunner(config), "Step 6a: L6a (CrossAttn+BAN+GRL+KNN/MLP)"))
+
+        if "6b" in config.levels:
+            runners.append(("6b", Level6bRunner(config), "Step 6b: L6b (AttnPool+BAN+GRL+KNN/MLP)"))
 
         return runners
 
@@ -240,6 +301,7 @@ class BenchmarkOrchestrator:
         print("SEMANTIC SCREENING — UNIFIED BENCHMARK")
         print("=" * 70)
         print(f"  Dataset:          {config.dataset}")
+        print(f"  Mode:             {config.mode} ({'fit=train, eval=val' if config.mode == 'train' else 'fit=val, eval=test'})")
         print(f"  Embedding:        {config.embedding} ({config.embedding_name})")
         print(f"  Levels:           {config.levels}")
         print(f"  Seeds:            {config.resolved_seeds}")

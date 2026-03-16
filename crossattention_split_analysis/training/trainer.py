@@ -69,10 +69,13 @@ def train_epoch(
             # Use simple BCE loss for classification only
             classification_logits = model_output['classification'].squeeze(-1)
             classification_labels_squeezed = classification_labels.squeeze(-1).float()
+            _pw = None
+            if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None:
+                _pw = loss_fn.pos_weight_tensor.to(device)
             classification_loss = F.binary_cross_entropy_with_logits(
-                classification_logits, 
-                classification_labels_squeezed, 
-                pos_weight=loss_fn.pos_weight if hasattr(loss_fn, 'pos_weight') else None
+                classification_logits,
+                classification_labels_squeezed,
+                pos_weight=_pw,
             )
             losses = {
                 'total': classification_loss, 
@@ -94,6 +97,14 @@ def train_epoch(
             losses['total'] = losses['total'] + scaled_auxiliary_loss
             losses['aux'] = scaled_auxiliary_loss.detach().item()
 
+        # Domain adversarial loss (Level 5 DA)
+        domain_logits = model_output.get('domain_logits')
+        if domain_logits is not None and 'domain_label' in batch:
+            domain_labels = batch['domain_label'].to(device)
+            domain_loss = F.cross_entropy(domain_logits, domain_labels)
+            losses['total'] = losses['total'] + domain_loss
+            losses['domain'] = domain_loss.detach().item()
+
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
             warnings.warn("NaN/Inf loss detected, skipping batch")
@@ -108,6 +119,8 @@ def train_epoch(
         total_reg_loss += losses['regression'].item()
         if 'aux' in losses:
             total_aux_loss += losses['aux']
+        if 'domain' in losses:
+            total_aux_loss += losses['domain']
         num_batches += 1
 
         progress_info = {
@@ -116,6 +129,8 @@ def train_epoch(
         }
         if 'aux' in losses:
             progress_info['aux'] = f"{losses['aux']:.4f}"
+        if 'domain' in losses:
+            progress_info['dom'] = f"{losses['domain']:.4f}"
         progress_bar.set_postfix(progress_info)
 
     if num_batches == 0:
@@ -175,11 +190,13 @@ def train_model(
     
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    best_val_mcc = -1
+    model_selection_metric = getattr(config, 'model_selection_metric', 'val_loss')
+    best_val_mcc = -1.0
+    best_selection_score = float('inf') if model_selection_metric == 'val_loss' else -1.0
     best_model_state = None
     best_epoch = 0
     patience_counter = 0
-    history = {'train_loss': [], 'val_mcc': [], 'val_acc': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_mcc': [], 'val_acc': []}
     start_epoch = 0
 
     # Load checkpoint if exists
@@ -197,10 +214,18 @@ def train_model(
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             best_val_mcc = checkpoint['best_val_mcc']
+            if 'best_selection_score' in checkpoint:
+                best_selection_score = checkpoint['best_selection_score']
+            elif model_selection_metric == 'val_loss':
+                val_losses = checkpoint.get('history', {}).get('val_loss', [])
+                best_selection_score = min(val_losses) if val_losses else float('inf')
+            else:
+                best_selection_score = best_val_mcc
             best_epoch = checkpoint.get('best_epoch', 0)
             best_model_state = checkpoint['best_model_state']
             patience_counter = checkpoint['patience_counter']
             history = checkpoint['history']
+            history.setdefault('val_loss', [])
             start_epoch = checkpoint['epoch'] + 1
             print(f"  [CHECKPOINT] Resuming from epoch {start_epoch}")
 
@@ -214,6 +239,12 @@ def train_model(
             aux_loss_scale = max(0.0, 1.0 - (epoch / denom))
         else:
             aux_loss_scale = 1.0
+
+        # Update GRL lambda schedule (Level 5 DA)
+        if hasattr(model, 'set_grl_lambda'):
+            from ..models.level5_da.domain_adaptation import lambda_schedule
+            progress = epoch / max(1, config.num_epochs - 1)
+            model.set_grl_lambda(lambda_schedule(progress))
 
         # Train
         try:
@@ -239,7 +270,7 @@ def train_model(
                 )
                 if not threshold_result.is_valid:
                     warnings.warn(f"Invalid threshold optimization at epoch {epoch+1}")
-                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                    val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                 else:
                     decision_threshold = float(threshold_result.metrics["decision_threshold"])
                     val_result = evaluate(
@@ -251,7 +282,7 @@ def train_model(
                     )
                     if not val_result.is_valid:
                         warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
-                        val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                        val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                     else:
                         val_metrics = val_result.metrics
             else:
@@ -264,22 +295,31 @@ def train_model(
                 )
                 if not val_result.is_valid:
                     warnings.warn(f"Invalid evaluation at epoch {epoch+1}")
-                    val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+                    val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
                 else:
                     val_metrics = val_result.metrics
         except EvaluationError as e:
             warnings.warn(f"Evaluation failed at epoch {epoch+1}: {e}")
-            val_metrics = {'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
+            val_metrics = {'loss': float('inf'), 'mcc': -2.0, 'accuracy': 0.0, 'auc': 0.0}
 
         scheduler.step()
 
         history['train_loss'].append(train_metrics['total'])
+        history['val_loss'].append(float(val_metrics.get('loss', float('inf'))))
         history['val_mcc'].append(val_metrics['mcc'])
         history['val_acc'].append(val_metrics['accuracy'])
 
         # Track best model
-        improved = val_metrics['mcc'] > best_val_mcc
+        if model_selection_metric == 'val_loss':
+            current_score = float(val_metrics.get('loss', float('inf')))
+            improved = current_score < (best_selection_score - 1e-12)
+            if (not improved) and abs(current_score - best_selection_score) <= 1e-12:
+                improved = val_metrics['mcc'] > best_val_mcc
+        else:
+            current_score = float(val_metrics['mcc'])
+            improved = current_score > best_selection_score
         if improved:
+            best_selection_score = current_score
             best_val_mcc = val_metrics['mcc']
             best_epoch = epoch + 1
             best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -287,9 +327,10 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Print progress every epoch (AUC instead of loss)
+        # Print progress every epoch
         print(
-            f"    Epoch {epoch+1}: val_auc={val_metrics['auc']:.4f}, "
+            f"    Epoch {epoch+1}: val_loss={val_metrics.get('loss', float('inf')):.6f}, "
+            f"val_auc={val_metrics['auc']:.4f}, "
             f"val_mcc={val_metrics['mcc']:.4f}, val_acc={val_metrics['accuracy']:.4f}"
         )
 
@@ -304,6 +345,8 @@ def train_model(
                     scheduler=scheduler,
                     epoch=epoch,
                     best_val_mcc=best_val_mcc,
+                    best_selection_score=best_selection_score,
+                    model_selection_metric=model_selection_metric,
                     best_epoch=best_epoch,
                     best_model_state=best_model_state,
                     patience_counter=patience_counter,
@@ -319,7 +362,10 @@ def train_model(
     # Load best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        print(f"  Best model from epoch {best_epoch} (val_mcc={best_val_mcc:.4f})")
+        print(
+            f"  Best model from epoch {best_epoch} "
+            f"({model_selection_metric}={best_selection_score:.6f}, val_mcc={best_val_mcc:.4f})"
+        )
 
     # Save final checkpoint
     if checkpoint_path is not None:
@@ -330,6 +376,8 @@ def train_model(
             scheduler=scheduler,
             epoch=epoch,
             best_val_mcc=best_val_mcc,
+            best_selection_score=best_selection_score,
+            model_selection_metric=model_selection_metric,
             best_epoch=best_epoch,
             best_model_state=best_model_state,
             patience_counter=patience_counter,

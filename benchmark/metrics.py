@@ -73,7 +73,13 @@ def aggregate_benchmark_metrics(
     level1c_results: Optional[Dict] = None,
     level2_results: Optional[Dict] = None,
     level3_results: Optional[Dict] = None,
+    level3a_results: Optional[Dict] = None,
     level4_results: Optional[Dict] = None,
+    level4a_results: Optional[Dict] = None,
+    level5_results: Optional[Dict] = None,
+    level5b_results: Optional[Dict] = None,
+    level6a_results: Optional[Dict] = None,
+    level6b_results: Optional[Dict] = None,
 ) -> Dict[str, Dict[str, Optional[float]]]:
     """Aggregate metrics from all levels into a unified dict.
 
@@ -93,7 +99,13 @@ def aggregate_benchmark_metrics(
         (level1c_results, [("KNN", "level1c_ligattn_knn"), ("MLP", "level1c_ligattn_mlp")]),
         (level2_results, [("KNN", "level2_meanpool_knn"), ("MLP", "level2_meanpool_mlp")]),
         (level3_results, [("KNN", "level3_attnpool_knn"), ("MLP", "level3_attnpool_mlp")]),
+        (level3a_results, [("MLP", "level3a_attnpool_mlp")]),
         (level4_results, [("KNN", "level4_crossatt_knn"), ("MLP", "level4_crossatt_mlp")]),
+        (level4a_results, [("MLP", "level4a_crossatt_mlp")]),
+        (level5_results, [("KNN", "level5_da_knn"), ("MLP", "level5_da_mlp")]),
+        (level5b_results, [("KNN", "level5b_da_knn"), ("MLP", "level5b_da_mlp")]),
+        (level6a_results, [("KNN", "level6a_ban_knn"), ("MLP", "level6a_ban_mlp")]),
+        (level6b_results, [("KNN", "level6b_ban_knn"), ("MLP", "level6b_ban_mlp")]),
     ]
 
     for results, model_pairs in _level_mapping:
@@ -108,6 +120,14 @@ def aggregate_benchmark_metrics(
             for metric in METRICS_ORDER:
                 row[metric] = extract_metric(sc, model_key, metric)
                 row[f"{metric}_std"] = extract_metric_std(sc, model_key, metric)
+            model_block = sc.get(model_key, {}) if isinstance(sc, dict) else {}
+            if isinstance(model_block, dict):
+                seed_results = model_block.get("seed_results")
+                if isinstance(seed_results, dict):
+                    row["seed_results"] = seed_results
+                n_seeds = model_block.get("n_seeds")
+                if isinstance(n_seeds, int):
+                    row["n_seeds"] = float(n_seeds)
             aggregated[label_key] = row
 
     return aggregated
