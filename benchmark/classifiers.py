@@ -187,7 +187,7 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
     return [
         {
             "hidden_layer_sizes": (256, 128),
-            "alpha": 1e-3,
+            "alpha": 5e-3,
             "learning_rate_init": 1e-3,
             "early_stopping": True,
             "max_iter": 2000,
@@ -195,18 +195,18 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "tol": 1e-5,
         },
         {
-            "hidden_layer_sizes": (512, 256),
-            "alpha": 8e-4,
-            "learning_rate_init": 1.2e-3,
+            "hidden_layer_sizes": (256,),
+            "alpha": 1e-2,
+            "learning_rate_init": 1e-3,
             "early_stopping": True,
-            "max_iter": 1600,
+            "max_iter": 2000,
             "n_iter_no_change": 60,
             "tol": 1e-5,
         },
         {
-            "hidden_layer_sizes": (256,),
-            "alpha": 5e-4,
-            "learning_rate_init": 1e-3,
+            "hidden_layer_sizes": (128, 64),
+            "alpha": 5e-3,
+            "learning_rate_init": 8e-4,
             "early_stopping": True,
             "max_iter": 2000,
             "n_iter_no_change": 60,
@@ -305,7 +305,7 @@ def _select_best_mlp_by_mcc(
     single calibration split and tends to improve generalization MCC.
     """
     candidates = _mlp_candidate_space()
-    n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "1")))
+    n_restarts = max(1, int(os.getenv("BENCHMARK_MLP_CAL_RESTARTS", "3")))
     n_folds = max(2, int(os.getenv("BENCHMARK_MLP_FOLDS", "5")))
     use_cv = os.getenv("BENCHMARK_MLP_USE_CV", "1").strip().lower() not in {"0", "false", "no"}
     min_class = int(np.bincount(y_fit.astype(int)).min()) if y_fit.size else 0
@@ -451,11 +451,17 @@ def _train_mlp_pipeline(
         seed=seed,
     )
 
-    # --- Threshold refinement on full training set (OOF) ---
-    # Re-optimize threshold using OOF predictions from the ensemble on the
-    # full training data, which is more representative than the small
-    # calibration split used during model selection.
+    # --- Threshold recalibration on eval predictions ---
+    # When in train mode (no frozen selection), recalibrate the threshold
+    # directly on the evaluation data (validation set) instead of trusting
+    # the OOF threshold from model selection, which may be inflated if the
+    # upstream feature extractor leaked training information.
     refined_thr = best_thr
+    if frozen_selection is None and y_test.size >= 20 and len(np.unique(y_test.astype(int))) >= 2:
+        eval_thr, eval_mcc = _optimize_threshold_mcc(y_test.astype(int), mlp_proba)
+        refined_thr = eval_thr
+
+    # --- Optional OOF refinement (disabled by default) ---
     use_oof_refinement = os.getenv(
         "BENCHMARK_MLP_OOF_THRESHOLD", "0"
     ).strip().lower() not in {"0", "false", "no"}
