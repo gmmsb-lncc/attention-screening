@@ -54,7 +54,10 @@ from benchmark.config import (
     BenchmarkConfig,
 )
 from benchmark.levels.base import BaseLevelRunner
-from benchmark.levels.matrix_utils import build_matrix_dataloaders
+from benchmark.levels.matrix_utils import (
+    build_matrix_dataloaders,
+    split_loader_for_feature_extraction,
+)
 
 
 def _load_frozen_mlp_selection_from_train(
@@ -127,6 +130,10 @@ class Level4Runner(BaseLevelRunner):
         if os.path.exists(cache_path) and not self.force and strict_freeze:
             tqdm.write("  Strict test mode: ignoring cached Level 4 results and recomputing.")
 
+        # --- Resolve Level 4 hyperparameters (controllable via env vars) --
+        l4_dropout = float(os.getenv("BENCHMARK_LEVEL4_DROPOUT", "0.30"))
+        l4_weight_decay = float(os.getenv("BENCHMARK_LEVEL4_WEIGHT_DECAY", "0.06"))
+
         # --- Step 1: Train the cross-attention model ---------------------
         tqdm.write(f"  Training Level 4 cross-attention encoder (seed {seed})...")
 
@@ -144,8 +151,8 @@ class Level4Runner(BaseLevelRunner):
             hidden_dim=384,
             num_cross_attn_layers=1,
             num_heads=12,
-            dropout=0.25,
-            classifier_dropout=0.25,
+            dropout=l4_dropout,
+            classifier_dropout=l4_dropout,
             classification_only=True,
             use_molformer_ligand=True,
             scaffold_split_dir=self.scaffold_split_dir,
@@ -153,7 +160,7 @@ class Level4Runner(BaseLevelRunner):
             optimize_threshold=False,
             fixed_threshold=0.5,
             model_selection_metric=self._config.model_selection_metric,
-            weight_decay=0.05,
+            weight_decay=l4_weight_decay,
         )
 
         # --- Step 2: Extract features from trained model -----------------
@@ -267,14 +274,16 @@ class Level4Runner(BaseLevelRunner):
         if best_state is None:
             raise RuntimeError("Checkpoint does not contain best_model_state")
 
+        l4_dropout = float(os.getenv("BENCHMARK_LEVEL4_DROPOUT", "0.30"))
+
         model = Level5LiteModel(
             protein_input_dim=protein_dim,
             ligand_input_dim=MOLFORMER_DIM,
             hidden_dim=384,
             num_cross_attn_layers=1,
             num_heads=12,
-            dropout=0.25,
-            classifier_dropout=0.25,
+            dropout=l4_dropout,
+            classifier_dropout=l4_dropout,
         )
         model.load_state_dict(best_state)
         model.to(device)
@@ -294,7 +303,12 @@ class Level4Runner(BaseLevelRunner):
 
         # --- Forward pass to collect features based on mode ---
         if self._config.mode == "train":
-            x_fit, y_fit = self._collect_features(model, train_loader, device)
+            # Use held-out subset of training data for feature extraction
+            # to avoid train-set optimism (model was trained on full train).
+            _, feat_loader = split_loader_for_feature_extraction(
+                train_loader, seed=seed,
+            )
+            x_fit, y_fit = self._collect_features(model, feat_loader, device)
             x_eval, y_eval = self._collect_features(model, val_loader, device)
         else:
             x_fit, y_fit = self._collect_features(model, val_loader, device)
@@ -489,6 +503,10 @@ class Level4aRunner(Level4Runner):
         if os.path.exists(cache_path) and not self.force and strict_freeze:
             tqdm.write("  Strict test mode: ignoring cached Level 4a results and recomputing.")
 
+        # --- Resolve Level 4a hyperparameters (same env vars as Level 4) --
+        l4_dropout = float(os.getenv("BENCHMARK_LEVEL4_DROPOUT", "0.30"))
+        l4_weight_decay = float(os.getenv("BENCHMARK_LEVEL4_WEIGHT_DECAY", "0.06"))
+
         # --- Step 1: Train the cross-attention model ---------------------
         tqdm.write(f"  Training Level 4a cross-attention encoder (seed {seed})...")
 
@@ -506,8 +524,8 @@ class Level4aRunner(Level4Runner):
             hidden_dim=384,
             num_cross_attn_layers=1,
             num_heads=12,
-            dropout=0.25,
-            classifier_dropout=0.25,
+            dropout=l4_dropout,
+            classifier_dropout=l4_dropout,
             classification_only=True,
             use_molformer_ligand=True,
             scaffold_split_dir=self.scaffold_split_dir,
@@ -515,7 +533,7 @@ class Level4aRunner(Level4Runner):
             optimize_threshold=False,
             fixed_threshold=0.5,
             model_selection_metric=self._config.model_selection_metric,
-            weight_decay=0.05,
+            weight_decay=l4_weight_decay,
         )
 
         # --- Step 2: Extract features from trained model -----------------

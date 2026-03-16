@@ -303,7 +303,7 @@ def _train_attention_pooling(
     val_loader: DataLoader,
     downstream_fit_loader: DataLoader | None,
     protein_dim: int,
-    hidden_dim: int = 256,
+    hidden_dim: int | None = None,
     num_heads: int = 8,
     dropout: float = 0.3,
     lr: float = 1e-3,
@@ -320,6 +320,14 @@ def _train_attention_pooling(
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
+
+    # Resolve hidden_dim: env var > argument > auto-scale from protein_dim.
+    if hidden_dim is None:
+        env_hd = os.getenv("BENCHMARK_LEVEL3_HIDDEN_DIM", "").strip()
+        if env_hd:
+            hidden_dim = int(env_hd)
+        else:
+            hidden_dim = max(256, protein_dim // 3)  # 320→256, 640→256, 1280→426
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
@@ -590,17 +598,19 @@ def _compute_downstream_mcc_proxy(
     x_fit_sc = scaler.fit_transform(x_fit).astype(np.float32)
     x_val_sc = scaler.transform(x_val).astype(np.float32)
 
+    # Align proxy regularisation with the real MLP grid search (alpha ≥ 5e-3)
+    # so that checkpoint selection reflects actual downstream performance.
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(256,),
         activation="relu",
         solver="adam",
-        alpha=1e-4,
+        alpha=5e-3,
         learning_rate="adaptive",
-        learning_rate_init=8e-4,
-        max_iter=700,
+        learning_rate_init=1e-3,
+        max_iter=500,
         early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=30,
+        validation_fraction=0.15,
+        n_iter_no_change=20,
         tol=1e-5,
         random_state=seed,
     )
