@@ -29,7 +29,7 @@ from benchmark.levels.level1b import Level1bRunner
 from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner, Level3aRunner
-from benchmark.levels.level4 import Level4Runner
+from benchmark.levels.level4 import Level4Runner, Level4aRunner
 from benchmark.levels.level5 import Level5Runner
 from benchmark.levels.level5b import Level5bRunner
 from benchmark.levels.level6a import Level6aRunner
@@ -130,6 +130,7 @@ class BenchmarkOrchestrator:
             level3_results=self._level_results.get("3"),
             level3a_results=self._level_results.get("3a"),
             level4_results=self._level_results.get("4"),
+            level4a_results=self._level_results.get("4a"),
             level5_results=self._level_results.get("5a"),
             level5b_results=self._level_results.get("5b"),
             level6a_results=self._level_results.get("6a"),
@@ -155,6 +156,7 @@ class BenchmarkOrchestrator:
                 "3": ["level3_attnpool_knn", "level3_attnpool_mlp"],
                 "3a": ["level3a_attnpool_mlp"],
                 "4": ["level4_crossatt_knn", "level4_crossatt_mlp"],
+                "4a": ["level4a_crossatt_mlp"],
                 "5a": ["level5_da_knn", "level5_da_mlp"],
                 "5b": ["level5b_da_knn", "level5b_da_mlp"],
                 "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
@@ -209,6 +211,9 @@ class BenchmarkOrchestrator:
 
         if "4" in config.levels:
             runners.append(("4", Level4Runner(config), "Step 4: L4 (CrossAttn+AttnPool+KNN/MLP)"))
+
+        if "4a" in config.levels:
+            runners.append(("4a", Level4aRunner(config), "Step 4a: L4a (CrossAttn+AttnPool+MLP only)"))
 
         if "5a" in config.levels:
             runners.append(("5a", Level5Runner(config), "Step 5a: L5a (CrossAttn+AttnPool+GRL+KNN/MLP)"))
