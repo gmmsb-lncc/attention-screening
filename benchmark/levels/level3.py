@@ -305,7 +305,7 @@ def _train_attention_pooling(
     protein_dim: int,
     hidden_dim: int = 256,
     num_heads: int = 8,
-    dropout: float = 0.2,
+    dropout: float = 0.3,
     lr: float = 1e-3,
     epochs: int = 30,
     patience: int = 10,
@@ -352,7 +352,7 @@ def _train_attention_pooling(
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(aux_head.parameters()),
         lr=lr,
-        weight_decay=0.01,
+        weight_decay=0.02,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     train_labels = _extract_binary_labels_from_loader(train_loader)
