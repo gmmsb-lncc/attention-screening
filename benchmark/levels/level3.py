@@ -160,9 +160,11 @@ class _AttentionPoolingModel(nn.Module):
         hidden_dim: int = 256,
         num_heads: int = 8,
         dropout: float = 0.2,
+        interaction_features: bool = True,
     ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.interaction_features = interaction_features
 
         # Dropout applied to the final concatenated representation to
         # reduce overfitting when downstream classifiers are trained on
@@ -203,6 +205,11 @@ class _AttentionPoolingModel(nn.Module):
     ) -> torch.Tensor:
         """Return concatenated [protein_vec ‖ ligand_vec].
 
+        During training the aux_head expects ``2 × hidden_dim`` input,
+        so this method always returns the plain concatenation.  For
+        downstream feature extraction use :meth:`forward_with_interactions`
+        which appends element-wise product and absolute difference.
+
         Parameters
         ----------
         protein_matrix : Tensor [B, prot_len, protein_input_dim]
@@ -227,6 +234,36 @@ class _AttentionPoolingModel(nn.Module):
         ligand_vec = self.ligand_pool(ligand, l_attn)      # [B, hidden]
 
         combined = torch.cat([protein_vec, ligand_vec], dim=-1)  # [B, 2*hidden]
+        return self.feature_dropout(combined)
+
+    def forward_with_interactions(
+        self,
+        protein_matrix: torch.Tensor,
+        ligand_matrix: torch.Tensor,
+        protein_mask: torch.Tensor | None = None,
+        ligand_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return enriched feature vector with interaction terms.
+
+        Output: ``[prot_vec ‖ lig_vec ‖ prot*lig ‖ |prot−lig|]``
+        giving ``4 × hidden_dim`` dimensions when interaction features
+        are enabled, otherwise falls back to ``2 × hidden_dim``.
+        """
+        p_attn = (protein_mask == 0) if protein_mask is not None else None
+        l_attn = (ligand_mask == 0) if ligand_mask is not None else None
+
+        protein = self.protein_proj(protein_matrix)
+        ligand = self.ligand_proj(ligand_matrix)
+
+        protein_vec = self.protein_pool(protein, p_attn)
+        ligand_vec = self.ligand_pool(ligand, l_attn)
+
+        parts = [protein_vec, ligand_vec]
+        if self.interaction_features:
+            parts.append(protein_vec * ligand_vec)              # co-activation
+            parts.append(torch.abs(protein_vec - ligand_vec))   # complementarity
+
+        combined = torch.cat(parts, dim=-1)
         return self.feature_dropout(combined)
 
 
@@ -289,12 +326,14 @@ def _train_attention_pooling(
     scaler = torch.amp.GradScaler(enabled=use_amp)
     torch.backends.cudnn.benchmark = True
 
+    use_interaction = os.getenv("BENCHMARK_LEVEL3_INTERACTION_FEATURES", "1") == "1"
     model = _AttentionPoolingModel(
         protein_input_dim=protein_dim,
         ligand_input_dim=MOLFORMER_DIM,
         hidden_dim=hidden_dim,
         num_heads=num_heads,
         dropout=dropout,
+        interaction_features=use_interaction,
     ).to(device)
 
     # Auxiliary supervision head used ONLY to shape representations
@@ -504,15 +543,28 @@ def _extract_features(
     if aux_head is not None:
         aux_head.eval()
 
+    # Check whether to use interaction-enriched features.
+    use_interactions = (
+        hasattr(model, "interaction_features")
+        and model.interaction_features
+        and hasattr(model, "forward_with_interactions")
+    )
+
     for batch in batch_iter:
         p = batch["protein_matrix"].to(device)
         l = batch["ligand_matrix"].to(device)
         pm = batch["protein_mask"].to(device)
         lm = batch["ligand_mask"].to(device)
 
-        features_t = model(p, l, pm, lm)
+        if use_interactions:
+            features_t = model.forward_with_interactions(p, l, pm, lm)
+        else:
+            features_t = model(p, l, pm, lm)
+
         if include_aux_channel and aux_head is not None:
-            aux_proba = torch.sigmoid(aux_head(features_t))
+            # aux_head still expects the plain 2*hidden concat.
+            plain_features = model(p, l, pm, lm) if use_interactions else features_t
+            aux_proba = torch.sigmoid(aux_head(plain_features))
             features_t = torch.cat([features_t, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()

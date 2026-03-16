@@ -309,7 +309,20 @@ class Level4Runner(BaseLevelRunner):
         loader: "torch.utils.data.DataLoader",
         device: torch.device,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Run forward passes and collect pre-head feature vectors."""
+        """Run forward passes and collect enriched feature vectors.
+
+        Mirrors Level 3's interaction features: splits the concatenated
+        ``[protein_vec ‖ ligand_vec]`` representation into its two halves,
+        then appends element-wise product and absolute difference for
+        explicit interaction signals (4×hidden_dim total).
+
+        Controlled by ``BENCHMARK_LEVEL4_INTERACTION_FEATURES`` env var
+        (default ``"1"``).
+        """
+        use_interactions = os.getenv(
+            "BENCHMARK_LEVEL4_INTERACTION_FEATURES", "1",
+        ).strip().lower() not in {"0", "false", "no"}
+
         all_features: list[np.ndarray] = []
         all_labels: list[np.ndarray] = []
 
@@ -327,7 +340,20 @@ class Level4Runner(BaseLevelRunner):
                 protein, ligand, protein_mask, ligand_mask,
                 return_features=True,
             )
-            features = output["features"].cpu().numpy()
+            feats = output["features"]  # [B, 2*hidden_dim]
+
+            if use_interactions:
+                half = feats.shape[-1] // 2
+                prot_vec = feats[:, :half]
+                lig_vec = feats[:, half:]
+                feats = torch.cat([
+                    prot_vec,
+                    lig_vec,
+                    prot_vec * lig_vec,                 # co-activation
+                    torch.abs(prot_vec - lig_vec),      # complementarity
+                ], dim=-1)  # [B, 4*hidden_dim]
+
+            features = feats.cpu().numpy()
             labels = batch["label"].numpy()
 
             all_features.append(features)
