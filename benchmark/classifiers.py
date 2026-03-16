@@ -231,6 +231,24 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "n_iter_no_change": 60,
             "tol": 8e-6,
         },
+        {   # Strongly regularized for high-D interaction features (1024D)
+            "hidden_layer_sizes": (256, 128),
+            "alpha": 5e-2,
+            "learning_rate_init": 5e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
+        {   # Simple architecture with strong L2 penalty
+            "hidden_layer_sizes": (128,),
+            "alpha": 1e-1,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
     ]
 
 
@@ -470,15 +488,12 @@ def _train_mlp_pipeline(
         seed=seed,
     )
 
-    # --- Threshold recalibration on eval predictions ---
-    # When in train mode (no frozen selection), recalibrate the threshold
-    # directly on the evaluation data (validation set) instead of trusting
-    # the OOF threshold from model selection, which may be inflated if the
-    # upstream feature extractor leaked training information.
+    # --- Threshold from model selection ---
+    # Use the OOF/CV-selected threshold directly.  Previous versions
+    # recalibrated on the eval data, which inflated train-mode MCC and
+    # created a misleading gap when the frozen threshold was applied at
+    # test time on unseen scaffolds.
     refined_thr = best_thr
-    if frozen_selection is None and y_test.size >= 20 and len(np.unique(y_test.astype(int))) >= 2:
-        eval_thr, eval_mcc = _optimize_threshold_mcc(y_test.astype(int), mlp_proba)
-        refined_thr = eval_thr
 
     # --- Optional OOF refinement (disabled by default) ---
     use_oof_refinement = os.getenv(
