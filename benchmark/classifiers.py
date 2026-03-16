@@ -336,7 +336,7 @@ def _select_best_mlp_by_mcc(
     x_cal: np.ndarray,
     y_cal: np.ndarray,
     seed: int,
-) -> tuple[dict[str, object], float, float, float]:
+) -> tuple[dict[str, object], float, float, float, list[dict[str, object]]]:
     """Select MLP config by MCC with stratified CV (fallback: holdout calibration).
 
     Using OOF probabilities for threshold selection is more robust than a
@@ -354,6 +354,7 @@ def _select_best_mlp_by_mcc(
     best_mcc = -1.0
     best_std = 1.0
     best_score = -999.0
+    all_scores: list[tuple[float, dict[str, object]]] = []
 
     total_search_steps = len(candidates) * n_restarts
     search_bar = tqdm(
@@ -407,10 +408,15 @@ def _select_best_mlp_by_mcc(
             best_thr = thr
             best_mcc = float(mcc)
             best_std = mcc_std
+        all_scores.append((score, cfg))
 
     search_bar.close()
 
-    return best_cfg, best_thr, best_mcc, best_std
+    # Collect top-3 configs ranked by stability-adjusted MCC for diverse ensemble.
+    ranked_cfgs = sorted(all_scores, key=lambda x: x[0], reverse=True)[:3]
+    ranked_cfgs = [entry[1] for entry in ranked_cfgs]  # extract configs
+
+    return best_cfg, best_thr, best_mcc, best_std, ranked_cfgs
 
 
 def _fit_mlp_ensemble_predict(
@@ -419,32 +425,55 @@ def _fit_mlp_ensemble_predict(
     y_train: np.ndarray,
     x_eval: np.ndarray,
     seed: int,
+    ranked_cfgs: list[dict[str, object]] | None = None,
 ) -> np.ndarray:
-    """Fit an ensemble of MLP restarts and return mean probabilities.
+    """Fit a diverse ensemble of calibrated MLP restarts.
 
-    Each member trains with early stopping (default).  Set
-    ``BENCHMARK_MLP_FULL_REFIT=1`` only if you explicitly want to
-    disable early stopping for the final refit.
+    When *ranked_cfgs* is provided, members cycle through the top-k
+    configs (round-robin) instead of using one config for all members.
+    Each member is individually calibrated via CalibratedClassifierCV
+    (isotonic) when ``BENCHMARK_MLP_CALIBRATE_MEMBERS=1``.
     """
-    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "3")))
+    from sklearn.calibration import CalibratedClassifierCV
+
+    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
     full_refit = os.getenv(
         "BENCHMARK_MLP_FULL_REFIT", "0"
     ).strip().lower() not in {"0", "false", "no"}
+    calibrate_members = os.getenv(
+        "BENCHMARK_MLP_CALIBRATE_MEMBERS", "1"
+    ).strip().lower() not in {"0", "false", "no"}
+
+    # Use diverse configs if available, otherwise repeat best config.
+    cfgs = ranked_cfgs if ranked_cfgs else [cfg]
     probs: list[np.ndarray] = []
 
     ensemble_iter = tqdm(
         range(n_members),
-        desc="    MLP ensemble" + (" (full refit)" if full_refit else ""),
+        desc="    MLP ensemble" + (" (calibrated)" if calibrate_members else ""),
         unit="model",
         leave=False,
         dynamic_ncols=True,
     )
+    min_class_count = int(np.bincount(y_train.astype(int)).min()) if y_train.size else 0
+    can_calibrate = calibrate_members and min_class_count >= 3 and y_train.size >= 30
+
     for member in ensemble_iter:
         rs = seed + (member * 53)
+        member_cfg = cfgs[member % len(cfgs)]  # round-robin across top configs
         model = _fit_mlp_from_cfg(
-            cfg, x_train, y_train, random_state=rs, final_refit=full_refit,
+            member_cfg, x_train, y_train, random_state=rs, final_refit=full_refit,
         )
-        probs.append(model.predict_proba(x_eval)[:, 1])
+
+        if can_calibrate:
+            # Per-member isotonic calibration via CalibratedClassifierCV.
+            cal_model = CalibratedClassifierCV(
+                model, method="isotonic", cv=3,
+            )
+            cal_model.fit(x_train, y_train)
+            probs.append(cal_model.predict_proba(x_eval)[:, 1])
+        else:
+            probs.append(model.predict_proba(x_eval)[:, 1])
 
     return np.mean(np.stack(probs, axis=0), axis=0)
 
@@ -461,7 +490,7 @@ def _train_mlp_pipeline(
     if frozen_selection is None:
         x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
 
-        best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
+        best_cfg, best_thr, best_mcc, best_mcc_std, ranked_cfgs = _select_best_mlp_by_mcc(
             x_fit=x_fit,
             y_fit=y_fit,
             x_cal=x_cal,
@@ -478,15 +507,19 @@ def _train_mlp_pipeline(
         best_thr = float(frozen_selection["best_thr"])
         best_mcc = float(frozen_selection["best_mcc"])
         best_mcc_std = float(frozen_selection["best_mcc_std"])
+        # Recover ranked configs saved during training (if available).
+        raw_ranked = frozen_selection.get("ranked_cfgs")
+        ranked_cfgs = [dict(c) for c in raw_ranked] if isinstance(raw_ranked, list) else [best_cfg]
         selection_source = "frozen_train_selection"
 
-    # Refit best architecture on full training features as a restart ensemble.
+    # Refit best architecture on full training features as a diverse ensemble.
     mlp_proba = _fit_mlp_ensemble_predict(
         cfg=best_cfg,
         x_train=x_train_sc,
         y_train=y_train,
         x_eval=x_test_sc,
         seed=seed,
+        ranked_cfgs=ranked_cfgs,
     )
 
     # --- Isotonic calibration of ensemble probabilities ---
@@ -559,6 +592,7 @@ def _train_mlp_pipeline(
         "best_thr": float(best_thr),
         "best_mcc": float(best_mcc),
         "best_mcc_std": float(best_mcc_std),
+        "ranked_cfgs": ranked_cfgs,
     }
     return mlp_metrics
 
