@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# run_benchmark.sh — Automated train/test benchmark for Levels 3 and 3a
+# run_benchmark.sh — Automated train/test benchmark (any level)
 #
 # Usage:
 #   bash run_benchmark.sh
@@ -21,7 +21,25 @@ EPOCHS="${EPOCHS:-500}"
 MODEL_SELECTION_METRIC="${MODEL_SELECTION_METRIC:-mcc}"
 BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-downstream_mcc}"
 BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY="${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY:-10}"
-FOCUS_MODEL="${FOCUS_MODEL:-level3a_attnpool_mlp}"
+# ---------- Auto-derive focus model from first requested level ----------
+_derive_focus_model() {
+    case "$1" in
+        1a)  echo "level1a_fp_mlp" ;;
+        1b)  echo "level1b_ligmean_mlp" ;;
+        1c)  echo "level1c_ligattn_mlp" ;;
+        2)   echo "level2_meanpool_mlp" ;;
+        3)   echo "level3_attnpool_mlp" ;;
+        3a)  echo "level3a_attnpool_mlp" ;;
+        4)   echo "level4_crossatt_mlp" ;;
+        4a)  echo "level4a_crossatt_mlp" ;;
+        5)   echo "level5_da_mlp" ;;
+        5b)  echo "level5b_da_mlp" ;;
+        6a)  echo "level6a_ban_mlp" ;;
+        6b)  echo "level6b_ban_mlp" ;;
+        *)   echo "level${1}_mlp" ;;
+    esac
+}
+FOCUS_MODEL="${FOCUS_MODEL:-$(_derive_focus_model "${LEVELS[0]}")}"
 TARGET_TEST_MCC="${TARGET_TEST_MCC:-0.6}"
 MAX_TEST_MCC_STD="${MAX_TEST_MCC_STD:-0.08}"
 BENCHMARK_ENFORCE_RIGOR="${BENCHMARK_ENFORCE_RIGOR:-1}"
@@ -34,6 +52,7 @@ BENCHMARK_MLP_ENSEMBLE="${BENCHMARK_MLP_ENSEMBLE:-3}"
 BENCHMARK_MLP_OVERSAMPLE="${BENCHMARK_MLP_OVERSAMPLE:-0}"
 BENCHMARK_LEVEL3_USE_AUX_CHANNEL="${BENCHMARK_LEVEL3_USE_AUX_CHANNEL:-1}"
 BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES="${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES:-0}"
+BENCHMARK_LEVEL4_INTERACTION_FEATURES="${BENCHMARK_LEVEL4_INTERACTION_FEATURES:-1}"
 
 # OOF threshold refinement (re-calibrates decision threshold on full training set).
 BENCHMARK_MLP_OOF_THRESHOLD="${BENCHMARK_MLP_OOF_THRESHOLD:-0}"
@@ -55,6 +74,7 @@ export BENCHMARK_LEVEL3_USE_AUX_CHANNEL
 export BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES
 export BENCHMARK_LEVEL3_SELECTION_METRIC
 export BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY
+export BENCHMARK_LEVEL4_INTERACTION_FEATURES
 export BENCHMARK_MLP_OOF_THRESHOLD
 export BENCHMARK_MLP_OOF_FOLDS
 export BENCHMARK_MLP_FULL_REFIT
@@ -84,6 +104,7 @@ echo " MLP full refit: ${BENCHMARK_MLP_FULL_REFIT} (final ensemble trains withou
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
 echo " Level3 full train features: ${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES} (transfer learning mode)"
 echo " Level3 checkpoint selection: ${BENCHMARK_LEVEL3_SELECTION_METRIC} (eval_every=${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY})"
+echo " Level4 interaction features: ${BENCHMARK_LEVEL4_INTERACTION_FEATURES}"
 echo " Rigor: require_train_selection=${BENCHMARK_REQUIRE_TRAIN_SELECTION}, strict_completeness=${BENCHMARK_STRICT_LEVEL_COMPLETENESS}"
 echo " Acceptance gate: focus_model=${FOCUS_MODEL}, target_test_mcc>=${TARGET_TEST_MCC}, max_test_mcc_std<=${MAX_TEST_MCC_STD}"
 echo " Output root: ${OUTPUT_ROOT}"
@@ -112,6 +133,7 @@ echo ""
 echo "============================================================"
 echo " MCC summary from train/test benchmark_comparison.json"
 echo "============================================================"
+LEVELS_CSV_ENV="${LEVELS_CSV}" \
 OUTPUT_ROOT_ENV="${OUTPUT_ROOT}" \
 FOCUS_MODEL_ENV="${FOCUS_MODEL}" \
 TARGET_TEST_MCC_ENV="${TARGET_TEST_MCC}" \
@@ -121,21 +143,39 @@ import json
 import os
 from pathlib import Path
 
+# ---------- Build targets list from requested levels ----------
+_LEVEL_MODEL_MAP = {
+    "1a": ["level1a_fp_knn", "level1a_fp_mlp"],
+    "1b": ["level1b_ligmean_knn", "level1b_ligmean_mlp"],
+    "1c": ["level1c_ligattn_knn", "level1c_ligattn_mlp"],
+    "2":  ["level2_meanpool_knn", "level2_meanpool_mlp"],
+    "3":  ["level3_attnpool_knn", "level3_attnpool_mlp"],
+    "3a": ["level3a_attnpool_mlp"],
+    "4":  ["level4_crossatt_knn", "level4_crossatt_mlp"],
+    "4a": ["level4a_crossatt_mlp"],
+    "5":  ["level5_da_knn", "level5_da_mlp"],
+    "5b": ["level5b_da_knn", "level5b_da_mlp"],
+    "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
+    "6b": ["level6b_ban_knn", "level6b_ban_mlp"],
+}
+
+levels_csv = os.environ["LEVELS_CSV_ENV"]
+targets = []
+for lvl in levels_csv.split(","):
+    lvl = lvl.strip()
+    targets.extend(_LEVEL_MODEL_MAP.get(lvl, [f"level{lvl}_mlp"]))
+
 # The orchestrator appends /train and /test to --output_dir.
 output_root = Path(os.environ["OUTPUT_ROOT_ENV"])
-targets = [
-    "level3_attnpool_knn",
-    "level3_attnpool_mlp",
-    "level3a_attnpool_mlp",
-]
 
 paths = {
     "train": output_root / "train" / "benchmark_comparison.json",
     "test": output_root / "test" / "benchmark_comparison.json",
 }
 
-print(f"{'phase':>6}  {'model':<20} {'MCC':>8} {'MCC_std':>8}")
-print("-" * 52)
+col_w = max(20, max((len(t) for t in targets), default=20) + 2)
+print(f"{'phase':>6}  {'model':<{col_w}} {'MCC':>8} {'MCC_std':>8}")
+print("-" * (26 + col_w))
 
 focus_model = os.environ["FOCUS_MODEL_ENV"]
 target_test_mcc = float(os.environ["TARGET_TEST_MCC_ENV"])
@@ -162,7 +202,7 @@ for phase, path in paths.items():
         mcc_std = row.get("mcc_std")
         mcc_txt = f"{mcc:.4f}" if isinstance(mcc, (float, int)) else "N/A"
         std_txt = f"{mcc_std:.4f}" if isinstance(mcc_std, (float, int)) else "N/A"
-        print(f"{phase:>6}  {model:<20} {mcc_txt:>8} {std_txt:>8}")
+        print(f"{phase:>6}  {model:<{col_w}} {mcc_txt:>8} {std_txt:>8}")
         if phase == "test" and model == focus_model:
             test_focus_mcc = mcc if isinstance(mcc, (float, int)) else None
             test_focus_std = mcc_std if isinstance(mcc_std, (float, int)) else None
