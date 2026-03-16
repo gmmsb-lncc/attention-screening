@@ -19,7 +19,7 @@ IFS=',' read -r -a LEVELS <<< "${LEVELS_CSV}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_16_03_2026}"
 EPOCHS="${EPOCHS:-500}"
 MODEL_SELECTION_METRIC="${MODEL_SELECTION_METRIC:-mcc}"
-BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-downstream_mcc}"
+BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-val_loss}"
 BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY="${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY:-10}"
 # ---------- Auto-derive focus model from first requested level ----------
 _derive_focus_model() {
@@ -61,6 +61,13 @@ BENCHMARK_MLP_OOF_FOLDS="${BENCHMARK_MLP_OOF_FOLDS:-5}"
 # Full refit: final ensemble trains on 100% of data without early stopping.
 BENCHMARK_MLP_FULL_REFIT="${BENCHMARK_MLP_FULL_REFIT:-0}"
 
+# Level 3 architecture scaling (auto-scaled by default, set explicitly for 650M).
+BENCHMARK_LEVEL3_HIDDEN_DIM="${BENCHMARK_LEVEL3_HIDDEN_DIM:-}"
+
+# Level 4 regularisation (tuned for 650M embeddings by default).
+BENCHMARK_LEVEL4_DROPOUT="${BENCHMARK_LEVEL4_DROPOUT:-0.30}"
+BENCHMARK_LEVEL4_WEIGHT_DECAY="${BENCHMARK_LEVEL4_WEIGHT_DECAY:-0.06}"
+
 # Scientific-rigor safeguards (test cannot guide tuning).
 BENCHMARK_REQUIRE_TRAIN_SELECTION="${BENCHMARK_REQUIRE_TRAIN_SELECTION:-1}"
 BENCHMARK_STRICT_LEVEL_COMPLETENESS="${BENCHMARK_STRICT_LEVEL_COMPLETENESS:-1}"
@@ -80,6 +87,9 @@ export BENCHMARK_MLP_OOF_FOLDS
 export BENCHMARK_MLP_FULL_REFIT
 export BENCHMARK_REQUIRE_TRAIN_SELECTION
 export BENCHMARK_STRICT_LEVEL_COMPLETENESS
+export BENCHMARK_LEVEL3_HIDDEN_DIM
+export BENCHMARK_LEVEL4_DROPOUT
+export BENCHMARK_LEVEL4_WEIGHT_DECAY
 
 run_phase() {
     local mode="$1"
@@ -104,7 +114,9 @@ echo " MLP full refit: ${BENCHMARK_MLP_FULL_REFIT} (final ensemble trains withou
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
 echo " Level3 full train features: ${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES} (transfer learning mode)"
 echo " Level3 checkpoint selection: ${BENCHMARK_LEVEL3_SELECTION_METRIC} (eval_every=${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY})"
+echo " Level3 hidden_dim: ${BENCHMARK_LEVEL3_HIDDEN_DIM:-auto}"
 echo " Level4 interaction features: ${BENCHMARK_LEVEL4_INTERACTION_FEATURES}"
+echo " Level4 dropout: ${BENCHMARK_LEVEL4_DROPOUT}, weight_decay: ${BENCHMARK_LEVEL4_WEIGHT_DECAY}"
 echo " Rigor: require_train_selection=${BENCHMARK_REQUIRE_TRAIN_SELECTION}, strict_completeness=${BENCHMARK_STRICT_LEVEL_COMPLETENESS}"
 echo " Acceptance gate: focus_model=${FOCUS_MODEL}, target_test_mcc>=${TARGET_TEST_MCC}, max_test_mcc_std<=${MAX_TEST_MCC_STD}"
 echo " Output root: ${OUTPUT_ROOT}"
