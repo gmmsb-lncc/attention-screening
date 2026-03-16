@@ -9,23 +9,25 @@ Coordinates the full pipeline:
   Step 1c: Level 1c — Ligand MoLFormer attention pooling + KNN/MLP
   Step 2:  Level 2  — Protein+Ligand mean pooling + KNN/MLP
   Step 3:  Level 3  — Protein+Ligand attention pooling + KNN/MLP
-  Step 4:  Level 4  — Cross-Attention + KNN/MLP (DT-Kinase)
+  Step 4:  Level 4  — Protein+Ligand cross-attention + KNN/MLP
+  Note: Levels after 4 (5a, 5b, 6a, 6b) are obsolete.
   Report:  Comparative report and visualizations
 
 Monotonic complexity hierarchy:
   1a (FP) < 1b (lig mean) < 1c (lig attn) < 2 (prot+lig mean)
-  < 3 (prot+lig attn) < 4 (cross-attention)
+  < 3 (prot+lig attn)
 
 Evaluation protocol:
-  - All six levels use the **exact same** canonical KNN and MLP classifiers
+  - All active levels use the **exact same** canonical KNN and MLP classifiers
     (benchmark.classifiers), ensuring the only variable is the representation.
   - Classifiers are trained on **validation-split** features and evaluated
     on the **test** split, eliminating train-set optimism for levels with
-    learned feature extractors (1c, 3, 4).
+    learned feature extractors (1c, 3).
 
 Usage:
-    python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3 4
-    python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 1b 1c 2 3 4
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4 --finetune
+  python semantic_screening_models.py --dataset human --embedding 8M --levels 1b 1c 2 3 4 --se3 --se3-features-dir path/to/se3_features
 """
 
 from benchmark.cli import build_parser, config_from_args

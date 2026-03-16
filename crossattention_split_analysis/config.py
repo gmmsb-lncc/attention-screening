@@ -22,12 +22,22 @@ PROTEIN_DIMS = {
 # Ligand embedding dimensions
 LIGAND_DIM = 768  # SMI-TED per-token embeddings
 MOLFORMER_DIM = 768  # MoLFormer per-token embeddings
+CHEMBERTA_DIM = 384  # ChemBERTa-77M-MTR per-token embeddings
 
 # Ligand matrix directory names
 LIGAND_MATRIX_DIRS = {
     'smited': 'ligand_matrices',      # Original SMI-TED matrices
     'molformer': 'molformer_matrix',  # MoLFormer matrices
+    'chemberta': 'chemberta_matrix',  # ChemBERTa matrices
 }
+
+# Ligand model dimensions (for cross-attention pipeline)
+LIGAND_MODEL_DIMS = {
+    'smited': 768,
+    'molformer': 768,
+    'chemberta': 384,
+}
+
 LIGAND_VECTOR_DIR = 'ligand_embeddings'
 
 # Max sequence length for attention matrices
@@ -41,7 +51,7 @@ MAX_SEQ_LEN = 1024
 DATASET_PATHS = {
     'human': './tests/datasets/kinase_human_compounds.tsv',
     'non_human': './tests/datasets/kinase_non_human_compounds.tsv',
-    'all': './tests/datasets/kinase_all_compounds.tsv'
+    'all': './tests/datasets/kinase_all_compounds.tsv',
 }
 
 EMBEDDING_BASE_PATH = './results/protein_model_benchmark_{dataset_type}_v2'
@@ -127,7 +137,7 @@ class TrainingConfig:
     protein_dim: int = 640
     ligand_dim: int = 768
     hidden_dim: int = 256
-    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite'] = 'cnn_crossattn'
+    model_variant: Literal['cnn_crossattn', 'cross_attention_lite', 'diffusion', 'level5_lite', 'level5_da', 'level5b_da', 'level6a', 'level6b'] = 'cnn_crossattn'
     num_cnn_layers: int = 3
     num_cross_attn_layers: int = 2
     num_heads: int = 8
@@ -167,6 +177,7 @@ class TrainingConfig:
     optimize_threshold: bool = True
     threshold_metric: str = 'mcc'
     fixed_threshold: float = 0.5
+    model_selection_metric: str = 'val_loss'
 
     # Reproducibility
     affinity_threshold: AffinityThresholdConfig = field(
@@ -214,6 +225,7 @@ class TrainingConfig:
             'optimize_threshold': self.optimize_threshold,
             'threshold_metric': self.threshold_metric,
             'fixed_threshold': self.fixed_threshold,
+            'model_selection_metric': self.model_selection_metric,
             'affinity_threshold': self.affinity_threshold.to_dict()
         }
 

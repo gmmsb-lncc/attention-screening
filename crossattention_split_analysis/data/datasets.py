@@ -112,11 +112,11 @@ class AttentionMatrixDataset(Dataset):
             seq_len = self.max_seq_len
 
         # Load ligand matrix - search in all directories with alternative naming patterns
-        # SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy
+        # SMI-TED uses _matrix.npy, MoLFormer uses _molformer_matrix.npy, ChemBERTa uses _chemberta_matrix.npy
         ligand_file = self._find_file(
             self.ligand_matrix_dirs,
             f"{ligand_id}_matrix.npy",
-            alt_patterns=[f"{ligand_id}_molformer_matrix.npy"]
+            alt_patterns=[f"{ligand_id}_molformer_matrix.npy", f"{ligand_id}_chemberta_matrix.npy"]
         )
         ligand_matrix = np.load(ligand_file)
 
@@ -138,6 +138,10 @@ class AttentionMatrixDataset(Dataset):
             else:
                 result['regression_target'] = torch.tensor(0.0, dtype=torch.float32)
                 result['has_regression'] = torch.tensor(0, dtype=torch.float32)
+
+        # Domain label for adversarial domain adaptation (Level 5 DA / Level 6)
+        if 'domain_label' in self.data_df.columns:
+            result['domain_label'] = torch.tensor(int(row['domain_label']), dtype=torch.long)
 
         return result
 
@@ -186,15 +190,21 @@ def collate_attention_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
             regression_targets[i] = sample['regression_target']
             regression_mask[i] = sample.get('has_regression', torch.tensor(1))
 
-    return {
+    result = {
         'protein_matrix': protein_matrices,
         'ligand_matrix': ligand_matrices,
         'protein_mask': protein_masks,
         'ligand_mask': ligand_masks,
         'labels': labels,
         'regression_targets': regression_targets,
-        'regression_mask': regression_mask
+        'regression_mask': regression_mask,
     }
+
+    # Domain labels for adversarial domain adaptation (Level 5 DA / Level 6)
+    if 'domain_label' in batch[0]:
+        result['domain_label'] = torch.stack([s['domain_label'] for s in batch])
+
+    return result
 
 
 def create_attention_dataloader(

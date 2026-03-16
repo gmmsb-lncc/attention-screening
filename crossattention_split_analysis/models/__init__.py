@@ -11,6 +11,18 @@ from .level5_lite import (
     collate_level5_lite,
 )
 
+from .level5_da import (
+    Level5DAModel,
+    GradientReversalLayer,
+    DomainDiscriminator,
+    build_scaffold_clusters,
+    lambda_schedule,
+)
+
+from .level5b_da import Level5bDAModel
+from .level6a import Level6aModel
+from .level6b import Level6bModel
+
 __all__ = [
     "Level5LiteModel",
     "ProteinEncoder",
@@ -20,4 +32,12 @@ __all__ = [
     "ClassifierHead",
     "Level5LiteDataset",
     "collate_level5_lite",
+    "Level5DAModel",
+    "Level5bDAModel",
+    "Level6aModel",
+    "Level6bModel",
+    "GradientReversalLayer",
+    "DomainDiscriminator",
+    "build_scaffold_clusters",
+    "lambda_schedule",
 ]

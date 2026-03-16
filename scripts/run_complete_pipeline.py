@@ -51,9 +51,16 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-# Add project path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root / 'src'))
+# Add project paths (repo root + src/) so both import styles work:
+# - from integrated_pipeline import ...
+# - from src.build... import ...
+scripts_dir = Path(__file__).resolve().parent
+repo_root = scripts_dir.parent
+
+for p in (repo_root, repo_root / 'src'):
+    p_str = str(p)
+    if p_str not in sys.path:
+        sys.path.insert(0, p_str)
 
 
 # =============================================================================
@@ -200,8 +207,8 @@ Devices:
         '--ligand-model',
         type=str,
         default='SMI-TED',
-        choices=['SMI-TED', 'MOLFORMER'],
-        help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim)'
+        choices=['SMI-TED', 'MOLFORMER', 'CHEMBERTA'],
+        help='FM4M model for ligand embeddings (default: SMI-TED, 768-dim; CHEMBERTA: 384-dim)'
     )
     
     parser.add_argument(

@@ -461,11 +461,11 @@ def train_and_evaluate(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(128,),
+        hidden_layer_sizes=(512,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        max_iter=100,
+        max_iter=500,
         early_stopping=True,
         validation_fraction=0.1,
         n_iter_no_change=10,
@@ -643,11 +643,11 @@ def train_and_evaluate_with_val(
     print("    Training MLP...")
     t0 = time.time()
     mlp = MLPClassifier(
-        hidden_layer_sizes=(128,),
+        hidden_layer_sizes=(512,),
         activation='relu',
         solver='adam',
         alpha=0.0001,
-        max_iter=100,
+        max_iter=500,
         early_stopping=True,
         validation_fraction=0.1,
         n_iter_no_change=10,

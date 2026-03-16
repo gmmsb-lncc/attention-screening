@@ -155,8 +155,14 @@ FM4M_MODELS = {
     'SMI-SSED': {'dim': 768, 'type': 'encoder'},
     'MHG': {'dim': 768, 'type': 'graph'},
     'MOL-MOE': {'dim': 768, 'type': 'mixture'},
-    'MOLFORMER': {'dim': 768, 'type': 'transformer'}
+    'MOLFORMER': {'dim': 768, 'type': 'transformer'},
+    'CHEMBERTA': {'dim': 384, 'type': 'transformer'},
 }
+
+# ChemBERTa model configuration (same as GraphBAN)
+CHEMBERTA_MODEL_NAME = 'DeepChem/ChemBERTa-77M-MTR'
+CHEMBERTA_DIM = 384
+CHEMBERTA_MAX_LEN = 290
 
 # Configurações de Spark
 SPARK_CONFIG = {

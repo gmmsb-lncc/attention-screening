@@ -22,7 +22,9 @@ from .config import (
     DEFAULT_SEEDS,
     LIGAND_MATRIX_DIRS,
     LIGAND_VECTOR_DIR,
-    MOLFORMER_DIM
+    LIGAND_MODEL_DIMS,
+    MOLFORMER_DIM,
+    CHEMBERTA_DIM,
 )
 from .data import (
     create_attention_dataloader
@@ -102,37 +104,34 @@ def _load_precomputed_scaffold_splits(
     """
     Load fixed scaffold splits produced by scaffold_split.py.
 
-    Expected files:
-      - {dir}/scenarios/Sc/{dataset}_train.tsv (or .tsv.gz)
-      - {dir}/scenarios/Sc/{dataset}_val.tsv (or .tsv.gz)
-      - {dir}/{dataset}_test.tsv (or .tsv.gz)
-    where dataset is human/non_human, or both concatenated when dataset_type=all.
+    Always reads the **universal** split files and filters by
+    ``dataset_source`` when *dataset_type* is ``human`` or ``non_human``.
     """
     base = Path(scaffold_split_dir)
     scenario_dir = base / "scenarios" / SCAFFOLD_SCENARIO_CODE
 
-    def _load_one(ds: str):
-        train_path = scenario_dir / f"{ds}_train.tsv"
-        val_path = scenario_dir / f"{ds}_val.tsv"
-        test_path = base / f"{ds}_test.tsv"
+    def _load_universal():
+        train_path = scenario_dir / "universal_train.tsv"
+        val_path = scenario_dir / "universal_val.tsv"
+        test_path = base / "universal_test.tsv"
 
-        train_df, train_used = _read_split_tsv(train_path, f"{ds} train")
-        val_df, val_used = _read_split_tsv(val_path, f"{ds} val")
+        train_df, train_used = _read_split_tsv(train_path, "universal train")
+        val_df, val_used = _read_split_tsv(val_path, "universal val")
         if include_test:
-            test_df, test_used = _read_split_tsv(test_path, f"{ds} test")
+            test_df, test_used = _read_split_tsv(test_path, "universal test")
         else:
             test_df = val_df.iloc[0:0].copy()
             test_used = None
 
-        train_df = _ensure_label_column(train_df, threshold, f"{ds} train")
-        val_df = _ensure_label_column(val_df, threshold, f"{ds} val")
+        train_df = _ensure_label_column(train_df, threshold, "universal train")
+        val_df = _ensure_label_column(val_df, threshold, "universal val")
         if include_test:
-            test_df = _ensure_label_column(test_df, threshold, f"{ds} test")
+            test_df = _ensure_label_column(test_df, threshold, "universal test")
 
-        _ensure_required_columns(train_df, f"{ds} train")
-        _ensure_required_columns(val_df, f"{ds} val")
+        _ensure_required_columns(train_df, "universal train")
+        _ensure_required_columns(val_df, "universal val")
         if include_test:
-            _ensure_required_columns(test_df, f"{ds} test")
+            _ensure_required_columns(test_df, "universal test")
 
         return train_df, val_df, test_df, {
             "train_path": str(train_used),
@@ -140,34 +139,26 @@ def _load_precomputed_scaffold_splits(
             "test_path": str(test_used) if test_used else None,
         }
 
-    if dataset_type in {"human", "non_human"}:
-        train_df, val_df, test_df, paths = _load_one(dataset_type)
-        metadata = {"dataset_type": dataset_type, "split_source": "precomputed_scaffold_split", "paths": paths}
-        return train_df, val_df, test_df, metadata
+    train_df, val_df, test_df, paths = _load_universal()
 
-    if dataset_type == "all":
-        h_train, h_val, h_test, h_paths = _load_one("human")
-        n_train, n_val, n_test, n_paths = _load_one("non_human")
+    # Filter by corpus origin when a specific dataset is requested
+    source_filter = None if dataset_type == "all" else dataset_type
+    if source_filter is not None and source_filter in {"human", "non_human"}:
+        if "dataset_source" in train_df.columns:
+            train_df = train_df[train_df["dataset_source"] == source_filter].reset_index(drop=True)
+            val_df = val_df[val_df["dataset_source"] == source_filter].reset_index(drop=True)
+            if include_test:
+                test_df = test_df[test_df["dataset_source"] == source_filter].reset_index(drop=True)
 
-        for frame, source in (
-            (h_train, "human"), (h_val, "human"), (h_test, "human"),
-            (n_train, "non_human"), (n_val, "non_human"), (n_test, "non_human"),
-        ):
-            if "dataset_source" not in frame.columns:
-                frame["dataset_source"] = source
+    metadata = {
+        "dataset_type": dataset_type,
+        "split_source": "precomputed_scaffold_split_universal",
+        "paths": paths,
+    }
+    if source_filter:
+        metadata["dataset_source_filter"] = source_filter
 
-        train_df = pd.concat([h_train, n_train], axis=0, ignore_index=True)
-        val_df = pd.concat([h_val, n_val], axis=0, ignore_index=True)
-        test_df = pd.concat([h_test, n_test], axis=0, ignore_index=True)
-
-        metadata = {
-            "dataset_type": dataset_type,
-            "split_source": "precomputed_scaffold_split",
-            "paths": {"human": h_paths, "non_human": n_paths},
-        }
-        return train_df, val_df, test_df, metadata
-
-    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+    return train_df, val_df, test_df, metadata
 
 
 def _load_external_test_dataframe(
@@ -175,41 +166,24 @@ def _load_external_test_dataframe(
     scaffold_split_dir: str,
     threshold: float,
 ) -> Tuple[Optional[pd.DataFrame], Dict[str, str]]:
-    """Load external test split(s) from scaffold output, accepting .tsv or .tsv.gz."""
+    """Load external test split from universal scaffold output, accepting .tsv or .tsv.gz."""
     base = Path(scaffold_split_dir)
-
-    def _load_one(ds: str) -> Tuple[pd.DataFrame, Path]:
-        raw_df, used_path = _read_split_tsv(base / f"{ds}_test.tsv", f"{ds} external test")
-        test_df = _ensure_label_column(raw_df, threshold, f"{ds} external test")
-        _ensure_required_columns(test_df, f"{ds} external test")
-        return test_df, used_path
-
     loaded_paths: Dict[str, str] = {}
 
-    if dataset_type in {"human", "non_human"}:
-        try:
-            df, used = _load_one(dataset_type)
-        except FileNotFoundError:
-            return None, loaded_paths
-        loaded_paths[dataset_type] = str(used)
-        return df, loaded_paths
+    try:
+        raw_df, used_path = _read_split_tsv(base / "universal_test.tsv", "universal external test")
+    except FileNotFoundError:
+        return None, loaded_paths
 
-    if dataset_type == "all":
-        frames: List[pd.DataFrame] = []
-        for ds in ("human", "non_human"):
-            try:
-                frame, used = _load_one(ds)
-            except FileNotFoundError:
-                continue
-            if "dataset_source" not in frame.columns:
-                frame["dataset_source"] = ds
-            frames.append(frame)
-            loaded_paths[ds] = str(used)
-        if not frames:
-            return None, loaded_paths
-        return pd.concat(frames, axis=0, ignore_index=True), loaded_paths
+    test_df = _ensure_label_column(raw_df, threshold, "universal external test")
+    _ensure_required_columns(test_df, "universal external test")
+    loaded_paths["universal"] = str(used_path)
 
-    raise ValueError(f"Unsupported dataset_type='{dataset_type}'. Expected human, non_human, or all.")
+    # Filter by corpus if not "all"
+    if dataset_type in {"human", "non_human"} and "dataset_source" in test_df.columns:
+        test_df = test_df[test_df["dataset_source"] == dataset_type].reset_index(drop=True)
+
+    return test_df, loaded_paths
 
 MODEL_VARIANT_TO_ENCODER = {
     'cnn_crossattn': 'cnn',
@@ -217,6 +191,10 @@ MODEL_VARIANT_TO_ENCODER = {
     'diffusion': 'diffusion',
     'level5_lite': 'level5_lite',
     'level3_crossatt': 'level3_crossatt',  # Level 3 simplified architecture
+    'level5_da': 'level5_da',
+    'level5b_da': 'level5b_da',
+    'level6a': 'level6a',
+    'level6b': 'level6b',
 }
 
 MODEL_VARIANT_TO_LABEL = {
@@ -225,6 +203,10 @@ MODEL_VARIANT_TO_LABEL = {
     'diffusion': 'Diffusion',
     'level5_lite': 'Level5-Lite',
     'level3_crossatt': 'Level3-CrossAtt',  # Alias for Level 3
+    'level5_da': 'Level5a-DA',
+    'level5b_da': 'Level5b-DA',
+    'level6a': 'Level6a-BAN',
+    'level6b': 'Level6b-BAN',
 }
 
 
@@ -281,6 +263,24 @@ def run_scenario(
 
     if evaluation_split not in {"test", "val"}:
         raise ValueError(f"evaluation_split must be 'test' or 'val', got {evaluation_split!r}")
+
+    # Inject scaffold domain labels for Level 5 / 5b DA
+    num_domains = 16
+    if config.model_variant in ('level5_da', 'level5b_da', 'level6a', 'level6b') and 'scaffold' in train_df.columns:
+        from .models.level5_da.domain_adaptation import build_scaffold_clusters
+        scaffold_to_cluster = build_scaffold_clusters(
+            train_df['scaffold'].tolist(),
+            num_clusters=num_domains,
+        )
+        fallback_id = num_domains - 1
+        train_df = train_df.copy()
+        train_df['domain_label'] = train_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        val_df = val_df.copy()
+        val_df['domain_label'] = val_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        if test_df is not None:
+            test_df = test_df.copy()
+            test_df['domain_label'] = test_df['scaffold'].map(scaffold_to_cluster).fillna(fallback_id).astype(int)
+        print(f"  Domain adaptation: {num_domains} scaffold clusters")
 
     # Create data loaders (pass list of directories for multi-source datasets)
     if use_attention:
@@ -360,6 +360,52 @@ def run_scenario(
             num_heads=config.num_heads,
             dropout=config.dropout,
             classifier_dropout=config.classifier_dropout,
+        )
+    elif encoder_type == "level5_da":
+        from .models.level5_da import Level5DAModel
+        model = Level5DAModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level5b_da":
+        from .models.level5b_da import Level5bDAModel
+        model = Level5bDAModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level6a":
+        from .models.level6a import Level6aModel
+        model = Level6aModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_cross_attn_layers=config.num_cross_attn_layers,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
+        )
+    elif encoder_type == "level6b":
+        from .models.level6b import Level6bModel
+        model = Level6bModel(
+            protein_input_dim=config.protein_dim,
+            ligand_input_dim=config.ligand_dim,
+            hidden_dim=config.hidden_dim,
+            num_heads=config.num_heads,
+            dropout=config.dropout,
+            classifier_dropout=config.classifier_dropout,
+            num_domains=num_domains,
         )
     elif encoder_type == "level3_crossatt":
         from src.models.level3_crossatt import Level3CrossAttModel
@@ -558,6 +604,7 @@ def run_crossattention_analysis(
     external_test_mode: bool = False,
     custom_protein_matrix_dir: str = None,
     custom_ligand_matrix_dir: str = None,
+    ligand_model: str = None,
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Run complete CrossAttention analysis for one embedding + dataset.
@@ -571,9 +618,13 @@ def run_crossattention_analysis(
         prefix: Prefix for output files
         use_attention: Use attention matrices instead of embeddings
         scenarios: Scenario list (only scaffold is supported)
-        use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands
+        use_molformer_ligand: Use MoLFormer matrices instead of SMI-TED for ligands (deprecated, use ligand_model)
         use_ligand_vectors: Use ligand vectors instead of per-token matrices
         scaffold_split_dir: Directory generated by scaffold_split.py
+        external_test_mode: If True, use only precomputed scaffold train/val and skip internal test
+        custom_protein_matrix_dir: Optional custom directory for fine-tuned protein matrices
+        custom_ligand_matrix_dir: Optional custom directory for fine-tuned ligand matrices
+        ligand_model: Ligand model key ('molformer', 'smited', 'chemberta'). Overrides use_molformer_ligand.
         external_test_mode: If True, use only precomputed scaffold train/val and skip internal test
         custom_protein_matrix_dir: Optional custom directory for fine-tuned protein matrices
         custom_ligand_matrix_dir: Optional custom directory for fine-tuned ligand matrices
@@ -584,8 +635,17 @@ def run_crossattention_analysis(
     if seeds is None:
         seeds = DEFAULT_SEEDS
 
-    # For dataset 'all', use multiple directories (human + non_human)
-    if dataset_type == 'all':
+    # Resolve ligand_model from explicit parameter or legacy boolean flags
+    if ligand_model is None:
+        ligand_model = 'molformer' if use_molformer_ligand else 'smited'
+    ligand_model = ligand_model.lower()
+    if ligand_model not in LIGAND_MATRIX_DIRS:
+        print(f"ERROR: Unknown ligand model '{ligand_model}'. "
+              f"Supported: {list(LIGAND_MATRIX_DIRS.keys())}")
+        return None, None
+
+    # For dataset 'all' or 'universal', use multiple directories (human + non_human)
+    if dataset_type in ('all', 'universal'):
         embedding_dirs = [
             os.path.join(base_path, embedding_name, 'build')
             for base_path in EMBEDDING_BASE_PATHS_ALL
@@ -617,13 +677,22 @@ def run_crossattention_analysis(
         # Keep matrix dirs for backward compatibility (not used in vector mode)
         ligand_matrix_dirs = [os.path.join(d, LIGAND_MATRIX_DIRS['molformer']) for d in embedding_dirs]
     else:
-        if use_molformer_ligand:
-            ligand_dir_name = LIGAND_MATRIX_DIRS['molformer']
-            ligand_type = "Per-token Embeddings (MoLFormer)"
-        else:
-            ligand_dir_name = LIGAND_MATRIX_DIRS['smited']
-            ligand_type = "Per-token Embeddings (SMI-TED)"
+        ligand_dir_name = LIGAND_MATRIX_DIRS[ligand_model]
+        ligand_label = {'molformer': 'MoLFormer', 'smited': 'SMI-TED', 'chemberta': 'ChemBERTa'}.get(ligand_model, ligand_model)
+        ligand_type = f"Per-token Embeddings ({ligand_label})"
         ligand_matrix_dirs = [os.path.join(d, ligand_dir_name) for d in embedding_dirs]
+
+        # Compatibility fallback: some pipelines store MoLFormer matrices under
+        # build/ligand_matrices instead of build/molformer_matrix.
+        if ligand_model == 'molformer':
+            fallback_dirs = [os.path.join(d, 'ligand_matrices') for d in embedding_dirs]
+            has_primary = any(os.path.exists(d) for d in ligand_matrix_dirs)
+            has_fallback = any(os.path.exists(d) for d in fallback_dirs)
+            if not has_primary and has_fallback:
+                print(
+                    "  WARNING: molformer_matrix not found; falling back to ligand_matrices for MoLFormer inputs."
+                )
+                ligand_matrix_dirs = fallback_dirs
 
     # Override with custom paths if provided (for fine-tuned embeddings)
     if custom_protein_matrix_dir:
@@ -920,6 +989,7 @@ def run_single_analysis(
     optimize_threshold: bool = True,
     threshold_metric: str = "mcc",
     fixed_threshold: float = 0.5,
+    model_selection_metric: str = "val_loss",
     use_molformer_ligand: bool = True,
     use_ligand_vectors: bool = False,
     scaffold_split_dir: str = DEFAULT_SCAFFOLD_SPLIT_DIR,
@@ -927,6 +997,7 @@ def run_single_analysis(
     model_variant: str = 'cnn_crossattn',
     custom_protein_matrix_dir: str = None,
     custom_ligand_matrix_dir: str = None,
+    ligand_model: str = None,
 ) -> Optional[Dict]:
     """
     Run analysis for a single embedding + dataset combination.
@@ -999,6 +1070,12 @@ def run_single_analysis(
         )
     if not (0.0 <= fixed_threshold <= 1.0):
         raise ValueError(f"fixed_threshold must be in [0, 1], got {fixed_threshold}")
+    supported_selection_metrics = {"val_loss", "mcc"}
+    if model_selection_metric not in supported_selection_metrics:
+        raise ValueError(
+            f"Unsupported model_selection_metric={model_selection_metric!r}. "
+            f"Expected one of {sorted(supported_selection_metrics)}"
+        )
     if diffusion_snr_sampling_gamma <= 0:
         raise ValueError(
             f"diffusion_snr_sampling_gamma must be > 0, got {diffusion_snr_sampling_gamma}"
@@ -1012,18 +1089,33 @@ def run_single_analysis(
     if embedding_name in SUPPORTED_EMBEDDINGS:
         embedding_name = SUPPORTED_EMBEDDINGS[embedding_name]
 
-    # Generate prefix (include molformer tag to avoid overwriting existing results)
+    # Resolve ligand_model from explicit parameter or legacy boolean flags
+    if ligand_model is None:
+        _resolved_ligand = 'molformer' if use_molformer_ligand else 'smited'
+    else:
+        _resolved_ligand = ligand_model.lower()
+
+    # Generate prefix (include ligand model tag to avoid overwriting existing results)
     short_name = embedding_name.replace('esm2_', '').replace('_UR50D', '')
     attn_prefix = 'attn_' if use_attention else ''
-    molformer_prefix = 'molformer_' if (use_molformer_ligand and not use_ligand_vectors) else ''
+    ligand_prefix_map = {'molformer': 'molformer_', 'smited': '', 'chemberta': 'chemberta_'}
+    ligand_tag = ligand_prefix_map.get(_resolved_ligand, f'{_resolved_ligand}_') if not use_ligand_vectors else ''
     ligvec_prefix = 'ligvec_' if use_ligand_vectors else ''
     if model_variant == 'cross_attention_lite':
         variant_prefix = 'lite_'
     elif model_variant == 'diffusion':
         variant_prefix = 'diffusion_'
+    elif model_variant == 'level5_da':
+        variant_prefix = 'da_'
+    elif model_variant == 'level5b_da':
+        variant_prefix = 'da5b_'
+    elif model_variant == 'level6a':
+        variant_prefix = 'ban6a_'
+    elif model_variant == 'level6b':
+        variant_prefix = 'ban6b_'
     else:
         variant_prefix = ''
-    prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{molformer_prefix}{ligvec_prefix}{short_name}_"
+    prefix = f"{dataset_type}_{variant_prefix}{attn_prefix}{ligand_tag}{ligvec_prefix}{short_name}_"
 
     # Check cache
     json_file = os.path.join(output_dir, f'{prefix}crossattention_analysis_results.json')
@@ -1038,7 +1130,8 @@ def run_single_analysis(
     if use_ligand_vectors:
         ligand_input_type = "VECTOR EMBEDDINGS"
     else:
-        ligand_input_type = "PER-TOKEN EMBEDDINGS (MoLFormer)" if use_molformer_ligand else "PER-TOKEN EMBEDDINGS (SMI-TED)"
+        _ligand_label = {'molformer': 'MoLFormer', 'smited': 'SMI-TED', 'chemberta': 'ChemBERTa'}.get(_resolved_ligand, _resolved_ligand)
+        ligand_input_type = f"PER-TOKEN EMBEDDINGS ({_ligand_label})"
     print("\n" + "=" * 70)
     print(f"{model_label.upper()} ANALYSIS: {embedding_name} + {dataset_type}")
     print(f"MODEL VARIANT: {model_variant}")
@@ -1055,6 +1148,7 @@ def run_single_analysis(
         print(f"DECISION THRESHOLD: OPTIMIZED ON VALIDATION ({threshold_metric})")
     else:
         print(f"DECISION THRESHOLD: FIXED ({fixed_threshold})")
+    print(f"MODEL SELECTION METRIC: {model_selection_metric}")
     if patience is None:
         print(f"EARLY STOPPING: DISABLED (training for {num_epochs} epochs)")
     else:
@@ -1067,8 +1161,8 @@ def run_single_analysis(
     else:
         protein_dim = PROTEIN_DIMS.get(embedding_name, 640)
 
-    # Ligand dimension (same for both SMI-TED and MoLFormer)
-    ligand_dim = MOLFORMER_DIM if use_molformer_ligand else 768
+    # Ligand dimension (varies by model: SMI-TED/MoLFormer=768, ChemBERTa=384)
+    ligand_dim = LIGAND_MODEL_DIMS.get(_resolved_ligand, 768)
 
     config = TrainingConfig(
         protein_dim=protein_dim,
@@ -1110,6 +1204,7 @@ def run_single_analysis(
         optimize_threshold=optimize_threshold,
         threshold_metric=threshold_metric,
         fixed_threshold=fixed_threshold,
+        model_selection_metric=model_selection_metric,
     )
 
     # Create output directory
@@ -1125,6 +1220,7 @@ def run_single_analysis(
         external_test_mode=external_test_mode,
         custom_protein_matrix_dir=custom_protein_matrix_dir,
         custom_ligand_matrix_dir=custom_ligand_matrix_dir,
+        ligand_model=_resolved_ligand,
     )
 
     if all_results is None:

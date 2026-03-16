@@ -111,12 +111,12 @@ def create_mlp_model(random_state: int = RANDOM_SEED) -> Pipeline:
     """
     Cria modelo MLP com StandardScaler.
     
-    Arquitetura: 2 camadas ocultas (256, 128 neurônios).
+    Arquitetura: 1 camada oculta (512 neurônios).
     """
     return Pipeline([
         ('scaler', StandardScaler()),
         ('model', MLPClassifier(
-            hidden_layer_sizes=(256, 128),
+            hidden_layer_sizes=(512,),
             activation='relu',
             solver='adam',
             alpha=0.0001,            # Regularização L2

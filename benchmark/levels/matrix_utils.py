@@ -26,6 +26,21 @@ from benchmark.config import (
 
 
 # ---------------------------------------------------------------------------
+# DataLoader tuning
+# ---------------------------------------------------------------------------
+
+def _loader_kwargs() -> dict:
+    """Return optimal DataLoader keyword arguments for current hardware."""
+    use_cuda = torch.cuda.is_available()
+    n_workers = min(4, os.cpu_count() or 0) if use_cuda else 0
+    return {
+        "num_workers": n_workers,
+        "pin_memory": use_cuda,
+        "persistent_workers": n_workers > 0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -84,11 +99,20 @@ class MatrixDataset(Dataset):
         filename: str,
         fallback_shape: tuple[int, int],
     ) -> np.ndarray:
-        """Search across multiple directories for a ``.npy`` file."""
+        """Search across multiple directories for a ``.npy`` file.
+
+        Tries both ``{id}_matrix.npy`` and ``{id}_molformer_matrix.npy``
+        naming conventions to handle cross-machine inconsistencies.
+        """
+        # Build alternate filename: foo_matrix.npy -> foo_molformer_matrix.npy
+        alt_filename = filename.replace("_matrix.npy", "_molformer_matrix.npy")
         for d in dirs:
             path = d / filename
             if path.exists():
                 return np.load(path).astype(np.float32)
+            alt_path = d / alt_filename
+            if alt_path.exists():
+                return np.load(alt_path).astype(np.float32)
         return np.zeros(fallback_shape, dtype=np.float32)
 
 
@@ -188,28 +212,74 @@ def build_matrix_dataloaders(
     embedding_name: str,
     scaffold_split_dir: str,
     batch_size: int = 32,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build train / val / test ``DataLoader`` instances from scaffold splits.
+    dataset_source_filter: str | None = None,
+    mode: str = "test",
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Build train / val / test ``DataLoader`` instances from universal splits.
 
-    Handles ``dataset_type="all"`` transparently by concatenating
-    DataFrames and searching both ``human`` and ``non_human`` matrix
-    directories.
+    Always reads the **universal** scaffold split files.  When
+    *dataset_source_filter* is set (e.g. ``"human"``), rows are filtered
+    by the ``dataset_source`` column before building tensors.
+
+    *dataset_type* still controls which embedding directories to search
+    for matrix ``.npy`` files (per-corpus storage is unchanged).
+
+    When *mode* is ``"train"``, test data is **never loaded** — the
+    returned ``test_loader`` is ``None``.
 
     Returns
     -------
-    train_loader, val_loader, test_loader
+    train_loader, val_loader, test_loader (or None when mode="train")
     """
-    if dataset_type == "all":
-        return _build_all_dataloaders(embedding_name, scaffold_split_dir, batch_size)
-    return _build_single_dataloaders(dataset_type, embedding_name, scaffold_split_dir, batch_size)
+    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
+
+    train_df = read_split_file(
+        os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv")
+    )
+    val_df = read_split_file(
+        os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_val.tsv")
+    )
+
+    if mode == "test":
+        test_df = read_split_file(
+            os.path.join(scaffold_split_dir, "universal_test.tsv")
+        )
+    else:
+        test_df = None
+
+    if dataset_source_filter is not None:
+        train_df = train_df[train_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+        val_df = val_df[val_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+        if test_df is not None:
+            test_df = test_df[test_df["dataset_source"] == dataset_source_filter].reset_index(drop=True)
+
+    for df in (train_df, val_df, test_df):
+        if df is not None and "label" not in df.columns:
+            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
+
+    test_loader = (
+        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False)
+        if test_df is not None
+        else None
+    )
+
+    return (
+        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
+        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
+        test_loader,
+    )
 
 
 def _resolve_matrix_dirs(
     dataset_type: str,
     embedding_name: str,
 ) -> tuple[list[Path], list[Path]]:
-    """Return lists of protein and ligand matrix directories."""
-    if dataset_type == "all":
+    """Return lists of protein and ligand matrix directories.
+
+    For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
+    because naming conventions vary across machines and datasets.
+    """
+    if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
     else:
         base_paths = [EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)]
@@ -218,79 +288,12 @@ def _resolve_matrix_dirs(
         Path(bp) / embedding_name / "build" / "protein_matrices"
         for bp in base_paths
     ]
-    ligand_dirs = [
-        Path(bp) / embedding_name / "build" / "molformer_matrix"
-        for bp in base_paths
-    ]
+    ligand_dirs = []
+    for bp in base_paths:
+        build = Path(bp) / embedding_name / "build"
+        ligand_dirs.append(build / "ligand_matrices")
+        ligand_dirs.append(build / "molformer_matrix")
     return protein_dirs, ligand_dirs
-
-
-def _build_single_dataloaders(
-    dataset_type: str,
-    embedding_name: str,
-    scaffold_split_dir: str,
-    batch_size: int,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build loaders for a single dataset type (human or non_human)."""
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
-
-    train_df = read_split_file(
-        os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset_type}_train.tsv")
-    )
-    val_df = read_split_file(
-        os.path.join(scaffold_split_dir, "scenarios/Sc", f"{dataset_type}_val.tsv")
-    )
-    test_df = read_split_file(
-        os.path.join(scaffold_split_dir, f"{dataset_type}_test.tsv")
-    )
-
-    for df in (train_df, val_df, test_df):
-        if "label" not in df.columns:
-            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
-
-    return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-    )
-
-
-def _build_all_dataloaders(
-    embedding_name: str,
-    scaffold_split_dir: str,
-    batch_size: int,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Build loaders for dataset_type='all' by combining human + non_human."""
-    protein_dirs, ligand_dirs = _resolve_matrix_dirs("all", embedding_name)
-
-    train_dfs: list[pd.DataFrame] = []
-    val_dfs: list[pd.DataFrame] = []
-    test_dfs: list[pd.DataFrame] = []
-
-    for ds in ("human", "non_human"):
-        train_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{ds}_train.tsv"))
-        )
-        val_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, "scenarios/Sc", f"{ds}_val.tsv"))
-        )
-        test_dfs.append(
-            read_split_file(os.path.join(scaffold_split_dir, f"{ds}_test.tsv"))
-        )
-
-    train_df = pd.concat(train_dfs, ignore_index=True)
-    val_df = pd.concat(val_dfs, ignore_index=True)
-    test_df = pd.concat(test_dfs, ignore_index=True)
-
-    for df in (train_df, val_df, test_df):
-        if "label" not in df.columns:
-            df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
-
-    return (
-        _make_loader(train_df, protein_dirs, ligand_dirs, batch_size, shuffle=True),
-        _make_loader(val_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-        _make_loader(test_df, protein_dirs, ligand_dirs, batch_size, shuffle=False),
-    )
 
 
 def _make_loader(
@@ -306,7 +309,7 @@ def _make_loader(
         batch_size=batch_size,
         shuffle=shuffle,
         collate_fn=collate_matrices,
-        num_workers=0,
+        **_loader_kwargs(),
     )
 
 
@@ -317,29 +320,115 @@ def _validate_matrix_coverage(
 ) -> None:
     """Check that matrix files exist for all unique IDs in the DataFrame.
 
-    Emits a ``tqdm.write`` warning with counts when files are missing.
-    Runs on unique IDs only, not per-row, for efficiency.
+    Raises RuntimeError with a detailed listing of missing IDs
+    when any protein or ligand matrix files are absent.
     """
     unique_seqs = df["seq_id"].unique()
     unique_chembls = df["chembl_id"].unique()
 
-    missing_prot = sum(
-        1
+    missing_prot_ids: list[str] = [
+        str(sid)
         for sid in unique_seqs
         if not any((d / f"{sid}_matrix.npy").exists() for d in protein_dirs)
-    )
-    missing_lig = sum(
-        1
+    ]
+    missing_lig_ids: list[str] = [
+        str(cid)
         for cid in unique_chembls
-        if not any((d / f"{cid}_matrix.npy").exists() for d in ligand_dirs)
-    )
-
-    if missing_prot or missing_lig:
-        from tqdm import tqdm
-
-        tqdm.write(
-            f"  WARNING: matrix coverage gap — "
-            f"{missing_prot}/{len(unique_seqs)} protein matrices and "
-            f"{missing_lig}/{len(unique_chembls)} ligand matrices not found. "
-            f"Zero-fallback will be used for missing files."
+        if not any(
+            (d / f"{cid}_matrix.npy").exists() or (d / f"{cid}_molformer_matrix.npy").exists()
+            for d in ligand_dirs
         )
+    ]
+
+    if missing_prot_ids or missing_lig_ids:
+        lines = [
+            "FATAL: Matrix coverage gap — cannot proceed with missing embeddings.",
+            f"  Protein dirs searched: {[str(d) for d in protein_dirs]}",
+            f"  Ligand dirs searched:  {[str(d) for d in ligand_dirs]}",
+        ]
+        if missing_prot_ids:
+            lines.append(
+                f"  Missing protein matrices: {len(missing_prot_ids)}/{len(unique_seqs)}"
+            )
+            preview = missing_prot_ids[:20]
+            lines.append(f"    IDs: {preview}{'...' if len(missing_prot_ids) > 20 else ''}")
+        if missing_lig_ids:
+            lines.append(
+                f"  Missing ligand matrices: {len(missing_lig_ids)}/{len(unique_chembls)}"
+            )
+            preview = missing_lig_ids[:20]
+            lines.append(f"    IDs: {preview}{'...' if len(missing_lig_ids) > 20 else ''}")
+
+        msg = "\n".join(lines)
+        raise RuntimeError(msg)
+
+
+
+# ---------------------------------------------------------------------------
+# Train/feature-extract split (avoids train-set optimism in train mode)
+# ---------------------------------------------------------------------------
+
+def split_loader_for_feature_extraction(
+    loader: DataLoader,
+    seed: int,
+    model_fraction: float = 0.8,
+) -> tuple[DataLoader, DataLoader]:
+    """Split a DataLoader into two non-overlapping subsets.
+
+    Used by levels with learned feature extractors (L1c, L3) in
+    **train mode** to avoid train-set optimism: the attention model
+    trains on *model_fraction* of the data, and KNN features are
+    extracted from the remaining held-out portion.
+
+    Uses stratified splitting to preserve class balance.
+
+    Returns
+    -------
+    model_loader : DataLoader
+        For training the attention pooling model.
+    feature_loader : DataLoader
+        For extracting features to train KNN/MLP (unseen by the model).
+    """
+    from torch.utils.data import DataLoader as _DL, Subset
+
+    dataset = loader.dataset
+    n = len(dataset)
+    # Fast path: read labels from the DataFrame if available (avoids
+    # loading .npy matrices just to extract a scalar label per row).
+    if hasattr(dataset, '_df') and 'label' in dataset._df.columns:
+        labels = dataset._df['label'].to_numpy(dtype=int)
+    else:
+        labels = np.array([dataset[i][2] for i in range(n)])
+
+    # Stratified split using label distribution
+    rng = np.random.RandomState(seed)
+    idx_pos = np.where(labels == 1)[0]
+    idx_neg = np.where(labels == 0)[0]
+    rng.shuffle(idx_pos)
+    rng.shuffle(idx_neg)
+
+    split_pos = int(len(idx_pos) * model_fraction)
+    split_neg = int(len(idx_neg) * model_fraction)
+
+    model_idx = np.concatenate([idx_pos[:split_pos], idx_neg[:split_neg]])
+    feat_idx = np.concatenate([idx_pos[split_pos:], idx_neg[split_neg:]])
+
+    rng.shuffle(model_idx)
+    rng.shuffle(feat_idx)
+
+    bs = loader.batch_size or 32
+    model_loader = _DL(
+        Subset(dataset, model_idx.tolist()),
+        batch_size=bs,
+        shuffle=True,
+        collate_fn=collate_matrices,
+        **_loader_kwargs(),
+    )
+    feature_loader = _DL(
+        Subset(dataset, feat_idx.tolist()),
+        batch_size=bs,
+        shuffle=False,
+        collate_fn=collate_matrices,
+        **_loader_kwargs(),
+    )
+    return model_loader, feature_loader

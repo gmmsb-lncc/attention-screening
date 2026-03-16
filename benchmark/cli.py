@@ -13,6 +13,7 @@ from typing import List
 
 from benchmark.config import (
     DEFAULT_SCAFFOLD_SPLIT_DIR,
+    LEVEL_0_EXPANSION,
     VALID_LEVELS,
     BenchmarkConfig,
 )
@@ -25,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 4\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1 2 3 --finetune\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
+            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
         ),
     )
 
@@ -35,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset",
         required=True,
         choices=["human", "non_human", "all"],
-        help="Dataset to benchmark (all = human + non_human combined)",
+        help="Dataset to benchmark. All options use the universal scaffold-disjoint split; "
+             "'human'/'non_human' filter by dataset_source, 'all' uses all rows.",
     )
     parser.add_argument(
         "--embedding",
@@ -47,13 +49,17 @@ def build_parser() -> argparse.ArgumentParser:
     # --- level selection ---
     parser.add_argument(
         "--levels",
-        default="1a,1b,1c,2,3,4",
+        default="1a,1b,1c,2,3,4,5a,5b,6a,6b",
         nargs="*",
         help=(
-            "Levels to run: 1a=FP, 1b=LigandMeanPool, 1c=LigandAttnPool, "
-            "2=MeanPool, 3=AttnPool, 4=CrossAtt "
-            "(default: 1a,1b,1c,2,3,4). "
-            "Examples: --levels 1a 1b 1c 2 3 4 OR --levels 1a,2,4"
+            "Levels to run: "
+            "0=ClassicalML(1a+1b+1c+3), "
+            "1a=FP, 1b=LigMeanPool, 1c=LigAttnPool, "
+            "2=MeanPool, 3=AttnPool(KNN+MLP), 3a=AttnPool(MLP only), 4=CrossAttn+AttnPool, "
+            "5a=CrossAttn+AttnPool+GRL, 5b=AttnPool+GRL, "
+            "6a=CrossAttn+BAN+GRL, 6b=AttnPool+BAN+GRL "
+            "(default: 1a,1b,1c,2,3,4,5a,5b,6a,6b). "
+            "Examples: --levels 0 OR --levels 1a 1b 1c 2 3a 4 5a 5b 6a 6b"
         ),
     )
 
@@ -78,6 +84,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seeds for multi-seed runs (default: from config.DEFAULT_SEEDS)",
     )
 
+    # --- mode (mutually exclusive) ---
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--train",
+        dest="mode",
+        action="store_const",
+        const="train",
+        help="Train mode: fit classifiers on train (80%%), evaluate on val (10%%). "
+             "Test set is NEVER loaded.",
+    )
+    mode_group.add_argument(
+        "--test",
+        dest="mode",
+        action="store_const",
+        const="test",
+        help="Test mode: fit classifiers on val (10%%), evaluate on held-out test (10%%).",
+    )
+    parser.set_defaults(mode="train")
+
     # --- flags ---
     parser.add_argument("--force", action="store_true", help="Force recalculation of all levels")
     parser.add_argument("--force_split", action="store_true", help="Force regeneration of scaffold splits")
@@ -86,8 +111,19 @@ def build_parser() -> argparse.ArgumentParser:
     # --- deep-learning hyper-parameters ---
     parser.add_argument("--epochs", type=int, default=500, help="Max epochs for Level 4 (default: 500)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for Level 4 (default: 32)")
-    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (default: 5, 0=disable)")
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Deprecated: patience is auto-computed as 10%% of --epochs.",
+    )
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate for Level 4 (default: 1e-4)")
+    parser.add_argument(
+        "--model_selection_metric",
+        choices=["val_loss", "mcc"],
+        default="val_loss",
+        help="Primary metric for model selection/early stop in learned levels (default: val_loss)",
+    )
 
     # --- fine-tuning ---
     parser.add_argument("--finetune", action="store_true", help="Enable ESM-2 + MolFormer fine-tuning before levels")
@@ -124,6 +160,10 @@ def parse_levels(levels_arg: object) -> List[str]:
                 msg = f"Invalid level: {level}. Valid: {sorted(VALID_LEVELS)}"
                 raise ValueError(msg)
 
+        # Expand level 0 shortcut → 1a, 1b, 1c, 3
+        if "0" in levels:
+            levels = sorted({lv for lv in levels if lv != "0"} | set(LEVEL_0_EXPANSION))
+
         return levels if levels else sorted(VALID_LEVELS)
 
     except ValueError as exc:
@@ -140,6 +180,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         output_dir=args.output_dir,
         scaffold_split_dir=args.scaffold_split_dir,
         seeds=args.seeds,
+        mode=args.mode,
         force=args.force,
         force_split=args.force_split,
         debug=args.debug,
@@ -147,6 +188,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         batch_size=args.batch_size,
         patience=args.patience,
         learning_rate=args.learning_rate,
+        model_selection_metric=args.model_selection_metric,
         finetune=args.finetune,
         use_finetuned=args.use_finetuned,
         finetune_epochs=args.finetune_epochs,

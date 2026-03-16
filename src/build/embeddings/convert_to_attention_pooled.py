@@ -105,11 +105,16 @@ def main():
         action="store_true",
         help="Convert MolFormer matrices"
     )
+    parser.add_argument(
+        "--chemberta",
+        action="store_true",
+        help="Convert ChemBERTa matrices"
+    )
     
     args = parser.parse_args()
     
-    if not (args.protein or args.ligand or args.molformer):
-        print("Error: Specify at least one of --protein, --ligand, --molformer")
+    if not (args.protein or args.ligand or args.molformer or args.chemberta):
+        print("Error: Specify at least one of --protein, --ligand, --molformer, --chemberta")
         sys.exit(1)
     
     base_dir = Path(args.base_dir)
@@ -139,6 +144,14 @@ def main():
         count = convert_directory(str(matrix_dir), str(output_dir), suffix="_molformer_matrix.npy")
         total_converted += count
         print(f"  ✓ Converted {count} MolFormer matrices\n")
+    
+    if args.chemberta:
+        print("\n[Ligand ChemBERTa] Converting matrices to attention-pooled vectors...")
+        matrix_dir = base_dir / "chemberta_matrix"
+        output_dir = base_dir / "ligand_embeddings"
+        count = convert_directory(str(matrix_dir), str(output_dir), suffix="_chemberta_matrix.npy")
+        total_converted += count
+        print(f"  ✓ Converted {count} ChemBERTa matrices\n")
     
     print(f"[DONE] Total converted: {total_converted} files")
 

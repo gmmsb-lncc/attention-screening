@@ -357,16 +357,44 @@ def _resolve_split_tsvs(
     scaffold_split_dir: str,
     dataset: str,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Find train and val TSV paths for a dataset."""
+    """Find universal train and val TSV paths, optionally filtered by dataset.
+
+    Always routes through ``universal_train.tsv`` / ``universal_val.tsv``.
+    When *dataset* is ``'human'`` or ``'non_human'``, writes a filtered
+    copy so downstream finetuning code can consume a plain TSV path.
+    """
+    import tempfile
+
     base = os.path.join(scaffold_split_dir, "scenarios", "Sc")
 
-    train_tsv = _find_file(base, f"{dataset}_train.tsv")
-    val_tsv = _find_file(base, f"{dataset}_val.tsv")
+    train_tsv = _find_file(base, "universal_train.tsv")
+    val_tsv = _find_file(base, "universal_val.tsv")
 
     if not train_tsv:
-        tqdm.write(f"    ERROR: Training TSV not found for {dataset}")
+        tqdm.write("    ERROR: Universal training TSV not found")
     if not val_tsv:
-        tqdm.write(f"    ERROR: Validation TSV not found for {dataset}")
+        tqdm.write("    ERROR: Universal validation TSV not found")
+
+    if not train_tsv or not val_tsv:
+        return None, None
+
+    # For 'all', the full universal file is used as-is
+    if dataset == "all":
+        return train_tsv, val_tsv
+
+    # For a specific corpus, filter and write to a temp file
+    import pandas as pd
+
+    for label, src_path in [("train", train_tsv), ("val", val_tsv)]:
+        df = pd.read_csv(src_path, sep="\t")
+        if "dataset_source" in df.columns:
+            filtered = df[df["dataset_source"] == dataset]
+            filtered_path = os.path.join(base, f"_ft_{dataset}_{label}.tsv")
+            filtered.to_csv(filtered_path, sep="\t", index=False)
+            if label == "train":
+                train_tsv = filtered_path
+            else:
+                val_tsv = filtered_path
 
     return train_tsv, val_tsv
 
