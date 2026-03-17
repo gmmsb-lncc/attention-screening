@@ -245,8 +245,8 @@ class _AttentionPoolingModel(nn.Module):
     ) -> torch.Tensor:
         """Return enriched feature vector with interaction terms.
 
-        Output: ``[prot_vec ‖ lig_vec ‖ prot*lig ‖ |prot−lig|]``
-        giving ``4 × hidden_dim`` dimensions when interaction features
+        Output: ``[prot_vec ‖ lig_vec ‖ prot*lig ‖ |prot−lig| ‖ cos(prot,lig)]``
+        giving ``4 × hidden_dim + 1`` dimensions when interaction features
         are enabled, otherwise falls back to ``2 × hidden_dim``.
         """
         p_attn = (protein_mask == 0) if protein_mask is not None else None
@@ -262,6 +262,11 @@ class _AttentionPoolingModel(nn.Module):
         if self.interaction_features:
             parts.append(protein_vec * ligand_vec)              # co-activation
             parts.append(torch.abs(protein_vec - ligand_vec))   # complementarity
+            # Cosine similarity — global directional compatibility [B, 1]
+            cos_sim = torch.nn.functional.cosine_similarity(
+                protein_vec, ligand_vec, dim=-1,
+            ).unsqueeze(-1)
+            parts.append(cos_sim)
 
         combined = torch.cat(parts, dim=-1)
         return self.feature_dropout(combined)
@@ -390,9 +395,12 @@ def _train_attention_pooling(
 
     # Auxiliary supervision head used ONLY to shape representations
     # (discarded afterwards — KNN/MLP remain the real classifiers).
-    # When aux_interactions is True the head receives the same 4×hidden
-    # features used at extraction time, aligning training gradients.
-    aux_input_dim = hidden_dim * (4 if aux_interactions and use_interaction else 2)
+    # When aux_interactions is True the head receives the same
+    # 4×hidden + 1 (cosine sim) features, aligning training gradients.
+    if aux_interactions and use_interaction:
+        aux_input_dim = hidden_dim * 4 + 1   # prot|lig|prod|diff|cos
+    else:
+        aux_input_dim = hidden_dim * 2        # prot|lig
     aux_head = nn.Sequential(
         nn.Linear(aux_input_dim, hidden_dim),
         nn.GELU(),
@@ -624,15 +632,21 @@ def _extract_features(
 
         if include_aux_channel and aux_head is not None:
             # Determine whether aux_head was trained with interaction features
-            # by inspecting its input dimension. When trained with
-            # aux_interactions=True it expects 4×hidden; otherwise 2×hidden.
+            # by inspecting its input dimension.  When trained with
+            # aux_interactions=True it expects 4×hidden+1; otherwise 2×hidden.
             aux_expects_interactions = aux_head[0].in_features > model.hidden_dim * 2
             if aux_expects_interactions:
                 aux_input = features_t if use_interactions else model.forward_with_interactions(p, l, pm, lm)
             else:
                 aux_input = model(p, l, pm, lm) if use_interactions else features_t
-            aux_proba = torch.sigmoid(aux_head(aux_input))
-            features_t = torch.cat([features_t, aux_proba], dim=1)
+
+            # Extract rich aux representation: penultimate hidden layer
+            # (hidden_dim activations) + final probability (1 scalar).
+            # This gives the downstream MLP access to the learned
+            # intermediate representation instead of just 1 number.
+            aux_hidden = torch.nn.functional.gelu(aux_head[0](aux_input))  # [B, hidden_dim]
+            aux_proba = torch.sigmoid(aux_head[3](aux_head[2](aux_hidden)))  # [B, 1]
+            features_t = torch.cat([features_t, aux_hidden, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
