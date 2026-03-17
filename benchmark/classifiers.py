@@ -42,7 +42,6 @@ from sklearn.metrics import (
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
-from sklearn.isotonic import IsotonicRegression
 from tqdm import tqdm
 
 
@@ -427,53 +426,31 @@ def _fit_mlp_ensemble_predict(
     seed: int,
     ranked_cfgs: list[dict[str, object]] | None = None,
 ) -> np.ndarray:
-    """Fit a diverse ensemble of calibrated MLP restarts.
+    """Fit an ensemble of MLP restarts and return mean probabilities.
 
-    When *ranked_cfgs* is provided, members cycle through the top-k
-    configs (round-robin) instead of using one config for all members.
-    Each member is individually calibrated via CalibratedClassifierCV
-    (isotonic) when ``BENCHMARK_MLP_CALIBRATE_MEMBERS=1``.
+    Each member trains with early stopping (default).  Set
+    ``BENCHMARK_MLP_FULL_REFIT=1`` only if you explicitly want to
+    disable early stopping for the final refit.
     """
-    from sklearn.calibration import CalibratedClassifierCV
-
     n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
     full_refit = os.getenv(
         "BENCHMARK_MLP_FULL_REFIT", "0"
     ).strip().lower() not in {"0", "false", "no"}
-    calibrate_members = os.getenv(
-        "BENCHMARK_MLP_CALIBRATE_MEMBERS", "1"
-    ).strip().lower() not in {"0", "false", "no"}
-
-    # Use diverse configs if available, otherwise repeat best config.
-    cfgs = ranked_cfgs if ranked_cfgs else [cfg]
     probs: list[np.ndarray] = []
 
     ensemble_iter = tqdm(
         range(n_members),
-        desc="    MLP ensemble" + (" (calibrated)" if calibrate_members else ""),
+        desc="    MLP ensemble" + (" (full refit)" if full_refit else ""),
         unit="model",
         leave=False,
         dynamic_ncols=True,
     )
-    min_class_count = int(np.bincount(y_train.astype(int)).min()) if y_train.size else 0
-    can_calibrate = calibrate_members and min_class_count >= 3 and y_train.size >= 30
-
     for member in ensemble_iter:
         rs = seed + (member * 53)
-        member_cfg = cfgs[member % len(cfgs)]  # round-robin across top configs
         model = _fit_mlp_from_cfg(
-            member_cfg, x_train, y_train, random_state=rs, final_refit=full_refit,
+            cfg, x_train, y_train, random_state=rs, final_refit=full_refit,
         )
-
-        if can_calibrate:
-            # Per-member isotonic calibration via CalibratedClassifierCV.
-            cal_model = CalibratedClassifierCV(
-                model, method="isotonic", cv=3,
-            )
-            cal_model.fit(x_train, y_train)
-            probs.append(cal_model.predict_proba(x_eval)[:, 1])
-        else:
-            probs.append(model.predict_proba(x_eval)[:, 1])
+        probs.append(model.predict_proba(x_eval)[:, 1])
 
     return np.mean(np.stack(probs, axis=0), axis=0)
 
@@ -522,42 +499,13 @@ def _train_mlp_pipeline(
         ranked_cfgs=ranked_cfgs,
     )
 
-    # --- Isotonic calibration of ensemble probabilities ---
-    # Fits an isotonic regression on OOF predictions to correct the
-    # probability distribution before thresholding.  This greatly
-    # improves threshold transfer to unseen scaffolds.
-    use_isotonic = os.getenv(
-        "BENCHMARK_MLP_ISOTONIC_CAL", "1"
-    ).strip().lower() not in {"0", "false", "no"}
-    if use_isotonic and y_train.size >= 40 and len(np.unique(y_train.astype(int))) >= 2:
-        n_iso_folds = max(2, int(os.getenv("BENCHMARK_MLP_OOF_FOLDS", "5")))
-        min_class_iso = int(np.bincount(y_train.astype(int)).min())
-        if min_class_iso >= n_iso_folds:
-            # Build OOF predictions on train for calibrator fitting.
-            skf_iso = StratifiedKFold(
-                n_splits=n_iso_folds, shuffle=True, random_state=seed + 7,
-            )
-            oof_cal_proba = np.zeros(y_train.shape[0], dtype=np.float64)
-            for cal_train_idx, cal_val_idx in skf_iso.split(x_train_sc, y_train):
-                cal_model = _fit_mlp_from_cfg(
-                    best_cfg, x_train_sc[cal_train_idx], y_train[cal_train_idx],
-                    random_state=seed,
-                )
-                oof_cal_proba[cal_val_idx] = cal_model.predict_proba(
-                    x_train_sc[cal_val_idx],
-                )[:, 1]
-
-            # Fit isotonic calibrator on OOF predictions.
-            calibrator = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
-            calibrator.fit(oof_cal_proba, y_train.astype(int))
-
-            # Calibrate both ensemble eval probabilities and re-derive threshold.
-            mlp_proba = calibrator.predict(mlp_proba)
-            oof_cal_calibrated = calibrator.predict(oof_cal_proba)
-            refined_thr, _ = _optimize_threshold_mcc(y_train.astype(int), oof_cal_calibrated)
-            tqdm.write(f"    Isotonic calibration: threshold {best_thr:.3f} -> {refined_thr:.3f}")
+    # Use the OOF/CV-selected threshold directly.
+    refined_thr = best_thr
 
     # --- Optional OOF refinement (enabled by default) ---
+    # Re-derives threshold from OOF predictions on the actual training
+    # data used at this stage (val in test mode), providing a threshold
+    # better matched to the current probability distribution.
     use_oof_refinement = os.getenv(
         "BENCHMARK_MLP_OOF_THRESHOLD", "1"
     ).strip().lower() not in {"0", "false", "no"}
