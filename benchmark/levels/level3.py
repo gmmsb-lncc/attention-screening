@@ -362,9 +362,9 @@ def _train_attention_pooling(
     # and abs-diff) during training.  When enabled the training signal
     # is aligned with the features actually extracted for the downstream
     # MLP, potentially improving representation quality at the cost of a
-    # slightly larger aux_head.  Default: "0" (backward-compatible).
+    # slightly larger aux_head.  Default: "1" (enabled).
     aux_interactions = os.getenv(
-        "BENCHMARK_LEVEL3_AUX_INTERACTIONS", "0"
+        "BENCHMARK_LEVEL3_AUX_INTERACTIONS", "1"
     ).strip().lower() not in {"0", "false", "no"}
 
     tqdm.write(

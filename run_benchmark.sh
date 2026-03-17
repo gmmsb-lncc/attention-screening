@@ -52,6 +52,20 @@ BENCHMARK_MLP_ENSEMBLE="${BENCHMARK_MLP_ENSEMBLE:-5}"
 BENCHMARK_MLP_OVERSAMPLE="${BENCHMARK_MLP_OVERSAMPLE:-0}"
 BENCHMARK_LEVEL3_USE_AUX_CHANNEL="${BENCHMARK_LEVEL3_USE_AUX_CHANNEL:-1}"
 BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES="${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES:-0}"
+
+# Level 3 aux_head trained with interaction features (product + abs_diff).
+# Aligns the training signal with the 4×hidden features extracted for the
+# downstream MLP, improving representation quality.  (Default: 1 = enabled)
+BENCHMARK_LEVEL3_AUX_INTERACTIONS="${BENCHMARK_LEVEL3_AUX_INTERACTIONS:-1}"
+
+# Level 3 hyperparameter overrides (leave empty for auto-scaled defaults).
+# LR: learning rate (default: uses --learning_rate CLI value; recommended: 5e-4 for 150M+).
+# DROPOUT: dropout rate (default: 0.3; try 0.2 for richer embeddings).
+# WEIGHT_DECAY: AdamW weight decay (default: 0.02; try 0.04 for 150M+).
+BENCHMARK_LEVEL3_LR="${BENCHMARK_LEVEL3_LR:-}"
+BENCHMARK_LEVEL3_DROPOUT="${BENCHMARK_LEVEL3_DROPOUT:-}"
+BENCHMARK_LEVEL3_WEIGHT_DECAY="${BENCHMARK_LEVEL3_WEIGHT_DECAY:-}"
+
 BENCHMARK_LEVEL4_INTERACTION_FEATURES="${BENCHMARK_LEVEL4_INTERACTION_FEATURES:-1}"
 
 # OOF threshold refinement (re-calibrates decision threshold on training set OOF predictions).
@@ -79,6 +93,10 @@ export BENCHMARK_MLP_ENSEMBLE
 export BENCHMARK_MLP_OVERSAMPLE
 export BENCHMARK_LEVEL3_USE_AUX_CHANNEL
 export BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES
+export BENCHMARK_LEVEL3_AUX_INTERACTIONS
+export BENCHMARK_LEVEL3_LR
+export BENCHMARK_LEVEL3_DROPOUT
+export BENCHMARK_LEVEL3_WEIGHT_DECAY
 export BENCHMARK_LEVEL3_SELECTION_METRIC
 export BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY
 export BENCHMARK_LEVEL4_INTERACTION_FEATURES
@@ -112,9 +130,11 @@ echo " MLP tuning: cv=${BENCHMARK_MLP_USE_CV}, folds=${BENCHMARK_MLP_FOLDS}, cal
 echo " MLP OOF threshold: enabled=${BENCHMARK_MLP_OOF_THRESHOLD}, oof_folds=${BENCHMARK_MLP_OOF_FOLDS}"
 echo " MLP full refit: ${BENCHMARK_MLP_FULL_REFIT} (final ensemble trains without early stopping)"
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
+echo " Level3 aux interactions: ${BENCHMARK_LEVEL3_AUX_INTERACTIONS} (aux_head trains with product+abs_diff)"
 echo " Level3 full train features: ${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES} (transfer learning mode)"
 echo " Level3 checkpoint selection: ${BENCHMARK_LEVEL3_SELECTION_METRIC} (eval_every=${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY})"
 echo " Level3 hidden_dim: ${BENCHMARK_LEVEL3_HIDDEN_DIM:-auto}"
+echo " Level3 lr: ${BENCHMARK_LEVEL3_LR:-auto}, dropout: ${BENCHMARK_LEVEL3_DROPOUT:-0.3}, weight_decay: ${BENCHMARK_LEVEL3_WEIGHT_DECAY:-0.02}"
 echo " Level4 interaction features: ${BENCHMARK_LEVEL4_INTERACTION_FEATURES}"
 echo " Level4 dropout: ${BENCHMARK_LEVEL4_DROPOUT}, weight_decay: ${BENCHMARK_LEVEL4_WEIGHT_DECAY}"
 echo " Rigor: require_train_selection=${BENCHMARK_REQUIRE_TRAIN_SELECTION}, strict_completeness=${BENCHMARK_STRICT_LEVEL_COMPLETENESS}"
