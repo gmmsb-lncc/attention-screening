@@ -327,7 +327,9 @@ def _train_attention_pooling(
         if env_hd:
             hidden_dim = int(env_hd)
         else:
-            hidden_dim = max(256, protein_dim // 3)  # 320→256, 640→256, 1280→426
+            raw = max(256, protein_dim // 3)
+            hidden_dim = ((raw + num_heads - 1) // num_heads) * num_heads  # round up to multiple of num_heads
+            # 320→256, 640→256, 1280→432 (divisible by 8)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
