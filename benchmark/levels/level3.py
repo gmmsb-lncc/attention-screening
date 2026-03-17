@@ -358,9 +358,19 @@ def _train_attention_pooling(
     # weight decay (env var overrides hardcoded default)
     weight_decay = float(os.getenv("BENCHMARK_LEVEL3_WEIGHT_DECAY", "0.02"))
 
+    # Whether the aux_head should receive interaction features (product
+    # and abs-diff) during training.  When enabled the training signal
+    # is aligned with the features actually extracted for the downstream
+    # MLP, potentially improving representation quality at the cost of a
+    # slightly larger aux_head.  Default: "0" (backward-compatible).
+    aux_interactions = os.getenv(
+        "BENCHMARK_LEVEL3_AUX_INTERACTIONS", "0"
+    ).strip().lower() not in {"0", "false", "no"}
+
     tqdm.write(
         f"    L3 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
-        f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}"
+        f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}, "
+        f"aux_interactions={aux_interactions}"
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -380,8 +390,11 @@ def _train_attention_pooling(
 
     # Auxiliary supervision head used ONLY to shape representations
     # (discarded afterwards — KNN/MLP remain the real classifiers).
+    # When aux_interactions is True the head receives the same 4×hidden
+    # features used at extraction time, aligning training gradients.
+    aux_input_dim = hidden_dim * (4 if aux_interactions and use_interaction else 2)
     aux_head = nn.Sequential(
-        nn.Linear(hidden_dim * 2, hidden_dim),
+        nn.Linear(aux_input_dim, hidden_dim),
         nn.GELU(),
         nn.Dropout(dropout),
         nn.Linear(hidden_dim, 1),
@@ -434,7 +447,10 @@ def _train_attention_pooling(
             y = batch["label"].to(device).unsqueeze(1)
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-                features = model(p, l, pm, lm)
+                if aux_interactions and use_interaction:
+                    features = model.forward_with_interactions(p, l, pm, lm)
+                else:
+                    features = model(p, l, pm, lm)
                 logits = aux_head(features)
                 loss = criterion(logits, y)
 
@@ -465,7 +481,10 @@ def _train_attention_pooling(
                 y = batch["label"].to(device).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-                    features = model(p, l, pm, lm)
+                    if aux_interactions and use_interaction:
+                        features = model.forward_with_interactions(p, l, pm, lm)
+                    else:
+                        features = model(p, l, pm, lm)
                     logits = aux_head(features)
                     val_loss += criterion(logits, y).item()
                 val_n += 1
@@ -604,9 +623,15 @@ def _extract_features(
             features_t = model(p, l, pm, lm)
 
         if include_aux_channel and aux_head is not None:
-            # aux_head still expects the plain 2*hidden concat.
-            plain_features = model(p, l, pm, lm) if use_interactions else features_t
-            aux_proba = torch.sigmoid(aux_head(plain_features))
+            # Determine whether aux_head was trained with interaction features
+            # by inspecting its input dimension. When trained with
+            # aux_interactions=True it expects 4×hidden; otherwise 2×hidden.
+            aux_expects_interactions = aux_head[0].in_features > model.hidden_dim * 2
+            if aux_expects_interactions:
+                aux_input = features_t if use_interactions else model.forward_with_interactions(p, l, pm, lm)
+            else:
+                aux_input = model(p, l, pm, lm) if use_interactions else features_t
+            aux_proba = torch.sigmoid(aux_head(aux_input))
             features_t = torch.cat([features_t, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()
