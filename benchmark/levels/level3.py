@@ -361,7 +361,10 @@ def _train_attention_pooling(
         lr = float(env_lr)
 
     # weight decay (env var overrides hardcoded default)
-    weight_decay = float(os.getenv("BENCHMARK_LEVEL3_WEIGHT_DECAY", "0.02"))
+    weight_decay = 0.02
+    env_wd = os.getenv("BENCHMARK_LEVEL3_WEIGHT_DECAY", "").strip()
+    if env_wd:
+        weight_decay = float(env_wd)
 
     # Whether the aux_head should receive interaction features (product
     # and abs-diff) during training.  When enabled the training signal
