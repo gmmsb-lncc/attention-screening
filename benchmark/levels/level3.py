@@ -298,6 +298,17 @@ class _AttentionPool(nn.Module):
 # Training loop (very lightweight — only pooling weights to learn)
 # ---------------------------------------------------------------------------
 
+# Optimal hidden_dim per ESM-2 model size.  Determined empirically:
+#   8M  (d_P=320)  → 256  — small encoder, compact representation suffices
+#   150M (d_P=640) → 384  — matches Level 4 capacity for fair comparison
+#   650M (d_P=1280)→ 432  — 1280//3 rounded to multiple of 12 heads
+_HIDDEN_DIM_BY_PROTEIN_DIM: dict[int, int] = {
+    320:  256,   # ESM-2 8M
+    640:  384,   # ESM-2 150M
+    1280: 432,   # ESM-2 650M
+}
+
+
 def _train_attention_pooling(
     train_loader: DataLoader,
     val_loader: DataLoader,
@@ -321,15 +332,36 @@ def _train_attention_pooling(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    # Resolve hidden_dim: env var > argument > auto-scale from protein_dim.
+    # --- Resolve hyperparameters: env var > argument > auto-scale --------
+
+    # hidden_dim
     if hidden_dim is None:
         env_hd = os.getenv("BENCHMARK_LEVEL3_HIDDEN_DIM", "").strip()
         if env_hd:
             hidden_dim = int(env_hd)
+        elif protein_dim in _HIDDEN_DIM_BY_PROTEIN_DIM:
+            hidden_dim = _HIDDEN_DIM_BY_PROTEIN_DIM[protein_dim]
         else:
             raw = max(256, protein_dim // 3)
-            hidden_dim = ((raw + num_heads - 1) // num_heads) * num_heads  # round up to multiple of num_heads
-            # 320→256, 640→256, 1280→432 (divisible by 8)
+            hidden_dim = ((raw + num_heads - 1) // num_heads) * num_heads
+
+    # dropout (env var overrides function argument)
+    env_do = os.getenv("BENCHMARK_LEVEL3_DROPOUT", "").strip()
+    if env_do:
+        dropout = float(env_do)
+
+    # learning rate (env var overrides function argument)
+    env_lr = os.getenv("BENCHMARK_LEVEL3_LR", "").strip()
+    if env_lr:
+        lr = float(env_lr)
+
+    # weight decay (env var overrides hardcoded default)
+    weight_decay = float(os.getenv("BENCHMARK_LEVEL3_WEIGHT_DECAY", "0.02"))
+
+    tqdm.write(
+        f"    L3 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
+        f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}"
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
@@ -362,7 +394,7 @@ def _train_attention_pooling(
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(aux_head.parameters()),
         lr=lr,
-        weight_decay=0.02,
+        weight_decay=weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     train_labels = _extract_binary_labels_from_loader(train_loader)

@@ -249,6 +249,24 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "n_iter_no_change": 60,
             "tol": 1e-5,
         },
+        {   # 3-layer funnel for high-D interaction features (1024-1536D)
+            "hidden_layer_sizes": (512, 256, 128),
+            "alpha": 1e-2,
+            "learning_rate_init": 5e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 8e-6,
+        },
+        {   # Wide 2-layer for 150M/650M-scale features
+            "hidden_layer_sizes": (384, 192),
+            "alpha": 1e-2,
+            "learning_rate_init": 8e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
     ]
 
 
