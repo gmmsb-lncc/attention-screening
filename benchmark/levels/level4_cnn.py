@@ -153,11 +153,17 @@ class InteractionMapCNN(nn.Module):
         ])
 
         # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
+        # Layer 1-2: 3×3 local patterns (receptive field 5×5)
+        # Layer 3: dilated 3×3 (effective 5×5, receptive field 9×9)
+        # Layer 4: 3×3 consolidation (receptive field 13×13)
         self.cnn = nn.Sequential(
             nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.GELU(),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
             nn.BatchNorm2d(64),
             nn.GELU(),
             nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
