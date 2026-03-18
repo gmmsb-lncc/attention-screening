@@ -513,6 +513,10 @@ def _train_lora_attention_pooling(
             )
         else:
             no_improve += 1
+            tqdm.write(
+                f"    Epoch {epoch+1:3d}: loss={avg_loss:.4f}, val_loss={val_loss:.4f}, "
+                f"val_mcc={best_mcc_val:.4f}, thr={best_thr:.3f} ({no_improve}/{patience})"
+            )
             if no_improve >= patience:
                 tqdm.write(
                     f"    Early stopping at epoch {epoch+1} "
