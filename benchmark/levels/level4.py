@@ -277,6 +277,7 @@ def _apply_lora(
     model: nn.Module,
     rank: int = 8,
     alpha: int = 16,
+    lora_dropout: float = 0.15,
 ) -> nn.Module:
     """Wrap a HuggingFace model with LoRA adapters via PEFT.
 
@@ -290,13 +291,13 @@ def _apply_lora(
         # Fallback names common in MoLFormer / transformer architectures
         target_modules = ["q_proj", "v_proj"]
 
-    tqdm.write(f"    LoRA config: rank={rank}, alpha={alpha}, targets={target_modules}")
+    tqdm.write(f"    LoRA config: rank={rank}, alpha={alpha}, dropout={lora_dropout}, targets={target_modules}")
 
     config = LoraConfig(
         r=rank,
         lora_alpha=alpha,
         target_modules=target_modules,
-        lora_dropout=0.05,
+        lora_dropout=lora_dropout,
         bias="none",
         task_type=TaskType.FEATURE_EXTRACTION,
     )
@@ -366,7 +367,8 @@ def _train_lora_attention_pooling(
         p.requires_grad = False
 
     # Apply LoRA
-    lora_molformer = _apply_lora(base_molformer, rank=lora_rank, alpha=lora_alpha)
+    lora_dropout = float(os.getenv("BENCHMARK_LEVEL4_LORA_DROPOUT", "0.15"))
+    lora_molformer = _apply_lora(base_molformer, rank=lora_rank, alpha=lora_alpha, lora_dropout=lora_dropout)
 
     # --- Hidden dim (aligned to num_heads) ---
     hidden_dim = max(64, min(protein_dim, 512))
@@ -376,10 +378,16 @@ def _train_lora_attention_pooling(
     dropout = 0.30
     weight_decay = 0.02
 
+    # Label smoothing: reduces overconfident predictions
+    label_smoothing = float(os.getenv("BENCHMARK_LEVEL4_LABEL_SMOOTHING", "0.05"))
+    # Differential LR: LoRA adapters get lower LR to avoid overfitting the encoder
+    lora_lr_factor = float(os.getenv("BENCHMARK_LEVEL4_LORA_LR_FACTOR", "0.1"))
+
     tqdm.write(
         f"    L4 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
-        f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}, "
-        f"lora_rank={lora_rank}, lora_alpha={lora_alpha}"
+        f"lr={lr:.1e} (lora_lr={lr*lora_lr_factor:.1e}), wd={weight_decay}, "
+        f"protein_dim={protein_dim}, lora_rank={lora_rank}, lora_alpha={lora_alpha}, "
+        f"label_smooth={label_smoothing}, lora_dropout={lora_dropout}"
     )
 
     # --- Build joint model ---
@@ -402,15 +410,44 @@ def _train_lora_attention_pooling(
         nn.Linear(hidden_dim, 1),
     ).to(device)
 
-    # --- Optimizer: only LoRA + projection params ---
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    trainable_params += list(aux_head.parameters())
+    # --- Optimizer: differential LR for LoRA vs projection ---
+    # LoRA adapters get lower LR to avoid overfitting the pretrained encoder
+    lora_params = []
+    proj_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "lora_" in name:
+            lora_params.append(param)
+        else:
+            proj_params.append(param)
 
-    optimizer = torch.optim.AdamW(
-        trainable_params,
-        lr=lr,
-        weight_decay=weight_decay,
+    optimizer = torch.optim.AdamW([
+        {"params": lora_params, "lr": lr * lora_lr_factor},
+        {"params": proj_params, "lr": lr},
+        {"params": list(aux_head.parameters()), "lr": lr},
+    ], weight_decay=weight_decay)
+
+    # All trainable params (for grad clipping)
+    all_trainable = lora_params + proj_params + list(aux_head.parameters())
+
+    tqdm.write(
+        f"    Param groups: LoRA={sum(p.numel() for p in lora_params):,} (lr={lr*lora_lr_factor:.1e}), "
+        f"Proj={sum(p.numel() for p in proj_params):,} (lr={lr:.1e}), "
+        f"Aux={sum(p.numel() for p in aux_head.parameters()):,} (lr={lr:.1e})"
     )
+
+    # --- Scheduler: linear warmup + cosine decay ---
+    warmup_epochs = max(1, int(epochs * 0.1))
+    def lr_lambda(epoch: int) -> float:
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs  # linear warmup
+        progress = (epoch - warmup_epochs) / max(1, epochs - warmup_epochs)
+        return 0.5 * (1.0 + np.cos(np.pi * progress))  # cosine decay
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+    # --- Loss with label smoothing ---
     criterion = nn.BCEWithLogitsLoss()
 
     # --- Training loop ---
@@ -431,6 +468,12 @@ def _train_lora_attention_pooling(
             smiles = batch["smiles"]
             y = batch["label"].to(device)
 
+            # Apply label smoothing: 0 → ε, 1 → 1-ε
+            if label_smoothing > 0:
+                y_smooth = y * (1.0 - label_smoothing) + (1.0 - y) * label_smoothing
+            else:
+                y_smooth = y
+
             features = model.forward_with_interactions(p, pm, smiles, device)
 
             # Cosine similarity as extra feature
@@ -441,15 +484,18 @@ def _train_lora_attention_pooling(
             aux_input = torch.cat([features, cos_sim], dim=-1)
 
             logits = aux_head(aux_input).squeeze(-1)
-            loss = criterion(logits, y)
+            loss = criterion(logits, y_smooth)
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+            torch.nn.utils.clip_grad_norm_(all_trainable, 1.0)
             optimizer.step()
 
             running_loss += loss.item()
             n_batches += 1
+
+        # Step scheduler after each epoch
+        scheduler.step()
 
         avg_loss = running_loss / max(n_batches, 1)
 
