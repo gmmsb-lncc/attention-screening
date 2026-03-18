@@ -637,10 +637,18 @@ def _build_lora_dataloaders(
                     df = df[df["dataset_source"] == dataset_type]
                 if dataset_source_filter and "dataset_source" in df.columns:
                     df = df[df["dataset_source"] == dataset_source_filter]
+                # Normalise SMILES column name
+                if "smiles" not in df.columns and "canonical_smiles" in df.columns:
+                    df = df.rename(columns={"canonical_smiles": "smiles"})
+                # Compute label from pchembl_value if missing
+                if "label" not in df.columns and "pchembl_value" in df.columns:
+                    from benchmark.config import PCHEMBL_ACTIVITY_THRESHOLD
+                    df["label"] = (df["pchembl_value"] >= PCHEMBL_ACTIVITY_THRESHOLD).astype(int)
                 # Ensure required columns
                 required = {"seq_id", "chembl_id", "smiles", "label"}
-                if not required.issubset(df.columns):
-                    tqdm.write(f"    WARNING: Missing columns {required - set(df.columns)} in {path}")
+                missing = required - set(df.columns)
+                if missing:
+                    tqdm.write(f"    WARNING: Missing columns {missing} in {path}")
                     return None
                 return df
         return None
@@ -651,7 +659,8 @@ def _build_lora_dataloaders(
     if train_df is None or val_df is None:
         raise FileNotFoundError(
             f"Could not load scaffold split TSVs from {sc_dir}. "
-            "Ensure universal_train.tsv[.gz] and universal_val.tsv[.gz] exist."
+            "Ensure universal_train.tsv[.gz] and universal_val.tsv[.gz] exist "
+            "and contain columns: seq_id, chembl_id, smiles (or canonical_smiles), label (or pchembl_value)."
         )
 
     train_ds = LoRAMatrixDataset(train_df, protein_dirs)

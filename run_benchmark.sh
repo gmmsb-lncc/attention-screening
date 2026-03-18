@@ -32,6 +32,7 @@ _derive_focus_model() {
         3a)  echo "level3a_attnpool_mlp" ;;
         4)   echo "level4_crossatt_mlp" ;;
         4a)  echo "level4a_crossatt_mlp" ;;
+        4lora) echo "level4_lora_mlp" ;;
         5)   echo "level5_da_mlp" ;;
         5b)  echo "level5b_da_mlp" ;;
         6a)  echo "level6a_ban_mlp" ;;
@@ -194,6 +195,7 @@ _LEVEL_MODEL_MAP = {
     "3a": ["level3a_attnpool_mlp"],
     "4":  ["level4_crossatt_knn", "level4_crossatt_mlp"],
     "4a": ["level4a_crossatt_mlp"],
+    "4lora": ["level4_lora_mlp"],
     "5":  ["level5_da_knn", "level5_da_mlp"],
     "5b": ["level5b_da_knn", "level5b_da_mlp"],
     "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
