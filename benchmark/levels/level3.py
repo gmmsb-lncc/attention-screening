@@ -38,7 +38,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 import torch
@@ -585,6 +586,84 @@ def _train_attention_pooling(
 
 
 # ---------------------------------------------------------------------------
+# Multi-layer MoLFormer feature extraction helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_multilayer_dirs(
+    dataset_type: str,
+    embedding_name: str,
+) -> list[Path]:
+    """Return directories that may contain multilayer .npz files."""
+    from benchmark.config import EMBEDDING_BASE_PATH
+    if dataset_type in ("all",):
+        base_paths = [
+            "./results/protein_model_benchmark_human_v2",
+            "./results/protein_model_benchmark_non_human_v2",
+        ]
+    else:
+        base_paths = [EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)]
+    return [
+        Path(bp) / embedding_name / "build" / "molformer_multilayer"
+        for bp in base_paths
+    ]
+
+
+def _load_multilayer_features(
+    chembl_ids: Sequence[str],
+    multilayer_dirs: list[Path],
+    layers: list[int],
+    model: _AttentionPoolingModel | None = None,
+    device: torch.device | None = None,
+) -> np.ndarray | None:
+    """Load selected layers and attention-pool them via the trained model.
+
+    For each molecule, loads the compressed .npz, extracts the requested
+    layers, passes each through the trained ``ligand_proj + ligand_pool``
+    (same projection and attention pooling used for the last layer), and
+    concatenates the pooled vectors.
+
+    Returns
+    -------
+    np.ndarray of shape ``(len(chembl_ids), len(layers) * hidden_dim)``
+    or ``None`` if files are unavailable.
+    """
+    if model is None or device is None:
+        return None
+
+    hidden_dim = model.hidden_dim
+    all_features: list[np.ndarray] = []
+    for cid in chembl_ids:
+        fname = f"{cid}_multilayer.npz"
+        loaded = False
+        for d in multilayer_dirs:
+            path = d / fname
+            if path.exists():
+                data = np.load(path)
+                layer_vecs = []
+                for li in layers:
+                    key = f"layer_{li}"
+                    if key in data:
+                        mat = data[key].astype(np.float32)  # [seq_len, 768]
+                        mat_t = torch.from_numpy(mat).unsqueeze(0).to(device)  # [1, seq_len, 768]
+                        # Reuse the trained ligand projection + attention pool.
+                        with torch.no_grad():
+                            projected = model.ligand_proj(mat_t)  # [1, seq_len, hidden_dim]
+                            # Attention pool expects key_padding_mask (True = padding).
+                            pooled = model.ligand_pool(projected, mask=None)  # [1, hidden_dim]
+                        layer_vecs.append(pooled.squeeze(0).cpu().numpy())  # [hidden_dim]
+                    else:
+                        layer_vecs.append(np.zeros(hidden_dim, dtype=np.float32))
+                all_features.append(np.concatenate(layer_vecs))
+                loaded = True
+                break
+        if not loaded:
+            all_features.append(np.zeros(len(layers) * hidden_dim, dtype=np.float32))
+    if not all_features:
+        return None
+    return np.stack(all_features)
+
+
+# ---------------------------------------------------------------------------
 # Feature extraction with trained attention pooling
 # ---------------------------------------------------------------------------
 
@@ -596,8 +675,16 @@ def _extract_features(
     desc: str | None = None,
     aux_head: nn.Module | None = None,
     include_aux_channel: bool = False,
+    multilayer_dirs: list[Path] | None = None,
+    multilayer_layers: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract attention-pooled features from a dataloader."""
+    """Extract attention-pooled features from a dataloader.
+
+    When *multilayer_dirs* and *multilayer_layers* are provided, also
+    loads intermediate MoLFormer hidden states from pre-computed .npz
+    files, attention-pools each selected layer via the trained model,
+    and concatenates to the main features.
+    """
     model.eval()
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
@@ -653,6 +740,16 @@ def _extract_features(
 
         features = features_t.cpu().numpy()
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Append attention-pooled multi-layer features if requested.
+        if multilayer_dirs and multilayer_layers:
+            ml_feats = _load_multilayer_features(
+                batch["chembl_id"], multilayer_dirs, multilayer_layers,
+                model=model, device=device,
+            )
+            if ml_feats is not None:
+                features = np.concatenate([features, ml_feats], axis=1)
+
         all_features.append(features)
         all_labels.append(batch["label"].numpy())
 
@@ -792,6 +889,16 @@ class Level3Runner(BaseLevelRunner):
             "no",
         }
 
+        # Multi-layer MoLFormer features (optional).
+        ml_layers_str = os.getenv("BENCHMARK_LEVEL3_MULTILAYER_LAYERS", "").strip()
+        if ml_layers_str:
+            ml_layers = [int(x) for x in ml_layers_str.split(",")]
+            ml_dirs = _resolve_multilayer_dirs(self.dataset, self.embedding_name)
+            tqdm.write(f"  Multi-layer features enabled: layers {ml_layers}")
+        else:
+            ml_layers = None
+            ml_dirs = None
+
         device = next(model.parameters()).device
 
         if self.mode == "train":
@@ -803,6 +910,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -811,6 +920,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -821,6 +932,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -829,6 +942,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
 
         # Sanitize
