@@ -829,11 +829,22 @@ def _extract_features(
             # Determine whether aux_head was trained with interaction features
             # by inspecting its input dimension.  When trained with
             # aux_interactions=True it expects 4×hidden+1; otherwise 2×hidden.
+            # When multi-layer is active, K*hidden extra dims are also expected.
             aux_expects_interactions = aux_head[0].in_features > model.hidden_dim * 2
             if aux_expects_interactions:
                 aux_input = features_t if use_interactions else model.forward_with_interactions(p, l, pm, lm)
             else:
                 aux_input = model(p, l, pm, lm) if use_interactions else features_t
+
+            # Append multi-layer features to aux_input if the model has
+            # per-layer projectors (matching the training-time aux_head dim).
+            if hasattr(model, "ml_projectors") and model.multilayer_layers and multilayer_dirs and multilayer_layers:
+                ml_tensors = _load_multilayer_tensors(
+                    batch["chembl_id"], multilayer_dirs, multilayer_layers, device,
+                )
+                ml_feats_t = model.forward_multilayer(ml_tensors)
+                if ml_feats_t is not None:
+                    aux_input = torch.cat([aux_input, ml_feats_t], dim=-1)
 
             # Extract rich aux representation: penultimate hidden layer
             # (hidden_dim activations) + final probability (1 scalar).
