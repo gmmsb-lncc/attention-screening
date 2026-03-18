@@ -29,7 +29,8 @@ from benchmark.levels.level1b import Level1bRunner
 from benchmark.levels.level1c import Level1cRunner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner, Level3aRunner
-from benchmark.levels.level4 import Level4Runner, Level4aRunner
+from benchmark.levels.level4_crossatt import Level4Runner, Level4aRunner
+from benchmark.levels.level4 import Level4LoRARunner
 from benchmark.levels.level5 import Level5Runner
 from benchmark.levels.level5b import Level5bRunner
 from benchmark.levels.level6a import Level6aRunner
@@ -214,6 +215,9 @@ class BenchmarkOrchestrator:
 
         if "4a" in config.levels:
             runners.append(("4a", Level4aRunner(config), "Step 4a: L4a (CrossAttn+AttnPool+MLP only)"))
+
+        if "4lora" in config.levels:
+            runners.append(("4lora", Level4LoRARunner(config), "Step 4-LoRA: L4 (LoRA-MoLFormer+AttnPool+MLP)"))
 
         if "5a" in config.levels:
             runners.append(("5a", Level5Runner(config), "Step 5a: L5a (CrossAttn+AttnPool+GRL+KNN/MLP)"))
