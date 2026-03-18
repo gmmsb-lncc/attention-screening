@@ -67,6 +67,29 @@ from benchmark.levels.matrix_utils import (
 MOLFORMER_HF_NAME = "ibm/MoLFormer-XL-both-10pct"
 
 
+# ── SMILES augmentation ──────────────────────────────────────────────
+
+def _randomize_smiles(smiles: str) -> str:
+    """Generate a random but chemically equivalent SMILES string.
+
+    Uses RDKit to parse the canonical SMILES and regenerate it with a
+    random atom ordering.  Falls back to the original on failure.
+    """
+    try:
+        from rdkit import Chem
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return smiles
+        return Chem.MolToSmiles(mol, doRandom=True)
+    except Exception:
+        return smiles
+
+
+def _augment_smiles_batch(smiles_list: list[str]) -> list[str]:
+    """Randomize each SMILES in a batch."""
+    return [_randomize_smiles(s) for s in smiles_list]
+
+
 # ======================================================================
 # Dataset: protein matrices + SMILES (no pre-computed ligand matrices)
 # ======================================================================
@@ -494,6 +517,15 @@ def _train_lora_attention_pooling(
     # --- Loss with label smoothing ---
     criterion = nn.BCEWithLogitsLoss()
 
+    # --- SMILES augmentation ---
+    smiles_augment = os.getenv(
+        "BENCHMARK_LEVEL4_SMILES_AUGMENT", "1"
+    ).strip().lower() not in {"0", "false", "no"}
+    if smiles_augment:
+        tqdm.write("    SMILES augmentation: ENABLED (random SMILES each epoch)")
+    else:
+        tqdm.write("    SMILES augmentation: disabled")
+
     # --- Training loop ---
     best_state = None
     best_aux_state = None
@@ -510,6 +542,11 @@ def _train_lora_attention_pooling(
             p = batch["protein_matrix"].to(device)
             pm = batch["protein_mask"].to(device)
             smiles = batch["smiles"]
+
+            # SMILES augmentation: randomize during training only
+            if smiles_augment:
+                smiles = _augment_smiles_batch(smiles)
+
             y = batch["label"].to(device)
 
             # Apply label smoothing: 0 → ε, 1 → 1-ε
