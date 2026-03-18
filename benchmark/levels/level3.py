@@ -1233,6 +1233,8 @@ class Level3aRunner(Level3Runner):
                 desc=f"    Feature extraction (fit — {fit_desc})",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -1241,6 +1243,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -1251,6 +1255,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -1259,6 +1265,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
 
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
