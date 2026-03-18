@@ -467,6 +467,8 @@ def _train_attention_pooling(
         "BENCHMARK_LEVEL3_AUX_INTERACTIONS", "1"
     ).strip().lower() not in {"0", "false", "no"}
 
+    num_queries = int(os.getenv("BENCHMARK_LEVEL3_NUM_QUERIES", "4"))
+
     tqdm.write(
         f"    L3 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
         f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}, "
@@ -479,7 +481,6 @@ def _train_attention_pooling(
     torch.backends.cudnn.benchmark = True
 
     use_interaction = os.getenv("BENCHMARK_LEVEL3_INTERACTION_FEATURES", "1") == "1"
-    num_queries = int(os.getenv("BENCHMARK_LEVEL3_NUM_QUERIES", "4"))
     ml_layers = multilayer_layers or []
     ml_dirs = multilayer_dirs or []
     model = _AttentionPoolingModel(
