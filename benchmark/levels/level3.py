@@ -143,6 +143,40 @@ def _best_mcc_threshold(
 
 
 # ---------------------------------------------------------------------------
+# Residual projection block (2-layer with skip connection)
+# ---------------------------------------------------------------------------
+
+class _ResidualProjection(nn.Module):
+    """Two-layer projection with residual connection.
+
+    Layer 1: ``in_dim → out_dim`` (dimension change + non-linearity)
+    Layer 2: ``out_dim → out_dim + residual`` (refinement with skip)
+
+    The residual skip on the second layer prevents information loss
+    when the projection compresses higher dimensions (e.g. 768→256).
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, dropout: float) -> None:
+        super().__init__()
+        self.layer1 = nn.Sequential(
+            nn.Linear(in_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.layer2 = nn.Sequential(
+            nn.Linear(out_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.layer1(x)
+        return self.layer2(h) + h  # residual on 2nd layer
+
+
+# ---------------------------------------------------------------------------
 # Attention-pooling model (no cross-attention — isolation experiment)
 # ---------------------------------------------------------------------------
 
@@ -163,6 +197,7 @@ class _AttentionPoolingModel(nn.Module):
         dropout: float = 0.2,
         interaction_features: bool = True,
         multilayer_layers: list[int] | None = None,
+        num_queries: int = 4,
     ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -174,40 +209,22 @@ class _AttentionPoolingModel(nn.Module):
         # the extracted features.
         self.feature_dropout = nn.Dropout(dropout)
 
-        # Projection layers (identical to Level5LiteModel encoders)
-        self.protein_proj = nn.Sequential(
-            nn.Linear(protein_input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
-        self.ligand_proj = nn.Sequential(
-            nn.Linear(ligand_input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
+        # Two-layer projection with residual (replaces simple 1-layer)
+        self.protein_proj = _ResidualProjection(protein_input_dim, hidden_dim, dropout)
+        self.ligand_proj = _ResidualProjection(ligand_input_dim, hidden_dim, dropout)
 
-        # Attention pooling (identical to Level5LiteModel pools)
-        self.protein_pool = _AttentionPool(hidden_dim, num_heads, dropout)
-        self.ligand_pool = _AttentionPool(hidden_dim, num_heads, dropout)
+        # Multi-query attention pooling
+        self.protein_pool = _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
+        self.ligand_pool = _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
 
         # Per-layer projections and pools for multi-layer MoLFormer.
-        # Each intermediate layer gets its own dedicated projection
-        # (Linear → LN → GELU → Drop) and attention pool, trained
-        # jointly so gradients optimise each projector for its layer.
         if self.multilayer_layers:
             self.ml_projectors = nn.ModuleDict({
-                f"layer_{l}": nn.Sequential(
-                    nn.Linear(ligand_input_dim, hidden_dim),
-                    nn.LayerNorm(hidden_dim),
-                    nn.GELU(),
-                    nn.Dropout(dropout),
-                )
+                f"layer_{l}": _ResidualProjection(ligand_input_dim, hidden_dim, dropout)
                 for l in self.multilayer_layers
             })
             self.ml_pools = nn.ModuleDict({
-                f"layer_{l}": _AttentionPool(hidden_dim, num_heads, dropout)
+                f"layer_{l}": _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
                 for l in self.multilayer_layers
             })
 
@@ -215,12 +232,16 @@ class _AttentionPoolingModel(nn.Module):
 
     def _init_weights(self) -> None:
         for proj in (self.protein_proj, self.ligand_proj):
-            nn.init.xavier_uniform_(proj[0].weight)
-            nn.init.zeros_(proj[0].bias)
+            nn.init.xavier_uniform_(proj.layer1[0].weight)
+            nn.init.zeros_(proj.layer1[0].bias)
+            nn.init.xavier_uniform_(proj.layer2[0].weight)
+            nn.init.zeros_(proj.layer2[0].bias)
         if self.multilayer_layers:
             for proj in self.ml_projectors.values():
-                nn.init.xavier_uniform_(proj[0].weight)
-                nn.init.zeros_(proj[0].bias)
+                nn.init.xavier_uniform_(proj.layer1[0].weight)
+                nn.init.zeros_(proj.layer1[0].bias)
+                nn.init.xavier_uniform_(proj.layer2[0].weight)
+                nn.init.zeros_(proj.layer2[0].bias)
 
     def forward(
         self,
@@ -330,17 +351,26 @@ class _AttentionPoolingModel(nn.Module):
 
 
 class _AttentionPool(nn.Module):
-    """Learnable-query attention pooling (Set Transformer style).
+    """Multi-query learnable attention pooling (Set Transformer style).
 
-    Identical to ``AttentionPooling`` in
-    ``crossattention_split_analysis.models.level5_lite.attention``.
-    Duplicated here so that Level 3 is self-contained and does not
-    depend on Level 4's model internals.
+    Uses *num_queries* independent learnable query vectors, each attending
+    to the full input sequence from a different "perspective".  The K
+    output vectors are then averaged to produce a single pooled vector.
+
+    With ``num_queries=1`` this degenerates to the original single-query
+    pooling.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float,
+        num_queries: int = 4,
+    ) -> None:
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.02)
+        self.num_queries = num_queries
+        self.query = nn.Parameter(torch.randn(1, num_queries, hidden_dim) * 0.02)
         self.attention = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -351,9 +381,12 @@ class _AttentionPool(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """Pool ``[B, seq_len, dim]`` → ``[B, dim]``."""
-        query = self.query.expand(x.size(0), -1, -1)
+        query = self.query.expand(x.size(0), -1, -1)  # [B, K, hidden]
         pooled, _ = self.attention(query=query, key=x, value=x, key_padding_mask=mask)
-        return self.norm(pooled).squeeze(1)
+        pooled = self.norm(pooled)  # [B, K, hidden]
+        if self.num_queries == 1:
+            return pooled.squeeze(1)  # [B, hidden]
+        return pooled.mean(dim=1)  # [B, hidden] — average of K perspectives
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +470,7 @@ def _train_attention_pooling(
     tqdm.write(
         f"    L3 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
         f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}, "
-        f"aux_interactions={aux_interactions}"
+        f"aux_interactions={aux_interactions}, num_queries={num_queries}"
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -446,6 +479,7 @@ def _train_attention_pooling(
     torch.backends.cudnn.benchmark = True
 
     use_interaction = os.getenv("BENCHMARK_LEVEL3_INTERACTION_FEATURES", "1") == "1"
+    num_queries = int(os.getenv("BENCHMARK_LEVEL3_NUM_QUERIES", "4"))
     ml_layers = multilayer_layers or []
     ml_dirs = multilayer_dirs or []
     model = _AttentionPoolingModel(
@@ -456,6 +490,7 @@ def _train_attention_pooling(
         dropout=dropout,
         interaction_features=use_interaction,
         multilayer_layers=ml_layers,
+        num_queries=num_queries,
     ).to(device)
 
     # Auxiliary supervision head used ONLY to shape representations
@@ -540,7 +575,9 @@ def _train_attention_pooling(
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(
+                list(model.parameters()) + list(aux_head.parameters()), 1.0,
+            )
             scaler.step(optimizer)
             scaler.update()
 
@@ -850,8 +887,8 @@ def _extract_features(
             # (hidden_dim activations) + final probability (1 scalar).
             # This gives the downstream MLP access to the learned
             # intermediate representation instead of just 1 number.
-            # aux_head = Sequential(Linear, Dropout, GELU, Linear)
-            # Extract hidden representation after first 3 layers (Linear→Dropout→GELU)
+            # aux_head = Sequential(Linear, GELU, Dropout, Linear)
+            # Extract hidden representation after first 3 layers (Linear→GELU→Dropout)
             aux_hidden = aux_head[2](aux_head[1](aux_head[0](aux_input)))  # [B, hidden_dim]
             aux_proba = torch.sigmoid(aux_head[3](aux_hidden))  # [B, 1]
             features_t = torch.cat([features_t, aux_hidden, aux_proba], dim=1)
