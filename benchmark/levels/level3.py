@@ -850,8 +850,10 @@ def _extract_features(
             # (hidden_dim activations) + final probability (1 scalar).
             # This gives the downstream MLP access to the learned
             # intermediate representation instead of just 1 number.
-            aux_hidden = torch.nn.functional.gelu(aux_head[0](aux_input))  # [B, hidden_dim]
-            aux_proba = torch.sigmoid(aux_head[3](aux_head[2](aux_hidden)))  # [B, 1]
+            # aux_head = Sequential(Linear, Dropout, GELU, Linear)
+            # Extract hidden representation after first 3 layers (Linear→Dropout→GELU)
+            aux_hidden = aux_head[2](aux_head[1](aux_head[0](aux_input)))  # [B, hidden_dim]
+            aux_proba = torch.sigmoid(aux_head[3](aux_hidden))  # [B, 1]
             features_t = torch.cat([features_t, aux_hidden, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()

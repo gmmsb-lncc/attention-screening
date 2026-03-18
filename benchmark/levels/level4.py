@@ -381,7 +381,7 @@ def _train_lora_attention_pooling(
     # Label smoothing: reduces overconfident predictions
     label_smoothing = float(os.getenv("BENCHMARK_LEVEL4_LABEL_SMOOTHING", "0.05"))
     # Differential LR: LoRA adapters get lower LR to avoid overfitting the encoder
-    lora_lr_factor = float(os.getenv("BENCHMARK_LEVEL4_LORA_LR_FACTOR", "0.1"))
+    lora_lr_factor = float(os.getenv("BENCHMARK_LEVEL4_LORA_LR_FACTOR", "0.5"))
 
     tqdm.write(
         f"    L4 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
@@ -627,8 +627,10 @@ def _extract_lora_features(
             cos_sim = nn.functional.cosine_similarity(prot_v, lig_v, dim=-1, eps=1e-8).unsqueeze(-1)
             aux_input = torch.cat([features_t, cos_sim], dim=-1)
 
-            aux_hidden = torch.nn.functional.gelu(aux_head[0](aux_input))
-            aux_proba = torch.sigmoid(aux_head[3](aux_head[2](aux_hidden)))
+            # aux_head = Sequential(Linear, Dropout, GELU, Linear)
+            # Extract hidden representation after first 3 layers (Linear→Dropout→GELU)
+            aux_hidden = aux_head[2](aux_head[1](aux_head[0](aux_input)))  # [B, hidden_dim]
+            aux_proba = torch.sigmoid(aux_head[3](aux_hidden))  # [B, 1]
             features_t = torch.cat([features_t, aux_hidden, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()
