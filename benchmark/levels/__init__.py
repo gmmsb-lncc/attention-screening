@@ -7,10 +7,11 @@ interface for the orchestrator.
 from benchmark.levels.level1 import Level1Runner
 from benchmark.levels.level2 import Level2Runner
 from benchmark.levels.level3 import Level3Runner
-from benchmark.levels.level4 import Level4Runner
+from benchmark.levels.level4_crossatt import Level4Runner
+from benchmark.levels.level4 import Level4LoRARunner
 from benchmark.levels.level5 import Level5Runner
 from benchmark.levels.level5b import Level5bRunner
 from benchmark.levels.level6a import Level6aRunner
 from benchmark.levels.level6b import Level6bRunner
 
-__all__ = ["Level1Runner", "Level2Runner", "Level3Runner", "Level4Runner", "Level5Runner", "Level5bRunner", "Level6aRunner", "Level6bRunner"]
+__all__ = ["Level1Runner", "Level2Runner", "Level3Runner", "Level4Runner", "Level4LoRARunner", "Level5Runner", "Level5bRunner", "Level6aRunner", "Level6bRunner"]

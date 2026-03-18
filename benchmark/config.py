@@ -107,7 +107,7 @@ LEVEL_COLORS: Dict[str, str] = {
 # Valid levels
 # ---------------------------------------------------------------------------
 
-VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "3a", "4", "4a", "5a", "5b", "6a", "6b"})
+VALID_LEVELS = frozenset({"0", "1a", "1b", "1c", "2", "3", "3a", "4", "4a", "4lora", "5a", "5b", "6a", "6b"})
 
 # Level 0 is a shortcut for the classical ML baseline subset
 LEVEL_0_EXPANSION = ["1a", "1b", "1c", "3"]
