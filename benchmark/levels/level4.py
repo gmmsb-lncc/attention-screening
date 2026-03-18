@@ -275,23 +275,32 @@ class LoRAAttentionPoolingModel(nn.Module):
 
 def _apply_lora(
     model: nn.Module,
-    rank: int = 8,
+    rank: int = 4,
     alpha: int = 16,
     lora_dropout: float = 0.15,
+    target_layers: list[int] | None = None,
 ) -> nn.Module:
     """Wrap a HuggingFace model with LoRA adapters via PEFT.
 
-    Targets the query and value projection layers in all attention heads.
+    Parameters
+    ----------
+    target_layers : list[int] | None
+        Which transformer layers to adapt (0-indexed).  When *None*,
+        all layers are adapted.  E.g. ``[4, 5]`` adapts only the last
+        two layers of a 6-layer model.
     """
     from peft import LoraConfig, get_peft_model, TaskType
 
-    # Discover target module names by inspecting the model
-    target_modules = _discover_attention_modules(model)
+    # Discover Q/V projection modules, optionally filtering by layer
+    target_modules = _discover_attention_modules(model, target_layers=target_layers)
     if not target_modules:
         # Fallback names common in MoLFormer / transformer architectures
-        target_modules = ["q_proj", "v_proj"]
+        target_modules = ["q_proj", "v_proj", "query", "value"]
 
-    tqdm.write(f"    LoRA config: rank={rank}, alpha={alpha}, dropout={lora_dropout}, targets={target_modules}")
+    tqdm.write(
+        f"    LoRA config: rank={rank}, alpha={alpha}, dropout={lora_dropout}, "
+        f"layers={target_layers or 'all'}, targets={target_modules}"
+    )
 
     config = LoraConfig(
         r=rank,
@@ -312,18 +321,45 @@ def _apply_lora(
     return peft_model
 
 
-def _discover_attention_modules(model: nn.Module) -> list[str]:
-    """Find linear layers in attention blocks that can be LoRA-adapted."""
-    candidates = set()
+def _discover_attention_modules(
+    model: nn.Module,
+    target_layers: list[int] | None = None,
+) -> list[str]:
+    """Find linear Q/V layers in attention blocks that can be LoRA-adapted.
+
+    When *target_layers* is given, only modules whose full name contains
+    a layer index in that list are returned (using full-path matching).
+    """
+    qv_keywords = {"q_proj", "v_proj", "query", "value"}
+    found: list[str] = []
+
     for name, module in model.named_modules():
-        if isinstance(module, nn.Linear):
-            # Look for query/value projection patterns
-            short = name.split(".")[-1]
-            if short in {"q_proj", "v_proj", "query", "value", "k_proj", "key"}:
-                candidates.add(short)
-    # Prefer q/v only (standard LoRA practice)
-    qv = {n for n in candidates if n in {"q_proj", "v_proj", "query", "value"}}
-    return sorted(qv) if qv else sorted(candidates)
+        if not isinstance(module, nn.Linear):
+            continue
+        short = name.split(".")[-1]
+        if short not in qv_keywords:
+            continue
+
+        if target_layers is not None:
+            # Check if this module belongs to one of the target layers.
+            # Module names typically look like: encoder.layer.4.attention.query
+            # or: transformer.h.4.attn.q_proj — extract digits from path.
+            parts = name.split(".")
+            layer_idx = None
+            for p in parts:
+                if p.isdigit():
+                    layer_idx = int(p)
+                    break
+            if layer_idx is None or layer_idx not in target_layers:
+                continue
+            # Use full path for per-layer targeting
+            found.append(name)
+        else:
+            # Target by shortname (applies to ALL layers)
+            if short not in {n.split(".")[-1] for n in found}:
+                found.append(short)
+
+    return sorted(found)
 
 
 # ======================================================================
@@ -341,7 +377,7 @@ def _train_lora_attention_pooling(
     epochs: int,
     patience: int,
     seed: int,
-    lora_rank: int = 8,
+    lora_rank: int = 4,
     lora_alpha: int = 16,
     model_selection_metric: str = "downstream_mcc",
 ) -> tuple[LoRAAttentionPoolingModel, nn.Sequential]:
@@ -366,9 +402,17 @@ def _train_lora_attention_pooling(
     for p in base_molformer.parameters():
         p.requires_grad = False
 
-    # Apply LoRA
+    # Apply LoRA (only to selected layers)
     lora_dropout = float(os.getenv("BENCHMARK_LEVEL4_LORA_DROPOUT", "0.15"))
-    lora_molformer = _apply_lora(base_molformer, rank=lora_rank, alpha=lora_alpha, lora_dropout=lora_dropout)
+    lora_layers_str = os.getenv("BENCHMARK_LEVEL4_LORA_LAYERS", "4,5").strip()
+    if lora_layers_str.lower() == "all":
+        target_layers = None  # all layers
+    else:
+        target_layers = [int(x) for x in lora_layers_str.split(",")]
+    lora_molformer = _apply_lora(
+        base_molformer, rank=lora_rank, alpha=lora_alpha,
+        lora_dropout=lora_dropout, target_layers=target_layers,
+    )
 
     # --- Hidden dim (aligned to num_heads) ---
     hidden_dim = max(64, min(protein_dim, 512))
@@ -798,7 +842,7 @@ class Level4LoRARunner(BaseLevelRunner):
         protein_dim = PROTEIN_DIMS.get(full_emb, 320)
 
         # --- LoRA hyperparameters ---
-        lora_rank = int(os.getenv("BENCHMARK_LEVEL4_LORA_RANK", "8"))
+        lora_rank = int(os.getenv("BENCHMARK_LEVEL4_LORA_RANK", "4"))
         lora_alpha = int(os.getenv("BENCHMARK_LEVEL4_LORA_ALPHA", "16"))
 
         # --- Build dataloaders ---
