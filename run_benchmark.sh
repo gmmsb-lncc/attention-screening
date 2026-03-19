@@ -19,7 +19,7 @@ IFS=',' read -r -a LEVELS <<< "${LEVELS_CSV}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_16_03_2026}"
 EPOCHS="${EPOCHS:-500}"
 MODEL_SELECTION_METRIC="${MODEL_SELECTION_METRIC:-mcc}"
-BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-downstream_mcc}"
+BENCHMARK_LEVEL3_SELECTION_METRIC="${BENCHMARK_LEVEL3_SELECTION_METRIC:-val_loss}"
 BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY="${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY:-10}"
 # ---------- Auto-derive focus model from first requested level ----------
 _derive_focus_model() {
@@ -32,6 +32,8 @@ _derive_focus_model() {
         3a)  echo "level3a_attnpool_mlp" ;;
         4)   echo "level4_crossatt_mlp" ;;
         4a)  echo "level4a_crossatt_mlp" ;;
+        4lora) echo "level4_lora_mlp" ;;
+        4cnn) echo "level4_cnn_mlp" ;;
         5)   echo "level5_da_mlp" ;;
         5b)  echo "level5b_da_mlp" ;;
         6a)  echo "level6a_ban_mlp" ;;
@@ -48,18 +50,46 @@ BENCHMARK_ENFORCE_RIGOR="${BENCHMARK_ENFORCE_RIGOR:-1}"
 BENCHMARK_MLP_USE_CV="${BENCHMARK_MLP_USE_CV:-1}"
 BENCHMARK_MLP_FOLDS="${BENCHMARK_MLP_FOLDS:-5}"
 BENCHMARK_MLP_CAL_RESTARTS="${BENCHMARK_MLP_CAL_RESTARTS:-3}"
-BENCHMARK_MLP_ENSEMBLE="${BENCHMARK_MLP_ENSEMBLE:-3}"
+BENCHMARK_MLP_ENSEMBLE="${BENCHMARK_MLP_ENSEMBLE:-5}"
 BENCHMARK_MLP_OVERSAMPLE="${BENCHMARK_MLP_OVERSAMPLE:-0}"
-BENCHMARK_LEVEL3_USE_AUX_CHANNEL="${BENCHMARK_LEVEL3_USE_AUX_CHANNEL:-1}"
+BENCHMARK_LEVEL3_USE_AUX_CHANNEL="${BENCHMARK_LEVEL3_USE_AUX_CHANNEL:-0}"
 BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES="${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES:-0}"
+
+# Level 3 interaction features (product, abs-diff, cosine). Default OFF for baseline.
+BENCHMARK_LEVEL3_INTERACTION_FEATURES="${BENCHMARK_LEVEL3_INTERACTION_FEATURES:-0}"
+
+# Level 3 aux_head trained with interaction features (product + abs_diff).
+# Aligns the training signal with the 4×hidden features extracted for the
+# downstream MLP, improving representation quality.  (Default: 1 = enabled)
+BENCHMARK_LEVEL3_AUX_INTERACTIONS="${BENCHMARK_LEVEL3_AUX_INTERACTIONS:-0}"
+
+# Level 3 hyperparameter overrides (leave empty for auto-scaled defaults).
+# LR: learning rate (default: uses --learning_rate CLI value; recommended: 5e-4 for 150M+).
+# DROPOUT: dropout rate (default: 0.3; try 0.2 for richer embeddings).
+# WEIGHT_DECAY: AdamW weight decay (default: 0.02; try 0.04 for 150M+).
+BENCHMARK_LEVEL3_LR="${BENCHMARK_LEVEL3_LR:-}"
+BENCHMARK_LEVEL3_DROPOUT="${BENCHMARK_LEVEL3_DROPOUT:-}"
+BENCHMARK_LEVEL3_WEIGHT_DECAY="${BENCHMARK_LEVEL3_WEIGHT_DECAY:-}"
+
 BENCHMARK_LEVEL4_INTERACTION_FEATURES="${BENCHMARK_LEVEL4_INTERACTION_FEATURES:-1}"
 
-# OOF threshold refinement (re-calibrates decision threshold on full training set).
-BENCHMARK_MLP_OOF_THRESHOLD="${BENCHMARK_MLP_OOF_THRESHOLD:-0}"
+# OOF threshold refinement (re-calibrates decision threshold on training set OOF predictions).
+BENCHMARK_MLP_OOF_THRESHOLD="${BENCHMARK_MLP_OOF_THRESHOLD:-1}"
 BENCHMARK_MLP_OOF_FOLDS="${BENCHMARK_MLP_OOF_FOLDS:-5}"
 
 # Full refit: final ensemble trains on 100% of data without early stopping.
 BENCHMARK_MLP_FULL_REFIT="${BENCHMARK_MLP_FULL_REFIT:-0}"
+
+# Level 3 architecture scaling (auto-scaled by default, set explicitly for 650M).
+BENCHMARK_LEVEL3_HIDDEN_DIM="${BENCHMARK_LEVEL3_HIDDEN_DIM:-}"
+
+# Multi-layer MoLFormer features: comma-separated layer indices to append.
+# Empty = disabled (default). Example: "4,5,6" for last 3 transformer layers.
+BENCHMARK_LEVEL3_MULTILAYER_LAYERS="${BENCHMARK_LEVEL3_MULTILAYER_LAYERS:-}"
+
+# Level 4 regularisation (tuned for 650M embeddings by default).
+BENCHMARK_LEVEL4_DROPOUT="${BENCHMARK_LEVEL4_DROPOUT:-0.30}"
+BENCHMARK_LEVEL4_WEIGHT_DECAY="${BENCHMARK_LEVEL4_WEIGHT_DECAY:-0.06}"
 
 # Scientific-rigor safeguards (test cannot guide tuning).
 BENCHMARK_REQUIRE_TRAIN_SELECTION="${BENCHMARK_REQUIRE_TRAIN_SELECTION:-1}"
@@ -72,6 +102,11 @@ export BENCHMARK_MLP_ENSEMBLE
 export BENCHMARK_MLP_OVERSAMPLE
 export BENCHMARK_LEVEL3_USE_AUX_CHANNEL
 export BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES
+export BENCHMARK_LEVEL3_INTERACTION_FEATURES
+export BENCHMARK_LEVEL3_AUX_INTERACTIONS
+export BENCHMARK_LEVEL3_LR
+export BENCHMARK_LEVEL3_DROPOUT
+export BENCHMARK_LEVEL3_WEIGHT_DECAY
 export BENCHMARK_LEVEL3_SELECTION_METRIC
 export BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY
 export BENCHMARK_LEVEL4_INTERACTION_FEATURES
@@ -80,6 +115,10 @@ export BENCHMARK_MLP_OOF_FOLDS
 export BENCHMARK_MLP_FULL_REFIT
 export BENCHMARK_REQUIRE_TRAIN_SELECTION
 export BENCHMARK_STRICT_LEVEL_COMPLETENESS
+export BENCHMARK_LEVEL3_HIDDEN_DIM
+export BENCHMARK_LEVEL3_MULTILAYER_LAYERS
+export BENCHMARK_LEVEL4_DROPOUT
+export BENCHMARK_LEVEL4_WEIGHT_DECAY
 
 run_phase() {
     local mode="$1"
@@ -102,9 +141,13 @@ echo " MLP tuning: cv=${BENCHMARK_MLP_USE_CV}, folds=${BENCHMARK_MLP_FOLDS}, cal
 echo " MLP OOF threshold: enabled=${BENCHMARK_MLP_OOF_THRESHOLD}, oof_folds=${BENCHMARK_MLP_OOF_FOLDS}"
 echo " MLP full refit: ${BENCHMARK_MLP_FULL_REFIT} (final ensemble trains without early stopping)"
 echo " Level3 aux channel: ${BENCHMARK_LEVEL3_USE_AUX_CHANNEL}"
+echo " Level3 aux interactions: ${BENCHMARK_LEVEL3_AUX_INTERACTIONS} (aux_head trains with product+abs_diff)"
 echo " Level3 full train features: ${BENCHMARK_LEVEL3_FULL_TRAIN_FEATURES} (transfer learning mode)"
 echo " Level3 checkpoint selection: ${BENCHMARK_LEVEL3_SELECTION_METRIC} (eval_every=${BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY})"
+echo " Level3 hidden_dim: ${BENCHMARK_LEVEL3_HIDDEN_DIM:-auto}"
+echo " Level3 lr: ${BENCHMARK_LEVEL3_LR:-auto}, dropout: ${BENCHMARK_LEVEL3_DROPOUT:-0.3}, weight_decay: ${BENCHMARK_LEVEL3_WEIGHT_DECAY:-0.02}"
 echo " Level4 interaction features: ${BENCHMARK_LEVEL4_INTERACTION_FEATURES}"
+echo " Level4 dropout: ${BENCHMARK_LEVEL4_DROPOUT}, weight_decay: ${BENCHMARK_LEVEL4_WEIGHT_DECAY}"
 echo " Rigor: require_train_selection=${BENCHMARK_REQUIRE_TRAIN_SELECTION}, strict_completeness=${BENCHMARK_STRICT_LEVEL_COMPLETENESS}"
 echo " Acceptance gate: focus_model=${FOCUS_MODEL}, target_test_mcc>=${TARGET_TEST_MCC}, max_test_mcc_std<=${MAX_TEST_MCC_STD}"
 echo " Output root: ${OUTPUT_ROOT}"
@@ -153,6 +196,8 @@ _LEVEL_MODEL_MAP = {
     "3a": ["level3a_attnpool_mlp"],
     "4":  ["level4_crossatt_knn", "level4_crossatt_mlp"],
     "4a": ["level4a_crossatt_mlp"],
+    "4lora": ["level4_lora_mlp"],
+    "4cnn": ["level4_cnn_mlp"],
     "5":  ["level5_da_knn", "level5_da_mlp"],
     "5b": ["level5b_da_knn", "level5b_da_mlp"],
     "6a": ["level6a_ban_knn", "level6a_ban_mlp"],
