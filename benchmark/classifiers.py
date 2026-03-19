@@ -231,6 +231,42 @@ def _mlp_candidate_space() -> list[dict[str, object]]:
             "n_iter_no_change": 60,
             "tol": 8e-6,
         },
+        {   # Strongly regularized for high-D interaction features (1024D)
+            "hidden_layer_sizes": (256, 128),
+            "alpha": 5e-2,
+            "learning_rate_init": 5e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
+        {   # Simple architecture with strong L2 penalty
+            "hidden_layer_sizes": (128,),
+            "alpha": 1e-1,
+            "learning_rate_init": 1e-3,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
+        {   # 3-layer funnel for high-D interaction features (1024-1536D)
+            "hidden_layer_sizes": (512, 256, 128),
+            "alpha": 1e-2,
+            "learning_rate_init": 5e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 8e-6,
+        },
+        {   # Wide 2-layer for 150M/650M-scale features
+            "hidden_layer_sizes": (384, 192),
+            "alpha": 1e-2,
+            "learning_rate_init": 8e-4,
+            "early_stopping": True,
+            "max_iter": 2000,
+            "n_iter_no_change": 60,
+            "tol": 1e-5,
+        },
     ]
 
 
@@ -317,7 +353,7 @@ def _select_best_mlp_by_mcc(
     x_cal: np.ndarray,
     y_cal: np.ndarray,
     seed: int,
-) -> tuple[dict[str, object], float, float, float]:
+) -> tuple[dict[str, object], float, float, float, list[dict[str, object]]]:
     """Select MLP config by MCC with stratified CV (fallback: holdout calibration).
 
     Using OOF probabilities for threshold selection is more robust than a
@@ -335,6 +371,7 @@ def _select_best_mlp_by_mcc(
     best_mcc = -1.0
     best_std = 1.0
     best_score = -999.0
+    all_scores: list[tuple[float, dict[str, object]]] = []
 
     total_search_steps = len(candidates) * n_restarts
     search_bar = tqdm(
@@ -388,10 +425,15 @@ def _select_best_mlp_by_mcc(
             best_thr = thr
             best_mcc = float(mcc)
             best_std = mcc_std
+        all_scores.append((score, cfg))
 
     search_bar.close()
 
-    return best_cfg, best_thr, best_mcc, best_std
+    # Collect top-3 configs ranked by stability-adjusted MCC for diverse ensemble.
+    ranked_cfgs = sorted(all_scores, key=lambda x: x[0], reverse=True)[:3]
+    ranked_cfgs = [entry[1] for entry in ranked_cfgs]  # extract configs
+
+    return best_cfg, best_thr, best_mcc, best_std, ranked_cfgs
 
 
 def _fit_mlp_ensemble_predict(
@@ -400,6 +442,7 @@ def _fit_mlp_ensemble_predict(
     y_train: np.ndarray,
     x_eval: np.ndarray,
     seed: int,
+    ranked_cfgs: list[dict[str, object]] | None = None,
 ) -> np.ndarray:
     """Fit an ensemble of MLP restarts and return mean probabilities.
 
@@ -407,7 +450,7 @@ def _fit_mlp_ensemble_predict(
     ``BENCHMARK_MLP_FULL_REFIT=1`` only if you explicitly want to
     disable early stopping for the final refit.
     """
-    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "3")))
+    n_members = max(1, int(os.getenv("BENCHMARK_MLP_ENSEMBLE", "5")))
     full_refit = os.getenv(
         "BENCHMARK_MLP_FULL_REFIT", "0"
     ).strip().lower() not in {"0", "false", "no"}
@@ -442,7 +485,7 @@ def _train_mlp_pipeline(
     if frozen_selection is None:
         x_fit, y_fit, x_cal, y_cal = _split_fit_for_calibration(x_train_sc, y_train, seed)
 
-        best_cfg, best_thr, best_mcc, best_mcc_std = _select_best_mlp_by_mcc(
+        best_cfg, best_thr, best_mcc, best_mcc_std, ranked_cfgs = _select_best_mlp_by_mcc(
             x_fit=x_fit,
             y_fit=y_fit,
             x_cal=x_cal,
@@ -459,30 +502,30 @@ def _train_mlp_pipeline(
         best_thr = float(frozen_selection["best_thr"])
         best_mcc = float(frozen_selection["best_mcc"])
         best_mcc_std = float(frozen_selection["best_mcc_std"])
+        # Recover ranked configs saved during training (if available).
+        raw_ranked = frozen_selection.get("ranked_cfgs")
+        ranked_cfgs = [dict(c) for c in raw_ranked] if isinstance(raw_ranked, list) else [best_cfg]
         selection_source = "frozen_train_selection"
 
-    # Refit best architecture on full training features as a restart ensemble.
+    # Refit best architecture on full training features as a diverse ensemble.
     mlp_proba = _fit_mlp_ensemble_predict(
         cfg=best_cfg,
         x_train=x_train_sc,
         y_train=y_train,
         x_eval=x_test_sc,
         seed=seed,
+        ranked_cfgs=ranked_cfgs,
     )
 
-    # --- Threshold recalibration on eval predictions ---
-    # When in train mode (no frozen selection), recalibrate the threshold
-    # directly on the evaluation data (validation set) instead of trusting
-    # the OOF threshold from model selection, which may be inflated if the
-    # upstream feature extractor leaked training information.
+    # Use the OOF/CV-selected threshold directly.
     refined_thr = best_thr
-    if frozen_selection is None and y_test.size >= 20 and len(np.unique(y_test.astype(int))) >= 2:
-        eval_thr, eval_mcc = _optimize_threshold_mcc(y_test.astype(int), mlp_proba)
-        refined_thr = eval_thr
 
-    # --- Optional OOF refinement (disabled by default) ---
+    # --- Optional OOF refinement (enabled by default) ---
+    # Re-derives threshold from OOF predictions on the actual training
+    # data used at this stage (val in test mode), providing a threshold
+    # better matched to the current probability distribution.
     use_oof_refinement = os.getenv(
-        "BENCHMARK_MLP_OOF_THRESHOLD", "0"
+        "BENCHMARK_MLP_OOF_THRESHOLD", "1"
     ).strip().lower() not in {"0", "false", "no"}
     if use_oof_refinement and y_train.size >= 40 and len(np.unique(y_train.astype(int))) >= 2:
         n_oof_folds = max(2, int(os.getenv("BENCHMARK_MLP_OOF_FOLDS", "5")))
@@ -515,6 +558,7 @@ def _train_mlp_pipeline(
         "best_thr": float(best_thr),
         "best_mcc": float(best_mcc),
         "best_mcc_std": float(best_mcc_std),
+        "ranked_cfgs": ranked_cfgs,
     }
     return mlp_metrics
 

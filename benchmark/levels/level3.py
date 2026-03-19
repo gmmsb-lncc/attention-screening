@@ -38,7 +38,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 import torch
@@ -142,6 +143,40 @@ def _best_mcc_threshold(
 
 
 # ---------------------------------------------------------------------------
+# Residual projection block (2-layer with skip connection)
+# ---------------------------------------------------------------------------
+
+class _ResidualProjection(nn.Module):
+    """Two-layer projection with residual connection.
+
+    Layer 1: ``in_dim → out_dim`` (dimension change + non-linearity)
+    Layer 2: ``out_dim → out_dim + residual`` (refinement with skip)
+
+    The residual skip on the second layer prevents information loss
+    when the projection compresses higher dimensions (e.g. 768→256).
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, dropout: float) -> None:
+        super().__init__()
+        self.layer1 = nn.Sequential(
+            nn.Linear(in_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.layer2 = nn.Sequential(
+            nn.Linear(out_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.layer1(x)
+        return self.layer2(h) + h  # residual on 2nd layer
+
+
+# ---------------------------------------------------------------------------
 # Attention-pooling model (no cross-attention — isolation experiment)
 # ---------------------------------------------------------------------------
 
@@ -161,40 +196,52 @@ class _AttentionPoolingModel(nn.Module):
         num_heads: int = 8,
         dropout: float = 0.2,
         interaction_features: bool = True,
+        multilayer_layers: list[int] | None = None,
+        num_queries: int = 4,
     ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.interaction_features = interaction_features
+        self.multilayer_layers = multilayer_layers or []
 
         # Dropout applied to the final concatenated representation to
         # reduce overfitting when downstream classifiers are trained on
         # the extracted features.
         self.feature_dropout = nn.Dropout(dropout)
 
-        # Projection layers (identical to Level5LiteModel encoders)
-        self.protein_proj = nn.Sequential(
-            nn.Linear(protein_input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
-        self.ligand_proj = nn.Sequential(
-            nn.Linear(ligand_input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
+        # Two-layer projection with residual (replaces simple 1-layer)
+        self.protein_proj = _ResidualProjection(protein_input_dim, hidden_dim, dropout)
+        self.ligand_proj = _ResidualProjection(ligand_input_dim, hidden_dim, dropout)
 
-        # Attention pooling (identical to Level5LiteModel pools)
-        self.protein_pool = _AttentionPool(hidden_dim, num_heads, dropout)
-        self.ligand_pool = _AttentionPool(hidden_dim, num_heads, dropout)
+        # Multi-query attention pooling
+        self.protein_pool = _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
+        self.ligand_pool = _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
+
+        # Per-layer projections and pools for multi-layer MoLFormer.
+        if self.multilayer_layers:
+            self.ml_projectors = nn.ModuleDict({
+                f"layer_{l}": _ResidualProjection(ligand_input_dim, hidden_dim, dropout)
+                for l in self.multilayer_layers
+            })
+            self.ml_pools = nn.ModuleDict({
+                f"layer_{l}": _AttentionPool(hidden_dim, num_heads, dropout, num_queries)
+                for l in self.multilayer_layers
+            })
 
         self._init_weights()
 
     def _init_weights(self) -> None:
         for proj in (self.protein_proj, self.ligand_proj):
-            nn.init.xavier_uniform_(proj[0].weight)
-            nn.init.zeros_(proj[0].bias)
+            nn.init.xavier_uniform_(proj.layer1[0].weight)
+            nn.init.zeros_(proj.layer1[0].bias)
+            nn.init.xavier_uniform_(proj.layer2[0].weight)
+            nn.init.zeros_(proj.layer2[0].bias)
+        if self.multilayer_layers:
+            for proj in self.ml_projectors.values():
+                nn.init.xavier_uniform_(proj.layer1[0].weight)
+                nn.init.zeros_(proj.layer1[0].bias)
+                nn.init.xavier_uniform_(proj.layer2[0].weight)
+                nn.init.zeros_(proj.layer2[0].bias)
 
     def forward(
         self,
@@ -245,8 +292,8 @@ class _AttentionPoolingModel(nn.Module):
     ) -> torch.Tensor:
         """Return enriched feature vector with interaction terms.
 
-        Output: ``[prot_vec ‖ lig_vec ‖ prot*lig ‖ |prot−lig|]``
-        giving ``4 × hidden_dim`` dimensions when interaction features
+        Output: ``[prot_vec ‖ lig_vec ‖ prot*lig ‖ |prot−lig| ‖ cos(prot,lig)]``
+        giving ``4 × hidden_dim + 1`` dimensions when interaction features
         are enabled, otherwise falls back to ``2 × hidden_dim``.
         """
         p_attn = (protein_mask == 0) if protein_mask is not None else None
@@ -262,23 +309,68 @@ class _AttentionPoolingModel(nn.Module):
         if self.interaction_features:
             parts.append(protein_vec * ligand_vec)              # co-activation
             parts.append(torch.abs(protein_vec - ligand_vec))   # complementarity
+            # Cosine similarity — global directional compatibility [B, 1]
+            cos_sim = torch.nn.functional.cosine_similarity(
+                protein_vec, ligand_vec, dim=-1,
+            ).unsqueeze(-1)
+            parts.append(cos_sim)
 
         combined = torch.cat(parts, dim=-1)
         return self.feature_dropout(combined)
 
+    def forward_multilayer(
+        self,
+        ml_tensors: dict[str, torch.Tensor],
+    ) -> torch.Tensor | None:
+        """Project and attention-pool multi-layer tensors.
+
+        Each layer is processed by its **dedicated** projector and pool,
+        producing a vector of ``hidden_dim`` per layer.  Vectors are
+        concatenated, giving ``len(multilayer_layers) * hidden_dim``.
+
+        Parameters
+        ----------
+        ml_tensors : dict
+            Mapping ``"layer_{i}"`` → Tensor ``[B, seq_len, 768]``.
+            Tensors should already be on the correct device.
+
+        Returns
+        -------
+        Tensor ``[B, K * hidden_dim]`` or ``None`` if no layers matched.
+        """
+        vecs: list[torch.Tensor] = []
+        for l in self.multilayer_layers:
+            key = f"layer_{l}"
+            if key in ml_tensors and key in self.ml_projectors:
+                projected = self.ml_projectors[key](ml_tensors[key])  # [B, seq, hidden]
+                pooled = self.ml_pools[key](projected, mask=None)     # [B, hidden]
+                vecs.append(pooled)
+        if vecs:
+            return torch.cat(vecs, dim=-1)
+        return None
+
 
 class _AttentionPool(nn.Module):
-    """Learnable-query attention pooling (Set Transformer style).
+    """Multi-query learnable attention pooling (Set Transformer style).
 
-    Identical to ``AttentionPooling`` in
-    ``crossattention_split_analysis.models.level5_lite.attention``.
-    Duplicated here so that Level 3 is self-contained and does not
-    depend on Level 4's model internals.
+    Uses *num_queries* independent learnable query vectors, each attending
+    to the full input sequence from a different "perspective".  The K
+    output vectors are then averaged to produce a single pooled vector.
+
+    With ``num_queries=1`` this degenerates to the original single-query
+    pooling.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float,
+        num_queries: int = 4,
+    ) -> None:
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.02)
+        self.num_queries = num_queries
+        self.query = nn.Parameter(torch.randn(1, num_queries, hidden_dim) * 0.02)
         self.attention = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -289,28 +381,44 @@ class _AttentionPool(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """Pool ``[B, seq_len, dim]`` → ``[B, dim]``."""
-        query = self.query.expand(x.size(0), -1, -1)
+        query = self.query.expand(x.size(0), -1, -1)  # [B, K, hidden]
         pooled, _ = self.attention(query=query, key=x, value=x, key_padding_mask=mask)
-        return self.norm(pooled).squeeze(1)
+        pooled = self.norm(pooled)  # [B, K, hidden]
+        if self.num_queries == 1:
+            return pooled.squeeze(1)  # [B, hidden]
+        return pooled.mean(dim=1)  # [B, hidden] — average of K perspectives
 
 
 # ---------------------------------------------------------------------------
 # Training loop (very lightweight — only pooling weights to learn)
 # ---------------------------------------------------------------------------
 
+# Optimal hidden_dim per ESM-2 model size.  Determined empirically:
+#   8M  (d_P=320)  → 256  — small encoder, compact representation suffices
+#   150M (d_P=640) → 384  — matches Level 4 capacity for fair comparison
+#   650M (d_P=1280)→ 432  — 1280//3 rounded to multiple of 12 heads
+_HIDDEN_DIM_BY_PROTEIN_DIM: dict[int, int] = {
+    320:  256,   # ESM-2 8M
+    640:  384,   # ESM-2 150M
+    1280: 432,   # ESM-2 650M
+}
+
+
 def _train_attention_pooling(
     train_loader: DataLoader,
     val_loader: DataLoader,
     downstream_fit_loader: DataLoader | None,
     protein_dim: int,
-    hidden_dim: int = 256,
+    hidden_dim: int | None = None,
     num_heads: int = 8,
-    dropout: float = 0.2,
+    dropout: float = 0.3,
     lr: float = 1e-3,
     epochs: int = 30,
     patience: int = 10,
     seed: int = 42,
     model_selection_metric: str = "val_loss",
+    multilayer_layers: list[int] | None = None,
+    multilayer_dirs: list[Path] | None = None,
 ) -> tuple[_AttentionPoolingModel, nn.Module]:
     """Train the projection + attention pooling model.
 
@@ -321,12 +429,60 @@ def _train_attention_pooling(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    # --- Resolve hyperparameters: env var > argument > auto-scale --------
+
+    # hidden_dim
+    if hidden_dim is None:
+        env_hd = os.getenv("BENCHMARK_LEVEL3_HIDDEN_DIM", "").strip()
+        if env_hd:
+            hidden_dim = int(env_hd)
+        elif protein_dim in _HIDDEN_DIM_BY_PROTEIN_DIM:
+            hidden_dim = _HIDDEN_DIM_BY_PROTEIN_DIM[protein_dim]
+        else:
+            raw = max(256, protein_dim // 3)
+            hidden_dim = ((raw + num_heads - 1) // num_heads) * num_heads
+
+    # dropout (env var overrides function argument)
+    env_do = os.getenv("BENCHMARK_LEVEL3_DROPOUT", "").strip()
+    if env_do:
+        dropout = float(env_do)
+
+    # learning rate (env var overrides function argument)
+    env_lr = os.getenv("BENCHMARK_LEVEL3_LR", "").strip()
+    if env_lr:
+        lr = float(env_lr)
+
+    # weight decay (env var overrides hardcoded default)
+    weight_decay = 0.02
+    env_wd = os.getenv("BENCHMARK_LEVEL3_WEIGHT_DECAY", "").strip()
+    if env_wd:
+        weight_decay = float(env_wd)
+
+    # Whether the aux_head should receive interaction features (product
+    # and abs-diff) during training.  When enabled the training signal
+    # is aligned with the features actually extracted for the downstream
+    # MLP, potentially improving representation quality at the cost of a
+    # slightly larger aux_head.  Default: "1" (enabled).
+    aux_interactions = os.getenv(
+        "BENCHMARK_LEVEL3_AUX_INTERACTIONS", "1"
+    ).strip().lower() not in {"0", "false", "no"}
+
+    num_queries = int(os.getenv("BENCHMARK_LEVEL3_NUM_QUERIES", "4"))
+
+    tqdm.write(
+        f"    L3 config: hidden_dim={hidden_dim}, dropout={dropout:.2f}, "
+        f"lr={lr:.1e}, weight_decay={weight_decay}, protein_dim={protein_dim}, "
+        f"aux_interactions={aux_interactions}, num_queries={num_queries}"
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler(enabled=use_amp)
     torch.backends.cudnn.benchmark = True
 
     use_interaction = os.getenv("BENCHMARK_LEVEL3_INTERACTION_FEATURES", "1") == "1"
+    ml_layers = multilayer_layers or []
+    ml_dirs = multilayer_dirs or []
     model = _AttentionPoolingModel(
         protein_input_dim=protein_dim,
         ligand_input_dim=MOLFORMER_DIM,
@@ -334,12 +490,23 @@ def _train_attention_pooling(
         num_heads=num_heads,
         dropout=dropout,
         interaction_features=use_interaction,
+        multilayer_layers=ml_layers,
+        num_queries=num_queries,
     ).to(device)
 
     # Auxiliary supervision head used ONLY to shape representations
     # (discarded afterwards — KNN/MLP remain the real classifiers).
+    # When aux_interactions is True the head receives the same
+    # 4×hidden + 1 (cosine sim) features, aligning training gradients.
+    # When multilayer is active, K*hidden extra dims are appended.
+    if aux_interactions and use_interaction:
+        aux_input_dim = hidden_dim * 4 + 1   # prot|lig|prod|diff|cos
+    else:
+        aux_input_dim = hidden_dim * 2        # prot|lig
+    if ml_layers:
+        aux_input_dim += len(ml_layers) * hidden_dim
     aux_head = nn.Sequential(
-        nn.Linear(hidden_dim * 2, hidden_dim),
+        nn.Linear(aux_input_dim, hidden_dim),
         nn.GELU(),
         nn.Dropout(dropout),
         nn.Linear(hidden_dim, 1),
@@ -352,7 +519,7 @@ def _train_attention_pooling(
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(aux_head.parameters()),
         lr=lr,
-        weight_decay=0.01,
+        weight_decay=weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     train_labels = _extract_binary_labels_from_loader(train_loader)
@@ -392,13 +559,26 @@ def _train_attention_pooling(
             y = batch["label"].to(device).unsqueeze(1)
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-                features = model(p, l, pm, lm)
+                if aux_interactions and use_interaction:
+                    features = model.forward_with_interactions(p, l, pm, lm)
+                else:
+                    features = model(p, l, pm, lm)
+                # Append multi-layer features if configured.
+                if ml_layers and ml_dirs:
+                    ml_tensors = _load_multilayer_tensors(
+                        batch["chembl_id"], ml_dirs, ml_layers, device,
+                    )
+                    ml_feats = model.forward_multilayer(ml_tensors)
+                    if ml_feats is not None:
+                        features = torch.cat([features, ml_feats], dim=-1)
                 logits = aux_head(features)
                 loss = criterion(logits, y)
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(
+                list(model.parameters()) + list(aux_head.parameters()), 1.0,
+            )
             scaler.step(optimizer)
             scaler.update()
 
@@ -423,7 +603,18 @@ def _train_attention_pooling(
                 y = batch["label"].to(device).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-                    features = model(p, l, pm, lm)
+                    if aux_interactions and use_interaction:
+                        features = model.forward_with_interactions(p, l, pm, lm)
+                    else:
+                        features = model(p, l, pm, lm)
+                    # Append multi-layer features if configured.
+                    if ml_layers and ml_dirs:
+                        ml_tensors = _load_multilayer_tensors(
+                            batch["chembl_id"], ml_dirs, ml_layers, device,
+                        )
+                        ml_feats = model.forward_multilayer(ml_tensors)
+                        if ml_feats is not None:
+                            features = torch.cat([features, ml_feats], dim=-1)
                     logits = aux_head(features)
                     val_loss += criterion(logits, y).item()
                 val_n += 1
@@ -513,6 +704,109 @@ def _train_attention_pooling(
 
 
 # ---------------------------------------------------------------------------
+# Multi-layer MoLFormer feature extraction helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_multilayer_dirs(
+    dataset_type: str,
+    embedding_name: str,
+) -> list[Path]:
+    """Return directories that may contain multilayer .npz files."""
+    from benchmark.config import EMBEDDING_BASE_PATH
+    if dataset_type in ("all",):
+        base_paths = [
+            "./results/protein_model_benchmark_human_v2",
+            "./results/protein_model_benchmark_non_human_v2",
+        ]
+    else:
+        base_paths = [EMBEDDING_BASE_PATH.format(dataset_type=dataset_type)]
+    return [
+        Path(bp) / embedding_name / "build" / "molformer_multilayer"
+        for bp in base_paths
+    ]
+
+
+def _load_multilayer_tensors(
+    chembl_ids: Sequence[str],
+    multilayer_dirs: list[Path],
+    layers: list[int],
+    device: torch.device,
+) -> dict[str, torch.Tensor]:
+    """Load multi-layer .npz data as padded tensors for training.
+
+    Returns a dict ``{"layer_4": Tensor[B, max_seq, 768], ...}``
+    suitable for passing to ``model.forward_multilayer()``.
+    Tensors are padded to the maximum sequence length in the batch.
+    """
+    # Collect raw matrices per layer per molecule.
+    per_layer: dict[str, list[np.ndarray]] = {f"layer_{l}": [] for l in layers}
+    for cid in chembl_ids:
+        fname = f"{cid}_multilayer.npz"
+        loaded = False
+        for d in multilayer_dirs:
+            path = d / fname
+            if path.exists():
+                data = np.load(path)
+                for l in layers:
+                    key = f"layer_{l}"
+                    if key in data:
+                        per_layer[key].append(data[key].astype(np.float32))
+                    else:
+                        per_layer[key].append(np.zeros((1, 768), dtype=np.float32))
+                loaded = True
+                break
+        if not loaded:
+            for l in layers:
+                per_layer[f"layer_{l}"].append(np.zeros((1, 768), dtype=np.float32))
+
+    # Pad to common seq length per layer and convert to tensors.
+    result: dict[str, torch.Tensor] = {}
+    for key, mats in per_layer.items():
+        max_len = max(m.shape[0] for m in mats)
+        dim = mats[0].shape[1]
+        padded = np.zeros((len(mats), max_len, dim), dtype=np.float32)
+        for i, mat in enumerate(mats):
+            padded[i, :mat.shape[0], :] = mat
+        result[key] = torch.from_numpy(padded).to(device)
+    return result
+
+
+def _load_multilayer_features(
+    chembl_ids: Sequence[str],
+    multilayer_dirs: list[Path],
+    layers: list[int],
+    model: _AttentionPoolingModel | None = None,
+    device: torch.device | None = None,
+) -> np.ndarray | None:
+    """Load selected layers and attention-pool them via trained per-layer projectors.
+
+    Uses ``model.ml_projectors[key]`` and ``model.ml_pools[key]`` which
+    are dedicated projections trained end-to-end for each intermediate
+    layer, instead of sharing the last-layer weights.
+
+    Returns
+    -------
+    np.ndarray of shape ``(len(chembl_ids), len(layers) * hidden_dim)``
+    or ``None`` if model has no multilayer support.
+    """
+    if model is None or device is None:
+        return None
+    if not hasattr(model, "ml_projectors") or not model.multilayer_layers:
+        return None
+
+    hidden_dim = model.hidden_dim
+    # Load as tensors and forward through dedicated projectors.
+    ml_tensors = _load_multilayer_tensors(chembl_ids, multilayer_dirs, layers, device)
+    with torch.no_grad():
+        ml_out = model.forward_multilayer(ml_tensors)
+    if ml_out is not None:
+        return ml_out.cpu().numpy()
+
+    # Fallback: zeros.
+    return np.zeros((len(chembl_ids), len(layers) * hidden_dim), dtype=np.float32)
+
+
+# ---------------------------------------------------------------------------
 # Feature extraction with trained attention pooling
 # ---------------------------------------------------------------------------
 
@@ -524,8 +818,16 @@ def _extract_features(
     desc: str | None = None,
     aux_head: nn.Module | None = None,
     include_aux_channel: bool = False,
+    multilayer_dirs: list[Path] | None = None,
+    multilayer_layers: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract attention-pooled features from a dataloader."""
+    """Extract attention-pooled features from a dataloader.
+
+    When *multilayer_dirs* and *multilayer_layers* are provided, also
+    loads intermediate MoLFormer hidden states from pre-computed .npz
+    files, attention-pools each selected layer via the trained model,
+    and concatenates to the main features.
+    """
     model.eval()
     all_features: list[np.ndarray] = []
     all_labels: list[np.ndarray] = []
@@ -562,13 +864,48 @@ def _extract_features(
             features_t = model(p, l, pm, lm)
 
         if include_aux_channel and aux_head is not None:
-            # aux_head still expects the plain 2*hidden concat.
-            plain_features = model(p, l, pm, lm) if use_interactions else features_t
-            aux_proba = torch.sigmoid(aux_head(plain_features))
-            features_t = torch.cat([features_t, aux_proba], dim=1)
+            # Determine whether aux_head was trained with interaction features
+            # by inspecting its input dimension.  When trained with
+            # aux_interactions=True it expects 4×hidden+1; otherwise 2×hidden.
+            # When multi-layer is active, K*hidden extra dims are also expected.
+            aux_expects_interactions = aux_head[0].in_features > model.hidden_dim * 2
+            if aux_expects_interactions:
+                aux_input = features_t if use_interactions else model.forward_with_interactions(p, l, pm, lm)
+            else:
+                aux_input = model(p, l, pm, lm) if use_interactions else features_t
+
+            # Append multi-layer features to aux_input if the model has
+            # per-layer projectors (matching the training-time aux_head dim).
+            if hasattr(model, "ml_projectors") and model.multilayer_layers and multilayer_dirs and multilayer_layers:
+                ml_tensors = _load_multilayer_tensors(
+                    batch["chembl_id"], multilayer_dirs, multilayer_layers, device,
+                )
+                ml_feats_t = model.forward_multilayer(ml_tensors)
+                if ml_feats_t is not None:
+                    aux_input = torch.cat([aux_input, ml_feats_t], dim=-1)
+
+            # Extract rich aux representation: penultimate hidden layer
+            # (hidden_dim activations) + final probability (1 scalar).
+            # This gives the downstream MLP access to the learned
+            # intermediate representation instead of just 1 number.
+            # aux_head = Sequential(Linear, GELU, Dropout, Linear)
+            # Extract hidden representation after first 3 layers (Linear→GELU→Dropout)
+            aux_hidden = aux_head[2](aux_head[1](aux_head[0](aux_input)))  # [B, hidden_dim]
+            aux_proba = torch.sigmoid(aux_head[3](aux_hidden))  # [B, 1]
+            features_t = torch.cat([features_t, aux_hidden, aux_proba], dim=1)
 
         features = features_t.cpu().numpy()
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Append attention-pooled multi-layer features if requested.
+        if multilayer_dirs and multilayer_layers:
+            ml_feats = _load_multilayer_features(
+                batch["chembl_id"], multilayer_dirs, multilayer_layers,
+                model=model, device=device,
+            )
+            if ml_feats is not None:
+                features = np.concatenate([features, ml_feats], axis=1)
+
         all_features.append(features)
         all_labels.append(batch["label"].numpy())
 
@@ -590,17 +927,19 @@ def _compute_downstream_mcc_proxy(
     x_fit_sc = scaler.fit_transform(x_fit).astype(np.float32)
     x_val_sc = scaler.transform(x_val).astype(np.float32)
 
+    # Align proxy regularisation with the real MLP grid search (alpha ≥ 5e-3)
+    # so that checkpoint selection reflects actual downstream performance.
     mlp = MLPClassifier(
-        hidden_layer_sizes=(256, 128),
+        hidden_layer_sizes=(256,),
         activation="relu",
         solver="adam",
-        alpha=1e-4,
+        alpha=5e-3,
         learning_rate="adaptive",
-        learning_rate_init=8e-4,
-        max_iter=700,
+        learning_rate_init=1e-3,
+        max_iter=500,
         early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=30,
+        validation_fraction=0.15,
+        n_iter_no_change=20,
         tol=1e-5,
         random_state=seed,
     )
@@ -688,6 +1027,17 @@ class Level3Runner(BaseLevelRunner):
                 "BENCHMARK_LEVEL3_SELECTION_METRIC must be one of: "
                 "val_loss, mcc, downstream_mcc"
             )
+
+        # Multi-layer MoLFormer features (optional).
+        ml_layers_str = os.getenv("BENCHMARK_LEVEL3_MULTILAYER_LAYERS", "").strip()
+        if ml_layers_str:
+            ml_layers = [int(x) for x in ml_layers_str.split(",")]
+            ml_dirs = _resolve_multilayer_dirs(self.dataset, self.embedding_name)
+            tqdm.write(f"  Multi-layer features enabled: layers {ml_layers}")
+        else:
+            ml_layers = None
+            ml_dirs = None
+
         model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
@@ -698,6 +1048,8 @@ class Level3Runner(BaseLevelRunner):
             patience=self._config.resolved_patience or 10,
             seed=seed,
             model_selection_metric=local_selection_metric,
+            multilayer_layers=ml_layers,
+            multilayer_dirs=ml_dirs,
         )
 
         use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
@@ -717,6 +1069,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -725,6 +1079,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -735,6 +1091,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -743,6 +1101,8 @@ class Level3Runner(BaseLevelRunner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
 
         # Sanitize
@@ -870,6 +1230,17 @@ class Level3aRunner(Level3Runner):
                 "BENCHMARK_LEVEL3_SELECTION_METRIC must be one of: "
                 "val_loss, mcc, downstream_mcc"
             )
+
+        # Multi-layer MoLFormer features (optional).
+        ml_layers_str = os.getenv("BENCHMARK_LEVEL3_MULTILAYER_LAYERS", "").strip()
+        if ml_layers_str:
+            ml_layers = [int(x) for x in ml_layers_str.split(",")]
+            ml_dirs = _resolve_multilayer_dirs(self.dataset, self.embedding_name)
+            tqdm.write(f"  Multi-layer features enabled: layers {ml_layers}")
+        else:
+            ml_layers = None
+            ml_dirs = None
+
         model, aux_head = _train_attention_pooling(
             train_loader=model_train_loader,
             val_loader=val_loader,
@@ -880,6 +1251,8 @@ class Level3aRunner(Level3Runner):
             patience=self._config.resolved_patience or 10,
             seed=seed,
             model_selection_metric=local_selection_metric,
+            multilayer_layers=ml_layers,
+            multilayer_dirs=ml_dirs,
         )
 
         use_aux_channel = os.getenv("BENCHMARK_LEVEL3_USE_AUX_CHANNEL", "1").strip().lower() not in {
@@ -900,6 +1273,8 @@ class Level3aRunner(Level3Runner):
                 desc=f"    Feature extraction (fit — {fit_desc})",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -908,6 +1283,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
         else:
             tqdm.write("  Extracting attention-pooled features (val + test)...")
@@ -918,6 +1295,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (fit)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
             x_eval, y_eval = _extract_features(
                 model,
@@ -926,6 +1305,8 @@ class Level3aRunner(Level3Runner):
                 desc="    Feature extraction (eval)",
                 aux_head=aux_head,
                 include_aux_channel=use_aux_channel,
+                multilayer_dirs=ml_dirs,
+                multilayer_layers=ml_layers,
             )
 
         for name, arr in [("fit", x_fit), ("eval", x_eval)]:
