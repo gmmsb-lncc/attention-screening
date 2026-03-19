@@ -541,13 +541,14 @@ class Level4CNNRunner(BaseLevelRunner):
         cnn_channels = int(os.getenv("BENCHMARK_LEVEL4CNN_CHANNELS", "64"))
         dropout = float(os.getenv("BENCHMARK_LEVEL4CNN_DROPOUT", "0.3"))
         lr = float(os.getenv("BENCHMARK_LEVEL4CNN_LR", str(self._config.learning_rate)))
+        batch_size = int(os.getenv("BENCHMARK_LEVEL4CNN_BATCH_SIZE", str(self._config.batch_size)))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
             dataset_type=self.dataset,
             embedding_name=self.embedding_name,
             scaffold_split_dir=self.scaffold_split_dir,
-            batch_size=self._config.batch_size,
+            batch_size=batch_size,
             dataset_source_filter=self._config.dataset_source_filter,
             mode=self.mode,
         )
