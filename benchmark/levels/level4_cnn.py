@@ -128,6 +128,11 @@ class InteractionMapCNN(nn.Module):
 
     Creates K interaction maps from multi-head projections, processes
     them with a 2D CNN, and pools with hierarchical attention.
+
+    Optional enhancements (toggleable):
+      - interaction channels: adds product, abs-diff, cosine as extra
+        channels to the interaction map.
+      - residual connections: skip connections between conv blocks.
     """
 
     def __init__(
@@ -138,11 +143,15 @@ class InteractionMapCNN(nn.Module):
         head_dim: int = 32,
         cnn_channels: int = 64,
         dropout: float = 0.3,
+        use_interaction_channels: bool = False,
+        use_residual: bool = False,
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.scale = head_dim ** -0.5
+        self.use_interaction_channels = use_interaction_channels
+        self.use_residual = use_residual
 
         # Multi-head projections for interaction maps
         self.prot_heads = nn.ModuleList([
@@ -152,24 +161,52 @@ class InteractionMapCNN(nn.Module):
             nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
         ])
 
-        # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
-        # Layer 1-2: 3×3 local patterns (receptive field 5×5)
-        # Layer 3: dilated 3×3 (effective 5×5, receptive field 9×9)
-        # Layer 4: 3×3 consolidation (receptive field 13×13)
-        self.cnn = nn.Sequential(
-            nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.GELU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(cnn_channels),
-            nn.GELU(),
-        )
+        # --- Interaction feature channels (optional) ------------------
+        # Shared projection to common dim for element-wise ops
+        if use_interaction_channels:
+            self.prot_shared = nn.Linear(protein_dim, head_dim)
+            self.lig_shared = nn.Linear(ligand_dim, head_dim)
+            # 3 extra channels: product-map, diff-map, cosine-map
+            in_channels = num_heads + 3
+        else:
+            in_channels = num_heads
+
+        # --- 2D CNN ---------------------------------------------------
+        # Layer 1-2: 3×3 local patterns
+        # Layer 3: dilated 3×3 (effective 5×5)
+        # Layer 4: 3×3 consolidation
+        if use_residual:
+            # Block A: in_channels → 32
+            self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
+            self.bn1 = nn.BatchNorm2d(32)
+            # Block B: 32 → 64 (with residual via 1×1 projection)
+            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+            self.bn2 = nn.BatchNorm2d(64)
+            self.skip_ab = nn.Conv2d(32, 64, kernel_size=1)  # align channels
+            # Block C: 64 → 64 dilated (residual identity)
+            self.conv3 = nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2)
+            self.bn3 = nn.BatchNorm2d(64)
+            # Block D: 64 → cnn_channels (with residual)
+            self.conv4 = nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1)
+            self.bn4 = nn.BatchNorm2d(cnn_channels)
+            self.skip_cd = nn.Conv2d(64, cnn_channels, kernel_size=1) if cnn_channels != 64 else nn.Identity()
+            self.act = nn.GELU()
+            self.cnn = None  # not used in residual mode
+        else:
+            self.cnn = nn.Sequential(
+                nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.GELU(),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
+                nn.BatchNorm2d(cnn_channels),
+                nn.GELU(),
+            )
 
         # Hierarchical attention pooling
         self.pool = _HierarchicalPool(cnn_channels)
@@ -185,8 +222,28 @@ class InteractionMapCNN(nn.Module):
             for h in heads:
                 nn.init.xavier_uniform_(h.weight)
                 nn.init.zeros_(h.bias)
+        if self.use_interaction_channels:
+            nn.init.xavier_uniform_(self.prot_shared.weight)
+            nn.init.zeros_(self.prot_shared.bias)
+            nn.init.xavier_uniform_(self.lig_shared.weight)
+            nn.init.zeros_(self.lig_shared.bias)
         nn.init.xavier_uniform_(self.classifier.weight)
         nn.init.zeros_(self.classifier.bias)
+
+    def _cnn_residual(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward through CNN with residual connections."""
+        # Block A: in → 32
+        out = self.act(self.bn1(self.conv1(x)))
+        # Block B: 32 → 64 + skip(32→64)
+        identity = self.skip_ab(out)
+        out = self.act(self.bn2(self.conv2(out)) + identity)
+        # Block C: 64 → 64 dilated + skip(identity)
+        identity = out
+        out = self.act(self.bn3(self.conv3(out)) + identity)
+        # Block D: 64 → cnn_channels + skip
+        identity = self.skip_cd(out)
+        out = self.act(self.bn4(self.conv4(out)) + identity)
+        return out
 
     def forward(
         self,
@@ -217,12 +274,35 @@ class InteractionMapCNN(nn.Module):
 
         interaction = torch.stack(maps, dim=1)  # [B, K, seq_p, seq_l]
 
+        # --- Interaction feature channels (optional) -----------------
+        if self.use_interaction_channels:
+            ps = self.prot_shared(protein_matrix)  # [B, seq_p, d]
+            ls = self.lig_shared(ligand_matrix)    # [B, seq_l, d]
+            # Normalise for cosine
+            ps_n = torch.nn.functional.normalize(ps, dim=-1)
+            ls_n = torch.nn.functional.normalize(ls, dim=-1)
+            # Product map: sum of element-wise products across d
+            prod_map = torch.bmm(ps, ls.transpose(1, 2))       # [B, sp, sl]
+            # Diff map: ||p_i - l_j||^2 approximated via expansion
+            ps_sq = (ps ** 2).sum(-1, keepdim=True)             # [B, sp, 1]
+            ls_sq = (ls ** 2).sum(-1, keepdim=True)             # [B, 1, sl]
+            diff_map = ps_sq + ls_sq.transpose(1, 2) - 2 * prod_map  # [B, sp, sl]
+            diff_map = diff_map.clamp(min=0).sqrt()             # L2 distance
+            # Cosine map
+            cos_map = torch.bmm(ps_n, ls_n.transpose(1, 2))    # [B, sp, sl]
+            # Stack as extra channels
+            extras = torch.stack([prod_map, diff_map, cos_map], dim=1)  # [B, 3, sp, sl]
+            interaction = torch.cat([interaction, extras], dim=1)       # [B, K+3, sp, sl]
+
         # Mask padding positions
         mask_2d = protein_mask.unsqueeze(2) * ligand_mask.unsqueeze(1)  # [B, sp, sl]
         interaction = interaction * mask_2d.unsqueeze(1)
 
         # --- 2D CNN ---------------------------------------------------
-        features = self.cnn(interaction)  # [B, cnn_channels, seq_p, seq_l]
+        if self.use_residual:
+            features = self._cnn_residual(interaction)
+        else:
+            features = self.cnn(interaction)
         features = features * mask_2d.unsqueeze(1)  # re-apply mask after CNN
 
         # --- Hierarchical attention pool → classification ------------
@@ -299,6 +379,8 @@ def _train_interaction_cnn(
     head_dim: int = 32,
     cnn_channels: int = 64,
     dropout: float = 0.3,
+    use_interaction_channels: bool = False,
+    use_residual: bool = False,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -321,13 +403,16 @@ def _train_interaction_cnn(
         head_dim=head_dim,
         cnn_channels=cnn_channels,
         dropout=dropout,
+        use_interaction_channels=use_interaction_channels,
+        use_residual=use_residual,
     ).to(device)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     tqdm.write(
         f"    CNN InteractionMap: heads={num_heads}, head_dim={head_dim}, "
-        f"cnn_channels={cnn_channels}, dropout={dropout:.2f}\n"
+        f"cnn_channels={cnn_channels}, dropout={dropout:.2f}, "
+        f"interaction_ch={use_interaction_channels}, residual={use_residual}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
@@ -538,6 +623,12 @@ class Level4CNNRunner(BaseLevelRunner):
         cnn_channels = int(os.getenv("BENCHMARK_LEVEL4CNN_CHANNELS", "64"))
         dropout = float(os.getenv("BENCHMARK_LEVEL4CNN_DROPOUT", "0.3"))
         lr = float(os.getenv("BENCHMARK_LEVEL4CNN_LR", str(self._config.learning_rate)))
+        use_interaction_channels = os.getenv(
+            "BENCHMARK_LEVEL4CNN_INTERACTION_CHANNELS", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        use_residual = os.getenv(
+            "BENCHMARK_LEVEL4CNN_RESIDUAL", "0"
+        ).strip().lower() in {"1", "true", "yes"}
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -567,6 +658,8 @@ class Level4CNNRunner(BaseLevelRunner):
             head_dim=head_dim,
             cnn_channels=cnn_channels,
             dropout=dropout,
+            use_interaction_channels=use_interaction_channels,
+            use_residual=use_residual,
         )
 
         device = next(model.parameters()).device
