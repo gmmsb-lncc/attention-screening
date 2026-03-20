@@ -289,6 +289,36 @@ def _extract_labels(loader: DataLoader) -> np.ndarray:
     return np.asarray(labels, dtype=np.int64)
 
 
+def _save_training_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: object,
+    scaler: torch.amp.GradScaler,
+    use_amp: bool,
+    epoch: int,
+    best_score: float,
+    best_state: dict | None,
+    no_improve: int,
+) -> None:
+    """Save a training checkpoint for resuming interrupted runs."""
+    payload = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),  # type: ignore[union-attr]
+        "best_score": best_score,
+        "best_state": best_state,
+        "no_improve": no_improve,
+    }
+    if use_amp:
+        payload["scaler_state_dict"] = scaler.state_dict()
+    # Write to tmp then rename for atomicity
+    tmp_path = path + ".tmp"
+    torch.save(payload, tmp_path)
+    os.replace(tmp_path, path)
+    tqdm.write(f"    Checkpoint saved at epoch {epoch}: {path}")
+
 def _train_interaction_cnn(
     *,
     train_loader: DataLoader,
@@ -304,6 +334,8 @@ def _train_interaction_cnn(
     dropout: float = 0.3,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
+    checkpoint_dir: str | None = None,
+    checkpoint_every: int = 50,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -356,12 +388,35 @@ def _train_interaction_cnn(
             f"(max {epochs} epochs) ***"
         )
 
+    # --- Checkpoint paths ---------------------------------------------
+    ckpt_path = os.path.join(checkpoint_dir, "training_checkpoint.pt") if checkpoint_dir else None
+
     # --- Training loop ------------------------------------------------
     best_score = -float("inf")
     best_state = None
     no_improve = 0
+    start_epoch = 1
 
-    for epoch in range(1, epochs + 1):
+    # --- Resume from checkpoint if available --------------------------
+    if ckpt_path and os.path.exists(ckpt_path):
+        tqdm.write(f"    Resuming from checkpoint: {ckpt_path}")
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if use_amp and "scaler_state_dict" in ckpt:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        best_score = ckpt.get("best_score", -float("inf"))
+        no_improve = ckpt.get("no_improve", 0)
+        start_epoch = ckpt.get("epoch", 0) + 1
+        if ckpt.get("best_state") is not None:
+            best_state = ckpt["best_state"]
+        tqdm.write(
+            f"    Resumed at epoch {start_epoch}, "
+            f"best_val_mcc={best_score:.4f}, no_improve={no_improve}"
+        )
+
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         running_loss = 0.0
         n_batches = 0
@@ -459,10 +514,26 @@ def _train_interaction_cnn(
                 )
                 break
 
+        # --- Periodic checkpoint save ---------------------------------
+        if ckpt_path and checkpoint_every > 0 and epoch % checkpoint_every == 0:
+            assert isinstance(ckpt_path, str)
+            _save_training_checkpoint(
+                ckpt_path, model, optimizer, scheduler, scaler,
+                use_amp, epoch, best_score, best_state, no_improve,
+            )
+
     # --- Restore best model -------------------------------------------
     if best_state is not None:
         model.load_state_dict(best_state)
     model.to(device).eval()
+
+    # --- Clean up checkpoint (training complete) -----------------------
+    if checkpoint_dir is not None:
+        assert isinstance(checkpoint_dir, str)
+        final_ckpt = os.path.join(checkpoint_dir, "training_checkpoint.pt")
+        if os.path.exists(final_ckpt):
+            os.remove(final_ckpt)
+            tqdm.write(f"    Removed training checkpoint (training complete)")
 
     return model, {"best_val_mcc": best_score}
 
@@ -587,6 +658,9 @@ class Level4CNNRunner(BaseLevelRunner):
         train_to_zero = os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO", "0") == "1"
         train_to_zero_thr = float(os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR", "0.01"))
 
+        # --- Checkpoint frequency --------------------------------------
+        checkpoint_every = int(os.getenv("BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY", "50"))
+
         # --- Train ----------------------------------------------------
         tqdm.write("  Training InteractionMapCNN...")
         model, train_info = _train_interaction_cnn(
@@ -603,6 +677,8 @@ class Level4CNNRunner(BaseLevelRunner):
             dropout=dropout,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
+            checkpoint_dir=output_dir,
+            checkpoint_every=checkpoint_every,
         )
 
         device = next(model.parameters()).device
