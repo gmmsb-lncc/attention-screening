@@ -345,10 +345,34 @@ def _train_interaction_cnn(
     np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = device.type == "cuda"
+
+    # --- Precision flags ----------------------------------------------
+    use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "0") == "1"
+    no_amp = os.getenv("BENCHMARK_LEVEL4CNN_NO_AMP", "0") == "1"
+    deterministic = os.getenv("BENCHMARK_LEVEL4CNN_DETERMINISTIC", "0") == "1"
+
+    dtype = torch.float64 if use_double else torch.float32
+    use_amp = device.type == "cuda" and not no_amp and not use_double
     scaler = torch.amp.GradScaler(enabled=use_amp)
-    if device.type == "cuda":
+
+    if deterministic:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        tqdm.write("    Deterministic mode: ON (cudnn.benchmark=False)")
+    elif device.type == "cuda":
         torch.backends.cudnn.benchmark = True
+
+    precision_info = []
+    if use_double:
+        precision_info.append("float64")
+    if no_amp or use_double:
+        precision_info.append("AMP=OFF")
+    else:
+        precision_info.append("AMP=ON")
+    if deterministic:
+        precision_info.append("deterministic")
+    tqdm.write(f"    Precision: {', '.join(precision_info)}")
 
     # --- Build model --------------------------------------------------
     model = InteractionMapCNN(
@@ -358,7 +382,7 @@ def _train_interaction_cnn(
         head_dim=head_dim,
         cnn_channels=cnn_channels,
         dropout=dropout,
-    ).to(device)
+    ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -378,7 +402,7 @@ def _train_interaction_cnn(
     train_labels = _extract_labels(train_loader)
     pos_weight = _compute_pos_weight(train_labels)
     criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device),
+        pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
     )
     tqdm.write(f"    pos_weight={pos_weight:.2f}, lr={lr:.1e}, wd={weight_decay}")
     if train_to_zero:
@@ -422,11 +446,11 @@ def _train_interaction_cnn(
         n_batches = 0
 
         for batch in train_loader:
-            p = batch["protein_matrix"].to(device)
-            l = batch["ligand_matrix"].to(device)
+            p = batch["protein_matrix"].to(device=device, dtype=dtype)
+            l = batch["ligand_matrix"].to(device=device, dtype=dtype)
             pm = batch["protein_mask"].to(device)
             lm = batch["ligand_mask"].to(device)
-            y = batch["label"].to(device).unsqueeze(1)
+            y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
@@ -453,11 +477,11 @@ def _train_interaction_cnn(
 
         with torch.inference_mode():
             for batch in val_loader:
-                p = batch["protein_matrix"].to(device)
-                l = batch["ligand_matrix"].to(device)
+                p = batch["protein_matrix"].to(device=device, dtype=dtype)
+                l = batch["ligand_matrix"].to(device=device, dtype=dtype)
                 pm = batch["protein_mask"].to(device)
                 lm = batch["ligand_mask"].to(device)
-                y = batch["label"].to(device).unsqueeze(1)
+                y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     logits = model(p, l, pm, lm)
@@ -554,14 +578,18 @@ def _evaluate(
     all_probs: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
+    # Auto-detect model dtype for double precision support
+    model_dtype = next(model.parameters()).dtype
+    eval_amp = device.type == "cuda" and model_dtype != torch.float64
+
     for batch in loader:
-        p = batch["protein_matrix"].to(device)
-        l = batch["ligand_matrix"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
         pm = batch["protein_mask"].to(device)
         lm = batch["ligand_mask"].to(device)
         y = batch["label"].numpy()
 
-        with torch.amp.autocast(device_type=device.type, enabled=device.type == "cuda"):
+        with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
             logits = model(p, l, pm, lm)
 
         probs = torch.sigmoid(logits.float()).cpu().numpy().ravel()
