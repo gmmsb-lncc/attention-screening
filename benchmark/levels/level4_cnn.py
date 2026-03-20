@@ -302,6 +302,8 @@ def _train_interaction_cnn(
     head_dim: int = 32,
     cnn_channels: int = 64,
     dropout: float = 0.3,
+    train_to_zero: bool = False,
+    train_to_zero_threshold: float = 0.01,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -347,6 +349,12 @@ def _train_interaction_cnn(
         pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device),
     )
     tqdm.write(f"    pos_weight={pos_weight:.2f}, lr={lr:.1e}, wd={weight_decay}")
+    if train_to_zero:
+        tqdm.write(
+            f"    *** TRAIN-TO-ZERO mode: early stopping DISABLED, "
+            f"training until train_loss & val_loss < {train_to_zero_threshold:.4f} "
+            f"(max {epochs} epochs) ***"
+        )
 
     # --- Training loop ------------------------------------------------
     best_score = -float("inf")
@@ -410,15 +418,22 @@ def _train_interaction_cnn(
 
         thr, val_mcc = _best_mcc_threshold(targets.astype(int), probs)
 
-        # Early stopping on val_mcc
+        # Early stopping on val_mcc (disabled in train-to-zero mode)
         improved = val_mcc > best_score
         marker = " ★" if improved else ""
 
-        tqdm.write(
-            f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
-            f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
-            f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
-        )
+        if train_to_zero:
+            tqdm.write(
+                f"    Epoch {epoch:3d}: loss={avg_train:.6f}, "
+                f"val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, "
+                f"thr={thr:.3f}{marker}"
+            )
+        else:
+            tqdm.write(
+                f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
+                f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
+                f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
+            )
 
         if improved:
             best_score = val_mcc
@@ -426,6 +441,17 @@ def _train_interaction_cnn(
             no_improve = 0
         else:
             no_improve += 1
+
+        if train_to_zero:
+            # In train-to-zero mode: stop only when both losses are below threshold
+            if avg_train < train_to_zero_threshold and avg_val < train_to_zero_threshold:
+                tqdm.write(
+                    f"    ✓ Train-to-zero converged at epoch {epoch}: "
+                    f"train_loss={avg_train:.6f}, val_loss={avg_val:.6f} "
+                    f"(both < {train_to_zero_threshold})"
+                )
+                break
+        else:
             if no_improve >= patience:
                 tqdm.write(
                     f"    Early stopping at epoch {epoch} "
@@ -557,6 +583,10 @@ class Level4CNNRunner(BaseLevelRunner):
         # separate feature extraction stage that could leak).
         model_train_loader = train_loader
 
+        # --- Train-to-zero mode ----------------------------------------
+        train_to_zero = os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO", "0") == "1"
+        train_to_zero_thr = float(os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR", "0.01"))
+
         # --- Train ----------------------------------------------------
         tqdm.write("  Training InteractionMapCNN...")
         model, train_info = _train_interaction_cnn(
@@ -571,6 +601,8 @@ class Level4CNNRunner(BaseLevelRunner):
             head_dim=head_dim,
             cnn_channels=cnn_channels,
             dropout=dropout,
+            train_to_zero=train_to_zero,
+            train_to_zero_threshold=train_to_zero_thr,
         )
 
         device = next(model.parameters()).device
