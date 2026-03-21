@@ -4,28 +4,31 @@
 # Usage:
 #   bash setup_env.sh
 #
-# All packages installed via conda only (no pip).
+# Tested on: diamante-02 (RTX 4090, CUDA 12.4, Python 3.10)
 #
-# Key lessons from deployment on diamante-01 (CUDA 12.2, PyTorch 2.4.1):
+# Installation order (CRITICAL — changing order breaks things):
+#   1. conda: Python 3.10 + scientific deps (numpy, sklearn, rdkit, etc.)
+#      ⚠ Do NOT include pytorch or dgl here (conda-forge pulls CPU-only builds)
+#   2. pip: PyTorch 2.4.1 + torchvision + torchaudio from pytorch.org/whl/cu121
+#      ⚠ conda pytorch from conda-forge installs CPU-only builds that break
+#        torchvision::nms operator registration (RuntimeError)
+#   3. pip: PyTorch-Geometric (torch-geometric, torch-scatter, etc.)
+#   4. conda: DGL from dglteam/label/cu121 channel (--no-update-deps!)
+#      ⚠ pip DGL wheels from data.dgl.ai return HTTP 403
+#      ⚠ conda-forge DGL pulls its own pytorch 2.3.1 (overrides pip 2.4.1)
+#      ⚠ Must pip uninstall dgl first to avoid ClobberError
+#      ⚠ DGL graphbolt .so expects wrong PyTorch — patch __init__.py after install
+#   5. pip: dgllife, fair-esm
+#   6. Clone GraphBAN source + apply upstream patches
+#   7. Verify all imports
 #
-#   1. PyTorch MUST come from the 'pytorch' channel, NOT conda-forge.
-#      conda-forge ships CPU-only builds (cpu_mkl_*) that conflict with
-#      CUDA torchvision/torchaudio and break torchvision::nms op registration.
-#
-#   2. pytorch + torchvision + torchaudio MUST be installed in ONE transaction
-#      so conda guarantees ABI-compatible builds (same build string py311_cu121).
-#
-#   3. DGL from 'dglteam/label/cu121' ships graphbolt .so files built for
-#      older PyTorch versions. They call libc exit(1) on load failure with
-#      the message "Stopping RUNTIME. Colaboratory will restart automatically."
-#      Fix: overwrite dgl/graphbolt/__init__.py with a no-op stub after install.
-#
-#   4. GraphBAN's src/inductive_mode/models.py has a Colab-only import that
-#      calls exit() when IPythonConsole is missing. Fix applied after clone.
-#
-#   5. transformers >= 4.40 blocks torch.load(.bin) due to CVE-2025-32434.
-#      ChemBERTa-77M-MTR has safetensors — use_safetensors=True in code.
-#      safetensors must be installed explicitly.
+# Common errors and fixes:
+#   torchvision::nms does not exist → PyTorch was from conda-forge (CPU build)
+#     Fix: pip install from pytorch.org/whl/cu121
+#   DGL graphbolt libgraphbolt_pytorch_X.so not found → ABI mismatch
+#     Fix: echo "# disabled" > dgl/graphbolt/__init__.py
+#   GraphBAN models.py calls exit() → Colab-only import
+#     Fix: patch_upstream.py removes the problematic import
 #
 set -euo pipefail
 
@@ -110,20 +113,24 @@ fi
 echo "[INFO] Installing PyTorch-Geometric via pip..."
 pip install torch-geometric torch-scatter torch-sparse torch-cluster torch-spline-conv
 
-# ── Step 4: DGL + dgllife via pip (AFTER pytorch) ─────────────────────────
-# Installing via pip avoids conda-forge's DGL pulling in its own pytorch.
-echo "[INFO] Installing DGL + dgllife via pip..."
-pip install dgl dgllife
+# ── Step 4: DGL + dgllife (AFTER pytorch, via conda from dglteam) ──────────
+# pip wheels from data.dgl.ai return 403. conda from dglteam channel is reliable.
+# conda DGL won't override pip-installed PyTorch.
+echo "[INFO] Installing DGL via conda (dglteam channel)..."
+pip uninstall -y dgl 2>/dev/null || true
+if [ "${GPU_MODE}" = true ]; then
+    conda install -y dgl -c "dglteam/label/cu${PYTORCH_CUDA//./}" --no-update-deps
+else
+    conda install -y dgl -c dglteam --no-update-deps
+fi
+
+echo "[INFO] Installing dgllife via pip..."
+pip install dgllife
 
 # ── Step 4b: Patch DGL graphbolt to prevent exit(1) crash ─────────────────
 echo "[INFO] Patching DGL graphbolt __init__.py to prevent CUDA version crash..."
-DGL_GB=$(python3 -c "
-import importlib.util, pathlib
-spec = importlib.util.find_spec('dgl')
-if spec:
-    p = pathlib.Path(spec.origin).parent / 'graphbolt/__init__.py'
-    print(p)
-" 2>/dev/null)
+DGL_GB=$(find "$(python3 -c 'import site; print(site.getsitepackages()[0])')" \
+    -path "*/dgl/graphbolt/__init__.py" 2>/dev/null | head -1)
 if [ -n "${DGL_GB}" ] && [ -f "${DGL_GB}" ]; then
     echo "# graphbolt disabled by setup_env.sh — GraphBAN does not use it" > "${DGL_GB}"
     echo "[INFO] Patched: ${DGL_GB}"
