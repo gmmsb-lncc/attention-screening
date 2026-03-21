@@ -1,6 +1,6 @@
 # Benchmark Package
 
-Modular framework for comparing protein–ligand interaction prediction models across a **five-level hierarchical representation benchmark**, using universal scaffold-based data splits for rigorous evaluation.
+Modular framework for comparing protein–ligand interaction prediction models across a **six-level hierarchical representation benchmark**, using universal scaffold-based data splits for rigorous evaluation.
 
 > SOLID-compliant package with ~15 focused modules. All levels share the same canonical classifiers, scaffold split, activity threshold, metrics, and multi-seed protocol.
 
@@ -15,28 +15,8 @@ The **only factor** that varies across levels is the **molecular representation*
 | Component | Specification |
 |-----------|--------------|
 | **KNN** | FAISS inner-product on L2-normalised features (cosine similarity), *k* = 5, distance-weighted voting |
-| **MLP Selection** | 9-candidate topology search via 5-fold stratified CV × 3 restarts, stability-adjusted MCC objective: `score = mean_MCC - 0.10 × std_MCC` |
-| **MLP Ensemble** | Best candidate retrained as ensemble of 5 members with independent seeds |
-| **Threshold** | OOF (out-of-fold) threshold refinement on training data, maximising MCC |
+| **MLP** | `sklearn.neural_network.MLPClassifier` with hidden layers `(256, 128)`, ReLU activation, Adam solver, adaptive learning rate, α = 10⁻³, early stopping (patience = 20, 10% validation), max 2000 iterations, decision threshold = 0.5 |
 | **Scaler** | `StandardScaler` (fit on reference partition, applied to all partitions) |
-
-### MLP Candidate Space
-
-Nine configurations varying topology (128–512 neurons, 1–3 layers), L₂ regularisation (α ∈ [5×10⁻³, 10⁻¹]), learning rate, and tolerance:
-
-| # | Topology | α | η₀ | tol |
-|---|----------|---|----|----|
-| 1 | (512) | 10⁻² | 10⁻³ | 10⁻⁵ |
-| 2 | (512, 256) | 5×10⁻³ | 8×10⁻⁴ | 8×10⁻⁶ |
-| 3 | (256, 128) | 5×10⁻³ | 10⁻³ | 10⁻⁵ |
-| 4 | (256) | 10⁻² | 10⁻³ | 10⁻⁵ |
-| 5 | (128, 64) | 5×10⁻³ | 8×10⁻⁴ | 8×10⁻⁶ |
-| 6 | (256, 128) | 5×10⁻² | 5×10⁻⁴ | 10⁻⁵ |
-| 7 | (128) | 10⁻¹ | 10⁻³ | 10⁻⁵ |
-| 8 | (512, 256, 128) | 10⁻² | 5×10⁻⁴ | 8×10⁻⁶ |
-| 9 | (384, 192) | 10⁻² | 8×10⁻⁴ | 10⁻⁵ |
-
-All candidates use ReLU activation, Adam solver with adaptive learning rate, `max_iter = 2000`, and `n_iter_no_change = 60`.
 
 ### Evaluation Protocol
 
@@ -46,7 +26,8 @@ Scaffold Split:  Train (~80%)  /  Val (~10%)  /  Test (~10%)
   Level 1a:            │     FP(val) ──┤    FP(test) ──┤
   Level 1b:            │   Mean(val) ──┤   Mean(test) ─┤
   Level 1c:  train AttnPool →  pool(val)├    pool(test) ┤
-  Level 3:   train AttnPool →  pool(val)├    pool(test) ┤
+  Level 2:             │  Mean₂(val) ──┤  Mean₂(test) ─┤
+  Level 3:   train AttnPool₂→  pool(val)├    pool(test) ┤
   Level 4:   train CNN 2D  →  end-to-end on test        │
                        │               │               │
                        │         ┌─────┘        ┌──────┘
@@ -57,30 +38,43 @@ Scaffold Split:  Train (~80%)  /  Val (~10%)  /  Test (~10%)
 
 **Two-phase protocol**: `--train` fits classifiers on training data (80%) and evaluates on validation (10%); `--test` fits on validation and evaluates on held-out test (10%). The test set is **never loaded** during training. The MLP selection from the train phase is **frozen** and reused in the test phase.
 
-## The Five Levels
+## The Six Levels
 
 | Level | Input | Aggregation | Trainable Params | Module |
 |-------|-------|-------------|-----------------|--------|
 | **1a** | Morgan FP (1024-bit, r=2) — ligand only | — | 0 | `levels/level1.py` |
-| **1b** | MoLFormer per-token embeddings — ligand only | Mean pooling (zero params) | 0 | `levels/level1b.py` |
-| **1c** | MoLFormer per-token embeddings — ligand only | ResProj + multi-query attention pooling (4q, 8h) | ~461K | `levels/level1c.py` |
-| **3** | ESM-2 protein + MoLFormer ligand matrices | ResProj + MQAttn + interaction features + aux head | ~543K | `levels/level3.py` |
-| **4** | ESM-2 protein + MoLFormer ligand matrices | Multi-head projection → 2D interaction maps → CNN 2D → hierarchical attn pooling | ~337K | `levels/level4_cnn.py` |
+| **1b** | MoLFormer per-token embeddings — ligand only | Masked mean pooling (zero params) | 0 | `levels/level1b.py` |
+| **1c** | MoLFormer per-token embeddings — ligand only | Proj (Linear→LN→GELU→Drop) + attention pooling (1q, 8h) | ~264K | `levels/level1c.py` |
+| **2** | ESM-2 protein + MoLFormer ligand embeddings | Masked mean pooling per modality + concatenation | 0 | `levels/level2.py` |
+| **3** | ESM-2 protein + MoLFormer ligand matrices | Proj + attention pooling (1q, 8h) per modality + concat | ~528K | `levels/level3.py` |
+| **4** | ESM-2 protein + MoLFormer ligand matrices | Multi-head projection → 2D interaction maps → CNN 2D → hierarchical attn pooling | ~550K | `levels/level4_cnn.py` |
 
 ### Level Architecture Details
 
-**Level 1c**: Linear projection (768 → 256) with LayerNorm + GELU + Dropout → multi-query attention pooling (4 learned queries, 8 heads) → aux head (training only) → feature vector ∈ ℝ²⁵⁶.
+**Levels 1a, 1b, 2**: No trainable parameters. Level 1a uses Morgan fingerprints. Levels 1b and 2 apply masked mean pooling directly over raw foundation model embeddings — no projection, no learned components.
 
-**Level 3**: Two-layer residual projection per modality → multi-query attention pooling (4 queries, 8 heads) per modality → interaction features (element-wise product, absolute difference, cosine similarity) → 2-layer aux MLP → final feature vector ∈ ℝ¹²⁸² = (4×256 + 1) + 256 + 1.
+**Level 1c**: Single-layer projection (`Linear → LayerNorm → GELU → Dropout`, 768 → 256) followed by attention pooling with a single learned query vector (q ∈ ℝ^256) and multi-head attention (8 heads). Produces feature vectors z_L ∈ ℝ^256.
+
+**Level 3**: Same backbone as Level 1c, replicated independently for protein and ligand modalities. Each modality has its own projection and attention pooling module with an independent learned query. Outputs are concatenated: z^(3) = [z_P ∥ z_L] ∈ ℝ^512. No cross-modal interaction is modeled — concatenation is the sole fusion point.
 
 **Level 4 (CNN)**: K=8 multi-head linear projections → scaled dot-product interaction maps ∈ ℝ^(K×n×m) → 4-layer CNN 2D (including dilated convolution) → hierarchical attention pooling (first along ligand axis, then along protein axis) → linear classifier (end-to-end).
+
+### Training Protocol (Levels 1c, 3)
+
+- **Optimizer**: AdamW (η = 10⁻⁴, weight decay λ = 0.01)
+- **LR schedule**: CosineAnnealingLR (T = 500 epochs)
+- **Gradient clipping**: ‖∇‖₂ ≤ 1.0
+- **Early stopping**: patience = 5 (monitoring validation loss)
+- **Auxiliary head**: Binary classification head (BCEWithLogitsLoss) discarded after training
+- **Weight initialization**: Xavier uniform (projection), std = 0.02 (attention query)
 
 ### Data Flow per Level
 
 - **Level 1a**: Scaffold val/test TSV → Morgan FP → `StandardScaler` → KNN/MLP
 - **Level 1b**: Scaffold val/test TSV → load MoLFormer matrices → mean pool → `StandardScaler` → KNN/MLP
 - **Level 1c**: Train projection + attn pooling on train (early stop on val) → extract features from val/test → `StandardScaler` → KNN/MLP
-- **Level 3**: Train bimodal attn pooling on train (early stop on val) → extract features from val/test → `StandardScaler` → KNN/MLP
+- **Level 2**: Scaffold val/test TSV → load ESM-2 + MoLFormer matrices → mean pool per modality → concatenate → `StandardScaler` → KNN/MLP
+- **Level 3**: Train bimodal projection + attn pooling on train (early stop on val) → extract features from val/test → `StandardScaler` → KNN/MLP
 - **Level 4**: Train CNN 2D end-to-end on train (early stop on val MCC) → classify test directly
 
 ## Architecture
@@ -93,7 +87,7 @@ semantic_screening_models.py          ← Thin CLI entry point
     ├── config.py                     ← BenchmarkConfig (frozen dataclass), constants
     ├── cli.py                        ← argparse → BenchmarkConfig
     ├── orchestrator.py               ← Facade: coordinates the full pipeline
-    ├── classifiers.py                ← Canonical KNN + MLP (9-candidate CV + ensemble)
+    ├── classifiers.py                ← Canonical KNN + MLP (traditional classifiers)
     ├── progress.py                   ← tqdm-based step tracker
     ├── splits.py                     ← Scaffold split verification / generation
     ├── embeddings.py                 ← AttentionPooling module
@@ -108,7 +102,7 @@ semantic_screening_models.py          ← Thin CLI entry point
         ├── level1.py                 ← Level 1a: Morgan fingerprints
         ├── level1b.py                ← Level 1b: MoLFormer mean pooling
         ├── level1c.py                ← Level 1c: MoLFormer attention pooling
-        ├── level2.py                 ← Level 2: Bimodal mean pooling (experimental)
+        ├── level2.py                 ← Level 2: Bimodal mean pooling
         ├── level3.py                 ← Level 3: Bimodal attention pooling
         ├── level4_cnn.py             ← Level 4: CNN 2D interaction maps
         ├── level4_crossatt.py        ← Level 4 variant: Cross-attention (experimental)
@@ -135,40 +129,20 @@ semantic_screening_models.py          ← Thin CLI entry point
 - **Facade** — `BenchmarkOrchestrator.run()` hides all pipeline complexity
 - **Frozen Dataclass** — `BenchmarkConfig` is immutable after construction
 
-## Key Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCHMARK_MLP_USE_CV` | `1` | Stratified CV for MLP selection |
-| `BENCHMARK_MLP_FOLDS` | `5` | CV folds |
-| `BENCHMARK_MLP_CAL_RESTARTS` | `3` | Restarts per candidate (threshold calibration) |
-| `BENCHMARK_MLP_ENSEMBLE` | `5` | Ensemble members for final prediction |
-| `BENCHMARK_MLP_OOF_THRESHOLD` | `1` | OOF threshold refinement |
-| `BENCHMARK_MLP_FULL_REFIT` | `0` | Full refit (no early stopping in final ensemble) |
-| `BENCHMARK_MLP_OVERSAMPLE` | `0` | Minority class oversampling |
-| `BENCHMARK_LEVEL3_INTERACTION_FEATURES` | `0` | Product + abs-diff + cosine features |
-| `BENCHMARK_LEVEL3_AUX_INTERACTIONS` | `0` | Train aux head with interaction features |
-| `BENCHMARK_LEVEL3_MULTILAYER_LAYERS` | `` | Multi-layer MoLFormer extraction (e.g., `"4,5,6"`) |
-| `BENCHMARK_LEVEL3_HIDDEN_DIM` | auto | Override hidden dimension |
-| `BENCHMARK_LEVEL3_SELECTION_METRIC` | `val_loss` | Checkpoint selection metric |
-| `BENCHMARK_LEVEL3_DOWNSTREAM_EVAL_EVERY` | `10` | Downstream eval frequency (epochs) |
-| `BENCHMARK_REQUIRE_TRAIN_SELECTION` | `1` | Require frozen train selection for test |
-| `BENCHMARK_STRICT_LEVEL_COMPLETENESS` | `1` | All requested levels must complete |
-
 ## Quick Start
 
 ```bash
-# Full benchmark: core 5 levels (non-human dataset, ESM-2 8M)
+# Full benchmark: core 6 levels (non-human dataset, ESM-2 8M)
 # Train
 python semantic_screening_models.py --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 3 4cnn --train
+    --levels 1a 1b 1c 2 3 4cnn --train
 
 # Test
 python semantic_screening_models.py --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 3 4cnn --test
+    --levels 1a 1b 1c 2 3 4cnn --test
 
 # Or use the automated script:
-DATASET=non_human EMBEDDING=8M LEVELS_CSV=1a,1b,1c,3,4cnn bash run_benchmark.sh
+DATASET=non_human EMBEDDING=8M LEVELS_CSV=1a,1b,1c,2,3,4cnn bash run_benchmark.sh
 ```
 
 ## CLI Reference
@@ -177,7 +151,7 @@ DATASET=non_human EMBEDDING=8M LEVELS_CSV=1a,1b,1c,3,4cnn bash run_benchmark.sh
 python semantic_screening_models.py \
     --dataset {human,non_human,all}       # Required
     --embedding {8M,150M,650M}            # Default: 8M
-    --levels 1a 1b 1c 3 4cnn              # Default: all available
+    --levels 1a 1b 1c 2 3 4cnn           # Default: all available
     --seeds 42 123 456                    # Default: [42, 123, 456, 789, 1024]
     --output_dir ./my_results             # Default: ./results/benchmark_{dataset}_{embedding}
     --scaffold_split_dir path/to/splits   # Default: scaffolds_splits/output
