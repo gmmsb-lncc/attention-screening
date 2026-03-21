@@ -4,10 +4,18 @@
 # Usage:
 #   bash setup_env.sh
 #
-# Notes:
-# - Creates/updates conda env named "drugban"
-# - Installs core dependencies with conda
-# - Clones upstream DrugBAN source into DrugBAN/src if missing
+# Installation order (to avoid ABI conflicts):
+#   1. conda: Python + scientific deps (WITHOUT pytorch/dgl)
+#   2. pip: PyTorch stack from official pytorch.org index
+#   3. pip: DGL + dgllife (after pytorch, to match ABI)
+#   4. Patch DGL graphbolt to prevent exit(1) crash
+#   5. Clone DrugBAN upstream source
+#   6. Verify all imports
+#
+# Key lessons learned:
+#   - conda-forge DGL pulls its own pytorch (2.3.1 CPU), overwriting pip 2.4.1+cu121
+#   - conda-forge pytorch picks CPU-only builds causing torchvision::nms crash
+#   - Solution: use pip for ALL pytorch-related packages (torch, dgl, dgllife)
 
 set -euo pipefail
 
@@ -15,8 +23,6 @@ ENV_NAME="drugban"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${SCRIPT_DIR}/src"
 UPSTREAM_URL="https://github.com/peizhenbai/DrugBAN.git"
-# Optional: pin upstream source for reproducibility.
-# Set to a commit hash or git tag, e.g. "a1b2c3d" or "v1.0.0".
 UPSTREAM_REF=""
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -44,15 +50,33 @@ else
   echo "[INFO] No GPU detected. Installing CPU-compatible stack."
 fi
 
-# ── Step 1: PyTorch + torchvision + torchaudio (pip, official index) ───────
-# conda's channel resolver unreliably picks CPU-only builds from conda-forge,
-# causing torchvision::nms ABI failures. pip with --index-url is reliable.
+# ── Step 1: Conda scientific deps (NO pytorch, NO dgl) ────────────────────
+# Install these first via conda. pytorch and dgl come via pip to avoid
+# conda-forge pulling in incompatible CPU-only pytorch builds.
+echo "[INFO] Installing scientific dependencies via conda..."
+conda install -y \
+  "numpy<2" \
+  pandas \
+  scikit-learn \
+  tqdm \
+  rdkit \
+  prettytable \
+  yacs \
+  torchmetrics \
+  pyyaml \
+  pyarrow \
+  transformers \
+  safetensors \
+  huggingface_hub \
+  -c conda-forge
+
+# ── Step 2: PyTorch stack via pip (official index) ─────────────────────────
 echo "[INFO] Cleaning any existing PyTorch packages..."
 pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
 SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
 if [ -n "${SITE_PKGS}" ]; then
     for pkg_dir in torch torchvision torchaudio; do
-        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}*.dist-info" 2>/dev/null || true
+        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}"*.dist-info 2>/dev/null || true
     done
 fi
 
@@ -71,27 +95,12 @@ else
         --index-url https://download.pytorch.org/whl/cpu
 fi
 
-echo "[INFO] Installing scientific dependencies..."
-conda install -y \
-  "numpy<2" \
-  pandas \
-  scikit-learn \
-  tqdm \
-  rdkit \
-  prettytable \
-  yacs \
-  torchmetrics \
-  pyyaml \
-  pyarrow \
-  transformers \
-  safetensors \
-  huggingface_hub \
-  dgl \
-  dgllife \
-  -c conda-forge
+# ── Step 3: DGL + dgllife via pip (AFTER pytorch) ─────────────────────────
+# Installing via pip avoids conda-forge's DGL pulling in its own pytorch.
+echo "[INFO] Installing DGL + dgllife via pip..."
+pip install dgl dgllife
 
-# ── Patch DGL graphbolt to prevent exit(1) crash ──────────────────────────
-# DGL 2.x graphbolt .so may crash with ABI mismatch. Disable it.
+# ── Step 4: Patch DGL graphbolt to prevent exit(1) crash ──────────────────
 echo "[INFO] Patching DGL graphbolt..."
 DGL_GB=$(python3 -c "
 import importlib.util, pathlib
@@ -107,6 +116,7 @@ else
     echo "[WARN] Could not locate dgl/graphbolt/__init__.py — skipping patch."
 fi
 
+# ── Step 5: Clone DrugBAN source ──────────────────────────────────────────
 if [ -d "${SRC_DIR}/.git" ]; then
   echo "[INFO] DrugBAN source already present at ${SRC_DIR}"
   git -C "${SRC_DIR}" fetch --all --tags --prune
@@ -129,26 +139,31 @@ else
   echo "[INFO] No UPSTREAM_REF pin set; using repository default branch HEAD."
 fi
 
-echo "[INFO] Running import checks..."
-python - << 'PYEOF'
+# ── Step 6: Verify installation ──────────────────────────────────────────
+echo ""
+echo "[INFO] Verifying installation..."
+python3 - << 'PYEOF'
 import sys
-checks = [
-    ("torch", "import torch; print('torch', torch.__version__)"),
-    ("torchvision", "import torchvision; print('torchvision', torchvision.__version__)"),
-    ("dgl", "import dgl; print('dgl', dgl.__version__)"),
-    ("dgllife", "from dgllife.utils import smiles_to_bigraph; print('dgllife OK')"),
-    ("rdkit", "from rdkit import Chem; print('rdkit OK')"),
-    ("transformers", "from transformers import AutoTokenizer; print('transformers OK')"),
-    ("sklearn", "import sklearn; print('sklearn', sklearn.__version__)"),
-]
 ok = True
+checks = [
+    ("torch",        "import torch; print(f'  torch {torch.__version__} | CUDA={torch.cuda.is_available()}')"),
+    ("torchvision",  "import torchvision; print(f'  torchvision {torchvision.__version__}')"),
+    ("dgl",          "import dgl; print(f'  dgl {dgl.__version__}')"),
+    ("dgllife",      "from dgllife.utils import smiles_to_bigraph; print('  dgllife OK')"),
+    ("rdkit",        "from rdkit import Chem; print('  rdkit OK')"),
+    ("transformers", "from transformers import AutoTokenizer; print('  transformers OK')"),
+    ("sklearn",      "import sklearn; print(f'  sklearn {sklearn.__version__}')"),
+]
 for name, code in checks:
     try:
         exec(code)
     except Exception as e:
         ok = False
-        print(f"[FAIL] {name}: {e}", file=sys.stderr)
-if not ok:
+        print(f"  [FAIL] {name}: {e}", file=sys.stderr)
+if ok:
+    print("\n  All checks passed.")
+else:
+    print("\n  Some checks failed — review errors above.", file=sys.stderr)
     sys.exit(1)
 PYEOF
 
