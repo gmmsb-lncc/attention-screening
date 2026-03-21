@@ -77,8 +77,8 @@ def setup_drugban_imports() -> dict:
     try:
         # Load config from absolute path to avoid configs/ name collision
         import importlib.util
-        config_path = DRUGBAN_SRC / "config.py"
-        spec = importlib.util.spec_from_file_location("drugban_config", str(config_path))
+        config_path = DRUGBAN_SRC / "configs.py"
+        spec = importlib.util.spec_from_file_location("drugban_configs", str(config_path))
         cfg_mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cfg_mod)
         get_cfg_defaults = cfg_mod.get_cfg_defaults
