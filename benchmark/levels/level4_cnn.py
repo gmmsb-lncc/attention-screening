@@ -347,7 +347,7 @@ def _train_interaction_cnn(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- Precision flags ----------------------------------------------
-    use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "0") == "1"
+    use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
     no_amp = os.getenv("BENCHMARK_LEVEL4CNN_NO_AMP", "0") == "1"
     deterministic = os.getenv("BENCHMARK_LEVEL4CNN_DETERMINISTIC", "0") == "1"
 
