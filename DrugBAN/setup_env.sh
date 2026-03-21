@@ -158,6 +158,15 @@ else
   echo "[INFO] No UPSTREAM_REF pin set; using repository default branch HEAD."
 fi
 
+# ── Step 5b: Patch max_drug_nodes default in dataloader.py ────────────
+# Upstream hardcodes max_drug_nodes=290 but human dataset has molecules
+# up to 310 atoms. Read MAX_NODES from config and patch the default.
+MAX_NODES=$(grep 'MAX_NODES' configs/kinase.yaml 2>/dev/null | head -1 | awk -F: '{print $2}' | awk '{print $1}')
+if [ -n "${MAX_NODES}" ] && [ "${MAX_NODES}" != "290" ] && [ -f "${SRC_DIR}/dataloader.py" ]; then
+    sed -i "s/max_drug_nodes=290/max_drug_nodes=${MAX_NODES}/g" "${SRC_DIR}/dataloader.py"
+    echo "[INFO] Patched dataloader.py: max_drug_nodes=290 → ${MAX_NODES}"
+fi
+
 # ── Step 6: Verify installation ──────────────────────────────────────────
 echo ""
 echo "[INFO] Verifying installation..."
