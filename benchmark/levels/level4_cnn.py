@@ -23,7 +23,14 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import matthews_corrcoef
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -571,9 +578,17 @@ def _evaluate(
     model: InteractionMapCNN,
     loader: DataLoader,
     device: torch.device,
+    threshold: float | None = None,
     desc: str = "",
-) -> tuple[float, float, float]:
-    """Evaluate model and return (mcc, threshold, accuracy)."""
+) -> dict:
+    """Evaluate model and return full metrics dict.
+
+    If `threshold` is provided (e.g., from val-optimized), use it directly.
+    Otherwise, sweep to find the MCC-optimal threshold on this data.
+
+    Returns dict with: mcc, threshold, accuracy, f1, precision, recall, auroc,
+    plus raw y_true and y_prob arrays.
+    """
     model.eval()
     all_probs: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
@@ -598,14 +613,41 @@ def _evaluate(
 
     probs = np.concatenate(all_probs)
     targets = np.concatenate(all_targets).astype(int)
-    thr, mcc = _best_mcc_threshold(targets, probs)
+
+    if threshold is None:
+        thr, mcc = _best_mcc_threshold(targets, probs)
+    else:
+        thr = threshold
+        preds_for_mcc = (probs >= thr).astype(int)
+        mcc = float(matthews_corrcoef(targets, preds_for_mcc))
+
     preds = (probs >= thr).astype(int)
-    acc = float((preds == targets).mean())
+    acc = float(accuracy_score(targets, preds))
+    f1 = float(f1_score(targets, preds, zero_division=0))
+    prec = float(precision_score(targets, preds, zero_division=0))
+    rec = float(recall_score(targets, preds, zero_division=0))
+    try:
+        auroc = float(roc_auc_score(targets, probs))
+    except ValueError:
+        auroc = 0.0
 
     if desc:
-        tqdm.write(f"    {desc}: MCC={mcc:.4f}, thr={thr:.3f}, acc={acc:.4f}")
+        tqdm.write(
+            f"    {desc}: MCC={mcc:.4f}, AUROC={auroc:.4f}, "
+            f"F1={f1:.4f}, thr={thr:.3f}, acc={acc:.4f}"
+        )
 
-    return mcc, thr, acc
+    return {
+        "mcc": mcc,
+        "threshold": thr,
+        "accuracy": acc,
+        "f1": f1,
+        "precision": prec,
+        "recall": rec,
+        "auroc": auroc,
+        "y_true": targets,
+        "y_prob": probs,
+    }
 
 
 # ======================================================================
@@ -712,18 +754,31 @@ class Level4CNNRunner(BaseLevelRunner):
         device = next(model.parameters()).device
 
         # --- Evaluate -------------------------------------------------
+        # Step 1: Evaluate on val to get val-optimized threshold
+        val_result = _evaluate(model, val_loader, device, desc="Eval (val)")
+        val_threshold = val_result["threshold"]
+
         if self.mode == "train":
-            mcc, thr, acc = _evaluate(model, val_loader, device, "Eval (val)")
+            eval_result = val_result
         else:
-            mcc, thr, acc = _evaluate(model, test_loader, device, "Eval (test)")
+            # Step 2: Apply val threshold to test set (fair protocol)
+            eval_result = _evaluate(
+                model, test_loader, device,
+                threshold=val_threshold, desc="Eval (test)",
+            )
 
         # --- Save results in standard format --------------------------
         sc_key = "Split by Scaffold"
         cnn_metrics = {
-            "mcc": round(mcc, 6),
-            "threshold": round(thr, 4),
-            "accuracy": round(acc, 6),
+            "mcc": round(eval_result["mcc"], 6),
+            "threshold": round(eval_result["threshold"], 4),
+            "accuracy": round(eval_result["accuracy"], 6),
+            "f1": round(eval_result["f1"], 6),
+            "precision": round(eval_result["precision"], 6),
+            "recall": round(eval_result["recall"], 6),
+            "auc": round(eval_result["auroc"], 6),
             "best_val_mcc": round(train_info["best_val_mcc"], 6),
+            "val_threshold": round(val_threshold, 4),
         }
         result = {sc_key: {"MLP": cnn_metrics}}
 
@@ -731,8 +786,18 @@ class Level4CNNRunner(BaseLevelRunner):
         ckpt_path = os.path.join(output_dir, "level4_cnn_model.pt")
         torch.save(model.state_dict(), ckpt_path)
 
+        # Save raw predictions for reproducibility
+        np.savez(
+            os.path.join(output_dir, "raw_predictions.npz"),
+            y_true=eval_result["y_true"],
+            y_prob=eval_result["y_prob"],
+        )
+
         with open(cache_path, "w") as fh:
             json.dump(result, fh, indent=2)
 
-        tqdm.write(f"  Level 4 CNN (seed {seed}): MCC={mcc:.4f}")
+        tqdm.write(
+            f"  Level 4 CNN (seed {seed}): MCC={eval_result['mcc']:.4f}, "
+            f"AUROC={eval_result['auroc']:.4f}, F1={eval_result['f1']:.4f}"
+        )
         return result
