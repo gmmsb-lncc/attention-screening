@@ -7,7 +7,7 @@
 
 **Hierarchical benchmark framework for semantic screening of protein–ligand interactions using foundation language models.**
 
-semantic-screening is an extensible platform that combines frozen protein language models ([ESM-2](https://github.com/facebookresearch/esm)) with molecular language models ([MoLFormer](https://github.com/IBM/molformer)) to predict compound bioactivity against kinase targets. It implements a **five-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol with scaffold-based splitting and multi-seed evaluation.
+semantic-screening is an extensible platform that combines frozen protein language models ([ESM-2](https://github.com/facebookresearch/esm)) with molecular language models ([MoLFormer](https://github.com/IBM/molformer)) to predict compound bioactivity against kinase targets. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol with scaffold-based splitting and multi-seed evaluation.
 
 ---
 
@@ -19,26 +19,34 @@ semantic-screening is an extensible platform that combines frozen protein langua
 
 ---
 
-## 🏗️ Five-Level Hierarchical Benchmark
+## 🏗️ Six-Level Hierarchical Benchmark
 
-The framework evaluates five levels of increasing representational complexity, all under the **same scaffold split**, **same metrics**, and **same multi-seed protocol**. The only variable across levels is the **representation strategy**; classifiers are held constant.
+The framework evaluates six levels of increasing representational complexity, all under the **same scaffold split**, **same metrics**, and **same multi-seed protocol**. The only variable across levels is the **representation strategy**; classifiers are held constant.
 
-| Level | Representation | Protein? | Aggregation | Feature Dim | Trainable Params | Isolated Variable |
-|-------|---------------|----------|-------------|-------------|-----------------|------------------|
-| **1a** | Morgan FP (1024-bit, r=2) | No | — | 1024 | 0 | Baseline |
-| **1b** | MoLFormer embeddings | No | Mean pooling | 768 | 0 | Semantic repr. vs. classical |
-| **1c** | MoLFormer embeddings | No | ResProj + MQAttn (4q, 8h) | 256 | ~461K | + Learned aggregation |
-| **3** | ESM-2 + MoLFormer | Yes | ResProj + MQAttn + InterFeat + Aux | 1282 | ~543K | + Protein modality |
-| **4** | ESM-2 + MoLFormer | Yes | CNN 2D + Hierarchical Attn | 64 | ~337K | + Spatial interactions |
+| Level | Representation | Protein? | Aggregation | Feature Dim | Trainable? | Isolated Variable |
+|-------|---------------|----------|-------------|-------------|------------|-------------------|
+| **1a** | Morgan FP (1024-bit, r=2) | No | — | 1024 | No | Baseline |
+| **1b** | MoLFormer embeddings | No | Mean pooling | 768 | No | Semantic repr. vs. classical |
+| **1c** | MoLFormer embeddings | No | Proj + Attention pooling (8h) | 256 | Yes (~264K) | Learned aggregation vs. uniform |
+| **2** | ESM-2 + MoLFormer | Yes | Mean pooling | d_P + 768 | No | + Protein modality |
+| **3** | ESM-2 + MoLFormer | Yes | Proj + Attention pooling (8h) | 512 | Yes (~528K) | Bimodal selective aggregation |
+| **4** | ESM-2 + MoLFormer | Yes | CNN 2D + Hierarchical Attn | 64 | Yes (~550K) | Spatial interaction modeling |
 
-> **Parameter counts** for ESM-2 8M (`d_P = 320`). Levels 3 and 4 scale with the chosen ESM-2 variant (8M / 150M / 650M).
+> **Parameter counts** shown for ESM-2 8M (`d_P = 320`). Levels 3 and 4 scale with the chosen ESM-2 variant (8M / 150M / 650M).
 
 ### Key Transitions
 
 - **1a → 1b**: Value of semantic pre-trained representations vs. classical fingerprints
-- **1b → 1c**: Value of learned projection + selective attention vs. uniform mean pooling
-- **1c → 3**: Value of protein information + bimodal interaction features
+- **1b → 1c**: Value of learned projection + selective attention pooling vs. uniform mean pooling on raw embeddings
+- **1b → 2**: Value of adding protein information (both use parameter-free mean pooling)
+- **2 → 3**: Value of learned bimodal projection + attention pooling vs. raw bimodal mean pooling
 - **3 → 4**: Value of explicit spatial residue–atom interaction modeling (end-to-end)
+
+### Architecture Details
+
+- **Levels 1a, 1b, 2**: No trainable parameters. Level 1a uses Morgan fingerprints; Levels 1b and 2 apply masked mean pooling directly over raw foundation model embeddings.
+- **Levels 1c and 3** share the same backbone: `Linear → LayerNorm → GELU → Dropout` projection to 256 dimensions, followed by attention pooling with a single learned query and 8 attention heads. Level 3 replicates this backbone independently for both protein and ligand modalities, concatenating the resulting vectors.
+- **Level 4**: Multi-head linear projections → scaled dot-product interaction maps → 4-layer CNN 2D (including dilated convolution) → hierarchical attention pooling → end-to-end classification.
 
 ---
 
@@ -52,10 +60,11 @@ All levels are evaluated under **Bemis–Murcko scaffold splitting**, ensuring t
 Scaffold Split:  Train (~80%)  /  Val (~10%)  /  Test (~10%)
                        │               │              │
   Level 1a:            │    FP(val)  ──┤   FP(test) ──┤
-  Level 1b:            │    Mean(val) ─┤   Mean(test) ┤
-  Level 1c:  train AttnPool → AttnPool(val)├ AttnPool(test)┤
-  Level 3:   train AttnPool → AttnPool(val)├ AttnPool(test)┤
-  Level 4:   train CNN 2D → end-to-end evaluation on test  │
+  Level 1b:            │  Mean(val)  ──┤  Mean(test) ─┤
+  Level 1c:  train AttnPool → pool(val)├  pool(test) ─┤
+  Level 2:             │  Mean₂(val) ──┤  Mean₂(test)─┤
+  Level 3:   train AttnPool₂→ pool(val)├  pool(test) ─┤
+  Level 4:   train CNN 2D → end-to-end evaluation     │
                        │               │              │
                        │         ┌─────┘       ┌──────┘
                        │         ▼             ▼
@@ -70,9 +79,8 @@ All non-end-to-end levels share the **exact same** classifier pipeline:
 | Component | Specification |
 |-----------|--------------|
 | **KNN** | FAISS cosine similarity, *k* = 5, distance-weighted voting |
-| **MLP** | 9-candidate topology search (128–512 neurons), 5-fold CV, 3 restarts, ensemble of 5, OOF threshold refinement |
+| **MLP** | `MLPClassifier(256, 128)`, ReLU, Adam (η=10⁻³), α=10⁻³, adaptive LR, early stopping (patience=20), max 2000 iterations |
 | **Scaler** | `StandardScaler` (fit on reference partition, applied to all) |
-| **Metric** | MCC-optimized threshold selection with stability penalty |
 
 ### Multi-Seed Protocol
 
@@ -131,7 +139,7 @@ semantic-screening/
 │   ├── cli.py                          # CLI parser → BenchmarkConfig
 │   ├── config.py                       # Frozen config, constants, paths
 │   ├── orchestrator.py                 # Multi-seed pipeline coordinator
-│   ├── classifiers.py                  # Canonical KNN/MLP (9-candidate CV)
+│   ├── classifiers.py                  # Canonical KNN + MLP classifiers
 │   ├── splits.py                       # Scaffold split verification
 │   ├── metrics.py                      # Metric aggregation
 │   ├── reporting.py                    # JSON export + terminal tables
@@ -145,9 +153,10 @@ semantic-screening/
 │       ├── level1.py                   # Level 1a: Fingerprints
 │       ├── level1b.py                  # Level 1b: MoLFormer mean pooling
 │       ├── level1c.py                  # Level 1c: MoLFormer attention pooling
+│       ├── level2.py                   # Level 2: Bimodal mean pooling
 │       ├── level3.py                   # Level 3: Bimodal attention pooling
 │       ├── level4_cnn.py               # Level 4: CNN 2D interaction maps
-│       └── ...                         # Experimental levels (4crossatt, 5, 6)
+│       └── ...                         # Experimental levels
 │
 ├── scaffolds_splits/                   # Scaffold split logic & output
 │   └── output/                         # Pre-computed universal partitions
@@ -194,20 +203,20 @@ bash run_benchmark.sh
 # Train phase
 python semantic_screening_models.py \
     --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 3 4cnn \
+    --levels 1a 1b 1c 2 3 4cnn \
     --epochs 500 --train
 
 # Test phase (reuses frozen train-phase MLP selection)
 python semantic_screening_models.py \
     --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 3 4cnn \
+    --levels 1a 1b 1c 2 3 4cnn \
     --test
 
 # Quick baseline: Level 1a only (fingerprint, no GPU needed)
 python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a --train
 
 # Human dataset with ESM-2 150M
-python semantic_screening_models.py --dataset human --embedding 150M --levels 1a 1b 1c 3 --train
+python semantic_screening_models.py --dataset human --embedding 150M --levels 1a 1b 1c 2 3 --train
 ```
 
 ### Output Structure
@@ -220,33 +229,13 @@ results/benchmark_{dataset}_{embedding}/
 │   ├── level1a_fingerprint/            # Per-level, per-seed outputs
 │   ├── level1b_ligmean_{emb}/
 │   ├── level1c_ligattn_{emb}/
+│   ├── level2_bimean_{emb}/
 │   ├── level3_attnpool_{emb}/
 │   └── level4_cnn_{emb}/
 └── test/
     ├── benchmark_comparison.json
     └── ...
 ```
-
----
-
-## ⚙️ Environment Variables
-
-The benchmark is configured through environment variables for reproducibility:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCHMARK_MLP_USE_CV` | `1` | Enable stratified CV for MLP selection |
-| `BENCHMARK_MLP_FOLDS` | `5` | Number of CV folds |
-| `BENCHMARK_MLP_CAL_RESTARTS` | `3` | Restarts per candidate for threshold calibration |
-| `BENCHMARK_MLP_ENSEMBLE` | `5` | Ensemble size for final MLP prediction |
-| `BENCHMARK_MLP_OOF_THRESHOLD` | `1` | OOF threshold refinement (recommended) |
-| `BENCHMARK_MLP_FULL_REFIT` | `0` | Disable early stopping in final refit |
-| `BENCHMARK_LEVEL3_INTERACTION_FEATURES` | `0` | Enable interaction features (prod, diff, cos) |
-| `BENCHMARK_LEVEL3_AUX_INTERACTIONS` | `0` | Train aux head with interaction features |
-| `BENCHMARK_LEVEL3_MULTILAYER_LAYERS` | `` | Multi-layer MoLFormer (e.g., `"4,5,6"`) |
-| `BENCHMARK_LEVEL3_HIDDEN_DIM` | auto | Override hidden dim (auto-scaled per ESM-2) |
-| `BENCHMARK_REQUIRE_TRAIN_SELECTION` | `1` | Require frozen train-phase MLP selection for test |
-| `BENCHMARK_STRICT_LEVEL_COMPLETENESS` | `1` | Require all requested levels to complete |
 
 ---
 
@@ -267,7 +256,7 @@ The framework enforces strict separation between model selection and final evalu
 |----------|-------------|---------|
 | `--dataset` | `human`, `non_human`, or `all` | Required |
 | `--embedding` | ESM-2 variant: `8M`, `150M`, `650M` | `8M` |
-| `--levels` | Levels to run (e.g., `1a 1b 1c 3 4cnn`) | All |
+| `--levels` | Levels to run (e.g., `1a 1b 1c 2 3 4cnn`) | All |
 | `--train` / `--test` | Execution mode (mutually exclusive) | `--train` |
 | `--epochs` | Max training epochs for learned levels | `500` |
 | `--batch_size` | Batch size for learned levels | `32` |
@@ -282,10 +271,8 @@ The framework enforces strict separation between model selection and final evalu
 ## 📚 Further Documentation
 
 - **[Benchmark Package README](benchmark/README.md)** — Architecture, module reference, design patterns
-- **[Concepts Guide](docs/CONCEPTS.md)** — Platform vs. architecture distinction
-- **[Methodology](docs/methodology.md)** — Comprehensive scientific background
-- **[User Guide](docs/02-user-guide/)** — Detailed usage instructions
-- **[Architecture](docs/03-architecture/)** — System design patterns
+- **[Scaffold Splits README](scaffolds_splits/README.md)** — Scaffold splitting methodology
+- **[LLM README](llm/README.md)** — Foundation model setup and usage
 
 ---
 

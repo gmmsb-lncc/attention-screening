@@ -2,13 +2,13 @@
 
 **Author**: Leon Sulfierry (GMMSB-LNCC)
 **Date**: March 2026
-**Version**: 4.0 (Five-Level Hierarchical Benchmark)
+**Version**: 4.0 (Six-Level Hierarchical Benchmark)
 
 ---
 
 ## Abstract
 
-semantic-screening is a modular, scalable platform for predicting kinase–ligand bioactivity using foundation language models. It implements a **five-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical Morgan fingerprints to learned bimodal attention pooling and CNN 2D interaction maps — under a **single independent variable** protocol. All non-end-to-end levels share the same canonical KNN/MLP classifiers, scaffold-based splits (Bemis–Murcko), monotonic profile filtering, and multi-seed evaluation (5 seeds). The primary metric is MCC (Matthews Correlation Coefficient). This document details the theoretical foundations, architectural decisions, and evaluation methodology.
+semantic-screening is a modular, scalable platform for predicting kinase–ligand bioactivity using foundation language models. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical Morgan fingerprints to learned bimodal attention pooling and CNN 2D interaction maps — under a **single independent variable** protocol. All non-end-to-end levels share the same canonical KNN/MLP classifiers, scaffold-based splits (Bemis–Murcko), monotonic profile filtering, and multi-seed evaluation (5 seeds). The primary metric is MCC (Matthews Correlation Coefficient). This document details the theoretical foundations, architectural decisions, and evaluation methodology.
 
 ---
 
@@ -111,7 +111,7 @@ Removing these entities forces the model to learn genuine selectivity patterns r
 
 ---
 
-## Chapter 4: Five-Level Hierarchical Benchmark
+## Chapter 4: Six-Level Hierarchical Benchmark
 
 ### 4.1 Design Principle: Single Independent Variable
 
@@ -125,36 +125,44 @@ $$\mathbf{x}^{(1a)} = \text{MorganFP}(L) \in \{0, 1\}^{1024}$$
 
 ### 4.3 Level 1b — MoLFormer Mean Pooling
 
-Per-token MoLFormer embeddings aggregated via uniform mean pooling. **Zero trainable parameters:**
+Per-token MoLFormer embeddings aggregated via masked mean pooling. **Zero trainable parameters:**
 
-$$\mathbf{x}^{(1b)} = \frac{1}{M} \sum_{i=1}^{M} \mathbf{h}^L_i \in \mathbb{R}^{768}$$
+$$\mathbf{x}^{(1b)} = \frac{1}{|\mathcal{V}|} \sum_{i \in \mathcal{V}} \mathbf{h}^L_i \in \mathbb{R}^{768}$$
+
+where $\mathcal{V}$ is the set of valid (non-padding) token indices.
 
 ### 4.4 Level 1c — MoLFormer Attention Pooling
 
-Introduces learned aggregation via a two-layer residual projection followed by multi-query attention pooling:
+Introduces learned aggregation via a single-layer linear projection followed by attention pooling:
 
-1. **Residual Projection**: $\text{Proj}(h) = h + \text{GELU}(\text{LN}(W_2 \cdot \text{GELU}(\text{LN}(W_1 h + b_1))) + b_2)$
-2. **Multi-Query Attention Pooling** (4 learned queries, 8 heads): collapses variable-length sequence into 4 fixed-size vectors, concatenated into $\mathbb{R}^{4 \times 64} = \mathbb{R}^{256}$
-3. **Auxiliary head** (training-only): Binary classification head for gradient signal
+1. **Projection**: `Linear(768, 256) → LayerNorm → GELU → Dropout(0.1)` — projects per-token embeddings from 768d to 256d
+2. **Attention Pooling** (1 learned query, 8 heads): A single learned query vector $\mathbf{q} \in \mathbb{R}^{256}$ attends over all projected tokens via `MultiheadAttention(embed_dim=256, num_heads=8)`, collapsing the variable-length sequence into a fixed-size summary vector
+3. **Auxiliary head** (training-only): Binary classification head (`Linear(2 × 256, 1)`) for gradient signal, discarded after training
 
-**~461K trainable parameters.** Feature vector: $\mathbf{x}^{(1c)} \in \mathbb{R}^{256}$.
+**~264K trainable parameters.** Feature vector: $\mathbf{x}^{(1c)} = z_L \in \mathbb{R}^{256}$.
 
-### 4.5 Level 3 — Bimodal Attention Pooling
+### 4.5 Level 2 — Bimodal Mean Pooling
 
-Extends Level 1c to the bimodal (protein + ligand) setting:
+Per-token ESM-2 and MoLFormer embeddings aggregated independently via masked mean pooling, then concatenated. **Zero trainable parameters:**
 
-1. **Dual residual projections**: One per modality (ESM-2 → $d$, MoLFormer → $d$)
-2. **Dual attention pooling**: Multi-query attention (4 queries, 8 heads) per modality
-3. **Explicit interaction features**:
-   - Element-wise product: $z_{\text{prod}} = z_P \odot z_L$
-   - Absolute difference: $z_{\text{diff}} = |z_P - z_L|$
-   - Cosine similarity: $z_{\cos} = \frac{z_P \cdot z_L}{\|z_P\| \|z_L\|}$
-4. **Auxiliary MLP** (2-layer): Trained on the full interaction-enriched vector
-5. **Feature extraction**: Concatenation of pooled vectors + interaction features + aux head hidden layer
+$$\mathbf{x}^{(2)} = [\bar{h}_P \| \bar{h}_L] \in \mathbb{R}^{d_P + 768}$$
 
-**~543K trainable parameters** (ESM-2 8M). Feature vector: $\mathbf{x}^{(3)} \in \mathbb{R}^{1282}$.
+For ESM-2 8M ($d_P = 320$), this produces a 1088-dimensional vector. This level isolates the value of adding protein information while using the same parameter-free aggregation strategy as Level 1b.
 
-### 4.6 Level 4 — CNN 2D Interaction Maps
+### 4.6 Level 3 — Bimodal Attention Pooling
+
+Same backbone as Level 1c, replicated independently for protein and ligand modalities:
+
+1. **Dual projections**: One per modality — `Linear(d_P, 256) → LayerNorm → GELU → Dropout` for protein, `Linear(768, 256) → LayerNorm → GELU → Dropout` for ligand
+2. **Dual attention pooling**: Independent attention pooling (1 learned query, 8 heads) per modality — each modality has its own learned query vector
+3. **Auxiliary head** (training-only): Binary classification head (`Linear(2 × 256, 1)`) for gradient signal, discarded after training
+4. **Concatenation**: $z^{(3)} = [z_P \| z_L] \in \mathbb{R}^{512}$
+
+No cross-modal interaction features are computed. Concatenation is the sole fusion point.
+
+**~528K trainable parameters** (ESM-2 8M). Feature vector: $\mathbf{x}^{(3)} \in \mathbb{R}^{512}$.
+
+### 4.7 Level 4 — CNN 2D Interaction Maps
 
 End-to-end architecture without downstream KNN/MLP:
 
@@ -164,17 +172,26 @@ End-to-end architecture without downstream KNN/MLP:
 4. **Hierarchical attention pooling**: First along ligand axis, then along protein axis
 5. **Linear classifier**: Binary output with sigmoid
 
-**~337K trainable parameters** (ESM-2 8M). Trained end-to-end with binary cross-entropy.
+**~550K trainable parameters** (ESM-2 8M). Trained end-to-end with binary cross-entropy.
 
-### 4.7 Level Summary
+### 4.8 Level Summary
 
-| Level | Representation | Protein? | Params (8M) | Isolated Variable |
-|-------|---------------|----------|-------------|-------------------|
-| 1a | Morgan FP (1024-bit) | No | 0 | Baseline |
-| 1b | MoLFormer mean pool | No | 0 | Semantic repr. vs. classical |
-| 1c | MoLFormer attn pool | No | ~461K | + Learned aggregation |
-| 3 | ESM-2 + MoLFormer attn pool | Yes | ~543K | + Protein modality |
-| 4 | ESM-2 + MoLFormer CNN 2D | Yes | ~337K | + Spatial interactions |
+| Level | Representation | Protein? | Params (8M) | Feature Dim | Isolated Variable |
+|-------|---------------|----------|-------------|-------------|-------------------|
+| 1a | Morgan FP (1024-bit) | No | 0 | 1024 | Baseline |
+| 1b | MoLFormer mean pool | No | 0 | 768 | Semantic repr. vs. classical |
+| 1c | MoLFormer attn pool | No | ~264K | 256 | + Learned aggregation |
+| 2 | ESM-2 + MoLFormer mean pool | Yes | 0 | d_P + 768 | + Protein modality |
+| 3 | ESM-2 + MoLFormer attn pool | Yes | ~528K | 512 | Bimodal selective aggregation |
+| 4 | ESM-2 + MoLFormer CNN 2D | Yes | ~550K | 64 | + Spatial interactions |
+
+### 4.9 Training Protocol (Levels 1c, 3)
+
+- **Optimizer**: AdamW (η = 10⁻⁴, weight decay λ = 0.01)
+- **LR schedule**: CosineAnnealingLR (T = 500 epochs)
+- **Gradient clipping**: ‖∇‖₂ ≤ 1.0
+- **Early stopping**: patience = 5 (monitoring validation loss)
+- **Weight initialization**: Xavier uniform (projection), std = 0.02 (attention query)
 
 ---
 
@@ -186,37 +203,22 @@ FAISS inner-product index on L2-normalised features (equivalent to cosine simila
 
 $$\hat{y}(\mathbf{x}) = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} w_i \cdot \mathbb{1}[y_i = c], \quad w_i = \max(\text{sim}(\mathbf{x}, \mathbf{x}_i), 0)$$
 
-### 5.2 MLP Selection
+### 5.2 MLP Classifier
 
-Nine candidate topologies are evaluated via 5-fold stratified CV with 3 restarts per candidate:
+A traditional `sklearn.neural_network.MLPClassifier` with fixed architecture:
 
-| # | Topology | α | η₀ | tol |
-|---|----------|---|----|----|
-| 1 | (512) | 10⁻² | 10⁻³ | 10⁻⁵ |
-| 2 | (512, 256) | 5×10⁻³ | 8×10⁻⁴ | 8×10⁻⁶ |
-| 3 | (256, 128) | 5×10⁻³ | 10⁻³ | 10⁻⁵ |
-| 4 | (256) | 10⁻² | 10⁻³ | 10⁻⁵ |
-| 5 | (128, 64) | 5×10⁻³ | 8×10⁻⁴ | 8×10⁻⁶ |
-| 6 | (256, 128) | 5×10⁻² | 5×10⁻⁴ | 10⁻⁵ |
-| 7 | (128) | 10⁻¹ | 10⁻³ | 10⁻⁵ |
-| 8 | (512, 256, 128) | 10⁻² | 5×10⁻⁴ | 8×10⁻⁶ |
-| 9 | (384, 192) | 10⁻² | 8×10⁻⁴ | 10⁻⁵ |
+| Parameter | Value |
+|-----------|-------|
+| Hidden layers | (256, 128) |
+| Activation | ReLU |
+| Solver | Adam |
+| Learning rate | Adaptive (initial η = 10⁻³) |
+| L2 regularisation (α) | 10⁻³ |
+| Max iterations | 2000 |
+| Early stopping | Yes (patience = 20, 10% validation split) |
+| Decision threshold | 0.5 (fixed) |
 
-All use ReLU, Adam (adaptive LR), `max_iter = 2000`, patience = 60.
-
-**Selection objective** (stability-adjusted MCC):
-$$\text{score}(c) = \overline{\text{MCC}}_c - 0.10 \cdot \sigma_c$$
-
-### 5.3 MLP Ensemble
-
-Best candidate retrained as ensemble of $M = 5$ members with independent seeds:
-$$\hat{p}(\mathbf{x}) = \frac{1}{M} \sum_{m=1}^{M} \hat{p}_m(\mathbf{x})$$
-
-### 5.4 OOF Threshold Refinement
-
-Decision threshold optimised via out-of-fold predictions on training data, maximising MCC across a dense grid of thresholds.
-
-### 5.5 Two-Phase Protocol
+### 5.3 Two-Phase Protocol
 
 - **Train mode**: Classifiers trained on training split (80%), evaluated on validation (10%). Test set **never loaded**.
 - **Test mode**: Classifiers trained on validation (10%), evaluated on held-out test (10%). MLP configuration **frozen** from train phase.
@@ -256,21 +258,10 @@ Every experiment runs across 5 independent seeds: `{42, 123, 456, 789, 1024}`. R
 - **Package**: `benchmark/` (SOLID-compliant, 15 modules)
 - **Design patterns**: Template Method, Facade, Frozen Dataclass
 
-### 7.2 Reproducibility
+### 7.2 Hardware Requirements
 
-All hyperparameters are configurable via environment variables (see `run_benchmark.sh`). Key defaults:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCHMARK_MLP_ENSEMBLE` | 5 | Ensemble members |
-| `BENCHMARK_MLP_CAL_RESTARTS` | 3 | CV restarts |
-| `BENCHMARK_MLP_FOLDS` | 5 | CV folds |
-| `BENCHMARK_LEVEL3_HIDDEN_DIM` | auto | Hidden dim (per ESM-2 variant) |
-
-### 7.3 Hardware Requirements
-
-- **Levels 1a–1b**: CPU only (no GPU required)
-- **Levels 1c–4**: Single GPU (CUDA or MPS)
+- **Levels 1a–1b, 2**: CPU only (no GPU required, no trainable parameters)
+- **Levels 1c, 3, 4**: Single GPU (CUDA or MPS)
 - **Embedding generation**: GPU recommended for ESM-2 150M+ models
 
 ---
