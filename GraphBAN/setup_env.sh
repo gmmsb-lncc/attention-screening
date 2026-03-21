@@ -63,68 +63,10 @@ else
     GPU_MODE=false
 fi
 
-# ── Step 1: PyTorch + torchvision + torchaudio (pip, official index) ───────
-# LESSON LEARNED: conda's channel resolver unreliably picks CPU-only builds
-# from conda-forge even with --override-channels, causing torchvision::nms
-# ABI failures. pip with --index-url is deterministic and guaranteed compatible.
-echo "[INFO] Cleaning any existing PyTorch packages..."
-pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
-SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
-if [ -n "${SITE_PKGS}" ]; then
-    for pkg_dir in torch torchvision torchaudio; do
-        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}*.dist-info" 2>/dev/null || true
-    done
-fi
-
-echo "[INFO] Installing PyTorch stack via pip..."
-if [ "${GPU_MODE}" = true ]; then
-    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-        --index-url "https://download.pytorch.org/whl/cu${PYTORCH_CUDA//./}"
-else
-    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-        --index-url https://download.pytorch.org/whl/cpu
-fi
-
-# ── Step 2: PyTorch-Geometric ─────────────────────────────────────────────
-echo "[INFO] Installing PyTorch-Geometric (pyg channel)..."
-conda install -y \
-    pyg pytorch-scatter pytorch-sparse pytorch-cluster pytorch-spline-conv \
-    -c pyg -c conda-forge
-
-# ── Step 3: DGL (CUDA build from dglteam) ────────────────────────────────
-echo "[INFO] Installing DGL..."
-if [ "${GPU_MODE}" = true ]; then
-    conda install -y dgl --override-channels -c "dglteam/label/${DGL_LABEL}" -c pytorch -c nvidia -c conda-forge
-else
-    conda install -y dgl --override-channels -c dglteam -c pytorch -c conda-forge
-fi
-
-# ── Step 3b: Patch DGL graphbolt to prevent exit(1) crash ─────────────────
-# DGL 2.x ships libgraphbolt_pytorch_*.so files. When the .so ABI does not
-# match the running PyTorch, DGL's graphbolt/__init__.py calls exit(1) with
-# "Stopping RUNTIME. Colaboratory will restart automatically."
-# Overwriting the file with a comment prevents this entirely.
-echo "[INFO] Patching DGL graphbolt __init__.py to prevent CUDA version crash..."
-DGL_GB=$(python3 -c "
-import importlib.util, pathlib
-spec = importlib.util.find_spec('dgl')
-if spec:
-    p = pathlib.Path(spec.origin).parent / 'graphbolt/__init__.py'
-    print(p)
-" 2>/dev/null)
-if [ -n "${DGL_GB}" ] && [ -f "${DGL_GB}" ]; then
-    echo "# graphbolt disabled by setup_env.sh — GraphBAN does not use it" > "${DGL_GB}"
-    echo "[INFO] Patched: ${DGL_GB}"
-else
-    echo "[WARN] Could not locate dgl/graphbolt/__init__.py — skipping patch."
-fi
-
-# ── Step 4: dgllife ───────────────────────────────────────────────────────
-echo "[INFO] Installing dgllife (conda-forge)..."
-conda install -y dgllife -c conda-forge
-
-# ── Step 5: Remaining scientific dependencies ─────────────────────────────
-echo "[INFO] Installing remaining dependencies (conda-forge)..."
+# ── Step 1: Conda scientific deps (NO pytorch, NO dgl) ────────────────────
+# Install these first via conda. pytorch and dgl come via pip to avoid
+# conda-forge pulling in incompatible CPU-only pytorch builds.
+echo "[INFO] Installing scientific dependencies via conda..."
 conda install -y \
     "numpy<2" \
     scikit-learn \
@@ -142,9 +84,57 @@ conda install -y \
     packaging \
     -c conda-forge
 
-# ── Step 5b: ESM (fair-esm) — not available via conda ─────────────────────
+# ── Step 2: PyTorch stack via pip (official index) ─────────────────────────
+# LESSON LEARNED: conda's channel resolver unreliably picks CPU-only builds
+# from conda-forge even with --override-channels, causing torchvision::nms
+# ABI failures. pip with --index-url is deterministic and guaranteed compatible.
+echo "[INFO] Cleaning any existing PyTorch packages..."
+pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
+if [ -n "${SITE_PKGS}" ]; then
+    for pkg_dir in torch torchvision torchaudio; do
+        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}"*.dist-info 2>/dev/null || true
+    done
+fi
+
+echo "[INFO] Installing PyTorch stack via pip..."
+if [ "${GPU_MODE}" = true ]; then
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url "https://download.pytorch.org/whl/cu${PYTORCH_CUDA//./}"
+else
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url https://download.pytorch.org/whl/cpu
+fi
+
+# ── Step 3: PyTorch-Geometric via pip (AFTER pytorch) ─────────────────────
+echo "[INFO] Installing PyTorch-Geometric via pip..."
+pip install torch-geometric torch-scatter torch-sparse torch-cluster torch-spline-conv
+
+# ── Step 4: DGL + dgllife via pip (AFTER pytorch) ─────────────────────────
+# Installing via pip avoids conda-forge's DGL pulling in its own pytorch.
+echo "[INFO] Installing DGL + dgllife via pip..."
+pip install dgl dgllife
+
+# ── Step 4b: Patch DGL graphbolt to prevent exit(1) crash ─────────────────
+echo "[INFO] Patching DGL graphbolt __init__.py to prevent CUDA version crash..."
+DGL_GB=$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('dgl')
+if spec:
+    p = pathlib.Path(spec.origin).parent / 'graphbolt/__init__.py'
+    print(p)
+" 2>/dev/null)
+if [ -n "${DGL_GB}" ] && [ -f "${DGL_GB}" ]; then
+    echo "# graphbolt disabled by setup_env.sh — GraphBAN does not use it" > "${DGL_GB}"
+    echo "[INFO] Patched: ${DGL_GB}"
+else
+    echo "[WARN] Could not locate dgl/graphbolt/__init__.py — skipping patch."
+fi
+
+# ── Step 5: ESM (fair-esm) — not available via conda ─────────────────────
 echo "[INFO] Installing fair-esm (pip only — not on conda-forge)..."
 pip install fair-esm
+
 
 # ── Step 6: Clone GraphBAN source ────────────────────────────────────────
 echo "[INFO] Setting up GraphBAN source code..."
