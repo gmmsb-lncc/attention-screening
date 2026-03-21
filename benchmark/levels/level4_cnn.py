@@ -23,7 +23,14 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import matthews_corrcoef
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -289,6 +296,36 @@ def _extract_labels(loader: DataLoader) -> np.ndarray:
     return np.asarray(labels, dtype=np.int64)
 
 
+def _save_training_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: object,
+    scaler: torch.amp.GradScaler,
+    use_amp: bool,
+    epoch: int,
+    best_score: float,
+    best_state: dict | None,
+    no_improve: int,
+) -> None:
+    """Save a training checkpoint for resuming interrupted runs."""
+    payload = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),  # type: ignore[union-attr]
+        "best_score": best_score,
+        "best_state": best_state,
+        "no_improve": no_improve,
+    }
+    if use_amp:
+        payload["scaler_state_dict"] = scaler.state_dict()
+    # Write to tmp then rename for atomicity
+    tmp_path = path + ".tmp"
+    torch.save(payload, tmp_path)
+    os.replace(tmp_path, path)
+    tqdm.write(f"    Checkpoint saved at epoch {epoch}: {path}")
+
 def _train_interaction_cnn(
     *,
     train_loader: DataLoader,
@@ -302,6 +339,10 @@ def _train_interaction_cnn(
     head_dim: int = 32,
     cnn_channels: int = 64,
     dropout: float = 0.3,
+    train_to_zero: bool = False,
+    train_to_zero_threshold: float = 0.01,
+    checkpoint_dir: str | None = None,
+    checkpoint_every: int = 50,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -311,10 +352,34 @@ def _train_interaction_cnn(
     np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = device.type == "cuda"
+
+    # --- Precision flags ----------------------------------------------
+    use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
+    no_amp = os.getenv("BENCHMARK_LEVEL4CNN_NO_AMP", "0") == "1"
+    deterministic = os.getenv("BENCHMARK_LEVEL4CNN_DETERMINISTIC", "0") == "1"
+
+    dtype = torch.float64 if use_double else torch.float32
+    use_amp = device.type == "cuda" and not no_amp and not use_double
     scaler = torch.amp.GradScaler(enabled=use_amp)
-    if device.type == "cuda":
+
+    if deterministic:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        tqdm.write("    Deterministic mode: ON (cudnn.benchmark=False)")
+    elif device.type == "cuda":
         torch.backends.cudnn.benchmark = True
+
+    precision_info = []
+    if use_double:
+        precision_info.append("float64")
+    if no_amp or use_double:
+        precision_info.append("AMP=OFF")
+    else:
+        precision_info.append("AMP=ON")
+    if deterministic:
+        precision_info.append("deterministic")
+    tqdm.write(f"    Precision: {', '.join(precision_info)}")
 
     # --- Build model --------------------------------------------------
     model = InteractionMapCNN(
@@ -324,7 +389,7 @@ def _train_interaction_cnn(
         head_dim=head_dim,
         cnn_channels=cnn_channels,
         dropout=dropout,
-    ).to(device)
+    ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -344,26 +409,55 @@ def _train_interaction_cnn(
     train_labels = _extract_labels(train_loader)
     pos_weight = _compute_pos_weight(train_labels)
     criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device),
+        pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
     )
     tqdm.write(f"    pos_weight={pos_weight:.2f}, lr={lr:.1e}, wd={weight_decay}")
+    if train_to_zero:
+        tqdm.write(
+            f"    *** TRAIN-TO-ZERO mode: early stopping DISABLED, "
+            f"training until train_loss & val_loss < {train_to_zero_threshold:.4f} "
+            f"(max {epochs} epochs) ***"
+        )
+
+    # --- Checkpoint paths ---------------------------------------------
+    ckpt_path = os.path.join(checkpoint_dir, "training_checkpoint.pt") if checkpoint_dir else None
 
     # --- Training loop ------------------------------------------------
     best_score = -float("inf")
     best_state = None
     no_improve = 0
+    start_epoch = 1
 
-    for epoch in range(1, epochs + 1):
+    # --- Resume from checkpoint if available --------------------------
+    if ckpt_path and os.path.exists(ckpt_path):
+        tqdm.write(f"    Resuming from checkpoint: {ckpt_path}")
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if use_amp and "scaler_state_dict" in ckpt:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        best_score = ckpt.get("best_score", -float("inf"))
+        no_improve = ckpt.get("no_improve", 0)
+        start_epoch = ckpt.get("epoch", 0) + 1
+        if ckpt.get("best_state") is not None:
+            best_state = ckpt["best_state"]
+        tqdm.write(
+            f"    Resumed at epoch {start_epoch}, "
+            f"best_val_mcc={best_score:.4f}, no_improve={no_improve}"
+        )
+
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         running_loss = 0.0
         n_batches = 0
 
         for batch in train_loader:
-            p = batch["protein_matrix"].to(device)
-            l = batch["ligand_matrix"].to(device)
+            p = batch["protein_matrix"].to(device=device, dtype=dtype)
+            l = batch["ligand_matrix"].to(device=device, dtype=dtype)
             pm = batch["protein_mask"].to(device)
             lm = batch["ligand_mask"].to(device)
-            y = batch["label"].to(device).unsqueeze(1)
+            y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
@@ -390,11 +484,11 @@ def _train_interaction_cnn(
 
         with torch.inference_mode():
             for batch in val_loader:
-                p = batch["protein_matrix"].to(device)
-                l = batch["ligand_matrix"].to(device)
+                p = batch["protein_matrix"].to(device=device, dtype=dtype)
+                l = batch["ligand_matrix"].to(device=device, dtype=dtype)
                 pm = batch["protein_mask"].to(device)
                 lm = batch["ligand_mask"].to(device)
-                y = batch["label"].to(device).unsqueeze(1)
+                y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     logits = model(p, l, pm, lm)
@@ -410,15 +504,22 @@ def _train_interaction_cnn(
 
         thr, val_mcc = _best_mcc_threshold(targets.astype(int), probs)
 
-        # Early stopping on val_mcc
+        # Early stopping on val_mcc (disabled in train-to-zero mode)
         improved = val_mcc > best_score
         marker = " ★" if improved else ""
 
-        tqdm.write(
-            f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
-            f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
-            f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
-        )
+        if train_to_zero:
+            tqdm.write(
+                f"    Epoch {epoch:3d}: loss={avg_train:.6f}, "
+                f"val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, "
+                f"thr={thr:.3f}{marker}"
+            )
+        else:
+            tqdm.write(
+                f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
+                f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
+                f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
+            )
 
         if improved:
             best_score = val_mcc
@@ -426,6 +527,17 @@ def _train_interaction_cnn(
             no_improve = 0
         else:
             no_improve += 1
+
+        if train_to_zero:
+            # In train-to-zero mode: stop only when both losses are below threshold
+            if avg_train < train_to_zero_threshold and avg_val < train_to_zero_threshold:
+                tqdm.write(
+                    f"    ✓ Train-to-zero converged at epoch {epoch}: "
+                    f"train_loss={avg_train:.6f}, val_loss={avg_val:.6f} "
+                    f"(both < {train_to_zero_threshold})"
+                )
+                break
+        else:
             if no_improve >= patience:
                 tqdm.write(
                     f"    Early stopping at epoch {epoch} "
@@ -433,10 +545,26 @@ def _train_interaction_cnn(
                 )
                 break
 
+        # --- Periodic checkpoint save ---------------------------------
+        if ckpt_path and checkpoint_every > 0 and epoch % checkpoint_every == 0:
+            assert isinstance(ckpt_path, str)
+            _save_training_checkpoint(
+                ckpt_path, model, optimizer, scheduler, scaler,
+                use_amp, epoch, best_score, best_state, no_improve,
+            )
+
     # --- Restore best model -------------------------------------------
     if best_state is not None:
         model.load_state_dict(best_state)
     model.to(device).eval()
+
+    # --- Clean up checkpoint (training complete) -----------------------
+    if checkpoint_dir is not None:
+        assert isinstance(checkpoint_dir, str)
+        final_ckpt = os.path.join(checkpoint_dir, "training_checkpoint.pt")
+        if os.path.exists(final_ckpt):
+            os.remove(final_ckpt)
+            tqdm.write(f"    Removed training checkpoint (training complete)")
 
     return model, {"best_val_mcc": best_score}
 
@@ -450,21 +578,33 @@ def _evaluate(
     model: InteractionMapCNN,
     loader: DataLoader,
     device: torch.device,
+    threshold: float | None = None,
     desc: str = "",
-) -> tuple[float, float, float]:
-    """Evaluate model and return (mcc, threshold, accuracy)."""
+) -> dict:
+    """Evaluate model and return full metrics dict.
+
+    If `threshold` is provided (e.g., from val-optimized), use it directly.
+    Otherwise, sweep to find the MCC-optimal threshold on this data.
+
+    Returns dict with: mcc, threshold, accuracy, f1, precision, recall, auroc,
+    plus raw y_true and y_prob arrays.
+    """
     model.eval()
     all_probs: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
+    # Auto-detect model dtype for double precision support
+    model_dtype = next(model.parameters()).dtype
+    eval_amp = device.type == "cuda" and model_dtype != torch.float64
+
     for batch in loader:
-        p = batch["protein_matrix"].to(device)
-        l = batch["ligand_matrix"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
         pm = batch["protein_mask"].to(device)
         lm = batch["ligand_mask"].to(device)
         y = batch["label"].numpy()
 
-        with torch.amp.autocast(device_type=device.type, enabled=device.type == "cuda"):
+        with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
             logits = model(p, l, pm, lm)
 
         probs = torch.sigmoid(logits.float()).cpu().numpy().ravel()
@@ -473,14 +613,41 @@ def _evaluate(
 
     probs = np.concatenate(all_probs)
     targets = np.concatenate(all_targets).astype(int)
-    thr, mcc = _best_mcc_threshold(targets, probs)
+
+    if threshold is None:
+        thr, mcc = _best_mcc_threshold(targets, probs)
+    else:
+        thr = threshold
+        preds_for_mcc = (probs >= thr).astype(int)
+        mcc = float(matthews_corrcoef(targets, preds_for_mcc))
+
     preds = (probs >= thr).astype(int)
-    acc = float((preds == targets).mean())
+    acc = float(accuracy_score(targets, preds))
+    f1 = float(f1_score(targets, preds, zero_division=0))
+    prec = float(precision_score(targets, preds, zero_division=0))
+    rec = float(recall_score(targets, preds, zero_division=0))
+    try:
+        auroc = float(roc_auc_score(targets, probs))
+    except ValueError:
+        auroc = 0.0
 
     if desc:
-        tqdm.write(f"    {desc}: MCC={mcc:.4f}, thr={thr:.3f}, acc={acc:.4f}")
+        tqdm.write(
+            f"    {desc}: MCC={mcc:.4f}, AUROC={auroc:.4f}, "
+            f"F1={f1:.4f}, thr={thr:.3f}, acc={acc:.4f}"
+        )
 
-    return mcc, thr, acc
+    return {
+        "mcc": mcc,
+        "threshold": thr,
+        "accuracy": acc,
+        "f1": f1,
+        "precision": prec,
+        "recall": rec,
+        "auroc": auroc,
+        "y_true": targets,
+        "y_prob": probs,
+    }
 
 
 # ======================================================================
@@ -557,6 +724,13 @@ class Level4CNNRunner(BaseLevelRunner):
         # separate feature extraction stage that could leak).
         model_train_loader = train_loader
 
+        # --- Train-to-zero mode ----------------------------------------
+        train_to_zero = os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO", "0") == "1"
+        train_to_zero_thr = float(os.getenv("BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR", "0.01"))
+
+        # --- Checkpoint frequency --------------------------------------
+        checkpoint_every = int(os.getenv("BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY", "50"))
+
         # --- Train ----------------------------------------------------
         tqdm.write("  Training InteractionMapCNN...")
         model, train_info = _train_interaction_cnn(
@@ -571,23 +745,40 @@ class Level4CNNRunner(BaseLevelRunner):
             head_dim=head_dim,
             cnn_channels=cnn_channels,
             dropout=dropout,
+            train_to_zero=train_to_zero,
+            train_to_zero_threshold=train_to_zero_thr,
+            checkpoint_dir=output_dir,
+            checkpoint_every=checkpoint_every,
         )
 
         device = next(model.parameters()).device
 
         # --- Evaluate -------------------------------------------------
+        # Step 1: Evaluate on val to get val-optimized threshold
+        val_result = _evaluate(model, val_loader, device, desc="Eval (val)")
+        val_threshold = val_result["threshold"]
+
         if self.mode == "train":
-            mcc, thr, acc = _evaluate(model, val_loader, device, "Eval (val)")
+            eval_result = val_result
         else:
-            mcc, thr, acc = _evaluate(model, test_loader, device, "Eval (test)")
+            # Step 2: Apply val threshold to test set (fair protocol)
+            eval_result = _evaluate(
+                model, test_loader, device,
+                threshold=val_threshold, desc="Eval (test)",
+            )
 
         # --- Save results in standard format --------------------------
         sc_key = "Split by Scaffold"
         cnn_metrics = {
-            "mcc": round(mcc, 6),
-            "threshold": round(thr, 4),
-            "accuracy": round(acc, 6),
+            "mcc": round(eval_result["mcc"], 6),
+            "threshold": round(eval_result["threshold"], 4),
+            "accuracy": round(eval_result["accuracy"], 6),
+            "f1": round(eval_result["f1"], 6),
+            "precision": round(eval_result["precision"], 6),
+            "recall": round(eval_result["recall"], 6),
+            "auc": round(eval_result["auroc"], 6),
             "best_val_mcc": round(train_info["best_val_mcc"], 6),
+            "val_threshold": round(val_threshold, 4),
         }
         result = {sc_key: {"MLP": cnn_metrics}}
 
@@ -595,8 +786,18 @@ class Level4CNNRunner(BaseLevelRunner):
         ckpt_path = os.path.join(output_dir, "level4_cnn_model.pt")
         torch.save(model.state_dict(), ckpt_path)
 
+        # Save raw predictions for reproducibility
+        np.savez(
+            os.path.join(output_dir, "raw_predictions.npz"),
+            y_true=eval_result["y_true"],
+            y_prob=eval_result["y_prob"],
+        )
+
         with open(cache_path, "w") as fh:
             json.dump(result, fh, indent=2)
 
-        tqdm.write(f"  Level 4 CNN (seed {seed}): MCC={mcc:.4f}")
+        tqdm.write(
+            f"  Level 4 CNN (seed {seed}): MCC={eval_result['mcc']:.4f}, "
+            f"AUROC={eval_result['auroc']:.4f}, F1={eval_result['f1']:.4f}"
+        )
         return result
