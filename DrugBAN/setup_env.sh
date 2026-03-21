@@ -29,8 +29,8 @@ eval "$(conda shell.bash hook)"
 if conda info --envs | awk '{print $1}' | grep -qx "${ENV_NAME}"; then
   echo "[INFO] Environment '${ENV_NAME}' already exists."
 else
-  echo "[INFO] Creating environment '${ENV_NAME}' (Python 3.11)..."
-  conda create -y --name "${ENV_NAME}" python=3.11
+  echo "[INFO] Creating environment '${ENV_NAME}' (Python 3.10)..."
+  conda create -y --name "${ENV_NAME}" python=3.10
 fi
 
 conda activate "${ENV_NAME}"
@@ -44,16 +44,31 @@ else
   echo "[INFO] No GPU detected. Installing CPU-compatible stack."
 fi
 
-echo "[INFO] Installing PyTorch stack..."
+# ── Step 1: PyTorch + torchvision + torchaudio (pip, official index) ───────
+# conda's channel resolver unreliably picks CPU-only builds from conda-forge,
+# causing torchvision::nms ABI failures. pip with --index-url is reliable.
+echo "[INFO] Cleaning any existing PyTorch packages..."
+pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
+if [ -n "${SITE_PKGS}" ]; then
+    for pkg_dir in torch torchvision torchaudio; do
+        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}*.dist-info" 2>/dev/null || true
+    done
+fi
+
+echo "[INFO] Installing PyTorch stack via pip..."
 if [ "${GPU_MODE}" = true ]; then
-  conda install -y \
-    pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-    pytorch-cuda=12.1 \
-    --override-channels -c pytorch -c nvidia -c conda-forge
+    CUDA_MAJOR=$(echo "${CUDA_VER}" | cut -d. -f1)
+    if [ "${CUDA_MAJOR}" -ge 12 ]; then
+        PIP_CUDA="cu121"
+    else
+        PIP_CUDA="cu118"
+    fi
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url "https://download.pytorch.org/whl/${PIP_CUDA}"
 else
-  conda install -y \
-    pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 cpuonly \
-    --override-channels -c pytorch -c conda-forge
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url https://download.pytorch.org/whl/cpu
 fi
 
 echo "[INFO] Installing scientific dependencies..."
@@ -74,6 +89,23 @@ conda install -y \
   dgl \
   dgllife \
   -c conda-forge
+
+# ── Patch DGL graphbolt to prevent exit(1) crash ──────────────────────────
+# DGL 2.x graphbolt .so may crash with ABI mismatch. Disable it.
+echo "[INFO] Patching DGL graphbolt..."
+DGL_GB=$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('dgl')
+if spec:
+    p = pathlib.Path(spec.origin).parent / 'graphbolt/__init__.py'
+    print(p)
+" 2>/dev/null)
+if [ -n "${DGL_GB}" ] && [ -f "${DGL_GB}" ]; then
+    echo "# graphbolt disabled by setup_env.sh" > "${DGL_GB}"
+    echo "[INFO] Patched: ${DGL_GB}"
+else
+    echo "[WARN] Could not locate dgl/graphbolt/__init__.py — skipping patch."
+fi
 
 if [ -d "${SRC_DIR}/.git" ]; then
   echo "[INFO] DrugBAN source already present at ${SRC_DIR}"
@@ -124,5 +156,5 @@ echo ""
 echo "============================================"
 echo " DrugBAN environment ready"
 echo " Activate : conda activate ${ENV_NAME}"
-echo " Prepare  : python prepare_data.py --dataset non_human"
+echo " Run      : python run_baseline.py --dataset non_human"
 echo "============================================"

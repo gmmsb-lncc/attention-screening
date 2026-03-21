@@ -63,19 +63,26 @@ else
     GPU_MODE=false
 fi
 
-# ── Step 1: PyTorch + torchvision + torchaudio (one transaction, pytorch channel)
-# CRITICAL: must use -c pytorch -c nvidia and pin channel priority away from
-# conda-forge to avoid the CPU-only pytorch build overriding the CUDA one.
-echo "[INFO] Installing PyTorch stack via conda (pytorch channel)..."
+# ── Step 1: PyTorch + torchvision + torchaudio (pip, official index) ───────
+# LESSON LEARNED: conda's channel resolver unreliably picks CPU-only builds
+# from conda-forge even with --override-channels, causing torchvision::nms
+# ABI failures. pip with --index-url is deterministic and guaranteed compatible.
+echo "[INFO] Cleaning any existing PyTorch packages..."
+pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
+if [ -n "${SITE_PKGS}" ]; then
+    for pkg_dir in torch torchvision torchaudio; do
+        rm -rf "${SITE_PKGS}/${pkg_dir}" "${SITE_PKGS}/${pkg_dir}*.dist-info" 2>/dev/null || true
+    done
+fi
+
+echo "[INFO] Installing PyTorch stack via pip..."
 if [ "${GPU_MODE}" = true ]; then
-    conda install -y \
-        pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-        pytorch-cuda=${PYTORCH_CUDA} \
-        --override-channels -c pytorch -c nvidia -c conda-forge
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url "https://download.pytorch.org/whl/cu${PYTORCH_CUDA//./}"
 else
-    conda install -y \
-        pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 cpuonly \
-        --override-channels -c pytorch -c conda-forge
+    pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        --index-url https://download.pytorch.org/whl/cpu
 fi
 
 # ── Step 2: PyTorch-Geometric ─────────────────────────────────────────────
@@ -134,6 +141,10 @@ conda install -y \
     setuptools \
     packaging \
     -c conda-forge
+
+# ── Step 5b: ESM (fair-esm) — not available via conda ─────────────────────
+echo "[INFO] Installing fair-esm (pip only — not on conda-forge)..."
+pip install fair-esm
 
 # ── Step 6: Clone GraphBAN source ────────────────────────────────────────
 echo "[INFO] Setting up GraphBAN source code..."
