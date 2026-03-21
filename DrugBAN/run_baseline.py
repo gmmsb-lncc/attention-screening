@@ -63,11 +63,26 @@ CANONICAL_SEEDS = [42, 123, 456, 789, 1024]
 # ---------------------------------------------------------------------------
 
 def setup_drugban_imports() -> dict:
-    """Import DrugBAN modules after path setup."""
+    """Import DrugBAN modules after path setup.
+
+    NOTE: Our DrugBAN/configs/ directory (YAML files) shadows the upstream
+    src/configs/ Python package. We load config.py by absolute path to avoid
+    the name collision.
+    """
     if DRUGBAN_SRC.exists():
+        if str(DRUGBAN_SRC) in sys.path:
+            sys.path.remove(str(DRUGBAN_SRC))
         sys.path.insert(0, str(DRUGBAN_SRC))
+
     try:
-        from configs.config import get_cfg_defaults
+        # Load config from absolute path to avoid configs/ name collision
+        import importlib.util
+        config_path = DRUGBAN_SRC / "configs" / "config.py"
+        spec = importlib.util.spec_from_file_location("drugban_config", str(config_path))
+        cfg_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cfg_mod)
+        get_cfg_defaults = cfg_mod.get_cfg_defaults
+
         from dataloader import DTIDataset, MultiDataLoader
         from models import DrugBAN, binary_cross_entropy, cross_entropy_logits
         from trainer import Trainer
