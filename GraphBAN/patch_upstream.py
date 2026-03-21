@@ -90,6 +90,37 @@ def patch_dataloader(root: Path) -> list[str]:
     return changed
 
 
+def patch_max_drug_nodes(root: Path, config_path: Path | None = None) -> list[str]:
+    """Replace hardcoded max_drug_nodes=290 default with value from config YAML."""
+    changed: list[str] = []
+    path = root / "inductive_mode" / "dataloader.py"
+    if not path.exists():
+        return changed
+
+    # Read MAX_NODES from config
+    max_nodes = 290  # fallback
+    if config_path is None:
+        config_path = root.parent / "configs" / "kinase_inductive.yaml"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            if "MAX_NODES" in line and ":" in line:
+                try:
+                    max_nodes = int(line.split(":")[1].strip().split("#")[0].strip())
+                except ValueError:
+                    pass
+
+    if max_nodes == 290:
+        return changed  # nothing to patch
+
+    content = path.read_text(encoding="utf-8")
+    new_content = content.replace("max_drug_nodes=290", f"max_drug_nodes={max_nodes}")
+    if new_content != content:
+        path.write_text(new_content, encoding="utf-8")
+        changed.append(f"{path} (max_drug_nodes=290 → {max_nodes})")
+
+    return changed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Patch upstream GraphBAN source with local fixes")
     parser.add_argument(
@@ -107,6 +138,7 @@ def main() -> None:
     changed = []
     changed.extend(patch_models(src_root))
     changed.extend(patch_dataloader(src_root))
+    changed.extend(patch_max_drug_nodes(src_root))
 
     if changed:
         print("[INFO] Applied patches:")

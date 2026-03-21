@@ -1,14 +1,12 @@
-# GraphBAN Kinase Inductive Configuration
-# Based on GraphBAN_DA.yaml defaults, adapted for thesis kinase datasets
+# DrugBAN Kinase Configuration
+# Based on DrugBAN.yaml defaults, adapted for thesis kinase datasets
 #
-# This config enables domain adaptation (CDAN) for inductive CPI prediction.
-# The original GraphBAN paper uses these settings for out-of-distribution
-# generalization on unseen compounds and proteins.
+# DrugBAN uses GCN for drugs and CNN for proteins (no external LM embeddings).
 
 SOLVER:
-  BATCH_SIZE: 32
-  MAX_EPOCH: 50
-  LR: 1e-5
+  BATCH_SIZE: 64
+  MAX_EPOCH: 100
+  LR: 5e-5
   DA_LR: 5e-5
   NUM_WORKERS: 0
   SEED: 42
@@ -52,7 +50,7 @@ DA:
   LAMB_DA: 1
 
 COMET:
-  WORKSPACE: "graphban-kinase"
-  PROJECT_NAME: "GraphBAN_Kinase_Baseline"
+  WORKSPACE: "drugban-kinase"
+  PROJECT_NAME: "DrugBAN_Kinase_Baseline"
   USE: False
   TAG: null
