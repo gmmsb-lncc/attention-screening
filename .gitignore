@@ -159,6 +159,8 @@ FM4M/examples/*.ipynb
 # ============================================
 *.png
 !semantic-screening-DT-kinase.png
+!docs/l4_architecture_workflow.png
+!docs/l4_architecture_nature.png
 *.jpg
 *.jpeg
 *.gif
