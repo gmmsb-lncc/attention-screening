@@ -9,6 +9,10 @@
 
 semantic-screening is an extensible platform that combines frozen protein language models ([ESM-2](https://github.com/facebookresearch/esm)) with molecular language models ([MoLFormer](https://github.com/IBM/molformer)) to predict compound bioactivity against kinase targets. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol with scaffold-based splitting and multi-seed evaluation.
 
+<p align="center">
+  <img src="docs/l4_architecture_workflow.png" alt="Level 4 Architecture — CNN 2D Interaction Maps" width="100%">
+</p>
+
 ---
 
 ## 🔬 Scientific Motivation
