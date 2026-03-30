@@ -156,7 +156,7 @@ class BenchmarkConfig:
 
     # --- deep-learning hyper-parameters (Level 4) ---
     epochs: int = 500
-    batch_size: int = 32
+    batch_size: int = 256
     patience: Optional[int] = None
     learning_rate: float = 1e-4
     model_selection_metric: str = "val_loss"  # "val_loss" or "mcc"
