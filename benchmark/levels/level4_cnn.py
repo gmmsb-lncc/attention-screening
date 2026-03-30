@@ -133,11 +133,19 @@ class _HierarchicalPool(nn.Module):
 class InteractionMapCNN(nn.Module):
     """2D CNN on protein–ligand interaction maps.
 
-    Architecture (v7 — consolidated):
-      1. K pairs of linear projections create K interaction maps
-      2. 4-layer 2D CNN with dilated convolution extracts patterns
-      3. Hierarchical attention pooling aggregates spatially
-      4. Linear classifier produces logits (end-to-end BCE training)
+    Architecture variants:
+      v7 (original): K pairs of linear projections (prot_dim→head_dim,
+          lig_dim→head_dim) then dot-product → K interaction maps.
+      v8 (BAN):      Full Bilinear Attention Network — each head has a
+          weight matrix W_k [prot_dim, lig_dim] that computes interaction
+          directly in the original embedding spaces without any projection
+          bottleneck.  Preserves 100% of ligand information.
+
+    Common pipeline (both variants):
+      1. Interaction maps           [B, K, seq_p, seq_l]
+      2. 4-layer 2D CNN with dilated convolution
+      3. Hierarchical attention pooling
+      4. Linear classifier → BCEWithLogitsLoss
     """
 
     def __init__(
@@ -148,19 +156,33 @@ class InteractionMapCNN(nn.Module):
         head_dim: int = 32,
         cnn_channels: int = 64,
         dropout: float = 0.3,
+        variant: str = "v7",
     ) -> None:
         super().__init__()
+        self.variant = variant
         self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.scale = head_dim ** -0.5
 
-        # Multi-head projections for interaction maps
-        self.prot_heads = nn.ModuleList([
-            nn.Linear(protein_dim, head_dim) for _ in range(num_heads)
-        ])
-        self.lig_heads = nn.ModuleList([
-            nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
-        ])
+        if variant == "v7":
+            # Original: project both sides to head_dim, then dot-product
+            self.head_dim = head_dim
+            self.scale = head_dim ** -0.5
+            self.prot_heads = nn.ModuleList([
+                nn.Linear(protein_dim, head_dim) for _ in range(num_heads)
+            ])
+            self.lig_heads = nn.ModuleList([
+                nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
+            ])
+        elif variant == "v8":
+            # Full Bilinear Attention: W_k[prot_dim, lig_dim] per head.
+            # score(i,j) = protein[i] @ W_k @ ligand[j]
+            # No projection bottleneck — uses full embeddings.
+            self.head_dim = 0  # not used in v8
+            self.scale = ligand_dim ** -0.5
+            self.W_ban = nn.Parameter(
+                torch.empty(num_heads, protein_dim, ligand_dim)
+            )
+        else:
+            raise ValueError(f"Unknown variant '{variant}'. Choose 'v7' or 'v8'.")
 
         # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
         # Layer 1-2: 3×3 local patterns (receptive field 5×5)
@@ -191,10 +213,15 @@ class InteractionMapCNN(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        for heads in (self.prot_heads, self.lig_heads):
-            for h in heads:
-                nn.init.xavier_uniform_(h.weight)
-                nn.init.zeros_(h.bias)
+        if self.variant == "v7":
+            for heads in (self.prot_heads, self.lig_heads):
+                for h in heads:
+                    nn.init.xavier_uniform_(h.weight)
+                    nn.init.zeros_(h.bias)
+        elif self.variant == "v8":
+            # Xavier uniform on each head's W_k[prot_dim, lig_dim]
+            for k in range(self.num_heads):
+                nn.init.xavier_uniform_(self.W_ban[k])
         nn.init.xavier_uniform_(self.classifier.weight)
         nn.init.zeros_(self.classifier.bias)
 
@@ -218,14 +245,32 @@ class InteractionMapCNN(nn.Module):
         logits : [B, 1]
         """
         # --- Build multi-head interaction maps -----------------------
-        maps: list[torch.Tensor] = []
-        for ph, lh in zip(self.prot_heads, self.lig_heads):
-            p = ph(protein_matrix)                             # [B, seq_p, head_dim]
-            l = lh(ligand_matrix)                              # [B, seq_l, head_dim]
-            m = torch.bmm(p, l.transpose(1, 2)) * self.scale  # [B, seq_p, seq_l]
-            maps.append(m)
+        if self.variant == "v7":
+            maps: list[torch.Tensor] = []
+            for ph, lh in zip(self.prot_heads, self.lig_heads):
+                p = ph(protein_matrix)                             # [B, seq_p, head_dim]
+                l = lh(ligand_matrix)                              # [B, seq_l, head_dim]
+                m = torch.bmm(p, l.transpose(1, 2)) * self.scale  # [B, seq_p, seq_l]
+                maps.append(m)
+            interaction = torch.stack(maps, dim=1)  # [B, K, seq_p, seq_l]
 
-        interaction = torch.stack(maps, dim=1)  # [B, K, seq_p, seq_l]
+        elif self.variant == "v8":
+            # Full Bilinear: protein @ W_k @ ligand^T for each head k.
+            # Step 1: project protein into ligand space per head
+            #   protein_matrix: [B, sp, prot_dim]
+            #   W_ban:          [K, prot_dim, lig_dim]
+            #   result:         [B, K, sp, lig_dim]
+            p_proj = torch.einsum(
+                'bip, kpd -> bkid', protein_matrix, self.W_ban
+            )
+            # Step 2: dot-product with ligand in full lig_dim space
+            #   p_proj:         [B, K, sp, lig_dim]
+            #   ligand_matrix:  [B, sl, lig_dim]
+            #   result:         [B, K, sp, sl]
+            interaction = torch.matmul(
+                p_proj,
+                ligand_matrix.unsqueeze(1).transpose(-1, -2),
+            ) * self.scale
 
         # Mask padding positions
         mask_2d = protein_mask.unsqueeze(2) * ligand_mask.unsqueeze(1)  # [B, sp, sl]
@@ -339,6 +384,7 @@ def _train_interaction_cnn(
     head_dim: int = 32,
     cnn_channels: int = 64,
     dropout: float = 0.3,
+    variant: str = "v7",
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -352,6 +398,17 @@ def _train_interaction_cnn(
     np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # --- CPU / GPU optimization ---------------------------------------
+    if device.type == "cpu":
+        n_cpus = os.cpu_count() or 1
+        torch.set_num_threads(n_cpus)
+        torch.set_num_interop_threads(max(1, n_cpus // 2))
+        tqdm.write(f"    CPU mode: using {n_cpus} threads")
+    else:
+        # GPU: enable TF32 for faster matmuls on Ampere+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
     # --- Precision flags ----------------------------------------------
     use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
@@ -370,7 +427,7 @@ def _train_interaction_cnn(
     elif device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    precision_info = []
+    precision_info = [f"variant={variant}"]
     if use_double:
         precision_info.append("float64")
     if no_amp or use_double:
@@ -389,13 +446,18 @@ def _train_interaction_cnn(
         head_dim=head_dim,
         cnn_channels=cnn_channels,
         dropout=dropout,
+        variant=variant,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
+    variant_info = (
+        f"head_dim={head_dim}" if variant == "v7"
+        else f"BAN W[{num_heads}x{protein_dim}x{MOLFORMER_DIM}]"
+    )
     tqdm.write(
-        f"    CNN InteractionMap: heads={num_heads}, head_dim={head_dim}, "
-        f"cnn_channels={cnn_channels}, dropout={dropout:.2f}\n"
+        f"    CNN InteractionMap: variant={variant}, heads={num_heads}, "
+        f"{variant_info}, cnn_channels={cnn_channels}, dropout={dropout:.2f}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
@@ -703,6 +765,7 @@ class Level4CNNRunner(BaseLevelRunner):
         protein_dim = PROTEIN_DIMS.get(full_emb, 320)
 
         # --- Hyperparameters ------------------------------------------
+        variant = os.getenv("BENCHMARK_LEVEL4CNN_VARIANT", "v7")
         num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_NUM_HEADS", "8"))
         head_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_HEAD_DIM", "32"))
         cnn_channels = int(os.getenv("BENCHMARK_LEVEL4CNN_CHANNELS", "64"))
@@ -732,7 +795,7 @@ class Level4CNNRunner(BaseLevelRunner):
         checkpoint_every = int(os.getenv("BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY", "50"))
 
         # --- Train ----------------------------------------------------
-        tqdm.write("  Training InteractionMapCNN...")
+        tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
         model, train_info = _train_interaction_cnn(
             train_loader=model_train_loader,
             val_loader=val_loader,
@@ -745,6 +808,7 @@ class Level4CNNRunner(BaseLevelRunner):
             head_dim=head_dim,
             cnn_channels=cnn_channels,
             dropout=dropout,
+            variant=variant,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
