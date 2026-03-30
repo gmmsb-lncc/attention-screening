@@ -482,6 +482,7 @@ def _train_interaction_cnn(
     total = sum(p.numel() for p in model.parameters())
     variant_info = (
         f"head_dim={head_dim}" if variant == "v7"
+        else f"head_dim={head_dim}, MLP-gated" if variant == "v7_gated"
         else f"BAN W[{num_heads}x{protein_dim}x{MOLFORMER_DIM}]"
     )
     tqdm.write(
