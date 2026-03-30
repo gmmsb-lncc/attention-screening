@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Dict, Optional
 
 import numpy as np
@@ -582,6 +583,8 @@ def _train_interaction_cnn(
                 f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
                 f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
             )
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         if improved:
             best_score = val_mcc
@@ -802,7 +805,7 @@ class Level4CNNRunner(BaseLevelRunner):
             protein_dim=protein_dim,
             lr=lr,
             epochs=self._config.epochs,
-            patience=self._config.resolved_patience or 50,
+            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "20")),
             seed=seed,
             num_heads=num_heads,
             head_dim=head_dim,
