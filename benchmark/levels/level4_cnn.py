@@ -137,6 +137,8 @@ class InteractionMapCNN(nn.Module):
     Architecture variants:
       v7 (original): K pairs of linear projections (prot_dim→head_dim,
           lig_dim→head_dim) then dot-product → K interaction maps.
+      v7_gated:      Same as v7, but applies an MLP-based Sigmoid gate
+          to the original embeddings before projection to filter out noise.
       v8 (BAN):      Full Bilinear Attention Network — each head has a
           weight matrix W_k [prot_dim, lig_dim] that computes interaction
           directly in the original embedding spaces without any projection
@@ -163,10 +165,26 @@ class InteractionMapCNN(nn.Module):
         self.variant = variant
         self.num_heads = num_heads
 
-        if variant == "v7":
+        if variant in ("v7", "v7_gated"):
             # Original: project both sides to head_dim, then dot-product
             self.head_dim = head_dim
             self.scale = head_dim ** -0.5
+            
+            if variant == "v7_gated":
+                # MLP gates for non-linear local feature selection
+                self.prot_gate = nn.Sequential(
+                    nn.Linear(protein_dim, protein_dim // 2),
+                    nn.GELU(),
+                    nn.Linear(protein_dim // 2, protein_dim),
+                    nn.Sigmoid()
+                )
+                self.lig_gate = nn.Sequential(
+                    nn.Linear(ligand_dim, ligand_dim // 2),
+                    nn.GELU(),
+                    nn.Linear(ligand_dim // 2, ligand_dim),
+                    nn.Sigmoid()
+                )
+
             self.prot_heads = nn.ModuleList([
                 nn.Linear(protein_dim, head_dim) for _ in range(num_heads)
             ])
@@ -183,7 +201,7 @@ class InteractionMapCNN(nn.Module):
                 torch.empty(num_heads, protein_dim, ligand_dim)
             )
         else:
-            raise ValueError(f"Unknown variant '{variant}'. Choose 'v7' or 'v8'.")
+            raise ValueError(f"Unknown variant '{variant}'. Choose 'v7', 'v7_gated', or 'v8'.")
 
         # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
         # Layer 1-2: 3×3 local patterns (receptive field 5×5)
@@ -214,11 +232,17 @@ class InteractionMapCNN(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        if self.variant == "v7":
+        if self.variant in ("v7", "v7_gated"):
             for heads in (self.prot_heads, self.lig_heads):
                 for h in heads:
                     nn.init.xavier_uniform_(h.weight)
                     nn.init.zeros_(h.bias)
+            if self.variant == "v7_gated":
+                for seq in (self.prot_gate, self.lig_gate):
+                    for layer in seq:
+                        if isinstance(layer, nn.Linear):
+                            nn.init.xavier_uniform_(layer.weight)
+                            nn.init.zeros_(layer.bias)
         elif self.variant == "v8":
             # Xavier uniform on each head's W_k[prot_dim, lig_dim]
             for k in range(self.num_heads):
@@ -246,11 +270,15 @@ class InteractionMapCNN(nn.Module):
         logits : [B, 1]
         """
         # --- Build multi-head interaction maps -----------------------
-        if self.variant == "v7":
+        if self.variant in ("v7", "v7_gated"):
+            # If gated, squelch noise with local MLP gate BEFORE projection
+            p_feat = protein_matrix * self.prot_gate(protein_matrix) if self.variant == "v7_gated" else protein_matrix
+            l_feat = ligand_matrix * self.lig_gate(ligand_matrix) if self.variant == "v7_gated" else ligand_matrix
+
             maps: list[torch.Tensor] = []
             for ph, lh in zip(self.prot_heads, self.lig_heads):
-                p = ph(protein_matrix)                             # [B, seq_p, head_dim]
-                l = lh(ligand_matrix)                              # [B, seq_l, head_dim]
+                p = ph(p_feat)                                     # [B, seq_p, head_dim]
+                l = lh(l_feat)                                     # [B, seq_l, head_dim]
                 m = torch.bmm(p, l.transpose(1, 2)) * self.scale  # [B, seq_p, seq_l]
                 maps.append(m)
             interaction = torch.stack(maps, dim=1)  # [B, K, seq_p, seq_l]
@@ -805,7 +833,7 @@ class Level4CNNRunner(BaseLevelRunner):
             protein_dim=protein_dim,
             lr=lr,
             epochs=self._config.epochs,
-            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "20")),
+            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "10")),
             seed=seed,
             num_heads=num_heads,
             head_dim=head_dim,
