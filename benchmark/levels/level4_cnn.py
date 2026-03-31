@@ -181,10 +181,12 @@ class InteractionMapCNN(nn.Module):
         dropout: float = 0.3,
         variant: str = "v7",
         num_cross_layers: int = 2,
+        mlp_head: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
         self.num_heads = num_heads
+        self.mlp_head = mlp_head
 
         if variant in ("v7", "v7_gated"):
             # Original: project both sides to head_dim, then dot-product
@@ -312,7 +314,15 @@ class InteractionMapCNN(nn.Module):
             )
             self.pool = _HierarchicalPool(cnn_channels)
             self.dropout = nn.Dropout(dropout)
-            self.classifier = nn.Linear(cnn_channels, 1)
+            if mlp_head:
+                self.classifier = nn.Sequential(
+                    nn.Linear(cnn_channels, cnn_channels * 2),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(cnn_channels * 2, 1),
+                )
+            else:
+                self.classifier = nn.Linear(cnn_channels, 1)
         else:
             # v9: MLP classifier on concatenated pooled vectors
             d_model = head_dim
@@ -359,14 +369,14 @@ class InteractionMapCNN(nn.Module):
                     nn.init.zeros_(h.bias)
 
         # Init classifier (Linear or Sequential)
-        if self.variant != "v9":
-            nn.init.xavier_uniform_(self.classifier.weight)
-            nn.init.zeros_(self.classifier.bias)
-        else:
+        if isinstance(self.classifier, nn.Sequential):
             for m in self.classifier.modules():
                 if isinstance(m, nn.Linear):
                     nn.init.xavier_uniform_(m.weight)
                     nn.init.zeros_(m.bias)
+        else:
+            nn.init.xavier_uniform_(self.classifier.weight)
+            nn.init.zeros_(self.classifier.bias)
 
     def forward(
         self,
@@ -591,6 +601,7 @@ def _train_interaction_cnn(
     dropout: float = 0.3,
     variant: str = "v7",
     num_cross_layers: int = 2,
+    mlp_head: bool = False,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -654,6 +665,7 @@ def _train_interaction_cnn(
         dropout=dropout,
         variant=variant,
         num_cross_layers=num_cross_layers,
+        mlp_head=mlp_head,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -666,9 +678,10 @@ def _train_interaction_cnn(
         else f"CrossAttn d_model={head_dim}, layers={_cross_layers}" if variant == "v9"
         else f"CrossAttn+CNN d_model={head_dim}, layers={_cross_layers}"
     )
+    head_tag = ", mlp_head" if mlp_head else ""
     tqdm.write(
         f"    InteractionModel: variant={variant}, heads={num_heads}, "
-        f"{variant_info}, dropout={dropout:.2f}\n"
+        f"{variant_info}{head_tag}, dropout={dropout:.2f}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
@@ -986,6 +999,7 @@ class Level4CNNRunner(BaseLevelRunner):
         lr = float(os.getenv("BENCHMARK_LEVEL4CNN_LR", str(self._config.learning_rate)))
         batch_size = int(os.getenv("BENCHMARK_LEVEL4CNN_BATCH_SIZE", str(self._config.batch_size)))
         num_cross_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_CROSS_LAYERS", "2"))
+        mlp_head = os.getenv("BENCHMARK_LEVEL4CNN_MLP_HEAD", "0") == "1"
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1024,6 +1038,7 @@ class Level4CNNRunner(BaseLevelRunner):
             dropout=dropout,
             variant=variant,
             num_cross_layers=num_cross_layers,
+            mlp_head=mlp_head,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
