@@ -143,12 +143,22 @@ class InteractionMapCNN(nn.Module):
           weight matrix W_k [prot_dim, lig_dim] that computes interaction
           directly in the original embedding spaces without any projection
           bottleneck.  Preserves 100% of ligand information.
+      v9 (CrossAttn): Bidirectional Cross-Attention — protein attends to
+          ligand and vice-versa through stacked Transformer-style layers.
+          Replaces the CNN+HierPool pipeline with attention pooling + MLP.
+          Captures long-range interactions regardless of sequence distance.
 
-    Common pipeline (both variants):
+    Pipeline (v7/v7_gated/v8):
       1. Interaction maps           [B, K, seq_p, seq_l]
       2. 4-layer 2D CNN with dilated convolution
       3. Hierarchical attention pooling
       4. Linear classifier → BCEWithLogitsLoss
+
+    Pipeline (v9):
+      1. Project protein & ligand to shared d_model space
+      2. Bidirectional cross-attention (N layers)
+      3. Attention pooling per modality
+      4. MLP classifier → BCEWithLogitsLoss
     """
 
     def __init__(
@@ -160,6 +170,7 @@ class InteractionMapCNN(nn.Module):
         cnn_channels: int = 64,
         dropout: float = 0.3,
         variant: str = "v7",
+        num_cross_layers: int = 2,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -200,34 +211,74 @@ class InteractionMapCNN(nn.Module):
             self.W_ban = nn.Parameter(
                 torch.empty(num_heads, protein_dim, ligand_dim)
             )
+        elif variant == "v9":
+            # Cross-Attention: bidirectional Transformer-style attention
+            # between protein and ligand sequences.  No 2D interaction
+            # map, no CNN — captures long-range interactions directly.
+            self.head_dim = head_dim  # reused as d_model for v9
+            d_model = head_dim
+
+            # Project both modalities into a shared d_model space
+            self.prot_proj = nn.Linear(protein_dim, d_model)
+            self.lig_proj  = nn.Linear(ligand_dim, d_model)
+
+            # Stacked bidirectional cross-attention layers
+            self.num_cross_layers = num_cross_layers
+            self.cross_prot_to_lig = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.cross_lig_to_prot = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.prot_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+            self.lig_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+
+            # Attention pooling: learn which tokens matter
+            self.prot_pool_attn = nn.Linear(d_model, 1)
+            self.lig_pool_attn  = nn.Linear(d_model, 1)
         else:
-            raise ValueError(f"Unknown variant '{variant}'. Choose 'v7', 'v7_gated', or 'v8'.")
+            raise ValueError(
+                f"Unknown variant '{variant}'. "
+                f"Choose 'v7', 'v7_gated', 'v8', or 'v9'."
+            )
 
-        # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
-        # Layer 1-2: 3×3 local patterns (receptive field 5×5)
-        # Layer 3: dilated 3×3 (effective 5×5, receptive field 9×9)
-        # Layer 4: 3×3 consolidation (receptive field 13×13)
-        self.cnn = nn.Sequential(
-            nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.GELU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(cnn_channels),
-            nn.GELU(),
-        )
-
-        # Hierarchical attention pooling
-        self.pool = _HierarchicalPool(cnn_channels)
-
-        # Classifier
-        self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(cnn_channels, 1)
+        if variant in ("v7", "v7_gated", "v8"):
+            # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
+            self.cnn = nn.Sequential(
+                nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.GELU(),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
+                nn.BatchNorm2d(cnn_channels),
+                nn.GELU(),
+            )
+            self.pool = _HierarchicalPool(cnn_channels)
+            self.dropout = nn.Dropout(dropout)
+            self.classifier = nn.Linear(cnn_channels, 1)
+        else:
+            # v9: MLP classifier on concatenated pooled vectors
+            d_model = head_dim
+            self.dropout = nn.Dropout(dropout)
+            self.classifier = nn.Sequential(
+                nn.Linear(d_model * 2, d_model),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_model, 1),
+            )
 
         self._init_weights()
 
@@ -247,8 +298,24 @@ class InteractionMapCNN(nn.Module):
             # Xavier uniform on each head's W_k[prot_dim, lig_dim]
             for k in range(self.num_heads):
                 nn.init.xavier_uniform_(self.W_ban[k])
-        nn.init.xavier_uniform_(self.classifier.weight)
-        nn.init.zeros_(self.classifier.bias)
+        elif self.variant == "v9":
+            # Init projections and pooling attention
+            for lin in (self.prot_proj, self.lig_proj,
+                        self.prot_pool_attn, self.lig_pool_attn):
+                nn.init.xavier_uniform_(lin.weight)
+                nn.init.zeros_(lin.bias)
+            # MultiheadAttention uses its own init; classifier MLP below
+
+        # Init classifier (Linear or Sequential)
+        if self.variant in ("v7", "v7_gated", "v8"):
+            nn.init.xavier_uniform_(self.classifier.weight)
+            nn.init.zeros_(self.classifier.bias)
+        else:
+            # v9: classifier is nn.Sequential — init each Linear inside
+            for m in self.classifier.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -269,7 +336,47 @@ class InteractionMapCNN(nn.Module):
         -------
         logits : [B, 1]
         """
-        # --- Build multi-head interaction maps -----------------------
+        # --- v9: Cross-Attention pathway (no interaction map) ----------
+        if self.variant == "v9":
+            prot = self.prot_proj(protein_matrix)  # [B, sp, d_model]
+            lig  = self.lig_proj(ligand_matrix)    # [B, sl, d_model]
+
+            # key_padding_mask: True = IGNORE this position
+            prot_key_mask = (protein_mask == 0)    # [B, sp]
+            lig_key_mask  = (ligand_mask == 0)     # [B, sl]
+
+            for i in range(self.num_cross_layers):
+                # Protein attends to Ligand (Q=prot, K=V=lig)
+                prot_att, _ = self.cross_prot_to_lig[i](
+                    query=prot, key=lig, value=lig,
+                    key_padding_mask=lig_key_mask,
+                )
+                prot = self.prot_norms[i](prot + prot_att)
+
+                # Ligand attends to Protein (Q=lig, K=V=prot)
+                lig_att, _ = self.cross_lig_to_prot[i](
+                    query=lig, key=prot, value=prot,
+                    key_padding_mask=prot_key_mask,
+                )
+                lig = self.lig_norms[i](lig + lig_att)
+
+            # Attention pooling — learned weighted sum over sequence
+            p_scores = self.prot_pool_attn(prot).squeeze(-1)           # [B, sp]
+            p_scores = p_scores.masked_fill(prot_key_mask, -1e9)
+            p_weights = torch.softmax(p_scores, dim=-1).unsqueeze(-1)  # [B, sp, 1]
+            prot_pooled = (prot * p_weights).sum(dim=1)                # [B, d_model]
+
+            l_scores = self.lig_pool_attn(lig).squeeze(-1)             # [B, sl]
+            l_scores = l_scores.masked_fill(lig_key_mask, -1e9)
+            l_weights = torch.softmax(l_scores, dim=-1).unsqueeze(-1)  # [B, sl, 1]
+            lig_pooled = (lig * l_weights).sum(dim=1)                  # [B, d_model]
+
+            combined = torch.cat([prot_pooled, lig_pooled], dim=-1)    # [B, 2*d_model]
+            combined = self.dropout(combined)
+            logits = self.classifier(combined)                         # [B, 1]
+            return logits
+
+        # --- v7/v7_gated/v8: Interaction map → CNN pathway ------------
         if self.variant in ("v7", "v7_gated"):
             # If gated, squelch noise with local MLP gate BEFORE projection
             p_feat = protein_matrix * self.prot_gate(protein_matrix) if self.variant == "v7_gated" else protein_matrix
@@ -285,17 +392,9 @@ class InteractionMapCNN(nn.Module):
 
         elif self.variant == "v8":
             # Full Bilinear: protein @ W_k @ ligand^T for each head k.
-            # Step 1: project protein into ligand space per head
-            #   protein_matrix: [B, sp, prot_dim]
-            #   W_ban:          [K, prot_dim, lig_dim]
-            #   result:         [B, K, sp, lig_dim]
             p_proj = torch.einsum(
                 'bip, kpd -> bkid', protein_matrix, self.W_ban
             )
-            # Step 2: dot-product with ligand in full lig_dim space
-            #   p_proj:         [B, K, sp, lig_dim]
-            #   ligand_matrix:  [B, sl, lig_dim]
-            #   result:         [B, K, sp, sl]
             interaction = torch.matmul(
                 p_proj,
                 ligand_matrix.unsqueeze(1).transpose(-1, -2),
@@ -414,6 +513,7 @@ def _train_interaction_cnn(
     cnn_channels: int = 64,
     dropout: float = 0.3,
     variant: str = "v7",
+    num_cross_layers: int = 2,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -476,6 +576,7 @@ def _train_interaction_cnn(
         cnn_channels=cnn_channels,
         dropout=dropout,
         variant=variant,
+        num_cross_layers=num_cross_layers,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -483,11 +584,12 @@ def _train_interaction_cnn(
     variant_info = (
         f"head_dim={head_dim}" if variant == "v7"
         else f"head_dim={head_dim}, MLP-gated" if variant == "v7_gated"
-        else f"BAN W[{num_heads}x{protein_dim}x{MOLFORMER_DIM}]"
+        else f"BAN W[{num_heads}x{protein_dim}x{MOLFORMER_DIM}]" if variant == "v8"
+        else f"CrossAttn d_model={head_dim}, layers={int(os.getenv('BENCHMARK_LEVEL4CNN_CROSS_LAYERS', '2'))}"
     )
     tqdm.write(
-        f"    CNN InteractionMap: variant={variant}, heads={num_heads}, "
-        f"{variant_info}, cnn_channels={cnn_channels}, dropout={dropout:.2f}\n"
+        f"    InteractionModel: variant={variant}, heads={num_heads}, "
+        f"{variant_info}, dropout={dropout:.2f}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
@@ -804,6 +906,7 @@ class Level4CNNRunner(BaseLevelRunner):
         dropout = float(os.getenv("BENCHMARK_LEVEL4CNN_DROPOUT", "0.3"))
         lr = float(os.getenv("BENCHMARK_LEVEL4CNN_LR", str(self._config.learning_rate)))
         batch_size = int(os.getenv("BENCHMARK_LEVEL4CNN_BATCH_SIZE", str(self._config.batch_size)))
+        num_cross_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_CROSS_LAYERS", "2"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -841,6 +944,7 @@ class Level4CNNRunner(BaseLevelRunner):
             cnn_channels=cnn_channels,
             dropout=dropout,
             variant=variant,
+            num_cross_layers=num_cross_layers,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
