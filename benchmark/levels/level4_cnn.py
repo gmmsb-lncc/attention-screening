@@ -47,6 +47,50 @@ from benchmark.levels.matrix_utils import (
     split_loader_for_feature_extraction,
 )
 
+import torch.nn.functional as F
+
+
+# ======================================================================
+# Focal Loss — penalises easy examples, focuses on hard negatives
+# ======================================================================
+
+class FocalLoss(nn.Module):
+    """Focal Loss for binary classification (from logits).
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    When gamma=0 this reduces to standard BCE.
+    Higher gamma (e.g. 2) down-weights easy examples and focuses
+    learning on hard, misclassified examples (false positives).
+
+    Reference: Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017.
+    """
+
+    def __init__(self, gamma: float = 2.0, alpha: float | None = None,
+                 pos_weight: float = 1.0) -> None:
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha      # per-sample alpha (None = use pos_weight)
+        self.pos_weight = pos_weight
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # BCE without reduction
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, reduction="none",
+        )
+        probs = torch.sigmoid(logits)
+        p_t = probs * targets + (1 - probs) * (1 - targets)
+        focal_weight = (1 - p_t) ** self.gamma
+
+        # Class weighting (like pos_weight in BCE)
+        if self.alpha is not None:
+            alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        else:
+            alpha_t = self.pos_weight * targets + 1.0 * (1 - targets)
+
+        loss = alpha_t * focal_weight * bce
+        return loss.mean()
+
 
 # ======================================================================
 # Model components
@@ -182,11 +226,13 @@ class InteractionMapCNN(nn.Module):
         variant: str = "v7",
         num_cross_layers: int = 2,
         mlp_head: bool = False,
+        cosine_sim: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
         self.num_heads = num_heads
         self.mlp_head = mlp_head
+        self.cosine_sim = cosine_sim
 
         if variant in ("v7", "v7_gated"):
             # Original: project both sides to head_dim, then dot-product
@@ -461,6 +507,9 @@ class InteractionMapCNN(nn.Module):
             for ph, lh in zip(self.prot_heads, self.lig_heads):
                 p = ph(prot)
                 l = lh(lig)
+                if self.cosine_sim:
+                    p = F.normalize(p, dim=-1)
+                    l = F.normalize(l, dim=-1)
                 m = torch.bmm(p, l.transpose(1, 2)) * self.scale
                 maps.append(m)
             interaction = torch.stack(maps, dim=1)  # [B, K, sp, sl]
@@ -474,6 +523,9 @@ class InteractionMapCNN(nn.Module):
             for ph, lh in zip(self.prot_heads, self.lig_heads):
                 p = ph(p_feat)
                 l = lh(l_feat)
+                if self.cosine_sim:
+                    p = F.normalize(p, dim=-1)
+                    l = F.normalize(l, dim=-1)
                 m = torch.bmm(p, l.transpose(1, 2)) * self.scale
                 maps.append(m)
             interaction = torch.stack(maps, dim=1)
@@ -602,6 +654,7 @@ def _train_interaction_cnn(
     variant: str = "v7",
     num_cross_layers: int = 2,
     mlp_head: bool = False,
+    cosine_sim: bool = False,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -666,6 +719,7 @@ def _train_interaction_cnn(
         variant=variant,
         num_cross_layers=num_cross_layers,
         mlp_head=mlp_head,
+        cosine_sim=cosine_sim,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -694,10 +748,28 @@ def _train_interaction_cnn(
 
     train_labels = _extract_labels(train_loader)
     pos_weight = _compute_pos_weight(train_labels)
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
-    )
-    tqdm.write(f"    pos_weight={pos_weight:.2f}, lr={lr:.1e}, wd={weight_decay}")
+
+    # --- Loss function: Focal Loss or BCE -----------------------------
+    focal_gamma = float(os.getenv("BENCHMARK_LEVEL4CNN_FOCAL_GAMMA", "2.0"))
+    use_focal = os.getenv("BENCHMARK_LEVEL4CNN_FOCAL", "1") == "1"
+
+    if use_focal:
+        criterion = FocalLoss(
+            gamma=focal_gamma,
+            pos_weight=pos_weight,
+        )
+        tqdm.write(
+            f"    Loss: FocalLoss(gamma={focal_gamma}, pos_weight={pos_weight:.2f}), "
+            f"lr={lr:.1e}, wd={weight_decay}"
+        )
+    else:
+        criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
+        )
+        tqdm.write(f"    Loss: BCE(pos_weight={pos_weight:.2f}), lr={lr:.1e}, wd={weight_decay}")
+
+    if cosine_sim:
+        tqdm.write("    Interaction maps: cosine similarity (L2-normalized)")
     if train_to_zero:
         tqdm.write(
             f"    *** TRAIN-TO-ZERO mode: early stopping DISABLED, "
@@ -1000,6 +1072,7 @@ class Level4CNNRunner(BaseLevelRunner):
         batch_size = int(os.getenv("BENCHMARK_LEVEL4CNN_BATCH_SIZE", str(self._config.batch_size)))
         num_cross_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_CROSS_LAYERS", "2"))
         mlp_head = os.getenv("BENCHMARK_LEVEL4CNN_MLP_HEAD", "0") == "1"
+        cosine_sim = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_SIM", "0") == "1"
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1030,7 +1103,7 @@ class Level4CNNRunner(BaseLevelRunner):
             protein_dim=protein_dim,
             lr=lr,
             epochs=self._config.epochs,
-            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "10")),
+            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "20")),
             seed=seed,
             num_heads=num_heads,
             head_dim=head_dim,
@@ -1039,6 +1112,7 @@ class Level4CNNRunner(BaseLevelRunner):
             variant=variant,
             num_cross_layers=num_cross_layers,
             mlp_head=mlp_head,
+            cosine_sim=cosine_sim,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
