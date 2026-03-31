@@ -177,34 +177,63 @@ class _HierarchicalPool(nn.Module):
 
 
 class EmbeddingAdapter(nn.Module):
-    """Lightweight adapter to refine frozen embeddings for a specific task.
+    """Adapter to refine frozen embeddings for a specific task.
 
-    Architecture: Linear → GELU → Dropout → Linear + Skip Connection → LayerNorm
+    Supports:
+      - Stacked MLP bottleneck blocks (num_layers ≥ 1)
+      - Optional per-residue self-attention before the MLP blocks
 
-    The skip connection ensures the original embedding is preserved and the
-    adapter only learns incremental corrections.  The bottleneck (smaller
-    hidden dimension) acts as an information filter that amplifies task-relevant
-    features and attenuates noise.
+    Each MLP block:  Linear → GELU → Dropout → Linear + Skip → LayerNorm
+    Self-attention:  MultiheadAttention(1 head) + Skip → LayerNorm
 
-    Reference: Houlsby et al., "Parameter-Efficient Transfer Learning", ICML 2019.
+    References:
+      Houlsby et al., "Parameter-Efficient Transfer Learning", ICML 2019.
     """
 
-    def __init__(self, dim: int, bottleneck: int, dropout: float = 0.3) -> None:
+    def __init__(
+        self,
+        dim: int,
+        bottleneck: int,
+        dropout: float = 0.3,
+        num_layers: int = 1,
+        use_self_attn: bool = False,
+    ) -> None:
         super().__init__()
-        self.adapter = nn.Sequential(
-            nn.Linear(dim, bottleneck),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(bottleneck, dim),
-        )
-        self.norm = nn.LayerNorm(dim)
-        # Init near-identity: adapter starts as ~zero so initial behaviour
-        # matches the non-adapted model.
-        nn.init.zeros_(self.adapter[-1].weight)
-        nn.init.zeros_(self.adapter[-1].bias)
+
+        # --- Optional self-attention (context-aware adaptation) --------
+        self.use_self_attn = use_self_attn
+        if use_self_attn:
+            self.self_attn = nn.MultiheadAttention(
+                embed_dim=dim, num_heads=4, dropout=dropout, batch_first=True,
+            )
+            self.attn_norm = nn.LayerNorm(dim)
+
+        # --- Stacked MLP bottleneck blocks ----------------------------
+        self.mlp_blocks = nn.ModuleList()
+        self.mlp_norms = nn.ModuleList()
+        for _ in range(num_layers):
+            block = nn.Sequential(
+                nn.Linear(dim, bottleneck),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(bottleneck, dim),
+            )
+            # Zero-init output layer → starts as identity
+            nn.init.zeros_(block[-1].weight)
+            nn.init.zeros_(block[-1].bias)
+            self.mlp_blocks.append(block)
+            self.mlp_norms.append(nn.LayerNorm(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.norm(x + self.adapter(x))
+        # Self-attention: each residue sees its neighbours
+        if self.use_self_attn:
+            attn_out, _ = self.self_attn(x, x, x)
+            x = self.attn_norm(x + attn_out)
+
+        # Stacked MLP blocks with skip connections
+        for block, norm in zip(self.mlp_blocks, self.mlp_norms):
+            x = norm(x + block(x))
+        return x
 
 
 class InteractionMapCNN(nn.Module):
@@ -262,6 +291,8 @@ class InteractionMapCNN(nn.Module):
         use_adapter: bool = False,
         adapter_bottleneck_prot: int = 256,
         adapter_bottleneck_lig: int = 512,
+        adapter_layers: int = 1,
+        adapter_self_attn: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -276,11 +307,15 @@ class InteractionMapCNN(nn.Module):
                 dim=protein_dim,
                 bottleneck=adapter_bottleneck_prot,
                 dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=adapter_self_attn,
             )
             self.lig_adapter = EmbeddingAdapter(
                 dim=ligand_dim,
                 bottleneck=adapter_bottleneck_lig,
                 dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=adapter_self_attn,
             )
 
         if variant in ("v7", "v7_gated"):
@@ -779,6 +814,9 @@ def _train_interaction_cnn(
     use_adapter: bool = False,
     adapter_bottleneck_prot: int = 256,
     adapter_bottleneck_lig: int = 512,
+    adapter_layers: int = 1,
+    adapter_self_attn: bool = False,
+    adapter_lr_mult: float = 1.0,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -847,6 +885,8 @@ def _train_interaction_cnn(
         use_adapter=use_adapter,
         adapter_bottleneck_prot=adapter_bottleneck_prot,
         adapter_bottleneck_lig=adapter_bottleneck_lig,
+        adapter_layers=adapter_layers,
+        adapter_self_attn=adapter_self_attn,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -869,9 +909,29 @@ def _train_interaction_cnn(
 
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr, weight_decay=weight_decay,
-    )
+    if use_adapter and adapter_lr_mult != 1.0:
+        # Differential LR: adapters learn faster since they start from zero
+        adapter_params = (
+            list(model.prot_adapter.parameters())
+            + list(model.lig_adapter.parameters())
+        )
+        adapter_ids = {id(p) for p in adapter_params}
+        other_params = [
+            p for p in model.parameters()
+            if id(p) not in adapter_ids and p.requires_grad
+        ]
+        optimizer = torch.optim.AdamW([
+            {"params": adapter_params, "lr": lr * adapter_lr_mult},
+            {"params": other_params,   "lr": lr},
+        ], weight_decay=weight_decay)
+        tqdm.write(
+            f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
+            f"other={lr:.2e} (mult={adapter_lr_mult}x)"
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=lr, weight_decay=weight_decay,
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     train_labels = _extract_labels(train_loader)
@@ -1211,6 +1271,9 @@ class Level4CNNRunner(BaseLevelRunner):
         use_adapter = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER", "0") == "1"
         adapter_bottleneck_prot = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM", "256"))
         adapter_bottleneck_lig = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM", "512"))
+        adapter_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS", "1"))
+        adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
+        adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1254,6 +1317,9 @@ class Level4CNNRunner(BaseLevelRunner):
             use_adapter=use_adapter,
             adapter_bottleneck_prot=adapter_bottleneck_prot,
             adapter_bottleneck_lig=adapter_bottleneck_lig,
+            adapter_layers=adapter_layers,
+            adapter_self_attn=adapter_self_attn,
+            adapter_lr_mult=adapter_lr_mult,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
@@ -1324,3 +1390,95 @@ class Level4CNNRunner(BaseLevelRunner):
             f"AUROC={eval_result['auroc']:.4f}, F1={eval_result['f1']:.4f}"
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Ensemble: average probabilities across seeds → single prediction
+    # ------------------------------------------------------------------
+
+    def run(self, **kwargs: object) -> Optional[Dict]:
+        """Override base run to add probability ensemble after all seeds."""
+        base_result = super().run(**kwargs)
+
+        # Attempt ensemble of raw predictions
+        use_ensemble = os.getenv("BENCHMARK_LEVEL4CNN_ENSEMBLE", "1") == "1"
+        if use_ensemble and self.mode != "train":
+            self._ensemble_predictions()
+
+        return base_result
+
+    def _ensemble_predictions(self) -> None:
+        """Load raw predictions from all seeds, average probs, compute MCC.
+
+        The threshold is the mean of per-seed val-optimized thresholds
+        (NOT swept on test) to maintain the fair evaluation protocol.
+        """
+        level_dir = self.output_dir_for_level()
+        all_probs = []
+        val_thresholds = []
+        y_true = None
+
+        for seed in self.seeds:
+            seed_dir = os.path.join(level_dir, f"seed_{seed}")
+            npz_path = os.path.join(seed_dir, "raw_predictions.npz")
+            res_path = os.path.join(seed_dir, "level4_cnn_results.json")
+            if not os.path.exists(npz_path) or not os.path.exists(res_path):
+                tqdm.write(f"  Ensemble: skipping seed {seed} (missing files)")
+                return
+            data = np.load(npz_path)
+            all_probs.append(data["y_prob"])
+            if y_true is None:
+                y_true = data["y_true"]
+
+            # Load val threshold from per-seed results
+            with open(res_path) as fh:
+                seed_res = json.load(fh)
+            sc_key = next(iter(seed_res), None)
+            if sc_key:
+                mlp = seed_res[sc_key].get("MLP", {})
+                val_thresholds.append(mlp.get("val_threshold", 0.5))
+
+        if y_true is None or len(all_probs) < 2:
+            return
+
+        # Average probabilities across seeds
+        ensemble_probs = np.mean(all_probs, axis=0)
+
+        # Use mean of val thresholds (fair protocol: no test optimization)
+        thr = float(np.mean(val_thresholds)) if val_thresholds else 0.5
+
+        preds = (ensemble_probs >= thr).astype(int)
+        acc = float(np.mean(preds == y_true))
+        mcc = float(matthews_corrcoef(y_true.astype(int), preds))
+        f1 = float(f1_score(y_true, preds, zero_division=0))
+        prec = float(precision_score(y_true, preds, zero_division=0))
+        rec = float(recall_score(y_true, preds, zero_division=0))
+        try:
+            auroc = float(roc_auc_score(y_true, ensemble_probs))
+        except ValueError:
+            auroc = 0.0
+
+        tqdm.write(
+            f"\n  ┌── Ensemble ({len(all_probs)} seeds) ──────────────────\n"
+            f"  │ MCC={mcc:.4f}  AUROC={auroc:.4f}  F1={f1:.4f}\n"
+            f"  │ Precision={prec:.4f}  Recall={rec:.4f}  Acc={acc:.4f}\n"
+            f"  │ Threshold={thr:.4f} (mean of val thresholds)\n"
+            f"  └─────────────────────────────────────────"
+        )
+
+        # Save ensemble results
+        ensemble_path = os.path.join(level_dir, "ensemble_results.json")
+        ensemble_data = {
+            "n_seeds": len(all_probs),
+            "mcc": round(mcc, 6),
+            "auroc": round(auroc, 6),
+            "f1": round(f1, 6),
+            "precision": round(prec, 6),
+            "recall": round(rec, 6),
+            "accuracy": round(acc, 6),
+            "threshold": round(thr, 4),
+            "threshold_source": "mean_val_thresholds",
+        }
+        with open(ensemble_path, "w") as fh:
+            json.dump(ensemble_data, fh, indent=2)
+        tqdm.write(f"  Ensemble results saved: {ensemble_path}")
+
