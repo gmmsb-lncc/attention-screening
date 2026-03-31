@@ -24,6 +24,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -563,12 +564,17 @@ def _best_mcc_threshold(
     y_true: np.ndarray,
     y_proba: np.ndarray,
 ) -> tuple[float, float]:
-    """Return (threshold, MCC) that maximises MCC."""
+    """Two-pass threshold sweep that maximises MCC.
+
+    Pass 1: coarse grid (100 points) over [0.01, 0.99]
+    Pass 2: fine grid (100 points) in ±0.05 around the best
+    """
     if y_true.size == 0 or len(np.unique(y_true)) < 2:
         return 0.5, 0.0
 
-    grid = np.linspace(0.05, 0.95, 37)
-    anchors = np.unique(np.clip(y_proba, 0.0, 1.0))
+    # Pass 1 — coarse
+    grid = np.linspace(0.01, 0.99, 100)
+    anchors = np.unique(np.clip(y_proba, 0.01, 0.99))
     thresholds = np.unique(np.concatenate([grid, anchors]))
 
     best_thr, best_mcc = 0.5, -1.0
@@ -578,7 +584,69 @@ def _best_mcc_threshold(
         if mcc > best_mcc:
             best_mcc = mcc
             best_thr = float(thr)
+
+    # Pass 2 — fine around best
+    lo = max(0.01, best_thr - 0.05)
+    hi = min(0.99, best_thr + 0.05)
+    fine_grid = np.linspace(lo, hi, 100)
+    for thr in fine_grid:
+        pred = (y_proba >= thr).astype(int)
+        mcc = float(matthews_corrcoef(y_true, pred))
+        if mcc > best_mcc:
+            best_mcc = mcc
+            best_thr = float(thr)
+
     return best_thr, best_mcc
+
+
+# ======================================================================
+# Platt Scaling — probability calibration
+# ======================================================================
+
+@torch.inference_mode()
+def _platt_calibrate(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+) -> LogisticRegression:
+    """Fit Platt scaling on raw logits from the validation set.
+
+    Returns a fitted LogisticRegression that maps raw logits → calibrated
+    probabilities.  Usage: calibrator.predict_proba(logits)[:, 1]
+    """
+    model.eval()
+    model_dtype = next(model.parameters()).dtype
+    eval_amp = device.type == "cuda" and model_dtype != torch.float64
+
+    all_logits: list[np.ndarray] = []
+    all_targets: list[np.ndarray] = []
+
+    for batch in val_loader:
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
+        pm = batch["protein_mask"].to(device)
+        lm = batch["ligand_mask"].to(device)
+        y = batch["label"].numpy()
+
+        with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            logits = model(p, l, pm, lm)
+
+        all_logits.append(logits.float().cpu().numpy().ravel())
+        all_targets.append(y.ravel())
+
+    logits_np = np.concatenate(all_logits).reshape(-1, 1)
+    targets_np = np.concatenate(all_targets).astype(int)
+
+    # Platt scaling = logistic regression on raw logits (no regularisation)
+    calibrator = LogisticRegression(C=1e10, solver="lbfgs", max_iter=1000)
+    calibrator.fit(logits_np, targets_np)
+
+    # Report calibration shift
+    a = float(calibrator.coef_[0, 0])
+    b = float(calibrator.intercept_[0])
+    tqdm.write(f"    Platt calibration: a={a:.4f}, b={b:.4f}")
+
+    return calibrator
 
 
 # ======================================================================
@@ -940,17 +1008,19 @@ def _evaluate(
     device: torch.device,
     threshold: float | None = None,
     desc: str = "",
+    calibrator: LogisticRegression | None = None,
 ) -> dict:
     """Evaluate model and return full metrics dict.
 
     If `threshold` is provided (e.g., from val-optimized), use it directly.
     Otherwise, sweep to find the MCC-optimal threshold on this data.
+    If `calibrator` is provided, use Platt-calibrated probabilities.
 
     Returns dict with: mcc, threshold, accuracy, f1, precision, recall, auroc,
     plus raw y_true and y_prob arrays.
     """
     model.eval()
-    all_probs: list[np.ndarray] = []
+    all_logits: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
     # Auto-detect model dtype for double precision support
@@ -967,12 +1037,17 @@ def _evaluate(
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
             logits = model(p, l, pm, lm)
 
-        probs = torch.sigmoid(logits.float()).cpu().numpy().ravel()
-        all_probs.append(probs)
+        all_logits.append(logits.float().cpu().numpy().ravel())
         all_targets.append(y)
 
-    probs = np.concatenate(all_probs)
+    raw_logits = np.concatenate(all_logits)
     targets = np.concatenate(all_targets).astype(int)
+
+    # Calibrated or raw probabilities
+    if calibrator is not None:
+        probs = calibrator.predict_proba(raw_logits.reshape(-1, 1))[:, 1]
+    else:
+        probs = 1.0 / (1.0 + np.exp(-raw_logits))  # sigmoid
 
     if threshold is None:
         thr, mcc = _best_mcc_threshold(targets, probs)
@@ -1121,9 +1196,22 @@ class Level4CNNRunner(BaseLevelRunner):
 
         device = next(model.parameters()).device
 
+        # --- Platt Scaling calibration on train -------------------------
+        # Fitted on TRAIN (same data the model learned from) so that the
+        # val set remains fully independent for threshold selection.
+        # Protocol: Platt(train) → threshold(val) → evaluate(test)
+        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "1") == "1"
+        calibrator = None
+        if use_platt:
+            tqdm.write("  Fitting Platt calibration on train set...")
+            calibrator = _platt_calibrate(model, model_train_loader, device)
+
         # --- Evaluate -------------------------------------------------
         # Step 1: Evaluate on val to get val-optimized threshold
-        val_result = _evaluate(model, val_loader, device, desc="Eval (val)")
+        val_result = _evaluate(
+            model, val_loader, device, desc="Eval (val)",
+            calibrator=calibrator,
+        )
         val_threshold = val_result["threshold"]
 
         if self.mode == "train":
@@ -1133,6 +1221,7 @@ class Level4CNNRunner(BaseLevelRunner):
             eval_result = _evaluate(
                 model, test_loader, device,
                 threshold=val_threshold, desc="Eval (test)",
+                calibrator=calibrator,
             )
 
         # --- Save results in standard format --------------------------
