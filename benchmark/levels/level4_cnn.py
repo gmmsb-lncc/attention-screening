@@ -176,6 +176,37 @@ class _HierarchicalPool(nn.Module):
         return result
 
 
+class EmbeddingAdapter(nn.Module):
+    """Lightweight adapter to refine frozen embeddings for a specific task.
+
+    Architecture: Linear → GELU → Dropout → Linear + Skip Connection → LayerNorm
+
+    The skip connection ensures the original embedding is preserved and the
+    adapter only learns incremental corrections.  The bottleneck (smaller
+    hidden dimension) acts as an information filter that amplifies task-relevant
+    features and attenuates noise.
+
+    Reference: Houlsby et al., "Parameter-Efficient Transfer Learning", ICML 2019.
+    """
+
+    def __init__(self, dim: int, bottleneck: int, dropout: float = 0.3) -> None:
+        super().__init__()
+        self.adapter = nn.Sequential(
+            nn.Linear(dim, bottleneck),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(bottleneck, dim),
+        )
+        self.norm = nn.LayerNorm(dim)
+        # Init near-identity: adapter starts as ~zero so initial behaviour
+        # matches the non-adapted model.
+        nn.init.zeros_(self.adapter[-1].weight)
+        nn.init.zeros_(self.adapter[-1].bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.norm(x + self.adapter(x))
+
+
 class InteractionMapCNN(nn.Module):
     """2D CNN on protein–ligand interaction maps.
 
@@ -228,12 +259,29 @@ class InteractionMapCNN(nn.Module):
         num_cross_layers: int = 2,
         mlp_head: bool = False,
         cosine_sim: bool = False,
+        use_adapter: bool = False,
+        adapter_bottleneck_prot: int = 256,
+        adapter_bottleneck_lig: int = 512,
     ) -> None:
         super().__init__()
         self.variant = variant
         self.num_heads = num_heads
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
+        self.use_adapter = use_adapter
+
+        # --- Embedding adapters (optional) ----------------------------
+        if use_adapter:
+            self.prot_adapter = EmbeddingAdapter(
+                dim=protein_dim,
+                bottleneck=adapter_bottleneck_prot,
+                dropout=dropout,
+            )
+            self.lig_adapter = EmbeddingAdapter(
+                dim=ligand_dim,
+                bottleneck=adapter_bottleneck_lig,
+                dropout=dropout,
+            )
 
         if variant in ("v7", "v7_gated"):
             # Original: project both sides to head_dim, then dot-product
@@ -444,6 +492,11 @@ class InteractionMapCNN(nn.Module):
         -------
         logits : [B, 1]
         """
+        # --- Apply embedding adapters (if enabled) --------------------
+        if self.use_adapter:
+            protein_matrix = self.prot_adapter(protein_matrix)
+            ligand_matrix = self.lig_adapter(ligand_matrix)
+
         # --- Build multi-head interaction maps -----------------------
         if self.variant == "v9":
             # Pure Cross-Attention + Attention Pooling + MLP
@@ -723,6 +776,9 @@ def _train_interaction_cnn(
     num_cross_layers: int = 2,
     mlp_head: bool = False,
     cosine_sim: bool = False,
+    use_adapter: bool = False,
+    adapter_bottleneck_prot: int = 256,
+    adapter_bottleneck_lig: int = 512,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -788,6 +844,9 @@ def _train_interaction_cnn(
         num_cross_layers=num_cross_layers,
         mlp_head=mlp_head,
         cosine_sim=cosine_sim,
+        use_adapter=use_adapter,
+        adapter_bottleneck_prot=adapter_bottleneck_prot,
+        adapter_bottleneck_lig=adapter_bottleneck_lig,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -801,9 +860,10 @@ def _train_interaction_cnn(
         else f"CrossAttn+CNN d_model={head_dim}, layers={_cross_layers}"
     )
     head_tag = ", mlp_head" if mlp_head else ""
+    adapter_tag = f", adapter({adapter_bottleneck_prot}/{adapter_bottleneck_lig})" if use_adapter else ""
     tqdm.write(
         f"    InteractionModel: variant={variant}, heads={num_heads}, "
-        f"{variant_info}{head_tag}, dropout={dropout:.2f}\n"
+        f"{variant_info}{head_tag}{adapter_tag}, dropout={dropout:.2f}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
@@ -1148,6 +1208,9 @@ class Level4CNNRunner(BaseLevelRunner):
         num_cross_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_CROSS_LAYERS", "2"))
         mlp_head = os.getenv("BENCHMARK_LEVEL4CNN_MLP_HEAD", "0") == "1"
         cosine_sim = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_SIM", "0") == "1"
+        use_adapter = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER", "0") == "1"
+        adapter_bottleneck_prot = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM", "256"))
+        adapter_bottleneck_lig = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM", "512"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1188,6 +1251,9 @@ class Level4CNNRunner(BaseLevelRunner):
             num_cross_layers=num_cross_layers,
             mlp_head=mlp_head,
             cosine_sim=cosine_sim,
+            use_adapter=use_adapter,
+            adapter_bottleneck_prot=adapter_bottleneck_prot,
+            adapter_bottleneck_lig=adapter_bottleneck_lig,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
