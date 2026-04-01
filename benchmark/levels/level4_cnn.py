@@ -817,6 +817,8 @@ def _train_interaction_cnn(
     adapter_layers: int = 1,
     adapter_self_attn: bool = False,
     adapter_lr_mult: float = 1.0,
+    label_smooth: float = 0.0,
+    mixup_alpha: float = 0.0,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -958,6 +960,10 @@ def _train_interaction_cnn(
 
     if cosine_sim:
         tqdm.write("    Interaction maps: cosine similarity (L2-normalized)")
+    if label_smooth > 0:
+        tqdm.write(f"    Label smoothing: eps={label_smooth}")
+    if mixup_alpha > 0:
+        tqdm.write(f"    Mixup: alpha={mixup_alpha}")
     if train_to_zero:
         tqdm.write(
             f"    *** TRAIN-TO-ZERO mode: early stopping DISABLED, "
@@ -1004,6 +1010,20 @@ def _train_interaction_cnn(
             pm = batch["protein_mask"].to(device)
             lm = batch["ligand_mask"].to(device)
             y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+
+            # --- Mixup (only during training) ---------------------------
+            if mixup_alpha > 0:
+                lam = float(np.random.beta(mixup_alpha, mixup_alpha))
+                idx = torch.randperm(p.size(0), device=device)
+                p = lam * p + (1 - lam) * p[idx]
+                l = lam * l + (1 - lam) * l[idx]
+                pm = pm | pm[idx]   # union of valid positions from both samples
+                lm = lm | lm[idx]
+                y = lam * y + (1 - lam) * y[idx]
+
+            # --- Label smoothing ----------------------------------------
+            if label_smooth > 0:
+                y = y * (1 - label_smooth) + label_smooth * 0.5
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
@@ -1296,6 +1316,10 @@ class Level4CNNRunner(BaseLevelRunner):
         # --- Checkpoint frequency --------------------------------------
         checkpoint_every = int(os.getenv("BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY", "50"))
 
+        # --- Regularization techniques --------------------------------
+        label_smooth = float(os.getenv("BENCHMARK_LEVEL4CNN_LABEL_SMOOTH", "0.0"))
+        mixup_alpha = float(os.getenv("BENCHMARK_LEVEL4CNN_MIXUP_ALPHA", "0.0"))
+
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
         model, train_info = _train_interaction_cnn(
@@ -1320,6 +1344,8 @@ class Level4CNNRunner(BaseLevelRunner):
             adapter_layers=adapter_layers,
             adapter_self_attn=adapter_self_attn,
             adapter_lr_mult=adapter_lr_mult,
+            label_smooth=label_smooth,
+            mixup_alpha=mixup_alpha,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
