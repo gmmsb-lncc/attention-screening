@@ -54,7 +54,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 SCRIPT_DIR = Path(__file__).resolve().parent          # DrugBAN/
 REPO_ROOT   = SCRIPT_DIR.parent                        # semantic-screening/
 DRUGBAN_DATASETS = SCRIPT_DIR / "src" / "datasets"
-RESULTS_DIR = SCRIPT_DIR / "results" / "dtkinase"
+RESULTS_DIR = SCRIPT_DIR / "results" / "drugban_dataset_testes"
 
 # Add benchmark code to sys.path
 sys.path.insert(0, str(REPO_ROOT))
