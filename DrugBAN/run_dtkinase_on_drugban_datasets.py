@@ -374,7 +374,16 @@ def compute_ligand_matrices(
 from torch.utils.data import Dataset, DataLoader
 
 class DrugBANMatrixDataset(Dataset):
-    """Pair dataset mapping (protein_seq, smiles) → (protein_matrix, ligand_matrix, label)."""
+    """Pair dataset mapping (protein_seq, smiles) → (protein_matrix, ligand_matrix, label).
+
+    Long sequences are compressed to max_prot_len / max_lig_len via adaptive
+    average pooling along the residue/token axis — this preserves all learned
+    features without truncating information.
+    """
+
+    # Default max lengths: 545 residues (covers 95%+ of kinases), 128 tokens
+    DEFAULT_MAX_PROT = 545
+    DEFAULT_MAX_LIG  = 128
 
     def __init__(
         self,
@@ -383,26 +392,44 @@ class DrugBANMatrixDataset(Dataset):
         lig_matrices: Dict[str, np.ndarray],
         prot_dim: int = 320,
         lig_dim: int = MOLFORMER_DIM,
+        max_prot_len: int = DEFAULT_MAX_PROT,
+        max_lig_len: int = DEFAULT_MAX_LIG,
     ) -> None:
         self._df = df.reset_index(drop=True)
         self._prot = prot_matrices
         self._lig = lig_matrices
         self._prot_dim = prot_dim
         self._lig_dim = lig_dim
+        self._max_prot_len = max_prot_len
+        self._max_lig_len = max_lig_len
 
     def __len__(self) -> int:
         return len(self._df)
+
+    @staticmethod
+    def _pool_to_max(mat: np.ndarray, max_len: int) -> np.ndarray:
+        """Adaptive avg pool along axis 0 if mat exceeds max_len."""
+        if mat.shape[0] <= max_len:
+            return mat
+        # [L, D] → [1, D, L] for adaptive_avg_pool1d → [1, D, max_len] → [max_len, D]
+        t = torch.from_numpy(mat).float().unsqueeze(0).permute(0, 2, 1)  # [1, D, L]
+        pooled = torch.nn.functional.adaptive_avg_pool1d(t, max_len)     # [1, D, max_len]
+        return pooled.permute(0, 2, 1).squeeze(0).numpy()                # [max_len, D]
 
     def __getitem__(self, idx: int):
         row = self._df.iloc[idx]
         prot_mat = self._prot.get(
             row["protein_seq"],
-            np.zeros((1, self._prot_dim), dtype=np.float32),  # safe fallback
+            np.zeros((1, self._prot_dim), dtype=np.float32),
         )
         lig_mat = self._lig.get(
             row["smiles"],
-            np.zeros((1, self._lig_dim), dtype=np.float32),   # safe fallback
+            np.zeros((1, self._lig_dim), dtype=np.float32),
         )
+        # Adaptive pool if exceeding max length
+        prot_mat = self._pool_to_max(prot_mat, self._max_prot_len)
+        lig_mat  = self._pool_to_max(lig_mat, self._max_lig_len)
+
         label = int(row["label"])
         return prot_mat.astype(np.float32), lig_mat.astype(np.float32), label
 
