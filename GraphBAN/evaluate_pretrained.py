@@ -303,6 +303,21 @@ def find_best_model(source_dataset: str, seed: int) -> Path | None:
     return max(best_models, key=extract_epoch)
 
 
+def _detect_dgl_cuda() -> bool:
+    """Check if DGL was compiled with CUDA support."""
+    try:
+        import dgl
+        g = dgl.graph(([0], [1]))
+        g = g.to("cuda")
+        return True
+    except Exception:
+        return False
+
+
+# Cache the result so we only probe once
+_DGL_HAS_CUDA: bool | None = None
+
+
 def run_inference(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -312,11 +327,14 @@ def run_inference(
     """Run inference and return (y_true, y_prob).
 
     y_prob is the probability of the positive class.
-    Note: DGL graphs stay on CPU (pip DGL is CPU-only).
-    Model tensors are also on CPU for compatibility.
+    Uses GPU if DGL has CUDA support, otherwise falls back to CPU.
     """
-    # DGL installed via pip is CPU-only, so force everything to CPU
-    infer_device = torch.device("cpu")
+    global _DGL_HAS_CUDA
+    if _DGL_HAS_CUDA is None:
+        _DGL_HAS_CUDA = _detect_dgl_cuda()
+        print(f"    DGL CUDA support: {'YES → using GPU' if _DGL_HAS_CUDA else 'NO → using CPU'}")
+
+    infer_device = device if _DGL_HAS_CUDA else torch.device("cpu")
     model = model.to(infer_device)
 
     y_label_all = []
@@ -330,8 +348,7 @@ def run_inference(
             esm_feat = esm_feat.clone().detach().float()
             esm_feat = esm_feat.reshape(sm.shape[0], 1, 1280)
 
-            # Keep everything on CPU (DGL graphs can't go to CUDA with this DGL build)
-            v_d = v_d  # DGL graph, already on CPU
+            v_d = v_d.to(infer_device)
             sm = sm.to(infer_device)
             v_p = v_p.to(infer_device)
             esm_feat = esm_feat.to(infer_device)
