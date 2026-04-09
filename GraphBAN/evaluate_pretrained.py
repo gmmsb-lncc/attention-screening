@@ -426,8 +426,9 @@ def compute_metrics_paper_protocol(
     if cm.shape == (2, 2):
         tn, fp, fn, tp = cm.ravel()
         result["accuracy"] = float((tp + tn) / (tp + tn + fp + fn))
-        result["sensitivity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0  # Paper's convention
-        result["specificity"] = float(tp / (fn + tp)) if (fn + tp) > 0 else 0.0  # Paper's convention
+        # Standard convention (NOT the paper's swapped labels)
+        result["sensitivity"] = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0  # TPR = Recall
+        result["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0  # TNR
         result["precision"] = float(precision_score(y_true, y_pred_binary, zero_division=0))
         result["f1"] = result["f1_roc_optimal"]
         result["mcc"] = float(matthews_corrcoef(y_true, y_pred_binary))
@@ -609,7 +610,12 @@ def main():
     print(f"{'─' * 70}")
 
     # Create test dataset and dataloader
-    test_dataset = modules["DTIDataset"](df_test.index.values, df_test)
+    # IMPORTANT: Use max_drug_nodes=290 (upstream default) to match pretrained
+    # model training. Our patch_upstream.py changed it to 310 for re-training
+    # on kinase data, but pretrained weights expect 290-node padding.
+    PRETRAINED_MAX_DRUG_NODES = 290
+    test_dataset = modules["DTIDataset"](df_test.index.values, df_test,
+                                         max_drug_nodes=PRETRAINED_MAX_DRUG_NODES)
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=args.batch_size,
@@ -618,6 +624,7 @@ def main():
         drop_last=False,
         collate_fn=modules["graph_collate_func"],
     )
+    print(f"  max_drug_nodes:  {PRETRAINED_MAX_DRUG_NODES} (upstream default for pretrained weights)")
 
     all_results: dict[str, Any] = {
         "target_dataset": args.dataset,
