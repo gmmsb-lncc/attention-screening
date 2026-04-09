@@ -514,6 +514,13 @@ def main():
         help="Output directory (default: GraphBAN/results/pretrained_evaluation/)",
     )
     parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Name for this evaluation run (used in output filename, e.g. 'v1', 'final'). "
+             "Output file becomes <run-name>_pretrained_evaluation.json",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable feature caching",
@@ -530,6 +537,8 @@ def main():
     print(f"  Source models:   {args.source_models}")
     print(f"  Seeds:           {args.seeds}")
     print(f"  Batch size:      {args.batch_size}")
+    if args.run_name:
+        print(f"  Run name:        {args.run_name}")
 
     # Setup
     modules = setup_graphban_imports()
@@ -682,7 +691,9 @@ def main():
     result_dir = output_base / args.dataset
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    result_file = result_dir / "pretrained_evaluation.json"
+    filename = f"{args.run_name}_pretrained_evaluation.json" if args.run_name else "pretrained_evaluation.json"
+    result_file = result_dir / filename
+    all_results["run_name"] = args.run_name
     with open(result_file, "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     print(f"  Saved: {result_file}")
