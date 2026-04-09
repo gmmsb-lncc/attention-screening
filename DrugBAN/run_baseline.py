@@ -26,9 +26,14 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
+# Suppress HuggingFace tokenizers fork warning.
+# Must be set BEFORE any tokenizer import (transitive via transformers/rdkit).
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 import json
-import os
 import sys
 import time
 import warnings
