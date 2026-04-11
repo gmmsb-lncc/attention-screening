@@ -212,7 +212,7 @@ if [ "${PROTOCOL}" = "1" ] || [ "${PROTOCOL}" = "all" ]; then
             echo "  ${ds}: $(cat "${RES}" | python3 -c "
 import sys, json
 r = json.load(sys.stdin)
-print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  n={r[\"n_test_samples\"]}')
+print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  MCC={r.get(\"MCC\", 0):.4f}  F1={r.get(\"F1\", 0):.4f}  n={r[\"n_test_samples\"]}')
 ")"
         fi
     done
@@ -340,7 +340,7 @@ main()
                 echo "  ${ds} rep${seed}: $(cat "${RES}" | python3 -c "
 import sys, json
 r = json.load(sys.stdin)
-print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}')
+print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  MCC={r.get(\"MCC\", 0):.4f}  F1={r.get(\"F1\", 0):.4f}')
 ")"
             fi
         done
@@ -369,13 +369,13 @@ for f in sorted(results_dir.glob('*/results.json')):
     protocol = 'P1-pretrained' if 'pretrained' in exp else 'P2-trained'
     dataset = exp.replace('pretrained_', '').replace('trained_', '').rsplit('_rep', 1)[0]
     seed = exp.rsplit('_rep', 1)[1] if '_rep' in exp else '-'
-    rows.append((protocol, dataset, seed, r.get('AUROC', 0), r.get('AUPRC', 0), r.get('n_test_samples', 0)))
+    rows.append((protocol, dataset, seed, r.get('AUROC', 0), r.get('AUPRC', 0), r.get('MCC', 0), r.get('F1', 0), r.get('n_test_samples', 0)))
 
 if rows:
-    print(f' {\"Protocol\":<15s} {\"Dataset\":<12s} {\"Seed\":<5s} {\"AUROC\":<8s} {\"AUPRC\":<8s} {\"N_test\":<8s}')
-    print(f' {\"-\"*15} {\"-\"*12} {\"-\"*5} {\"-\"*8} {\"-\"*8} {\"-\"*8}')
-    for p, d, s, au, ap, n in rows:
-        print(f' {p:<15s} {d:<12s} {s:<5s} {au:<8.4f} {ap:<8.4f} {n:<8d}')
+    print(f' {\"Protocol\":<15s} {\"Dataset\":<12s} {\"Seed\":<5s} {\"AUROC\":<8s} {\"AUPRC\":<8s} {\"MCC\":<8s} {\"F1\":<8s} {\"N_test\":<8s}')
+    print(f' {\"-\"*15} {\"-\"*12} {\"-\"*5} {\"-\"*8} {\"-\"*8} {\"-\"*8} {\"-\"*8} {\"-\"*8}')
+    for p, d, s, au, ap, mcc, f1, n in rows:
+        print(f' {p:<15s} {d:<12s} {s:<5s} {au:<8.4f} {ap:<8.4f} {mcc:<8.4f} {f1:<8.4f} {n:<8d}')
 else:
     print(' No results found yet.')
 print()
