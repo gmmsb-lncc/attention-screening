@@ -44,10 +44,10 @@ echo "============================================"
 # ── Verify conda is available ─────────────────────────────────────────────
 CONDA_SH=""
 for p in \
-  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
-  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
   "/usr/local/anaconda3/etc/profile.d/conda.sh"; do
   if [ -f "$p" ]; then CONDA_SH="$p"; break; fi
 done
