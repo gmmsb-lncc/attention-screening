@@ -126,6 +126,7 @@ class ProtBertFeaturizer(Featurizer):
         self._protbert_tokenizer = AutoTokenizer.from_pretrained(
             "Rostlab/prot_bert",
             do_lower_case=False,
+            use_fast=False,
             cache_dir=f"{MODEL_CACHE_DIR}/huggingface/transformers",
         )
         self._protbert_model = AutoModel.from_pretrained(
