@@ -161,6 +161,7 @@ for ds in "${DATASETS[@]}"; do
 
         python3 -c "
 import pandas as pd
+split_name = '${split}'
 df = pd.read_csv('${SRC}', sep='\t')
 
 # Convert thesis format → ConPLex format
@@ -172,7 +173,7 @@ out = out.dropna().reset_index(drop=True)
 out.to_csv('${DST}', index=True)
 n_pos = int(out['Label'].sum())
 n_neg = len(out) - n_pos
-print(f'  [{split:5s}] {len(out):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
+print(f'  [{split_name:5s}] {len(out):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
 "
     done
 done
