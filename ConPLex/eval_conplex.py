@@ -143,13 +143,9 @@ def main():
     model = model.to(device)
     model.eval()
 
-    # Try torch.compile for PyTorch 2.x speedup
-    if hasattr(torch, 'compile') and use_cuda:
-        try:
-            model = torch.compile(model, mode="reduce-overhead")
-            logg.info("torch.compile: enabled (reduce-overhead)")
-        except Exception as e:
-            logg.warning(f"torch.compile failed, using eager mode: {e}")
+    # NOTE: torch.compile with mode="reduce-overhead" uses CUDAGraphs which
+    # overwrites tensor outputs between runs, breaking torchmetrics accumulation.
+    # Disabled — ConPLex is lightweight (~4M params), compile overhead not worth it.
 
     # ── Metrics ────────────────────────────────────────────────────────────
     metrics = {
