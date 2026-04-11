@@ -151,6 +151,9 @@ def main():
     metrics = {
         "AUROC": torchmetrics.AUROC(task="binary").to(device),
         "AUPRC": torchmetrics.AveragePrecision(task="binary").to(device),
+        "MCC": torchmetrics.MatthewsCorrCoef(task="binary").to(device),
+        "F1": torchmetrics.F1Score(task="binary").to(device),
+        "Accuracy": torchmetrics.Accuracy(task="binary").to(device),
     }
 
     # ── Inference ──────────────────────────────────────────────────────────
@@ -167,11 +170,12 @@ def main():
             label = label.to(device, non_blocking=True).int()
 
             pred = model(drug, target)
-            all_preds.append(pred.cpu())
+            pred_sigmoid = torch.sigmoid(pred)
+            all_preds.append(pred_sigmoid.cpu())
             all_labels.append(label.cpu())
 
             for met in metrics.values():
-                met(pred, label)
+                met(pred_sigmoid, label)
 
     if use_cuda:
         torch.cuda.synchronize()
