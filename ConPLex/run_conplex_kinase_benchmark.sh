@@ -294,8 +294,7 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-from train_DTI import main, parser
-
+# Set sys.argv BEFORE importing train_DTI (it parses args at module level)
 sys.argv = [
     'train_DTI.py',
     '--exp-id', '${EXP_ID}',
@@ -305,6 +304,8 @@ sys.argv = [
     '--epochs', '${EPOCHS}',
     '--batch-size', '${BATCH_SIZE}',
 ]
+
+from train_DTI import main, parser
 
 main()
 "
