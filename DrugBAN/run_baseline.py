@@ -9,11 +9,14 @@ This script wraps DrugBAN's training pipeline to:
 6. Save aggregated results as JSON with full methodology provenance
 
 Methodology alignment with DT-Kinase:
-- Same scaffold splits (Bemis-Murcko 80/10/10)
+- UNIVERSAL scaffold split (universal_train/val/test.tsv) — same scaffolds held out
+  across all corpora, ensuring no scaffold leakage between human/non-human splits.
 - Same 5 canonical seeds {42, 123, 456, 789, 1024}
 - Threshold calibrated on validation set (MCC-optimal), applied to test
 - Model selection: DrugBAN uses val AUROC (its published criterion)
   DT-Kinase uses val MCC — each uses its own published protocol
+- Architecture/hyperparameters: as published in Bai et al., Nature Machine
+  Intelligence (2023) — GCN + CNN + BAN + optional CDAN domain adaptation
 
 Usage:
     python run_baseline.py --dataset non_human
@@ -23,9 +26,14 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
+# Suppress HuggingFace tokenizers fork warning.
+# Must be set BEFORE any tokenizer import (transitive via transformers/rdkit).
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 import json
-import os
 import sys
 import time
 import warnings
@@ -544,14 +552,16 @@ def main() -> None:
     args = parser.parse_args()
 
     # Validate dataset exists — auto-prepare if missing
+    # All datasets use the UNIVERSAL scaffold split (universal_train/val/test.tsv)
+    # filtered by dataset_source column for human/non_human.
     dataset_path = SCRIPT_DIR / "datasets" / "kinase" / args.dataset / "scaffold"
     if not dataset_path.exists() or not (dataset_path / "train.csv").exists():
         print(f"Dataset not found at {dataset_path}")
-        print(f"Auto-preparing data for '{args.dataset}'...")
+        print(f"Auto-preparing data for '{args.dataset}' (universal scaffold split)...")
         from prepare_data import prepare_dataset
         prepare_dataset(args.dataset, SCRIPT_DIR)
         if not (dataset_path / "train.csv").exists():
-            print(f"ERROR: Data preparation failed. Check scaffold splits at:")
+            print(f"ERROR: Data preparation failed. Check universal scaffold splits at:")
             print(f"  {SCRIPT_DIR.parent / 'scaffolds_splits' / 'output'}")
             sys.exit(1)
         print("Data prepared successfully.\n")
@@ -590,8 +600,10 @@ def main() -> None:
         cfg.freeze()
 
     # Determine output directory
-    output_base = args.output_dir if args.output_dir else (SCRIPT_DIR / "results" / args.dataset)
-    output_base = Path(output_base).resolve()
+    if args.output_dir:
+        output_base = Path(args.output_dir).resolve()
+    else:
+        output_base = SCRIPT_DIR / "results" / "universal" / args.dataset
     output_base.mkdir(parents=True, exist_ok=True)
 
     print(f"Dataset: {args.dataset} (scaffold split)")
@@ -640,25 +652,36 @@ def main() -> None:
     results_file = output_base / "drugban_results.json"
     output = {
         "model": "DrugBAN",
+        "reference": "Bai et al., Nature Machine Intelligence (2023)",
         "dataset": args.dataset,
-        "split": "scaffold",
+        "split": "universal_scaffold",
+        "split_notes": (
+            "Universal Bemis-Murcko scaffold split — test scaffolds held out "
+            "across ALL corpora (human + non_human). "
+            "For 'human'/'non_human' filtered by dataset_source column. "
+            "Ensures no scaffold leakage between corpora."
+        ),
         "seeds": args.seeds,
         "total_elapsed_seconds": round(total_elapsed, 1),
         "methodology": {
+            "protocol": "DrugBAN as published (architecture + hyperparameters from paper)",
             "model_selection": "validation AUROC (DrugBAN published criterion)",
             "threshold_optimization": "validation MCC-optimal (no test leakage)",
             "threshold_metric": "mcc",
             "features": {
                 "drug": "Molecular graph (GCN, atom features 75-d → 128-d hidden layers)",
                 "protein": "Sequence (CNN with kernels [3,6,9], 128 filters each)",
+                "interaction": "Bilinear Attention Network (BAN, heads=2)",
+                "domain_adaptation": "CDAN (Conditional Domain Adversarial Network)",
             },
             "note": (
-                "Threshold is calibrated on validation set predictions by sweeping "
-                "all unique probability values and selecting the one that maximizes "
-                "MCC. This mirrors the DT-Kinase protocol. "
+                "Model architecture and hyperparameters follow the published "
+                "DrugBAN paper exactly (kinase.yaml config). "
+                "Training uses our kinase dataset with universal scaffold split. "
+                "Threshold calibrated on validation set (MCC-optimal, no test leakage). "
                 "DrugBAN's native test-set F1-optimal threshold is also recorded "
                 "under per_seed[].drugban_native for transparency but is NOT used "
-                "for comparison."
+                "for comparison with DT-Kinase."
             ),
         },
         "config": {

@@ -266,4 +266,138 @@ Every experiment runs across 5 independent seeds: `{42, 123, 456, 789, 1024}`. R
 
 ---
 
-**Last updated**: March 2026 | **Version**: 4.0
+## Chapter 8: Comparison with Baseline Architectures
+
+This chapter provides a formal comparison between the DT-Kinase hierarchical benchmark (this work) and two established baselines for compound–protein interaction (CPI) prediction: **DrugBAN** (Bai et al., 2023) and **GraphBAN** (Bai et al., 2023). Both baselines are evaluated under the same experimental protocol (scaffold split, multi-seed evaluation, MCC-calibrated threshold) to ensure methodological parity.
+
+### 8.1 Architectural Overview
+
+All three models address the same binary classification task — predicting whether a compound is active against a target kinase — but differ fundamentally in how they encode, interact, and classify protein–ligand pairs.
+
+| Component | DrugBAN | GraphBAN | DT-Kinase (Level 4) |
+|-----------|---------|----------|---------------------|
+| **Protein encoder** | CNN 1D (trained from scratch) | CNN 1D + **ESM-1b** (frozen, 650M) | **ESM-2** (frozen, 8M/150M/650M) |
+| **Ligand encoder** | GCN (trained from scratch) | GCN + **ChemBERTa** (frozen) | **MoLFormer** (frozen) |
+| **Interaction module** | Bilinear Attention Network (BAN) | Graph-based BAN | Scaled dot-product interaction maps |
+| **Classifier** | MLP (256→512→128→2) | MLP (256→512→128→2) | Linear (64→1) |
+| **Domain adaptation** | CDAN (optional) | CDAN (optional) | Not used |
+| **Output** | 2-class softmax | 2-class softmax | Sigmoid (BCE loss) |
+
+### 8.2 Protein and Ligand Encoders
+
+#### 8.2.1 DrugBAN — Task-Specific Encoders
+
+DrugBAN encodes both modalities **from scratch** during training:
+
+- **Protein**: A 1D convolutional network operates on integer-encoded amino acid sequences, with kernels of sizes [3, 6, 9] and 128 filters each, capturing local sequence motifs of varying lengths.
+- **Ligand**: A Graph Convolutional Network (GCN) with 3 hidden layers (128-d each) operates on the molecular graph, where atoms are nodes (75-d atomic features) and bonds are edges.
+
+No external pre-trained representations are used. The learned representations are entirely conditioned on the downstream classification objective and the training data.
+
+#### 8.2.2 GraphBAN — Hybrid Encoders with Foundation Models
+
+GraphBAN introduces a critical extension: **fusion of task-specific encoders with frozen foundation language models**:
+
+- **Protein**: The CNN 1D features are fused with **ESM-1b** (Rives et al., 2021; 650M parameters) embeddings via a learned projection $\text{Linear}(1280 \to 128)$ followed by a fusion module (`proFusion`). ESM-1b provides contextualised per-residue embeddings trained on 250M protein sequences via Masked Language Modelling (MLM).
+- **Ligand**: The GCN features are fused with **ChemBERTa** (Chithrananda et al., 2020) embeddings, a RoBERTa-based model pre-trained on SMILES strings.
+
+This hybrid approach allows GraphBAN to leverage the transferable knowledge encoded in foundation models while retaining the task-specific inductive biases of GCN and CNN architectures.
+
+#### 8.2.3 DT-Kinase (Level 4) — Foundation Models as Sole Encoders
+
+DT-Kinase employs foundation language models as the **exclusive** source of molecular representations:
+
+- **Protein**: ESM-2 (Lin et al., 2023) provides per-residue embeddings $\mathbf{H}_P \in \mathbb{R}^{n \times d_P}$, where $n$ is the sequence length and $d_P \in \{320, 640, 1280\}$ depends on the model scale.
+- **Ligand**: MoLFormer (Ross et al., 2022) provides per-token embeddings $\mathbf{H}_L \in \mathbb{R}^{m \times 768}$, where $m$ is the SMILES token count.
+
+Both models are kept **frozen** — no gradients flow through them. This isolates the representation quality from downstream training dynamics and enables fair comparison across embedding scales (8M, 150M, 650M).
+
+### 8.3 Interaction Mechanisms
+
+The most fundamental architectural difference lies in how each model captures protein–ligand interactions.
+
+#### 8.3.1 Bilinear Attention Network (BAN) — DrugBAN and GraphBAN
+
+Both DrugBAN and GraphBAN employ the Bilinear Attention Network (Kim et al., 2018) to model interactions. Given drug features $\mathbf{d} \in \mathbb{R}^{D}$ and protein features $\mathbf{p} \in \mathbb{R}^{D}$, BAN computes:
+
+$$\mathbf{f}_k = \sigma(\mathbf{d}^\top \mathbf{A}_k \mathbf{p}), \quad k = 1, \ldots, K$$
+
+where $\mathbf{A}_k \in \mathbb{R}^{D \times D}$ is a learned bilinear matrix for each of $K$ attention heads, and $\sigma$ is a non-linear activation. The outputs are concatenated to form a fixed-size interaction vector $\mathbf{f} = [\mathbf{f}_1 \| \ldots \| \mathbf{f}_K] \in \mathbb{R}^{256}$.
+
+This produces a **global summary** of the interaction — a single vector per protein–ligand pair. The spatial (residue-level) information is lost during pooling.
+
+#### 8.3.2 Scaled Dot-Product Interaction Maps — DT-Kinase
+
+Level 4 preserves full **residue-level spatial resolution**. For each of $K=8$ heads, independent linear projections map both modalities into a shared $d_k$-dimensional space:
+
+$$\mathbf{Z}_P^{(k)} = \mathbf{H}_P \mathbf{W}_P^{(k)} \in \mathbb{R}^{n \times d_k}, \quad \mathbf{Z}_L^{(k)} = \mathbf{H}_L \mathbf{W}_L^{(k)} \in \mathbb{R}^{m \times d_k}$$
+
+The interaction map for head $k$ is the scaled dot product:
+
+$$\mathbf{I}_k = \frac{\mathbf{Z}_P^{(k)} (\mathbf{Z}_L^{(k)})^\top}{\sqrt{d_k}} \in \mathbb{R}^{n \times m}$$
+
+The $K$ maps are stacked to form a multi-channel 2D tensor $\mathbf{I} \in \mathbb{R}^{K \times n \times m}$, where each entry $(k, i, j)$ quantifies the semantic compatibility between residue $i$ and token $j$ under the $k$-th projection head.
+
+This representation is analogous to a multi-channel image, where:
+- The spatial dimensions $(n \times m)$ encode all-vs-all residue–token comparisons
+- The channel dimension $(K)$ encodes $K$ learned "perspectives" on the interaction
+
+### 8.4 Classification Architecture
+
+#### 8.4.1 MLP Classifier — DrugBAN and GraphBAN
+
+Both baselines pass the BAN interaction vector through a multi-layer perceptron:
+
+$$\hat{y} = \text{softmax}(\text{MLP}(\mathbf{f}))$$
+
+where the MLP has architecture: $\text{Linear}(256 \to 512) \to \text{ReLU} \to \text{Linear}(512 \to 128) \to \text{ReLU} \to \text{Linear}(128 \to 2)$.
+
+The MLP has $\sim$200K trainable parameters dedicated solely to classification — representing significant additional capacity beyond the interaction module.
+
+#### 8.4.2 CNN 2D + Linear Classifier — DT-Kinase
+
+Level 4 processes the interaction maps through a 4-layer 2D CNN that extracts local spatial patterns:
+
+$$\mathbf{F} = \text{CNN}_\text{2D}(\mathbf{I}) \in \mathbb{R}^{C \times n \times m}, \quad C = 64$$
+
+The CNN includes dilated convolution (layer 3, dilation=2) to expand the effective receptive field without increasing parameter count. Feature maps are then aggregated via **hierarchical attention pooling**:
+
+1. **Ligand axis**: For each protein position $i$, attention-weighted pooling across $m$ ligand positions → $\mathbb{R}^{n \times C}$
+2. **Protein axis**: Attention-weighted pooling across $n$ protein positions → $\mathbb{R}^C$
+
+The final classifier is a single linear layer:
+
+$$\hat{y} = \sigma(\mathbf{w}^\top \mathbf{z} + b), \quad \mathbf{w} \in \mathbb{R}^{64}, \; b \in \mathbb{R}$$
+
+This represents the minimal possible classifier — a single neuron — in contrast to the deep MLP used by DrugBAN and GraphBAN. The classificatory capacity is delegated to the CNN feature extraction and attention pooling, rather than to the final decision layer.
+
+### 8.5 Domain Adaptation
+
+Both DrugBAN and GraphBAN employ **Conditional Domain Adversarial Networks (CDAN)** (Long et al., 2018) to improve generalisation under distribution shift between training and test scaffolds:
+
+$$\mathcal{L}_\text{total} = \mathcal{L}_\text{cls} + \lambda \cdot \mathcal{L}_\text{domain}$$
+
+where $\mathcal{L}_\text{domain}$ is the cross-entropy of a domain discriminator (MLP) trained to distinguish source (training) from target (validation) representations. A **Gradient Reversal Layer (GRL)** inverts the gradient of $\mathcal{L}_\text{domain}$ during backpropagation, forcing the encoder to learn domain-invariant features:
+
+$$\text{GRL}(x) = x \quad \text{(forward)}, \qquad \frac{\partial \text{GRL}}{\partial x} = -\lambda \cdot \mathbf{I} \quad \text{(backward)}$$
+
+Shared configuration: `RANDOM_LAYER=True`, `RANDOM_DIM=256`, `INIT_EPOCH=10`, $\lambda = 1.0$.
+
+DT-Kinase (Level 4) does **not** employ domain adaptation; generalisation is addressed exclusively through scaffold-based splitting and the transferable representations of frozen foundation models.
+
+### 8.6 Summary of Key Differentiators
+
+| Aspect | DrugBAN / GraphBAN | DT-Kinase (Level 4) |
+|--------|-------------------|---------------------|
+| **Representation source** | Task-specific (DrugBAN) or hybrid (GraphBAN) | Foundation models only |
+| **Interaction granularity** | Global vector (one per pair) | Residue × token matrix (all-vs-all) |
+| **Classifier complexity** | Deep MLP (~200K params) | Single linear layer (65 params) |
+| **Spatial information** | Lost during BAN pooling | Preserved through CNN 2D |
+| **Domain adaptation** | CDAN adversarial training | Not used |
+| **Interpretability** | BAN attention weights | Interaction maps visualisable as heatmaps |
+
+The DT-Kinase architecture is deliberately designed to shift classification capacity from the final decision layer (MLP) to the intermediate representation (interaction maps + CNN). This design enables direct visualisation of which protein residues interact with which ligand fragments — providing mechanistic interpretability that is absent in MLP-based classifiers.
+
+---
+
+**Last updated**: March 2026 | **Version**: 4.1

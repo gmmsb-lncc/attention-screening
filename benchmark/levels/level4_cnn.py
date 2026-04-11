@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Dict, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -45,6 +47,50 @@ from benchmark.levels.matrix_utils import (
     build_matrix_dataloaders,
     split_loader_for_feature_extraction,
 )
+
+import torch.nn.functional as F
+
+
+# ======================================================================
+# Focal Loss — penalises easy examples, focuses on hard negatives
+# ======================================================================
+
+class FocalLoss(nn.Module):
+    """Focal Loss for binary classification (from logits).
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    When gamma=0 this reduces to standard BCE.
+    Higher gamma (e.g. 2) down-weights easy examples and focuses
+    learning on hard, misclassified examples (false positives).
+
+    Reference: Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017.
+    """
+
+    def __init__(self, gamma: float = 2.0, alpha: float | None = None,
+                 pos_weight: float = 1.0) -> None:
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha      # per-sample alpha (None = use pos_weight)
+        self.pos_weight = pos_weight
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # BCE without reduction
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, reduction="none",
+        )
+        probs = torch.sigmoid(logits)
+        p_t = probs * targets + (1 - probs) * (1 - targets)
+        focal_weight = (1 - p_t) ** self.gamma
+
+        # Class weighting (like pos_weight in BCE)
+        if self.alpha is not None:
+            alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        else:
+            alpha_t = self.pos_weight * targets + 1.0 * (1 - targets)
+
+        loss = alpha_t * focal_weight * bce
+        return loss.mean()
 
 
 # ======================================================================
@@ -130,14 +176,104 @@ class _HierarchicalPool(nn.Module):
         return result
 
 
+class EmbeddingAdapter(nn.Module):
+    """Adapter to refine frozen embeddings for a specific task.
+
+    Supports:
+      - Stacked MLP bottleneck blocks (num_layers ≥ 1)
+      - Optional per-residue self-attention before the MLP blocks
+
+    Each MLP block:  Linear → GELU → Dropout → Linear + Skip → LayerNorm
+    Self-attention:  MultiheadAttention(1 head) + Skip → LayerNorm
+
+    References:
+      Houlsby et al., "Parameter-Efficient Transfer Learning", ICML 2019.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        bottleneck: int,
+        dropout: float = 0.3,
+        num_layers: int = 1,
+        use_self_attn: bool = False,
+    ) -> None:
+        super().__init__()
+
+        # --- Optional self-attention (context-aware adaptation) --------
+        self.use_self_attn = use_self_attn
+        if use_self_attn:
+            self.self_attn = nn.MultiheadAttention(
+                embed_dim=dim, num_heads=4, dropout=dropout, batch_first=True,
+            )
+            self.attn_norm = nn.LayerNorm(dim)
+
+        # --- Stacked MLP bottleneck blocks ----------------------------
+        self.mlp_blocks = nn.ModuleList()
+        self.mlp_norms = nn.ModuleList()
+        for _ in range(num_layers):
+            block = nn.Sequential(
+                nn.Linear(dim, bottleneck),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(bottleneck, dim),
+            )
+            # Zero-init output layer → starts as identity
+            nn.init.zeros_(block[-1].weight)
+            nn.init.zeros_(block[-1].bias)
+            self.mlp_blocks.append(block)
+            self.mlp_norms.append(nn.LayerNorm(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Self-attention: each residue sees its neighbours
+        if self.use_self_attn:
+            attn_out, _ = self.self_attn(x, x, x)
+            x = self.attn_norm(x + attn_out)
+
+        # Stacked MLP blocks with skip connections
+        for block, norm in zip(self.mlp_blocks, self.mlp_norms):
+            x = norm(x + block(x))
+        return x
+
+
 class InteractionMapCNN(nn.Module):
     """2D CNN on protein–ligand interaction maps.
 
-    Architecture (v7 — consolidated):
-      1. K pairs of linear projections create K interaction maps
-      2. 4-layer 2D CNN with dilated convolution extracts patterns
-      3. Hierarchical attention pooling aggregates spatially
-      4. Linear classifier produces logits (end-to-end BCE training)
+    Architecture variants:
+      v7 (original): K pairs of linear projections (prot_dim→head_dim,
+          lig_dim→head_dim) then dot-product → K interaction maps.
+      v7_gated:      Same as v7, but applies an MLP-based Sigmoid gate
+          to the original embeddings before projection to filter out noise.
+      v8 (BAN):      Full Bilinear Attention Network — each head has a
+          weight matrix W_k [prot_dim, lig_dim] that computes interaction
+          directly in the original embedding spaces without any projection
+          bottleneck.  Preserves 100% of ligand information.
+      v9 (CrossAttn): Bidirectional Cross-Attention — protein attends to
+          ligand and vice-versa through stacked Transformer-style layers.
+          Uses attention pooling + MLP classifier (no CNN).
+      v10 (CrossAttn+CNN): Same cross-attention as v9, but creates
+          enriched interaction maps fed into the CNN+HierPool pipeline.
+          Combines long-range awareness with spatial pattern detection.
+
+    Pipeline (v7/v7_gated/v8):
+      1. Interaction maps           [B, K, seq_p, seq_l]
+      2. 4-layer 2D CNN with dilated convolution
+      3. Hierarchical attention pooling
+      4. Linear classifier → BCEWithLogitsLoss
+
+    Pipeline (v9):
+      1. Project protein & ligand to shared d_model space
+      2. Bidirectional cross-attention (N layers)
+      3. Attention pooling per modality
+      4. MLP classifier → BCEWithLogitsLoss
+
+    Pipeline (v10):
+      1. Project protein & ligand to shared d_model space
+      2. Bidirectional cross-attention (N layers)
+      3. Multi-head dot-product → enriched interaction maps
+      4. 4-layer 2D CNN with dilated convolution
+      5. Hierarchical attention pooling
+      6. Linear classifier → BCEWithLogitsLoss
     """
 
     def __init__(
@@ -148,55 +284,229 @@ class InteractionMapCNN(nn.Module):
         head_dim: int = 32,
         cnn_channels: int = 64,
         dropout: float = 0.3,
+        variant: str = "v7",
+        num_cross_layers: int = 2,
+        mlp_head: bool = False,
+        cosine_sim: bool = False,
+        use_adapter: bool = False,
+        adapter_bottleneck_prot: int = 256,
+        adapter_bottleneck_lig: int = 512,
+        adapter_layers: int = 1,
+        adapter_self_attn: bool = False,
     ) -> None:
         super().__init__()
+        self.variant = variant
         self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.scale = head_dim ** -0.5
+        self.mlp_head = mlp_head
+        self.cosine_sim = cosine_sim
+        self.use_adapter = use_adapter
 
-        # Multi-head projections for interaction maps
-        self.prot_heads = nn.ModuleList([
-            nn.Linear(protein_dim, head_dim) for _ in range(num_heads)
-        ])
-        self.lig_heads = nn.ModuleList([
-            nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
-        ])
+        # --- Embedding adapters (optional) ----------------------------
+        if use_adapter:
+            self.prot_adapter = EmbeddingAdapter(
+                dim=protein_dim,
+                bottleneck=adapter_bottleneck_prot,
+                dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=adapter_self_attn,
+            )
+            self.lig_adapter = EmbeddingAdapter(
+                dim=ligand_dim,
+                bottleneck=adapter_bottleneck_lig,
+                dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=adapter_self_attn,
+            )
 
-        # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
-        # Layer 1-2: 3×3 local patterns (receptive field 5×5)
-        # Layer 3: dilated 3×3 (effective 5×5, receptive field 9×9)
-        # Layer 4: 3×3 consolidation (receptive field 13×13)
-        self.cnn = nn.Sequential(
-            nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.GELU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(cnn_channels),
-            nn.GELU(),
-        )
+        if variant in ("v7", "v7_gated"):
+            # Original: project both sides to head_dim, then dot-product
+            self.head_dim = head_dim
+            self.scale = head_dim ** -0.5
+            
+            if variant == "v7_gated":
+                # MLP gates for non-linear local feature selection
+                self.prot_gate = nn.Sequential(
+                    nn.Linear(protein_dim, protein_dim // 2),
+                    nn.GELU(),
+                    nn.Linear(protein_dim // 2, protein_dim),
+                    nn.Sigmoid()
+                )
+                self.lig_gate = nn.Sequential(
+                    nn.Linear(ligand_dim, ligand_dim // 2),
+                    nn.GELU(),
+                    nn.Linear(ligand_dim // 2, ligand_dim),
+                    nn.Sigmoid()
+                )
 
-        # Hierarchical attention pooling
-        self.pool = _HierarchicalPool(cnn_channels)
+            self.prot_heads = nn.ModuleList([
+                nn.Linear(protein_dim, head_dim) for _ in range(num_heads)
+            ])
+            self.lig_heads = nn.ModuleList([
+                nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
+            ])
+        elif variant == "v8":
+            # Full Bilinear Attention: W_k[prot_dim, lig_dim] per head.
+            # score(i,j) = protein[i] @ W_k @ ligand[j]
+            # No projection bottleneck — uses full embeddings.
+            self.head_dim = 0  # not used in v8
+            self.scale = ligand_dim ** -0.5
+            self.W_ban = nn.Parameter(
+                torch.empty(num_heads, protein_dim, ligand_dim)
+            )
+        elif variant == "v9":
+            # Pure Cross-Attention: bidirectional Transformer-style attention
+            # with attention pooling + MLP classifier. No CNN.
+            self.head_dim = head_dim  # reused as d_model
+            d_model = head_dim
 
-        # Classifier
-        self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(cnn_channels, 1)
+            self.prot_proj = nn.Linear(protein_dim, d_model)
+            self.lig_proj  = nn.Linear(ligand_dim, d_model)
+
+            self.num_cross_layers = num_cross_layers
+            self.cross_prot_to_lig = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.cross_lig_to_prot = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.prot_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+            self.lig_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+
+            # Attention pooling: learn which tokens matter
+            self.prot_pool_attn = nn.Linear(d_model, 1)
+            self.lig_pool_attn  = nn.Linear(d_model, 1)
+
+        elif variant == "v10":
+            # Cross-Attention + CNN hybrid: cross-attention enriches
+            # representations, then multi-head dot-product creates
+            # interaction maps for the CNN+HierPool pipeline.
+            self.head_dim = head_dim
+            d_model = head_dim
+            self.scale = head_dim ** -0.5
+
+            self.prot_proj = nn.Linear(protein_dim, d_model)
+            self.lig_proj  = nn.Linear(ligand_dim, d_model)
+
+            self.num_cross_layers = num_cross_layers
+            self.cross_prot_to_lig = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.cross_lig_to_prot = nn.ModuleList([
+                nn.MultiheadAttention(d_model, num_heads, dropout=dropout,
+                                      batch_first=True)
+                for _ in range(num_cross_layers)
+            ])
+            self.prot_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+            self.lig_norms = nn.ModuleList([
+                nn.LayerNorm(d_model) for _ in range(num_cross_layers)
+            ])
+
+            # Multi-head projections for interaction maps (post cross-attn)
+            self.prot_heads = nn.ModuleList([
+                nn.Linear(d_model, head_dim) for _ in range(num_heads)
+            ])
+            self.lig_heads = nn.ModuleList([
+                nn.Linear(d_model, head_dim) for _ in range(num_heads)
+            ])
+        else:
+            raise ValueError(
+                f"Unknown variant '{variant}'. "
+                f"Choose 'v7', 'v7_gated', 'v8', 'v9', or 'v10'."
+            )
+
+        if variant in ("v7", "v7_gated", "v8", "v10"):
+            # 2D CNN on interaction maps [B, num_heads, seq_p, seq_l]
+            self.cnn = nn.Sequential(
+                nn.Conv2d(num_heads, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.GELU(),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, 64, kernel_size=3, padding=2, dilation=2),
+                nn.BatchNorm2d(64),
+                nn.GELU(),
+                nn.Conv2d(64, cnn_channels, kernel_size=3, padding=1),
+                nn.BatchNorm2d(cnn_channels),
+                nn.GELU(),
+            )
+            self.pool = _HierarchicalPool(cnn_channels)
+            self.dropout = nn.Dropout(dropout)
+            if mlp_head:
+                self.classifier = nn.Sequential(
+                    nn.Linear(cnn_channels, cnn_channels * 2),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(cnn_channels * 2, 1),
+                )
+            else:
+                self.classifier = nn.Linear(cnn_channels, 1)
+        else:
+            # v9: MLP classifier on concatenated pooled vectors
+            d_model = head_dim
+            self.dropout = nn.Dropout(dropout)
+            self.classifier = nn.Sequential(
+                nn.Linear(d_model * 2, d_model),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_model, 1),
+            )
 
         self._init_weights()
 
     def _init_weights(self) -> None:
-        for heads in (self.prot_heads, self.lig_heads):
-            for h in heads:
-                nn.init.xavier_uniform_(h.weight)
-                nn.init.zeros_(h.bias)
-        nn.init.xavier_uniform_(self.classifier.weight)
-        nn.init.zeros_(self.classifier.bias)
+        if self.variant in ("v7", "v7_gated"):
+            for heads in (self.prot_heads, self.lig_heads):
+                for h in heads:
+                    nn.init.xavier_uniform_(h.weight)
+                    nn.init.zeros_(h.bias)
+            if self.variant == "v7_gated":
+                for seq in (self.prot_gate, self.lig_gate):
+                    for layer in seq:
+                        if isinstance(layer, nn.Linear):
+                            nn.init.xavier_uniform_(layer.weight)
+                            nn.init.zeros_(layer.bias)
+        elif self.variant == "v8":
+            # Xavier uniform on each head's W_k[prot_dim, lig_dim]
+            for k in range(self.num_heads):
+                nn.init.xavier_uniform_(self.W_ban[k])
+        elif self.variant == "v9":
+            # Init projections and pooling attention
+            for lin in (self.prot_proj, self.lig_proj,
+                        self.prot_pool_attn, self.lig_pool_attn):
+                nn.init.xavier_uniform_(lin.weight)
+                nn.init.zeros_(lin.bias)
+        elif self.variant == "v10":
+            # Init projections and post-cross-attn heads
+            for lin in (self.prot_proj, self.lig_proj):
+                nn.init.xavier_uniform_(lin.weight)
+                nn.init.zeros_(lin.bias)
+            for heads in (self.prot_heads, self.lig_heads):
+                for h in heads:
+                    nn.init.xavier_uniform_(h.weight)
+                    nn.init.zeros_(h.bias)
+
+        # Init classifier (Linear or Sequential)
+        if isinstance(self.classifier, nn.Sequential):
+            for m in self.classifier.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    nn.init.zeros_(m.bias)
+        else:
+            nn.init.xavier_uniform_(self.classifier.weight)
+            nn.init.zeros_(self.classifier.bias)
 
     def forward(
         self,
@@ -217,26 +527,117 @@ class InteractionMapCNN(nn.Module):
         -------
         logits : [B, 1]
         """
-        # --- Build multi-head interaction maps -----------------------
-        maps: list[torch.Tensor] = []
-        for ph, lh in zip(self.prot_heads, self.lig_heads):
-            p = ph(protein_matrix)                             # [B, seq_p, head_dim]
-            l = lh(ligand_matrix)                              # [B, seq_l, head_dim]
-            m = torch.bmm(p, l.transpose(1, 2)) * self.scale  # [B, seq_p, seq_l]
-            maps.append(m)
+        # --- Apply embedding adapters (if enabled) --------------------
+        if self.use_adapter:
+            protein_matrix = self.prot_adapter(protein_matrix)
+            ligand_matrix = self.lig_adapter(ligand_matrix)
 
-        interaction = torch.stack(maps, dim=1)  # [B, K, seq_p, seq_l]
+        # --- Build multi-head interaction maps -----------------------
+        if self.variant == "v9":
+            # Pure Cross-Attention + Attention Pooling + MLP
+            prot = self.prot_proj(protein_matrix)  # [B, sp, d_model]
+            lig  = self.lig_proj(ligand_matrix)    # [B, sl, d_model]
+
+            prot_key_mask = (protein_mask == 0)
+            lig_key_mask  = (ligand_mask == 0)
+
+            for i in range(self.num_cross_layers):
+                prot_att, _ = self.cross_prot_to_lig[i](
+                    query=prot, key=lig, value=lig,
+                    key_padding_mask=lig_key_mask,
+                )
+                prot = self.prot_norms[i](prot + prot_att)
+
+                lig_att, _ = self.cross_lig_to_prot[i](
+                    query=lig, key=prot, value=prot,
+                    key_padding_mask=prot_key_mask,
+                )
+                lig = self.lig_norms[i](lig + lig_att)
+
+            # Attention pooling
+            p_scores = self.prot_pool_attn(prot).squeeze(-1)
+            p_scores = p_scores.masked_fill(prot_key_mask, -1e9)
+            p_weights = torch.softmax(p_scores, dim=-1).unsqueeze(-1)
+            prot_pooled = (prot * p_weights).sum(dim=1)  # [B, d_model]
+
+            l_scores = self.lig_pool_attn(lig).squeeze(-1)
+            l_scores = l_scores.masked_fill(lig_key_mask, -1e9)
+            l_weights = torch.softmax(l_scores, dim=-1).unsqueeze(-1)
+            lig_pooled = (lig * l_weights).sum(dim=1)  # [B, d_model]
+
+            combined = torch.cat([prot_pooled, lig_pooled], dim=-1)
+            combined = self.dropout(combined)
+            logits = self.classifier(combined)  # [B, 1]
+            return logits
+
+        if self.variant == "v10":
+            # Cross-Attention + CNN hybrid
+            prot = self.prot_proj(protein_matrix)
+            lig  = self.lig_proj(ligand_matrix)
+
+            prot_key_mask = (protein_mask == 0)
+            lig_key_mask  = (ligand_mask == 0)
+
+            for i in range(self.num_cross_layers):
+                prot_att, _ = self.cross_prot_to_lig[i](
+                    query=prot, key=lig, value=lig,
+                    key_padding_mask=lig_key_mask,
+                )
+                prot = self.prot_norms[i](prot + prot_att)
+
+                lig_att, _ = self.cross_lig_to_prot[i](
+                    query=lig, key=prot, value=prot,
+                    key_padding_mask=prot_key_mask,
+                )
+                lig = self.lig_norms[i](lig + lig_att)
+
+            # Multi-head dot-product on ENRICHED representations
+            maps: list[torch.Tensor] = []
+            for ph, lh in zip(self.prot_heads, self.lig_heads):
+                p = ph(prot)
+                l = lh(lig)
+                if self.cosine_sim:
+                    p = F.normalize(p, dim=-1)
+                    l = F.normalize(l, dim=-1)
+                m = torch.bmm(p, l.transpose(1, 2)) * self.scale
+                maps.append(m)
+            interaction = torch.stack(maps, dim=1)  # [B, K, sp, sl]
+
+        elif self.variant in ("v7", "v7_gated"):
+            # If gated, squelch noise with local MLP gate BEFORE projection
+            p_feat = protein_matrix * self.prot_gate(protein_matrix) if self.variant == "v7_gated" else protein_matrix
+            l_feat = ligand_matrix * self.lig_gate(ligand_matrix) if self.variant == "v7_gated" else ligand_matrix
+
+            maps: list[torch.Tensor] = []
+            for ph, lh in zip(self.prot_heads, self.lig_heads):
+                p = ph(p_feat)
+                l = lh(l_feat)
+                if self.cosine_sim:
+                    p = F.normalize(p, dim=-1)
+                    l = F.normalize(l, dim=-1)
+                m = torch.bmm(p, l.transpose(1, 2)) * self.scale
+                maps.append(m)
+            interaction = torch.stack(maps, dim=1)
+
+        elif self.variant == "v8":
+            p_proj = torch.einsum(
+                'bip, kpd -> bkid', protein_matrix, self.W_ban
+            )
+            interaction = torch.matmul(
+                p_proj,
+                ligand_matrix.unsqueeze(1).transpose(-1, -2),
+            ) * self.scale
 
         # Mask padding positions
-        mask_2d = protein_mask.unsqueeze(2) * ligand_mask.unsqueeze(1)  # [B, sp, sl]
+        mask_2d = protein_mask.unsqueeze(2) * ligand_mask.unsqueeze(1)
         interaction = interaction * mask_2d.unsqueeze(1)
 
         # --- 2D CNN ---------------------------------------------------
-        features = self.cnn(interaction)  # [B, cnn_channels, seq_p, seq_l]
-        features = features * mask_2d.unsqueeze(1)  # re-apply mask after CNN
+        features = self.cnn(interaction)
+        features = features * mask_2d.unsqueeze(1)
 
         # --- Hierarchical attention pool → classification ------------
-        pooled = self.pool(features, protein_mask, ligand_mask)  # [B, C]
+        pooled = self.pool(features, protein_mask, ligand_mask)
         pooled = self.dropout(pooled)
         logits = self.classifier(pooled)  # [B, 1]
 
@@ -251,12 +652,17 @@ def _best_mcc_threshold(
     y_true: np.ndarray,
     y_proba: np.ndarray,
 ) -> tuple[float, float]:
-    """Return (threshold, MCC) that maximises MCC."""
+    """Two-pass threshold sweep that maximises MCC.
+
+    Pass 1: coarse grid (100 points) over [0.01, 0.99]
+    Pass 2: fine grid (100 points) in ±0.05 around the best
+    """
     if y_true.size == 0 or len(np.unique(y_true)) < 2:
         return 0.5, 0.0
 
-    grid = np.linspace(0.05, 0.95, 37)
-    anchors = np.unique(np.clip(y_proba, 0.0, 1.0))
+    # Pass 1 — coarse
+    grid = np.linspace(0.01, 0.99, 100)
+    anchors = np.unique(np.clip(y_proba, 0.01, 0.99))
     thresholds = np.unique(np.concatenate([grid, anchors]))
 
     best_thr, best_mcc = 0.5, -1.0
@@ -266,7 +672,69 @@ def _best_mcc_threshold(
         if mcc > best_mcc:
             best_mcc = mcc
             best_thr = float(thr)
+
+    # Pass 2 — fine around best
+    lo = max(0.01, best_thr - 0.05)
+    hi = min(0.99, best_thr + 0.05)
+    fine_grid = np.linspace(lo, hi, 100)
+    for thr in fine_grid:
+        pred = (y_proba >= thr).astype(int)
+        mcc = float(matthews_corrcoef(y_true, pred))
+        if mcc > best_mcc:
+            best_mcc = mcc
+            best_thr = float(thr)
+
     return best_thr, best_mcc
+
+
+# ======================================================================
+# Platt Scaling — probability calibration
+# ======================================================================
+
+@torch.inference_mode()
+def _platt_calibrate(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+) -> LogisticRegression:
+    """Fit Platt scaling on raw logits from the validation set.
+
+    Returns a fitted LogisticRegression that maps raw logits → calibrated
+    probabilities.  Usage: calibrator.predict_proba(logits)[:, 1]
+    """
+    model.eval()
+    model_dtype = next(model.parameters()).dtype
+    eval_amp = device.type == "cuda" and model_dtype != torch.float64
+
+    all_logits: list[np.ndarray] = []
+    all_targets: list[np.ndarray] = []
+
+    for batch in val_loader:
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
+        pm = batch["protein_mask"].to(device)
+        lm = batch["ligand_mask"].to(device)
+        y = batch["label"].numpy()
+
+        with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            logits = model(p, l, pm, lm)
+
+        all_logits.append(logits.float().cpu().numpy().ravel())
+        all_targets.append(y.ravel())
+
+    logits_np = np.concatenate(all_logits).reshape(-1, 1)
+    targets_np = np.concatenate(all_targets).astype(int)
+
+    # Platt scaling = logistic regression on raw logits (no regularisation)
+    calibrator = LogisticRegression(C=1e10, solver="lbfgs", max_iter=1000)
+    calibrator.fit(logits_np, targets_np)
+
+    # Report calibration shift
+    a = float(calibrator.coef_[0, 0])
+    b = float(calibrator.intercept_[0])
+    tqdm.write(f"    Platt calibration: a={a:.4f}, b={b:.4f}")
+
+    return calibrator
 
 
 # ======================================================================
@@ -339,6 +807,18 @@ def _train_interaction_cnn(
     head_dim: int = 32,
     cnn_channels: int = 64,
     dropout: float = 0.3,
+    variant: str = "v7",
+    num_cross_layers: int = 2,
+    mlp_head: bool = False,
+    cosine_sim: bool = False,
+    use_adapter: bool = False,
+    adapter_bottleneck_prot: int = 256,
+    adapter_bottleneck_lig: int = 512,
+    adapter_layers: int = 1,
+    adapter_self_attn: bool = False,
+    adapter_lr_mult: float = 1.0,
+    label_smooth: float = 0.0,
+    mixup_alpha: float = 0.0,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -352,6 +832,17 @@ def _train_interaction_cnn(
     np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # --- CPU / GPU optimization ---------------------------------------
+    if device.type == "cpu":
+        n_cpus = os.cpu_count() or 1
+        torch.set_num_threads(n_cpus)
+        torch.set_num_interop_threads(max(1, n_cpus // 2))
+        tqdm.write(f"    CPU mode: using {n_cpus} threads")
+    else:
+        # GPU: enable TF32 for faster matmuls on Ampere+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
     # --- Precision flags ----------------------------------------------
     use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
@@ -370,7 +861,7 @@ def _train_interaction_cnn(
     elif device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    precision_info = []
+    precision_info = [f"variant={variant}"]
     if use_double:
         precision_info.append("float64")
     if no_amp or use_double:
@@ -389,29 +880,90 @@ def _train_interaction_cnn(
         head_dim=head_dim,
         cnn_channels=cnn_channels,
         dropout=dropout,
+        variant=variant,
+        num_cross_layers=num_cross_layers,
+        mlp_head=mlp_head,
+        cosine_sim=cosine_sim,
+        use_adapter=use_adapter,
+        adapter_bottleneck_prot=adapter_bottleneck_prot,
+        adapter_bottleneck_lig=adapter_bottleneck_lig,
+        adapter_layers=adapter_layers,
+        adapter_self_attn=adapter_self_attn,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
+    _cross_layers = int(os.getenv('BENCHMARK_LEVEL4CNN_CROSS_LAYERS', '2'))
+    variant_info = (
+        f"head_dim={head_dim}" if variant == "v7"
+        else f"head_dim={head_dim}, MLP-gated" if variant == "v7_gated"
+        else f"BAN W[{num_heads}x{protein_dim}x{MOLFORMER_DIM}]" if variant == "v8"
+        else f"CrossAttn d_model={head_dim}, layers={_cross_layers}" if variant == "v9"
+        else f"CrossAttn+CNN d_model={head_dim}, layers={_cross_layers}"
+    )
+    head_tag = ", mlp_head" if mlp_head else ""
+    adapter_tag = f", adapter({adapter_bottleneck_prot}/{adapter_bottleneck_lig})" if use_adapter else ""
     tqdm.write(
-        f"    CNN InteractionMap: heads={num_heads}, head_dim={head_dim}, "
-        f"cnn_channels={cnn_channels}, dropout={dropout:.2f}\n"
+        f"    InteractionModel: variant={variant}, heads={num_heads}, "
+        f"{variant_info}{head_tag}{adapter_tag}, dropout={dropout:.2f}\n"
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr, weight_decay=weight_decay,
-    )
+    if use_adapter and adapter_lr_mult != 1.0:
+        # Differential LR: adapters learn faster since they start from zero
+        adapter_params = (
+            list(model.prot_adapter.parameters())
+            + list(model.lig_adapter.parameters())
+        )
+        adapter_ids = {id(p) for p in adapter_params}
+        other_params = [
+            p for p in model.parameters()
+            if id(p) not in adapter_ids and p.requires_grad
+        ]
+        optimizer = torch.optim.AdamW([
+            {"params": adapter_params, "lr": lr * adapter_lr_mult},
+            {"params": other_params,   "lr": lr},
+        ], weight_decay=weight_decay)
+        tqdm.write(
+            f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
+            f"other={lr:.2e} (mult={adapter_lr_mult}x)"
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=lr, weight_decay=weight_decay,
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     train_labels = _extract_labels(train_loader)
     pos_weight = _compute_pos_weight(train_labels)
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
-    )
-    tqdm.write(f"    pos_weight={pos_weight:.2f}, lr={lr:.1e}, wd={weight_decay}")
+
+    # --- Loss function: Focal Loss or BCE -----------------------------
+    focal_gamma = float(os.getenv("BENCHMARK_LEVEL4CNN_FOCAL_GAMMA", "2.0"))
+    use_focal = os.getenv("BENCHMARK_LEVEL4CNN_FOCAL", "1") == "1"
+
+    if use_focal:
+        criterion = FocalLoss(
+            gamma=focal_gamma,
+            pos_weight=pos_weight,
+        )
+        tqdm.write(
+            f"    Loss: FocalLoss(gamma={focal_gamma}, pos_weight={pos_weight:.2f}), "
+            f"lr={lr:.1e}, wd={weight_decay}"
+        )
+    else:
+        criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pos_weight], dtype=dtype, device=device),
+        )
+        tqdm.write(f"    Loss: BCE(pos_weight={pos_weight:.2f}), lr={lr:.1e}, wd={weight_decay}")
+
+    if cosine_sim:
+        tqdm.write("    Interaction maps: cosine similarity (L2-normalized)")
+    if label_smooth > 0:
+        tqdm.write(f"    Label smoothing: eps={label_smooth}")
+    if mixup_alpha > 0:
+        tqdm.write(f"    Mixup: alpha={mixup_alpha}")
     if train_to_zero:
         tqdm.write(
             f"    *** TRAIN-TO-ZERO mode: early stopping DISABLED, "
@@ -458,6 +1010,20 @@ def _train_interaction_cnn(
             pm = batch["protein_mask"].to(device)
             lm = batch["ligand_mask"].to(device)
             y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+
+            # --- Mixup (only during training) ---------------------------
+            if mixup_alpha > 0:
+                lam = float(np.random.beta(mixup_alpha, mixup_alpha))
+                idx = torch.randperm(p.size(0), device=device)
+                p = lam * p + (1 - lam) * p[idx]
+                l = lam * l + (1 - lam) * l[idx]
+                pm = pm | pm[idx]   # union of valid positions from both samples
+                lm = lm | lm[idx]
+                y = lam * y + (1 - lam) * y[idx]
+
+            # --- Label smoothing ----------------------------------------
+            if label_smooth > 0:
+                y = y * (1 - label_smooth) + label_smooth * 0.5
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
@@ -520,6 +1086,8 @@ def _train_interaction_cnn(
                 f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
                 f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
             )
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         if improved:
             best_score = val_mcc
@@ -580,17 +1148,19 @@ def _evaluate(
     device: torch.device,
     threshold: float | None = None,
     desc: str = "",
+    calibrator: LogisticRegression | None = None,
 ) -> dict:
     """Evaluate model and return full metrics dict.
 
     If `threshold` is provided (e.g., from val-optimized), use it directly.
     Otherwise, sweep to find the MCC-optimal threshold on this data.
+    If `calibrator` is provided, use Platt-calibrated probabilities.
 
     Returns dict with: mcc, threshold, accuracy, f1, precision, recall, auroc,
     plus raw y_true and y_prob arrays.
     """
     model.eval()
-    all_probs: list[np.ndarray] = []
+    all_logits: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
     # Auto-detect model dtype for double precision support
@@ -607,12 +1177,17 @@ def _evaluate(
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
             logits = model(p, l, pm, lm)
 
-        probs = torch.sigmoid(logits.float()).cpu().numpy().ravel()
-        all_probs.append(probs)
+        all_logits.append(logits.float().cpu().numpy().ravel())
         all_targets.append(y)
 
-    probs = np.concatenate(all_probs)
+    raw_logits = np.concatenate(all_logits)
     targets = np.concatenate(all_targets).astype(int)
+
+    # Calibrated or raw probabilities
+    if calibrator is not None:
+        probs = calibrator.predict_proba(raw_logits.reshape(-1, 1))[:, 1]
+    else:
+        probs = 1.0 / (1.0 + np.exp(-raw_logits))  # sigmoid
 
     if threshold is None:
         thr, mcc = _best_mcc_threshold(targets, probs)
@@ -703,12 +1278,22 @@ class Level4CNNRunner(BaseLevelRunner):
         protein_dim = PROTEIN_DIMS.get(full_emb, 320)
 
         # --- Hyperparameters ------------------------------------------
+        variant = os.getenv("BENCHMARK_LEVEL4CNN_VARIANT", "v7")
         num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_NUM_HEADS", "8"))
         head_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_HEAD_DIM", "32"))
         cnn_channels = int(os.getenv("BENCHMARK_LEVEL4CNN_CHANNELS", "64"))
         dropout = float(os.getenv("BENCHMARK_LEVEL4CNN_DROPOUT", "0.3"))
         lr = float(os.getenv("BENCHMARK_LEVEL4CNN_LR", str(self._config.learning_rate)))
         batch_size = int(os.getenv("BENCHMARK_LEVEL4CNN_BATCH_SIZE", str(self._config.batch_size)))
+        num_cross_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_CROSS_LAYERS", "2"))
+        mlp_head = os.getenv("BENCHMARK_LEVEL4CNN_MLP_HEAD", "0") == "1"
+        cosine_sim = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_SIM", "0") == "1"
+        use_adapter = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER", "0") == "1"
+        adapter_bottleneck_prot = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM", "256"))
+        adapter_bottleneck_lig = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM", "512"))
+        adapter_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS", "1"))
+        adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
+        adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -731,20 +1316,36 @@ class Level4CNNRunner(BaseLevelRunner):
         # --- Checkpoint frequency --------------------------------------
         checkpoint_every = int(os.getenv("BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY", "50"))
 
+        # --- Regularization techniques --------------------------------
+        label_smooth = float(os.getenv("BENCHMARK_LEVEL4CNN_LABEL_SMOOTH", "0.0"))
+        mixup_alpha = float(os.getenv("BENCHMARK_LEVEL4CNN_MIXUP_ALPHA", "0.0"))
+
         # --- Train ----------------------------------------------------
-        tqdm.write("  Training InteractionMapCNN...")
+        tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
         model, train_info = _train_interaction_cnn(
             train_loader=model_train_loader,
             val_loader=val_loader,
             protein_dim=protein_dim,
             lr=lr,
             epochs=self._config.epochs,
-            patience=self._config.resolved_patience or 50,
+            patience=int(os.getenv("BENCHMARK_LEVEL4CNN_PATIENCE", "20")),
             seed=seed,
             num_heads=num_heads,
             head_dim=head_dim,
             cnn_channels=cnn_channels,
             dropout=dropout,
+            variant=variant,
+            num_cross_layers=num_cross_layers,
+            mlp_head=mlp_head,
+            cosine_sim=cosine_sim,
+            use_adapter=use_adapter,
+            adapter_bottleneck_prot=adapter_bottleneck_prot,
+            adapter_bottleneck_lig=adapter_bottleneck_lig,
+            adapter_layers=adapter_layers,
+            adapter_self_attn=adapter_self_attn,
+            adapter_lr_mult=adapter_lr_mult,
+            label_smooth=label_smooth,
+            mixup_alpha=mixup_alpha,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
@@ -753,9 +1354,22 @@ class Level4CNNRunner(BaseLevelRunner):
 
         device = next(model.parameters()).device
 
+        # --- Platt Scaling calibration on train -------------------------
+        # Fitted on TRAIN (same data the model learned from) so that the
+        # val set remains fully independent for threshold selection.
+        # Protocol: Platt(train) → threshold(val) → evaluate(test)
+        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "1") == "1"
+        calibrator = None
+        if use_platt:
+            tqdm.write("  Fitting Platt calibration on train set...")
+            calibrator = _platt_calibrate(model, model_train_loader, device)
+
         # --- Evaluate -------------------------------------------------
         # Step 1: Evaluate on val to get val-optimized threshold
-        val_result = _evaluate(model, val_loader, device, desc="Eval (val)")
+        val_result = _evaluate(
+            model, val_loader, device, desc="Eval (val)",
+            calibrator=calibrator,
+        )
         val_threshold = val_result["threshold"]
 
         if self.mode == "train":
@@ -765,6 +1379,7 @@ class Level4CNNRunner(BaseLevelRunner):
             eval_result = _evaluate(
                 model, test_loader, device,
                 threshold=val_threshold, desc="Eval (test)",
+                calibrator=calibrator,
             )
 
         # --- Save results in standard format --------------------------
@@ -801,3 +1416,95 @@ class Level4CNNRunner(BaseLevelRunner):
             f"AUROC={eval_result['auroc']:.4f}, F1={eval_result['f1']:.4f}"
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Ensemble: average probabilities across seeds → single prediction
+    # ------------------------------------------------------------------
+
+    def run(self, **kwargs: object) -> Optional[Dict]:
+        """Override base run to add probability ensemble after all seeds."""
+        base_result = super().run(**kwargs)
+
+        # Attempt ensemble of raw predictions
+        use_ensemble = os.getenv("BENCHMARK_LEVEL4CNN_ENSEMBLE", "1") == "1"
+        if use_ensemble and self.mode != "train":
+            self._ensemble_predictions()
+
+        return base_result
+
+    def _ensemble_predictions(self) -> None:
+        """Load raw predictions from all seeds, average probs, compute MCC.
+
+        The threshold is the mean of per-seed val-optimized thresholds
+        (NOT swept on test) to maintain the fair evaluation protocol.
+        """
+        level_dir = self.output_dir_for_level()
+        all_probs = []
+        val_thresholds = []
+        y_true = None
+
+        for seed in self.seeds:
+            seed_dir = os.path.join(level_dir, f"seed_{seed}")
+            npz_path = os.path.join(seed_dir, "raw_predictions.npz")
+            res_path = os.path.join(seed_dir, "level4_cnn_results.json")
+            if not os.path.exists(npz_path) or not os.path.exists(res_path):
+                tqdm.write(f"  Ensemble: skipping seed {seed} (missing files)")
+                return
+            data = np.load(npz_path)
+            all_probs.append(data["y_prob"])
+            if y_true is None:
+                y_true = data["y_true"]
+
+            # Load val threshold from per-seed results
+            with open(res_path) as fh:
+                seed_res = json.load(fh)
+            sc_key = next(iter(seed_res), None)
+            if sc_key:
+                mlp = seed_res[sc_key].get("MLP", {})
+                val_thresholds.append(mlp.get("val_threshold", 0.5))
+
+        if y_true is None or len(all_probs) < 2:
+            return
+
+        # Average probabilities across seeds
+        ensemble_probs = np.mean(all_probs, axis=0)
+
+        # Use mean of val thresholds (fair protocol: no test optimization)
+        thr = float(np.mean(val_thresholds)) if val_thresholds else 0.5
+
+        preds = (ensemble_probs >= thr).astype(int)
+        acc = float(np.mean(preds == y_true))
+        mcc = float(matthews_corrcoef(y_true.astype(int), preds))
+        f1 = float(f1_score(y_true, preds, zero_division=0))
+        prec = float(precision_score(y_true, preds, zero_division=0))
+        rec = float(recall_score(y_true, preds, zero_division=0))
+        try:
+            auroc = float(roc_auc_score(y_true, ensemble_probs))
+        except ValueError:
+            auroc = 0.0
+
+        tqdm.write(
+            f"\n  ┌── Ensemble ({len(all_probs)} seeds) ──────────────────\n"
+            f"  │ MCC={mcc:.4f}  AUROC={auroc:.4f}  F1={f1:.4f}\n"
+            f"  │ Precision={prec:.4f}  Recall={rec:.4f}  Acc={acc:.4f}\n"
+            f"  │ Threshold={thr:.4f} (mean of val thresholds)\n"
+            f"  └─────────────────────────────────────────"
+        )
+
+        # Save ensemble results
+        ensemble_path = os.path.join(level_dir, "ensemble_results.json")
+        ensemble_data = {
+            "n_seeds": len(all_probs),
+            "mcc": round(mcc, 6),
+            "auroc": round(auroc, 6),
+            "f1": round(f1, 6),
+            "precision": round(prec, 6),
+            "recall": round(rec, 6),
+            "accuracy": round(acc, 6),
+            "threshold": round(thr, 4),
+            "threshold_source": "mean_val_thresholds",
+        }
+        with open(ensemble_path, "w") as fh:
+            json.dump(ensemble_data, fh, indent=2)
+        tqdm.write(f"  Ensemble results saved: {ensemble_path}")
+
