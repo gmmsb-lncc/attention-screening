@@ -23,6 +23,7 @@ git clone https://github.com/facebookresearch/esm.git llm/ESM
 ```
 
 The virtual environment lives in `env/`. Activate with `source env/bin/activate`.
+*Note: Some baseline models (like ConPLex, DrugBAN) require their own isolated conda environments. See `setup_env.sh` inside their respective directories.*
 
 ## Running Tests
 
@@ -32,31 +33,16 @@ pytest                                    # All tests
 pytest -m unit                            # Unit tests only
 pytest -m "not slow"                      # Skip slow tests
 pytest tests/classifier_test/             # Classifier module tests
-pytest tests/regression_test/             # Regression module tests
-pytest tests/embeddings_modular_test/     # Embedding module tests
 pytest tests/test_cross_attention_model.py  # Single test file
-
-# Custom test runners (older, use subprocess)
-python tests/run_all_tests.py
-python tests/classifier_test/run_all_tests.py
 ```
 
 Markers defined: `slow`, `integration`, `unit`, `regression`, `classifier`, `build`, `requires_gpu`, `requires_data`.
 
-## Main Entry Points
+## Architecture: DT-Kinase
 
-| Command | Purpose |
-|---------|---------|
-| `python scripts/run_complete_pipeline.py --input data.tsv --output results/ --protein-model esm2_t33_650M_UR50D` | Full pipeline: embeddings → stratification → classification → regression |
-| `python scripts/attention_matrix.py --attention-matrix on --input data.tsv --build results/` | Cross-Attention model training |
-| `python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a 1b 1c 2 3 4` | Benchmark: 6-level model comparison |
+### Parallel Pipelines
 
-## Architecture
-
-### Two Parallel Pipelines
-
-1. **Classical ML Pipeline** (`src/integrated_pipeline.py`): Generates mean-pooled vector embeddings → trains 10 models (XGBoost, LightGBM, CatBoost, RF, SVM, KNN, Ridge, Lasso, MLP, GB) for both classification and regression.
-
+1. **Classical ML Pipeline** (`src/integrated_pipeline.py`): Generates mean-pooled vector embeddings → trains 10 models (XGBoost, LightGBM, CatBoost, RF, SVM, etc) for both classification and regression.
 2. **DT-Kinase Deep Learning Pipeline** (`src/attention_matrix/`, `crossattention_split_analysis/`): Uses per-token matrix embeddings → CNN multi-scale encoders (kernels {3,5,7}) → bidirectional cross-attention → multi-task prediction (classification + regression jointly).
 
 ### Module Dependency Flow
@@ -65,10 +51,6 @@ Markers defined: `slow`, `integration`, `unit`, `regression`, `classifier`, `bui
 Input TSV (seq_id, seq, chembl_id, smiles, pchembl_value)
     │
     ├─→ src/build/embeddings/strategies/     # ESM-2, ESM-C, SMI-TED, MoLFormer
-    │       ├─→ protein_matrices/ [seq_len, protein_dim]   (per-residue)
-    │       ├─→ ligand_matrices/  [mol_len, 768]           (SMI-TED per-token)
-    │       ├─→ molformer_matrix/ [mol_len, 768]           (MoLFormer per-token)
-    │       └─→ protein_embeddings/ / ligand_embeddings/   (mean-pooled vectors)
     │
     ├─→ src/classifier/ + src/regression/    # Classical ML (uses vectors)
     │
@@ -80,19 +62,19 @@ Input TSV (seq_id, seq, chembl_id, smiles, pchembl_value)
             MultiTaskLoss                    # Joint classification + regression loss
 ```
 
-### ESM Loading (Critical)
+## Baseline Models Integration
 
-`src/__init__.py` adds `llm/ESM/` to `sys.path` at import time and pre-imports ESM to lock in the local version. Many modules also do their own `sys.path.insert` for ESM. **Never install ESM via pip** (`fair-esm` or `esm` packages) — they conflict with the local version.
+To rigorously evaluate DT-Kinase, the repository integrates several State-of-the-Art (SOTA) baseline models. Each resides in its own root directory with isolated environments to avoid dependency conflicts:
 
-### Embedding Dimensions
+1. **DrugBAN** (`DrugBAN/`): Deep Bilinear Attention Network.
+2. **GraphBAN** (`GraphBAN/`): Graph-based Bilinear Attention Network.
+3. **DeepDTAGen** (`DeepDTAGen/`): Generative DTI and Multi-task architecture.
+4. **ConPLex** (`ConPLex/`): Contrastive PLM-based exploration (structure-free, co-embedding with distance metrics).
 
-| Model | Shorthand | Protein Dim |
-|-------|-----------|-------------|
-| `esm2_t6_8M_UR50D` | `8M` | 320 |
-| `esm2_t30_150M_UR50D` | `150M` | 640 |
-| `esm2_t33_650M_UR50D` | `650M` | 1280 |
-
-Ligand dim is always 768 (both SMI-TED and MoLFormer).
+**Evaluation Workflow**:
+- We use unified **scaffold splits** (train/val/test) for fair comparison.
+- Baseline datasets are usually located in `DrugBAN/datasets/kinase/{dataset}/scaffold/`.
+- Training and evaluation are run via dedicated shell scripts and python wrappers in each baseline directory (e.g., `ConPLex/run_conplex_kinase_benchmark.sh`, `DrugBAN/run_dtkinase_drugban.sh`).
 
 ## Data Layout
 
@@ -101,11 +83,12 @@ Ligand dim is always 768 (both SMI-TED and MoLFormer).
 - `tests/datasets/kinase_non_human_compounds.tsv`
 - `tests/datasets/kinase_all_compounds.tsv`
 
+**Kinase Scaffold Splits** (used for standard benchmarking):
+- `DrugBAN/datasets/kinase/{non_human|human|all}/scaffold/{train|val|test}.csv`
+
 **Pre-computed embeddings** are stored at:
 `./results/protein_model_benchmark_{human|non_human}_v2/{embedding_name}/build/`
 with subdirs: `protein_matrices/`, `ligand_matrices/`, `molformer_matrix/`, `attention_matrices/`.
-
-**File naming**: `{seq_id}_matrix.npy`, `{chembl_id}_matrix.npy`, `{chembl_id}_molformer_matrix.npy`, `{seq_id}_attention.npy`.
 
 ## Split Analysis Module (`crossattention_split_analysis/`)
 
@@ -114,9 +97,6 @@ This is the most actively developed module. Key files:
 - `config.py` — `TrainingConfig` dataclass, `SUPPORTED_EMBEDDINGS`, `DATASET_PATHS`, `AVAILABLE_SCENARIOS`, thresholds
 - `experiment.py` — `run_single_analysis()` (CLI entry), `run_crossattention_analysis()` (orchestrator), `run_scenario()` (single train/eval)
 - `data/splits.py` — Three split strategies: `split_random`, `split_by_compound`, `split_new_compound_new_kinase`
-- `data/datasets.py` — `AttentionMatrixDataset`, `collate_attention_batch` (padding + masks)
-- `training/trainer.py` — `train_model()` with AdamW + CosineAnnealingLR, early stopping on val MCC
-- `training/evaluator.py` — `evaluate()` returns metrics: accuracy, f1, mcc, auc
 
 **Three data split scenarios** (hardest → easiest):
 1. `new_compound_new_kinase` — both compound AND kinase unseen in test (true generalization)
@@ -128,12 +108,11 @@ This is the most actively developed module. Key files:
 ## Key Development Notes
 
 - Default seeds for multi-seed experiments: `[42, 123, 456, 789, 1024]`
-- Model selection (early stopping) uses **validation MCC**, not loss
+- Model selection (early stopping) uses **validation MCC** or **validation AUPR/AUROC** depending on the pipeline, not loss.
 - `MultiTaskLoss` weights: classification=1.0, regression=0.5
-- Checkpoint system uses atomic writes (temp file + rename) to prevent corruption
-- The `--use_attention` flag switches protein input from per-residue embeddings to attention matrices `[seq_len, seq_len]`
-- The `--molformer_ligand` flag switches ligand input from SMI-TED to MoLFormer matrices
-- Dataset `all` combines human + non_human by loading from both embedding directories
+- ESM loading: `src/__init__.py` adds `llm/ESM/` to `sys.path`. **Never install ESM via pip**.
+- The `--use_attention` flag switches protein input from per-residue embeddings to attention matrices `[seq_len, seq_len]`.
+- The dataset `all` combines `human` + `non_human` by loading from both embedding directories.
 
 ## Adding a New Protein Model
 
