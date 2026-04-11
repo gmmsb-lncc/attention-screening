@@ -164,6 +164,8 @@ pip install \
 # pytdc (TDC benchmark) — installed separately because its pandas>=2.1 req
 # conflicts with rdkit, but it works fine with pandas 2.0.x at runtime
 pip install pytdc --no-deps 2>/dev/null || pip install pytdc
+# pytdc imports fuzzywuzzy (undeclared transitive dep)
+pip install fuzzywuzzy python-Levenshtein
 
 # ── Step 5: Pin versions to fix known compatibility issues ────────────────
 echo ""
