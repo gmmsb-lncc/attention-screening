@@ -133,10 +133,12 @@ class ProtBertFeaturizer(Featurizer):
             "Rostlab/prot_bert",
             cache_dir=f"{MODEL_CACHE_DIR}/huggingface/transformers",
         )
+        _device = 0 if torch.cuda.is_available() else -1
         self._protbert_feat = pipeline(
             "feature-extraction",
             model=self._protbert_model,
             tokenizer=self._protbert_tokenizer,
+            device=_device,
         )
 
         self._register_cuda("model", self._protbert_model)
