@@ -93,6 +93,31 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 
+class ContrastiveLoss(nn.Module):
+    """Margin-based contrastive loss for drug-target co-embedding.
+
+    Inspired by ConPLex (Sledzieski et al., PNAS 2023).
+    Positive pairs (binding): maximize cosine similarity.
+    Negative pairs (non-binding): push cosine similarity below margin.
+    """
+
+    def __init__(self, margin: float = 0.5) -> None:
+        super().__init__()
+        self.margin = margin
+
+    def forward(
+        self,
+        z_prot: torch.Tensor,
+        z_lig: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        cos_sim = F.cosine_similarity(z_prot, z_lig, dim=-1)
+        labels = labels.view(-1).float()
+        pos_loss = labels * (1 - cos_sim).pow(2)
+        neg_loss = (1 - labels) * F.relu(cos_sim - self.margin).pow(2)
+        return (pos_loss + neg_loss).mean()
+
+
 # ======================================================================
 # Model components
 # ======================================================================
@@ -293,6 +318,8 @@ class InteractionMapCNN(nn.Module):
         adapter_bottleneck_lig: int = 512,
         adapter_layers: int = 1,
         adapter_self_attn: bool = False,
+        contrastive_dim: int = 128,
+        cosine_feat: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -300,6 +327,11 @@ class InteractionMapCNN(nn.Module):
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
         self.use_adapter = use_adapter
+        self.contrastive_dim = contrastive_dim
+        self.cosine_feat = cosine_feat
+        self._z_prot: torch.Tensor | None = None
+        self._z_lig: torch.Tensor | None = None
+        self._cos_sim_feat: torch.Tensor | None = None
 
         # --- Embedding adapters (optional) ----------------------------
         if use_adapter:
@@ -444,24 +476,39 @@ class InteractionMapCNN(nn.Module):
             )
             self.pool = _HierarchicalPool(cnn_channels)
             self.dropout = nn.Dropout(dropout)
+            clf_in = cnn_channels + (1 if cosine_feat else 0)
             if mlp_head:
                 self.classifier = nn.Sequential(
-                    nn.Linear(cnn_channels, cnn_channels * 2),
+                    nn.Linear(clf_in, cnn_channels * 2),
                     nn.GELU(),
                     nn.Dropout(dropout),
                     nn.Linear(cnn_channels * 2, 1),
                 )
             else:
-                self.classifier = nn.Linear(cnn_channels, 1)
+                self.classifier = nn.Linear(clf_in, 1)
         else:
             # v9: MLP classifier on concatenated pooled vectors
             d_model = head_dim
             self.dropout = nn.Dropout(dropout)
+            clf_in_v9 = d_model * 2 + (1 if cosine_feat else 0)
             self.classifier = nn.Sequential(
-                nn.Linear(d_model * 2, d_model),
+                nn.Linear(clf_in_v9, d_model),
                 nn.GELU(),
                 nn.Dropout(dropout),
                 nn.Linear(d_model, 1),
+            )
+
+        # --- Contrastive projection heads (ConPLex-inspired) ----------
+        if contrastive_dim > 0:
+            self.prot_contrast_proj = nn.Sequential(
+                nn.Linear(protein_dim, contrastive_dim),
+                nn.ReLU(),
+                nn.Linear(contrastive_dim, contrastive_dim),
+            )
+            self.lig_contrast_proj = nn.Sequential(
+                nn.Linear(ligand_dim, contrastive_dim),
+                nn.ReLU(),
+                nn.Linear(contrastive_dim, contrastive_dim),
             )
 
         self._init_weights()
@@ -531,6 +578,22 @@ class InteractionMapCNN(nn.Module):
         if self.use_adapter:
             protein_matrix = self.prot_adapter(protein_matrix)
             ligand_matrix = self.lig_adapter(ligand_matrix)
+
+        # --- Mean-pooled embeddings (contrastive & cosine feat) -------
+        if self.contrastive_dim > 0 or self.cosine_feat:
+            _pm = protein_mask.unsqueeze(-1).float()
+            _lm = ligand_mask.unsqueeze(-1).float()
+            _prot_mean = (protein_matrix * _pm).sum(1) / _pm.sum(1).clamp(min=1)
+            _lig_mean = (ligand_matrix * _lm).sum(1) / _lm.sum(1).clamp(min=1)
+
+            if self.contrastive_dim > 0:
+                self._z_prot = F.normalize(self.prot_contrast_proj(_prot_mean), dim=-1)
+                self._z_lig = F.normalize(self.lig_contrast_proj(_lig_mean), dim=-1)
+
+            if self.cosine_feat:
+                self._cos_sim_feat = F.cosine_similarity(
+                    _prot_mean, _lig_mean, dim=-1,
+                ).unsqueeze(1)  # [B, 1]
 
         # --- Build multi-head interaction maps -----------------------
         if self.variant == "v9":
@@ -639,6 +702,11 @@ class InteractionMapCNN(nn.Module):
         # --- Hierarchical attention pool → classification ------------
         pooled = self.pool(features, protein_mask, ligand_mask)
         pooled = self.dropout(pooled)
+
+        # Concatenate global cosine similarity feature
+        if self.cosine_feat and self._cos_sim_feat is not None:
+            pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
+
         logits = self.classifier(pooled)  # [B, 1]
 
         return logits
@@ -819,6 +887,9 @@ def _train_interaction_cnn(
     adapter_lr_mult: float = 1.0,
     label_smooth: float = 0.0,
     mixup_alpha: float = 0.0,
+    contrastive_weight: float = 0.0,
+    cosine_feat: bool = False,
+    contrastive_dim: int = 128,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -889,6 +960,8 @@ def _train_interaction_cnn(
         adapter_bottleneck_lig=adapter_bottleneck_lig,
         adapter_layers=adapter_layers,
         adapter_self_attn=adapter_self_attn,
+        contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
+        cosine_feat=cosine_feat,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -960,6 +1033,10 @@ def _train_interaction_cnn(
 
     if cosine_sim:
         tqdm.write("    Interaction maps: cosine similarity (L2-normalized)")
+    if contrastive_weight > 0:
+        tqdm.write(f"    Contrastive loss: weight={contrastive_weight}, dim={contrastive_dim} (ConPLex-inspired)")
+    if cosine_feat:
+        tqdm.write("    Cosine similarity: added as extra classifier feature")
     if label_smooth > 0:
         tqdm.write(f"    Label smoothing: eps={label_smooth}")
     if mixup_alpha > 0:
@@ -1028,6 +1105,13 @@ def _train_interaction_cnn(
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
                 loss = criterion(logits, y)
+
+                # Contrastive regularization (ConPLex-inspired)
+                if contrastive_weight > 0 and model.contrastive_dim > 0:
+                    c_loss = ContrastiveLoss(margin=0.5)(
+                        model._z_prot, model._z_lig, y,
+                    )
+                    loss = loss + contrastive_weight * c_loss
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
@@ -1319,6 +1403,9 @@ class Level4CNNRunner(BaseLevelRunner):
         # --- Regularization techniques --------------------------------
         label_smooth = float(os.getenv("BENCHMARK_LEVEL4CNN_LABEL_SMOOTH", "0.0"))
         mixup_alpha = float(os.getenv("BENCHMARK_LEVEL4CNN_MIXUP_ALPHA", "0.0"))
+        contrastive_weight = float(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_WEIGHT", "0.0"))
+        cosine_feat = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_FEAT", "0") == "1"
+        contrastive_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM", "128"))
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1346,6 +1433,9 @@ class Level4CNNRunner(BaseLevelRunner):
             adapter_lr_mult=adapter_lr_mult,
             label_smooth=label_smooth,
             mixup_alpha=mixup_alpha,
+            contrastive_weight=contrastive_weight,
+            cosine_feat=cosine_feat,
+            contrastive_dim=contrastive_dim,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
