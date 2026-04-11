@@ -59,7 +59,7 @@ VRAM_MB=$(python3 -c "
 import torch
 if torch.cuda.is_available():
     props = torch.cuda.get_device_properties(${GPU})
-    print(props.total_mem // (1024*1024))
+    print(props.total_memory // (1024*1024))
 else:
     print(0)
 " 2>/dev/null || echo 0)

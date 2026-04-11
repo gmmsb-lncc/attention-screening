@@ -77,7 +77,7 @@ def main():
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        vram = torch.cuda.get_device_properties(args.device).total_mem // (1024**2)
+        vram = torch.cuda.get_device_properties(args.device).total_memory // (1024**2)
         logg.info(f"GPU: {torch.cuda.get_device_name(args.device)} ({vram} MB)")
         logg.info(f"cuDNN benchmark: ON, TF32: ON")
 
