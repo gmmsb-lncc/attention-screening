@@ -205,11 +205,15 @@ class DTIDataModule(pl.LightningDataModule):
         sep=",",
     ):
 
+        _use_cuda = device.type == "cuda" if hasattr(device, 'type') else False
         self._loader_kwargs = {
             "batch_size": batch_size,
             "shuffle": shuffle,
             "num_workers": num_workers,
             "collate_fn": drug_target_collate_fn,
+            "pin_memory": _use_cuda,
+            "persistent_workers": (num_workers > 0),
+            "prefetch_factor": 4 if num_workers > 0 else None,
         }
 
         self._csv_kwargs = {
