@@ -19,7 +19,7 @@
 #
 # Requirements:
 #   - conda environment 'conplex' (created by setup_env.sh)
-#   - kinase datasets in DrugBAN/datasets/kinase/{non_human,human,all}/scaffold/
+#   - kinase datasets in scaffolds_splits/output/{non_human,human}_*.tsv
 #
 # Output:
 #   - Protocol 1: results/pretrained_{dataset}/results.json
@@ -43,8 +43,8 @@ DRUG_FEAT="${DRUG_FEAT:-MorganFeaturizer}"
 TARGET_FEAT="${TARGET_FEAT:-ProtBertFeaturizer}"
 CHECKPOINT="${CHECKPOINT:-models/protbert_epoch3_state_dict.pt}"
 
-# Source datasets from DrugBAN (same scaffold splits used across all baselines)
-KINASE_DATA_ROOT="${KINASE_DATA_ROOT:-${REPO_ROOT}/DrugBAN/datasets/kinase}"
+# Source datasets: thesis scaffold splits (TSV format in scaffolds_splits/output/)
+KINASE_DATA_ROOT="${KINASE_DATA_ROOT:-${REPO_ROOT}/scaffolds_splits/output}"
 
 # ── Hardware-aware auto-tuning ─────────────────────────────────────────────
 # Detect CPU count for DataLoader workers
@@ -111,10 +111,10 @@ export CUDA_VISIBLE_DEVICES="${GPU}"
 # ── Activate conda env ─────────────────────────────────────────────────────
 CONDA_SH=""
 for p in \
-  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
-  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniconda3/etc/profile.d/conda.sh" \
-  "${HOME}/miniforge3/etc/profile.d/conda.sh"; do
+  "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh"; do
   [ -f "$p" ] && { CONDA_SH="$p"; break; }
 done
 [ -n "${CONDA_SH}" ] && source "${CONDA_SH}"
@@ -134,20 +134,25 @@ echo "[STEP 0] Converting kinase datasets to ConPLex format..."
 echo ""
 
 for ds in "${DATASETS[@]}"; do
-    SRC_DIR="${KINASE_DATA_ROOT}/${ds}/scaffold"
     DST_DIR="${SCRIPT_DIR}/dataset/kinase_${ds}"
-
-    if [ ! -d "${SRC_DIR}" ]; then
-        echo "[ERROR] Source not found: ${SRC_DIR}"
-        exit 1
-    fi
-
     mkdir -p "${DST_DIR}"
 
-    # Convert SMILES,Protein,Y → (index),SMILES,Target Sequence,Label
+    # Map split names to thesis TSV files
+    # Thesis files: {non_human,human}_{train,val,test}.tsv
+    # 'all' dataset: uses canonical universal_{train,val,test}.tsv
     for split in train val test; do
-        SRC="${SRC_DIR}/${split}.csv"
         DST="${DST_DIR}/${split}.csv"
+
+        if [ "${ds}" = "all" ]; then
+            SRC="${KINASE_DATA_ROOT}/universal_${split}.tsv"
+        else
+            SRC="${KINASE_DATA_ROOT}/${ds}_${split}.tsv"
+        fi
+
+        if [ ! -f "${SRC}" ]; then
+            echo "[ERROR] Source not found: ${SRC}"
+            exit 1
+        fi
 
         if [ -f "${DST}" ] && [ "${DST}" -nt "${SRC}" ]; then
             echo "  [SKIP] ${ds}/${split}.csv (already converted)"
@@ -156,13 +161,18 @@ for ds in "${DATASETS[@]}"; do
 
         python3 -c "
 import pandas as pd
-df = pd.read_csv('${SRC}')
-df = df.rename(columns={'Protein': 'Target Sequence', 'Y': 'Label'})
-df = df[['SMILES', 'Target Sequence', 'Label']]
-df.to_csv('${DST}', index=True)
-n_pos = int(df['Label'].sum())
-n_neg = len(df) - n_pos
-print(f'  [{split:5s}] {len(df):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
+df = pd.read_csv('${SRC}', sep='\t')
+
+# Convert thesis format → ConPLex format
+out = pd.DataFrame()
+out['SMILES'] = df['canonical_smiles']
+out['Target Sequence'] = df['seq']
+out['Label'] = df['label'].astype(int)
+out = out.dropna().reset_index(drop=True)
+out.to_csv('${DST}', index=True)
+n_pos = int(out['Label'].sum())
+n_neg = len(out) - n_pos
+print(f'  [{split:5s}] {len(out):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
 "
     done
 done
