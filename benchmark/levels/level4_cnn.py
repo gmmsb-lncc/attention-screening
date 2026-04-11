@@ -511,6 +511,13 @@ class InteractionMapCNN(nn.Module):
                 nn.Linear(contrastive_dim, contrastive_dim),
             )
 
+        # --- Cosine feature projection (shared space) -----------------
+        if cosine_feat and contrastive_dim <= 0:
+            # Need separate projections if no contrastive heads exist
+            _cos_dim = 128
+            self.prot_cos_proj = nn.Linear(protein_dim, _cos_dim)
+            self.lig_cos_proj = nn.Linear(ligand_dim, _cos_dim)
+
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -591,8 +598,15 @@ class InteractionMapCNN(nn.Module):
                 self._z_lig = F.normalize(self.lig_contrast_proj(_lig_mean), dim=-1)
 
             if self.cosine_feat:
+                # Project to common space before cosine similarity
+                if self.contrastive_dim > 0:
+                    p_proj = self._z_prot
+                    l_proj = self._z_lig
+                else:
+                    p_proj = self.prot_cos_proj(_prot_mean)
+                    l_proj = self.lig_cos_proj(_lig_mean)
                 self._cos_sim_feat = F.cosine_similarity(
-                    _prot_mean, _lig_mean, dim=-1,
+                    p_proj, l_proj, dim=-1,
                 ).unsqueeze(1)  # [B, 1]
 
         # --- Build multi-head interaction maps -----------------------
