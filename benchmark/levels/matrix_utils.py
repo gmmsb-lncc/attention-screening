@@ -32,12 +32,15 @@ from benchmark.config import (
 def _loader_kwargs() -> dict:
     """Return optimal DataLoader keyword arguments for current hardware."""
     use_cuda = torch.cuda.is_available()
-    n_workers = min(4, os.cpu_count() or 0) if use_cuda else 0
-    return {
+    n_workers = min(8, os.cpu_count() or 0) if use_cuda else 0
+    kwargs = {
         "num_workers": n_workers,
         "pin_memory": use_cuda,
         "persistent_workers": n_workers > 0,
     }
+    if n_workers > 0:
+        kwargs["prefetch_factor"] = 4
+    return kwargs
 
 
 # ---------------------------------------------------------------------------
