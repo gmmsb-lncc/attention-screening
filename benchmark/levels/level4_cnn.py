@@ -785,7 +785,8 @@ def _platt_calibrate(
     probabilities.  Usage: calibrator.predict_proba(logits)[:, 1]
     """
     model.eval()
-    model_dtype = next(model.parameters()).dtype
+    _raw = getattr(model, '_orig_mod', model)
+    model_dtype = next(_raw.parameters()).dtype
     eval_amp = device.type == "cuda" and model_dtype != torch.float64
 
     all_logits: list[np.ndarray] = []
@@ -859,9 +860,11 @@ def _save_training_checkpoint(
     no_improve: int,
 ) -> None:
     """Save a training checkpoint for resuming interrupted runs."""
+    # Unwrap compiled model to get clean state_dict keys (no _orig_mod. prefix)
+    _raw_model = getattr(model, '_orig_mod', model)
     payload = {
         "epoch": epoch,
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": _raw_model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),  # type: ignore[union-attr]
         "best_score": best_score,
@@ -1086,7 +1089,13 @@ def _train_interaction_cnn(
     if ckpt_path and os.path.exists(ckpt_path):
         tqdm.write(f"    Resuming from checkpoint: {ckpt_path}")
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
+        # Strip _orig_mod. prefix if checkpoint was saved by compiled model
+        raw_sd = ckpt["model_state_dict"]
+        _clean_sd = {
+            k.removeprefix("_orig_mod."): v for k, v in raw_sd.items()
+        }
+        _raw_for_load = getattr(model, '_orig_mod', model)
+        _raw_for_load.load_state_dict(_clean_sd)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         if use_amp and "scaler_state_dict" in ckpt:
@@ -1095,7 +1104,8 @@ def _train_interaction_cnn(
         no_improve = ckpt.get("no_improve", 0)
         start_epoch = ckpt.get("epoch", 0) + 1
         if ckpt.get("best_state") is not None:
-            best_state = ckpt["best_state"]
+            _bs = ckpt["best_state"]
+            best_state = {k.removeprefix("_orig_mod."): v for k, v in _bs.items()}
         tqdm.write(
             f"    Resumed at epoch {start_epoch}, "
             f"best_val_mcc={best_score:.4f}, no_improve={no_improve}"
@@ -1132,9 +1142,10 @@ def _train_interaction_cnn(
                 loss = criterion(logits, y)
 
                 # Contrastive regularization (ConPLex-inspired)
-                if contrastive_weight > 0 and model.contrastive_dim > 0:
+                _orig = getattr(model, '_orig_mod', model)
+                if contrastive_weight > 0 and _orig.contrastive_dim > 0:
                     c_loss = ContrastiveLoss(margin=0.5)(
-                        model._z_prot, model._z_lig, y,
+                        _orig._z_prot, _orig._z_lig, y,
                     )
                     loss = loss + contrastive_weight * c_loss
 
@@ -1200,7 +1211,9 @@ def _train_interaction_cnn(
 
         if improved:
             best_score = val_mcc
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            # Save raw (unwrapped) state_dict for portability
+            _raw_best = getattr(model, '_orig_mod', model)
+            best_state = {k: v.cpu().clone() for k, v in _raw_best.state_dict().items()}
             no_improve = 0
         else:
             no_improve += 1
@@ -1232,16 +1245,15 @@ def _train_interaction_cnn(
 
     # --- Restore best model -------------------------------------------
     if best_state is not None:
-        model.load_state_dict(best_state)
-    model.to(device).eval()
+        _raw_restore = getattr(model, '_orig_mod', model)
+        _raw_restore.load_state_dict(best_state)
+    # Call .to().eval() on the wrapper (delegates to _orig_mod internally)
+    model.to(device)
+    model.eval()
 
-    # --- torch.compile for fused eval kernels (PyTorch 2.x) -----------
-    if hasattr(torch, 'compile') and device.type == 'cuda':
-        try:
-            model = torch.compile(model, mode='reduce-overhead')
-            tqdm.write("    torch.compile: enabled (reduce-overhead)")
-        except Exception as e:
-            tqdm.write(f"    torch.compile: unavailable ({e})")
+    # NOTE: torch.compile was already applied before training (if available).
+    # Re-compiling after load_state_dict on an already-compiled model
+    # produces a plain function wrapper that loses nn.Module API.
 
     # --- Clean up checkpoint (training complete) -----------------------
     if checkpoint_dir is not None:
@@ -1281,7 +1293,8 @@ def _evaluate(
     all_targets: list[np.ndarray] = []
 
     # Auto-detect model dtype for double precision support
-    model_dtype = next(model.parameters()).dtype
+    _raw = getattr(model, '_orig_mod', model)
+    model_dtype = next(_raw.parameters()).dtype
     eval_amp = device.type == "cuda" and model_dtype != torch.float64
 
     for batch in loader:
@@ -1475,7 +1488,9 @@ class Level4CNNRunner(BaseLevelRunner):
             checkpoint_every=checkpoint_every,
         )
 
-        device = next(model.parameters()).device
+        # Unwrap torch.compile wrapper (if any) to access nn.Module API
+        _raw = getattr(model, '_orig_mod', model)
+        device = next(_raw.parameters()).device
 
         # --- Platt Scaling calibration on train -------------------------
         # Fitted on TRAIN (same data the model learned from) so that the
@@ -1522,7 +1537,7 @@ class Level4CNNRunner(BaseLevelRunner):
 
         # Save checkpoint
         ckpt_path = os.path.join(output_dir, "level4_cnn_model.pt")
-        torch.save(model.state_dict(), ckpt_path)
+        torch.save(_raw.state_dict(), ckpt_path)
 
         # Save raw predictions for reproducibility
         np.savez(
