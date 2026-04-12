@@ -271,44 +271,15 @@ log_file: ./logs/${EXP_ID}.log
 model_save_dir: ./best_models
 YAML
 
-            # Train with monkey-patched get_task_dir
-            WANDB_MODE=disabled python3 -c "
-import sys, os
-os.chdir('${SCRIPT_DIR}')
-sys.path.insert(0, '.')
-
-# Monkey-patch get_task_dir to include kinase datasets
-import src.data as data_module
-from pathlib import Path
-_orig_get_task_dir = data_module.get_task_dir
-def _patched_get_task_dir(task_name):
-    if task_name.startswith('kinase_'):
-        return Path('./dataset/' + task_name).resolve()
-    return _orig_get_task_dir(task_name)
-data_module.get_task_dir = _patched_get_task_dir
-
-# Enable CUDA optimizations
-import torch
-if torch.cuda.is_available():
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-
-# Set sys.argv BEFORE importing train_DTI (it parses args at module level)
-sys.argv = [
-    'train_DTI.py',
-    '--exp-id', '${EXP_ID}',
-    '--config', '${CONFIG_TMP}',
-    '--d', '${GPU}',
-    '--r', '${seed}',
-    '--epochs', '${EPOCHS}',
-    '--batch-size', '${BATCH_SIZE}',
-]
-
-from train_DTI import main, parser
-
-main()
-"
+            # Train directly — kinase datasets are now registered in src/data.py
+            WANDB_MODE=disabled python3 train_DTI.py \
+                --exp-id "${EXP_ID}" \
+                --config "${CONFIG_TMP}" \
+                --task "kinase_${ds}" \
+                --d "${GPU}" \
+                --r "${seed}" \
+                --epochs "${EPOCHS}" \
+                --batch-size "${BATCH_SIZE}"
 
             echo "[P2] Training ${ds} rep${seed} done."
 
