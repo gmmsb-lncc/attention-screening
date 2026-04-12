@@ -1,5 +1,6 @@
 """Configuration and constants for CrossAttention split analysis."""
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Literal
 
@@ -159,7 +160,7 @@ class TrainingConfig:
     diffusion_snr_sampling_gamma: float = 0.5
     diffusion_snr_sampling_mix: float = 0.2
     diffusion_joint_denoise: bool = False
-    dataloader_num_workers: int = 0
+    dataloader_num_workers: int = min(max(os.cpu_count() // 2, 2), 8) if os.cpu_count() else 0
     dataloader_cache_in_memory: bool = False
     dataloader_pin_memory: bool = True
     dataloader_prefetch_factor: int = 2

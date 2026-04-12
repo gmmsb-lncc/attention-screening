@@ -77,7 +77,7 @@ def main():
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        vram = torch.cuda.get_device_properties(args.device).total_mem // (1024**2)
+        vram = torch.cuda.get_device_properties(args.device).total_memory // (1024**2)
         logg.info(f"GPU: {torch.cuda.get_device_name(args.device)} ({vram} MB)")
         logg.info(f"cuDNN benchmark: ON, TF32: ON")
 
@@ -143,18 +143,17 @@ def main():
     model = model.to(device)
     model.eval()
 
-    # Try torch.compile for PyTorch 2.x speedup
-    if hasattr(torch, 'compile') and use_cuda:
-        try:
-            model = torch.compile(model, mode="reduce-overhead")
-            logg.info("torch.compile: enabled (reduce-overhead)")
-        except Exception as e:
-            logg.warning(f"torch.compile failed, using eager mode: {e}")
+    # NOTE: torch.compile with mode="reduce-overhead" uses CUDAGraphs which
+    # overwrites tensor outputs between runs, breaking torchmetrics accumulation.
+    # Disabled — ConPLex is lightweight (~4M params), compile overhead not worth it.
 
     # ── Metrics ────────────────────────────────────────────────────────────
     metrics = {
         "AUROC": torchmetrics.AUROC(task="binary").to(device),
         "AUPRC": torchmetrics.AveragePrecision(task="binary").to(device),
+        "MCC": torchmetrics.MatthewsCorrCoef(task="binary").to(device),
+        "F1": torchmetrics.F1Score(task="binary").to(device),
+        "Accuracy": torchmetrics.Accuracy(task="binary").to(device),
     }
 
     # ── Inference ──────────────────────────────────────────────────────────
@@ -171,11 +170,12 @@ def main():
             label = label.to(device, non_blocking=True).int()
 
             pred = model(drug, target)
-            all_preds.append(pred.cpu())
+            pred_sigmoid = torch.sigmoid(pred)
+            all_preds.append(pred_sigmoid.cpu())
             all_labels.append(label.cpu())
 
             for met in metrics.values():
-                met(pred, label)
+                met(pred_sigmoid, label)
 
     if use_cuda:
         torch.cuda.synchronize()

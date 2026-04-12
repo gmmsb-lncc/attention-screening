@@ -1,5 +1,15 @@
-"""Model training utilities."""
+"""Model training utilities.
 
+Performance optimizations (RTX 4090 / multi-core):
+- AMP mixed precision (FP16) via GradScaler
+- non_blocking CPU→GPU transfers
+- set_to_none=True for faster gradient zeroing
+- torch.compile for fused kernels (PyTorch 2.x)
+- cuDNN benchmark autotuner
+- TF32 on Ampere+ GPUs
+"""
+
+import os
 from typing import Tuple, Dict, Optional
 import warnings
 
@@ -25,6 +35,7 @@ def train_epoch(
     num_epochs: int,
     max_grad_norm: float = 1.0,
     aux_loss_scale: float = 1.0,
+    scaler: Optional[torch.cuda.amp.GradScaler] = None,
 ) -> Dict[str, float]:
     """
     Train for one epoch.
@@ -38,6 +49,7 @@ def train_epoch(
         epoch: Current epoch number
         num_epochs: Total number of epochs
         max_grad_norm: Maximum gradient norm for clipping
+        scaler: GradScaler for AMP mixed precision (None to disable)
 
     Returns:
         Dictionary with loss values
@@ -48,71 +60,85 @@ def train_epoch(
     total_reg_loss = 0
     total_aux_loss = 0
     num_batches = 0
+    use_amp = scaler is not None and device.type == 'cuda'
 
     progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', leave=False)
 
     for batch in progress_bar:
-        protein_embeddings = batch['protein_matrix'].to(device)
-        ligand_embeddings = batch['ligand_matrix'].to(device)
-        protein_padding_mask = batch['protein_mask'].to(device)
-        ligand_padding_mask = batch['ligand_mask'].to(device)
-        classification_labels = batch['labels'].to(device)
-        regression_targets = batch['regression_targets'].to(device)
-        regression_mask = batch['regression_mask'].to(device)
+        protein_embeddings = batch['protein_matrix'].to(device, non_blocking=True)
+        ligand_embeddings = batch['ligand_matrix'].to(device, non_blocking=True)
+        protein_padding_mask = batch['protein_mask'].to(device, non_blocking=True)
+        ligand_padding_mask = batch['ligand_mask'].to(device, non_blocking=True)
+        classification_labels = batch['labels'].to(device, non_blocking=True)
+        regression_targets = batch['regression_targets'].to(device, non_blocking=True)
+        regression_mask = batch['regression_mask'].to(device, non_blocking=True)
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
-        model_output = model(protein_embeddings, ligand_embeddings, protein_padding_mask, ligand_padding_mask)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            model_output = model(protein_embeddings, ligand_embeddings, protein_padding_mask, ligand_padding_mask)
 
-        # Handle classification-only models (Level 3)
-        if model_output['regression'] is None:
-            # Use simple BCE loss for classification only
-            classification_logits = model_output['classification'].squeeze(-1)
-            classification_labels_squeezed = classification_labels.squeeze(-1).float()
-            _pw = None
-            if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None:
-                _pw = loss_fn.pos_weight_tensor.to(device)
-            classification_loss = F.binary_cross_entropy_with_logits(
-                classification_logits,
-                classification_labels_squeezed,
-                pos_weight=_pw,
-            )
-            losses = {
-                'total': classification_loss, 
-                'classification': classification_loss, 
-                'regression': torch.tensor(0.0, device=device)
-            }
-        else:
-            # Multi-task loss (for other levels)
-            losses = loss_fn(
-                model_output['classification'],
-                model_output['regression'],
-                classification_labels,
-                regression_targets,
-                regression_mask
-            )
-        auxiliary_loss = model_output.get('aux_loss')
-        if auxiliary_loss is not None:
-            scaled_auxiliary_loss = auxiliary_loss * float(aux_loss_scale)
-            losses['total'] = losses['total'] + scaled_auxiliary_loss
-            losses['aux'] = scaled_auxiliary_loss.detach().item()
+            # Handle classification-only models (Level 3)
+            if model_output['regression'] is None:
+                # Use simple BCE loss for classification only
+                classification_logits = model_output['classification'].squeeze(-1)
+                classification_labels_squeezed = classification_labels.squeeze(-1).float()
+                _pw = None
+                if hasattr(loss_fn, 'pos_weight_tensor') and loss_fn.pos_weight_tensor is not None:
+                    _pw = loss_fn.pos_weight_tensor.to(device)
+                classification_loss = F.binary_cross_entropy_with_logits(
+                    classification_logits,
+                    classification_labels_squeezed,
+                    pos_weight=_pw,
+                )
+                losses = {
+                    'total': classification_loss, 
+                    'classification': classification_loss, 
+                    'regression': torch.tensor(0.0, device=device)
+                }
+            else:
+                # Multi-task loss (for other levels)
+                losses = loss_fn(
+                    model_output['classification'],
+                    model_output['regression'],
+                    classification_labels,
+                    regression_targets,
+                    regression_mask
+                )
+            auxiliary_loss = model_output.get('aux_loss')
+            if auxiliary_loss is not None:
+                scaled_auxiliary_loss = auxiliary_loss * float(aux_loss_scale)
+                losses['total'] = losses['total'] + scaled_auxiliary_loss
+                losses['aux'] = scaled_auxiliary_loss.detach().item()
 
-        # Domain adversarial loss (Level 5 DA)
-        domain_logits = model_output.get('domain_logits')
-        if domain_logits is not None and 'domain_label' in batch:
-            domain_labels = batch['domain_label'].to(device)
-            domain_loss = F.cross_entropy(domain_logits, domain_labels)
-            losses['total'] = losses['total'] + domain_loss
-            losses['domain'] = domain_loss.detach().item()
+            # Domain adversarial loss (Level 5 DA)
+            domain_logits = model_output.get('domain_logits')
+            if domain_logits is not None and 'domain_label' in batch:
+                domain_labels = batch['domain_label'].to(device, non_blocking=True)
+                domain_loss = F.cross_entropy(domain_logits, domain_labels)
+                losses['total'] = losses['total'] + domain_loss
+                losses['domain'] = domain_loss.detach().item()
 
         # Check for NaN loss
         if torch.isnan(losses['total']) or torch.isinf(losses['total']):
-            warnings.warn("NaN/Inf loss detected, skipping batch")
+            if use_amp and scaler.get_scale() > 1.0:
+                # AMP overflow — skip batch but don't warn excessively
+                scaler.update()
+            else:
+                warnings.warn("NaN/Inf loss detected, skipping batch")
             continue
 
-        losses['total'].backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-        optimizer.step()
+        # Backward with AMP scaling
+        if use_amp:
+            scaler.scale(losses['total']).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            losses['total'].backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            optimizer.step()
 
         total_loss += losses['total'].item()
         total_cls_loss += losses['classification'].item()
@@ -174,10 +200,33 @@ def train_model(
     """
     model = model.to(device)
 
+    # Enable CUDA performance flags
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+    # Try torch.compile for fused kernels (PyTorch 2.x)
+    compiled = False
+    if hasattr(torch, 'compile') and device.type == 'cuda':
+        try:
+            model = torch.compile(model, mode='reduce-overhead')
+            compiled = True
+            print(f"  torch.compile: enabled (reduce-overhead)")
+        except Exception as e:
+            print(f"  torch.compile: unavailable ({e})")
+
+    # AMP mixed precision for ~2x speedup on Ampere+ GPUs
+    use_amp = device.type == 'cuda'
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp) if use_amp else None
+    if use_amp:
+        print(f"  AMP mixed precision: enabled")
+
     optimizer = optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
-        weight_decay=config.weight_decay
+        weight_decay=config.weight_decay,
+        fused=device.type == 'cuda',  # Fused AdamW kernel (faster on CUDA)
     )
 
     # 3-epoch warmup + cosine annealing
@@ -241,16 +290,18 @@ def train_model(
             aux_loss_scale = 1.0
 
         # Update GRL lambda schedule (Level 5 DA)
-        if hasattr(model, 'set_grl_lambda'):
+        _base = model._orig_module if compiled and hasattr(model, '_orig_module') else model
+        if hasattr(_base, 'set_grl_lambda'):
             from ..models.level5_da.domain_adaptation import lambda_schedule
             progress = epoch / max(1, config.num_epochs - 1)
-            model.set_grl_lambda(lambda_schedule(progress))
+            _base.set_grl_lambda(lambda_schedule(progress))
 
         # Train
         try:
             train_metrics = train_epoch(
                 model, train_loader, optimizer, loss_fn, device,
-                epoch, config.num_epochs, config.max_grad_norm, aux_loss_scale
+                epoch, config.num_epochs, config.max_grad_norm, aux_loss_scale,
+                scaler=scaler,
             )
         except RuntimeError as e:
             if "skipped" in str(e):
