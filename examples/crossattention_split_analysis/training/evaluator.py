@@ -67,23 +67,27 @@ def _collect_predictions(
     model.eval()
     all_probs = []
     all_labels = []
+    use_amp = device.type == 'cuda'
 
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.cuda.amp.autocast(enabled=use_amp):
         for batch in data_loader:
-            protein_matrix = batch["protein_matrix"].to(device)
-            ligand_matrix = batch["ligand_matrix"].to(device)
-            protein_mask = batch["protein_mask"].to(device)
-            ligand_mask = batch["ligand_mask"].to(device)
+            protein_matrix = batch["protein_matrix"].to(device, non_blocking=True)
+            ligand_matrix = batch["ligand_matrix"].to(device, non_blocking=True)
+            protein_mask = batch["protein_mask"].to(device, non_blocking=True)
+            ligand_mask = batch["ligand_mask"].to(device, non_blocking=True)
             labels = batch["labels"]
 
             output = model(protein_matrix, ligand_matrix, protein_mask, ligand_mask)
-            probs = torch.sigmoid(output["classification"]).cpu().numpy().reshape(-1)
+            probs = torch.sigmoid(output["classification"]).cpu().reshape(-1)
 
-            all_probs.extend(probs.tolist())
-            all_labels.extend(labels.numpy().reshape(-1).tolist())
+            all_probs.append(probs)
+            all_labels.append(labels.reshape(-1))
 
-    all_probs_arr = np.asarray(all_probs, dtype=np.float64)
-    all_labels_arr = np.asarray(all_labels, dtype=np.int64)
+    if len(all_probs) == 0:
+        return np.array([], dtype=np.int64), np.array([], dtype=np.float64), 0, 0
+
+    all_probs_arr = torch.cat(all_probs).numpy().astype(np.float64)
+    all_labels_arr = torch.cat(all_labels).numpy().astype(np.int64)
 
     nan_count = int(np.isnan(all_probs_arr).sum())
     inf_count = int(np.isinf(all_probs_arr).sum())
