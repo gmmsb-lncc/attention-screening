@@ -108,6 +108,7 @@ else
 fi
 echo "[INFO] Installing PyG extensions from wheels: ${PYG_WHEEL_TAG}"
 pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
+    --no-build-isolation \
     -f "https://data.pyg.org/whl/${PYG_WHEEL_TAG}.html"
 
 # ── Step 4: DeepDTAGen-specific deps ──────────────────────────────────────
