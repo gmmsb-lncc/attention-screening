@@ -66,10 +66,9 @@ Input TSV (seq_id, seq, chembl_id, smiles, pchembl_value)
 
 To rigorously evaluate DT-Kinase, the repository integrates several State-of-the-Art (SOTA) baseline models. Each resides in its own root directory with isolated environments to avoid dependency conflicts:
 
-1. **DrugBAN** (`DrugBAN/`): Deep Bilinear Attention Network.
-2. **GraphBAN** (`GraphBAN/`): Graph-based Bilinear Attention Network.
-3. **DeepDTAGen** (`DeepDTAGen/`): Generative DTI and Multi-task architecture.
-4. **ConPLex** (`ConPLex/`): Contrastive PLM-based exploration (structure-free, co-embedding with distance metrics).
+1. **DrugBAN** (`DrugBAN/`): Deep Bilinear Attention Network (MIT license).
+2. **GraphBAN** (`GraphBAN/`): Graph-based Bilinear Attention Network (MIT license).
+3. **ConPLex** (`ConPLex/`): Contrastive PLM-based exploration (structure-free, co-embedding with distance metrics) (MIT license).
 
 **Evaluation Workflow**:
 - We use unified **scaffold splits** (train/val/test) for fair comparison.
