@@ -49,9 +49,23 @@ def get_task_dir(task_name: str):
         "esterase": "./dataset/EnzPred/esterase_binary",
         "kinase": "./dataset/EnzPred/davis_filtered",
         "phosphatase": "./dataset/EnzPred/phosphatase_chiral_binary",
+        # DT-Kinase universal benchmarks (scaffold splits)
+        "kinase_non_human": "./dataset/kinase_non_human",
+        "kinase_human": "./dataset/kinase_human",
+        "kinase_all": "./dataset/kinase_all",
     }
 
-    return Path(task_paths[task_name.lower()]).resolve()
+    task_key = task_name.lower()
+    if task_key in task_paths:
+        return Path(task_paths[task_key]).resolve()
+
+    # Fallback: try dataset/{task_name} directory
+    fallback = Path(f"./dataset/{task_name}")
+    if fallback.exists():
+        logg.info(f"Using fallback dataset directory: {fallback}")
+        return fallback.resolve()
+
+    raise KeyError(f"Unknown task '{task_name}'. Known tasks: {list(task_paths.keys())}")
 
 
 def drug_target_collate_fn(

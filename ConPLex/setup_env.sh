@@ -44,10 +44,10 @@ echo "============================================"
 # ── Verify conda is available ─────────────────────────────────────────────
 CONDA_SH=""
 for p in \
-  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
-  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
   "/usr/local/anaconda3/etc/profile.d/conda.sh"; do
   if [ -f "$p" ]; then CONDA_SH="$p"; break; fi
 done
@@ -164,6 +164,8 @@ pip install \
 # pytdc (TDC benchmark) — installed separately because its pandas>=2.1 req
 # conflicts with rdkit, but it works fine with pandas 2.0.x at runtime
 pip install pytdc --no-deps 2>/dev/null || pip install pytdc
+# pytdc imports fuzzywuzzy (undeclared transitive dep)
+pip install fuzzywuzzy python-Levenshtein
 
 # ── Step 5: Pin versions to fix known compatibility issues ────────────────
 echo ""

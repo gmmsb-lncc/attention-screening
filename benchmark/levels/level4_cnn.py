@@ -93,6 +93,31 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 
+class ContrastiveLoss(nn.Module):
+    """Margin-based contrastive loss for drug-target co-embedding.
+
+    Inspired by ConPLex (Sledzieski et al., PNAS 2023).
+    Positive pairs (binding): maximize cosine similarity.
+    Negative pairs (non-binding): push cosine similarity below margin.
+    """
+
+    def __init__(self, margin: float = 0.5) -> None:
+        super().__init__()
+        self.margin = margin
+
+    def forward(
+        self,
+        z_prot: torch.Tensor,
+        z_lig: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        cos_sim = F.cosine_similarity(z_prot, z_lig, dim=-1)
+        labels = labels.view(-1).float()
+        pos_loss = labels * (1 - cos_sim).pow(2)
+        neg_loss = (1 - labels) * F.relu(cos_sim - self.margin).pow(2)
+        return (pos_loss + neg_loss).mean()
+
+
 # ======================================================================
 # Model components
 # ======================================================================
@@ -293,6 +318,8 @@ class InteractionMapCNN(nn.Module):
         adapter_bottleneck_lig: int = 512,
         adapter_layers: int = 1,
         adapter_self_attn: bool = False,
+        contrastive_dim: int = 128,
+        cosine_feat: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -300,6 +327,11 @@ class InteractionMapCNN(nn.Module):
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
         self.use_adapter = use_adapter
+        self.contrastive_dim = contrastive_dim
+        self.cosine_feat = cosine_feat
+        self._z_prot: torch.Tensor | None = None
+        self._z_lig: torch.Tensor | None = None
+        self._cos_sim_feat: torch.Tensor | None = None
 
         # --- Embedding adapters (optional) ----------------------------
         if use_adapter:
@@ -444,25 +476,47 @@ class InteractionMapCNN(nn.Module):
             )
             self.pool = _HierarchicalPool(cnn_channels)
             self.dropout = nn.Dropout(dropout)
+            clf_in = cnn_channels + (1 if cosine_feat else 0)
             if mlp_head:
                 self.classifier = nn.Sequential(
-                    nn.Linear(cnn_channels, cnn_channels * 2),
+                    nn.Linear(clf_in, cnn_channels * 2),
                     nn.GELU(),
                     nn.Dropout(dropout),
                     nn.Linear(cnn_channels * 2, 1),
                 )
             else:
-                self.classifier = nn.Linear(cnn_channels, 1)
+                self.classifier = nn.Linear(clf_in, 1)
         else:
             # v9: MLP classifier on concatenated pooled vectors
             d_model = head_dim
             self.dropout = nn.Dropout(dropout)
+            clf_in_v9 = d_model * 2 + (1 if cosine_feat else 0)
             self.classifier = nn.Sequential(
-                nn.Linear(d_model * 2, d_model),
+                nn.Linear(clf_in_v9, d_model),
                 nn.GELU(),
                 nn.Dropout(dropout),
                 nn.Linear(d_model, 1),
             )
+
+        # --- Contrastive projection heads (ConPLex-inspired) ----------
+        if contrastive_dim > 0:
+            self.prot_contrast_proj = nn.Sequential(
+                nn.Linear(protein_dim, contrastive_dim),
+                nn.ReLU(),
+                nn.Linear(contrastive_dim, contrastive_dim),
+            )
+            self.lig_contrast_proj = nn.Sequential(
+                nn.Linear(ligand_dim, contrastive_dim),
+                nn.ReLU(),
+                nn.Linear(contrastive_dim, contrastive_dim),
+            )
+
+        # --- Cosine feature projection (shared space) -----------------
+        if cosine_feat and contrastive_dim <= 0:
+            # Need separate projections if no contrastive heads exist
+            _cos_dim = 128
+            self.prot_cos_proj = nn.Linear(protein_dim, _cos_dim)
+            self.lig_cos_proj = nn.Linear(ligand_dim, _cos_dim)
 
         self._init_weights()
 
@@ -531,6 +585,29 @@ class InteractionMapCNN(nn.Module):
         if self.use_adapter:
             protein_matrix = self.prot_adapter(protein_matrix)
             ligand_matrix = self.lig_adapter(ligand_matrix)
+
+        # --- Mean-pooled embeddings (contrastive & cosine feat) -------
+        if self.contrastive_dim > 0 or self.cosine_feat:
+            _pm = protein_mask.unsqueeze(-1).float()
+            _lm = ligand_mask.unsqueeze(-1).float()
+            _prot_mean = (protein_matrix * _pm).sum(1) / _pm.sum(1).clamp(min=1)
+            _lig_mean = (ligand_matrix * _lm).sum(1) / _lm.sum(1).clamp(min=1)
+
+            if self.contrastive_dim > 0:
+                self._z_prot = F.normalize(self.prot_contrast_proj(_prot_mean), dim=-1)
+                self._z_lig = F.normalize(self.lig_contrast_proj(_lig_mean), dim=-1)
+
+            if self.cosine_feat:
+                # Project to common space before cosine similarity
+                if self.contrastive_dim > 0:
+                    p_proj = self._z_prot
+                    l_proj = self._z_lig
+                else:
+                    p_proj = self.prot_cos_proj(_prot_mean)
+                    l_proj = self.lig_cos_proj(_lig_mean)
+                self._cos_sim_feat = F.cosine_similarity(
+                    p_proj, l_proj, dim=-1,
+                ).unsqueeze(1)  # [B, 1]
 
         # --- Build multi-head interaction maps -----------------------
         if self.variant == "v9":
@@ -639,6 +716,11 @@ class InteractionMapCNN(nn.Module):
         # --- Hierarchical attention pool → classification ------------
         pooled = self.pool(features, protein_mask, ligand_mask)
         pooled = self.dropout(pooled)
+
+        # Concatenate global cosine similarity feature
+        if self.cosine_feat and self._cos_sim_feat is not None:
+            pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
+
         logits = self.classifier(pooled)  # [B, 1]
 
         return logits
@@ -703,17 +785,18 @@ def _platt_calibrate(
     probabilities.  Usage: calibrator.predict_proba(logits)[:, 1]
     """
     model.eval()
-    model_dtype = next(model.parameters()).dtype
+    _raw = getattr(model, '_orig_mod', model)
+    model_dtype = next(_raw.parameters()).dtype
     eval_amp = device.type == "cuda" and model_dtype != torch.float64
 
     all_logits: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
     for batch in val_loader:
-        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
-        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
-        pm = batch["protein_mask"].to(device)
-        lm = batch["ligand_mask"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        pm = batch["protein_mask"].to(device, non_blocking=True)
+        lm = batch["ligand_mask"].to(device, non_blocking=True)
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
@@ -735,6 +818,66 @@ def _platt_calibrate(
     tqdm.write(f"    Platt calibration: a={a:.4f}, b={b:.4f}")
 
     return calibrator
+
+
+@torch.inference_mode()
+def _temperature_calibrate(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+) -> float:
+    """Fit temperature scaling T on validation logits (Guo et al. 2017).
+
+    Temperature scaling divides logits by a single scalar T before sigmoid.
+    Minimises negative log-likelihood on val set — 1 parameter, so it
+    generalises better than Platt (2 parameters) across scaffold splits.
+
+    T > 1  →  softer probabilities (model was overconfident)
+    T < 1  →  sharper probabilities (model was underconfident)
+    T = 1  →  no change (model is already well-calibrated)
+    """
+    from scipy.optimize import minimize_scalar
+
+    model.eval()
+    _raw = getattr(model, '_orig_mod', model)
+    model_dtype = next(_raw.parameters()).dtype
+    eval_amp = device.type == "cuda" and model_dtype != torch.float64
+
+    all_logits: list[np.ndarray] = []
+    all_targets: list[np.ndarray] = []
+
+    for batch in val_loader:
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        pm = batch["protein_mask"].to(device, non_blocking=True)
+        lm = batch["ligand_mask"].to(device, non_blocking=True)
+        y = batch["label"].numpy()
+
+        with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            logits = model(p, l, pm, lm)
+
+        all_logits.append(logits.float().cpu().numpy().ravel())
+        all_targets.append(y.ravel())
+
+    logits_np = np.concatenate(all_logits)
+    targets_np = np.concatenate(all_targets).astype(float)
+
+    def _nll(T: float) -> float:
+        """Binary cross-entropy after temperature scaling."""
+        scaled = logits_np / max(float(T), 1e-4)
+        probs = 1.0 / (1.0 + np.exp(-scaled))
+        probs = np.clip(probs, 1e-7, 1.0 - 1e-7)
+        return float(-np.mean(
+            targets_np * np.log(probs) + (1.0 - targets_np) * np.log(1.0 - probs)
+        ))
+
+    result = minimize_scalar(_nll, bounds=(0.05, 10.0), method="bounded")
+    T = float(result.x)
+    tqdm.write(
+        f"    Temperature scaling: T={T:.4f} "
+        f"({'underconfident → softened' if T > 1 else 'overconfident → sharpened' if T < 1 else 'well-calibrated'})"
+    )
+    return T
 
 
 # ======================================================================
@@ -777,9 +920,11 @@ def _save_training_checkpoint(
     no_improve: int,
 ) -> None:
     """Save a training checkpoint for resuming interrupted runs."""
+    # Unwrap compiled model to get clean state_dict keys (no _orig_mod. prefix)
+    _raw_model = getattr(model, '_orig_mod', model)
     payload = {
         "epoch": epoch,
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": _raw_model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),  # type: ignore[union-attr]
         "best_score": best_score,
@@ -819,6 +964,9 @@ def _train_interaction_cnn(
     adapter_lr_mult: float = 1.0,
     label_smooth: float = 0.0,
     mixup_alpha: float = 0.0,
+    contrastive_weight: float = 0.0,
+    cosine_feat: bool = False,
+    contrastive_dim: int = 128,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -889,6 +1037,8 @@ def _train_interaction_cnn(
         adapter_bottleneck_lig=adapter_bottleneck_lig,
         adapter_layers=adapter_layers,
         adapter_self_attn=adapter_self_attn,
+        contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
+        cosine_feat=cosine_feat,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -909,6 +1059,16 @@ def _train_interaction_cnn(
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
+    # --- torch.compile for fused training kernels (PyTorch 2.x) -------
+    compiled = False
+    if hasattr(torch, 'compile') and device.type == 'cuda' and not use_double:
+        try:
+            model = torch.compile(model, mode='reduce-overhead')
+            compiled = True
+            tqdm.write("    torch.compile: enabled (reduce-overhead)")
+        except Exception as e:
+            tqdm.write(f"    torch.compile: unavailable ({e})")
+
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
     if use_adapter and adapter_lr_mult != 1.0:
@@ -925,7 +1085,7 @@ def _train_interaction_cnn(
         optimizer = torch.optim.AdamW([
             {"params": adapter_params, "lr": lr * adapter_lr_mult},
             {"params": other_params,   "lr": lr},
-        ], weight_decay=weight_decay)
+        ], weight_decay=weight_decay, fused=(device.type == 'cuda' and not use_double))
         tqdm.write(
             f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
             f"other={lr:.2e} (mult={adapter_lr_mult}x)"
@@ -933,6 +1093,7 @@ def _train_interaction_cnn(
     else:
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay,
+            fused=(device.type == 'cuda' and not use_double),
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
@@ -960,6 +1121,10 @@ def _train_interaction_cnn(
 
     if cosine_sim:
         tqdm.write("    Interaction maps: cosine similarity (L2-normalized)")
+    if contrastive_weight > 0:
+        tqdm.write(f"    Contrastive loss: weight={contrastive_weight}, dim={contrastive_dim} (ConPLex-inspired)")
+    if cosine_feat:
+        tqdm.write("    Cosine similarity: added as extra classifier feature")
     if label_smooth > 0:
         tqdm.write(f"    Label smoothing: eps={label_smooth}")
     if mixup_alpha > 0:
@@ -984,7 +1149,13 @@ def _train_interaction_cnn(
     if ckpt_path and os.path.exists(ckpt_path):
         tqdm.write(f"    Resuming from checkpoint: {ckpt_path}")
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
+        # Strip _orig_mod. prefix if checkpoint was saved by compiled model
+        raw_sd = ckpt["model_state_dict"]
+        _clean_sd = {
+            k.removeprefix("_orig_mod."): v for k, v in raw_sd.items()
+        }
+        _raw_for_load = getattr(model, '_orig_mod', model)
+        _raw_for_load.load_state_dict(_clean_sd)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         if use_amp and "scaler_state_dict" in ckpt:
@@ -993,7 +1164,8 @@ def _train_interaction_cnn(
         no_improve = ckpt.get("no_improve", 0)
         start_epoch = ckpt.get("epoch", 0) + 1
         if ckpt.get("best_state") is not None:
-            best_state = ckpt["best_state"]
+            _bs = ckpt["best_state"]
+            best_state = {k.removeprefix("_orig_mod."): v for k, v in _bs.items()}
         tqdm.write(
             f"    Resumed at epoch {start_epoch}, "
             f"best_val_mcc={best_score:.4f}, no_improve={no_improve}"
@@ -1005,11 +1177,11 @@ def _train_interaction_cnn(
         n_batches = 0
 
         for batch in train_loader:
-            p = batch["protein_matrix"].to(device=device, dtype=dtype)
-            l = batch["ligand_matrix"].to(device=device, dtype=dtype)
-            pm = batch["protein_mask"].to(device)
-            lm = batch["ligand_mask"].to(device)
-            y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+            p = batch["protein_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+            l = batch["ligand_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+            pm = batch["protein_mask"].to(device, non_blocking=True)
+            lm = batch["ligand_mask"].to(device, non_blocking=True)
+            y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
             # --- Mixup (only during training) ---------------------------
             if mixup_alpha > 0:
@@ -1028,6 +1200,14 @@ def _train_interaction_cnn(
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 logits = model(p, l, pm, lm)
                 loss = criterion(logits, y)
+
+                # Contrastive regularization (ConPLex-inspired)
+                _orig = getattr(model, '_orig_mod', model)
+                if contrastive_weight > 0 and _orig.contrastive_dim > 0:
+                    c_loss = ContrastiveLoss(margin=0.5)(
+                        _orig._z_prot, _orig._z_lig, y,
+                    )
+                    loss = loss + contrastive_weight * c_loss
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
@@ -1050,11 +1230,11 @@ def _train_interaction_cnn(
 
         with torch.inference_mode():
             for batch in val_loader:
-                p = batch["protein_matrix"].to(device=device, dtype=dtype)
-                l = batch["ligand_matrix"].to(device=device, dtype=dtype)
-                pm = batch["protein_mask"].to(device)
-                lm = batch["ligand_mask"].to(device)
-                y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+                p = batch["protein_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+                l = batch["ligand_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+                pm = batch["protein_mask"].to(device, non_blocking=True)
+                lm = batch["ligand_mask"].to(device, non_blocking=True)
+                y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     logits = model(p, l, pm, lm)
@@ -1091,7 +1271,9 @@ def _train_interaction_cnn(
 
         if improved:
             best_score = val_mcc
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            # Save raw (unwrapped) state_dict for portability
+            _raw_best = getattr(model, '_orig_mod', model)
+            best_state = {k: v.cpu().clone() for k, v in _raw_best.state_dict().items()}
             no_improve = 0
         else:
             no_improve += 1
@@ -1123,8 +1305,15 @@ def _train_interaction_cnn(
 
     # --- Restore best model -------------------------------------------
     if best_state is not None:
-        model.load_state_dict(best_state)
-    model.to(device).eval()
+        _raw_restore = getattr(model, '_orig_mod', model)
+        _raw_restore.load_state_dict(best_state)
+    # Call .to().eval() on the wrapper (delegates to _orig_mod internally)
+    model.to(device)
+    model.eval()
+
+    # NOTE: torch.compile was already applied before training (if available).
+    # Re-compiling after load_state_dict on an already-compiled model
+    # produces a plain function wrapper that loses nn.Module API.
 
     # --- Clean up checkpoint (training complete) -----------------------
     if checkpoint_dir is not None:
@@ -1149,29 +1338,35 @@ def _evaluate(
     threshold: float | None = None,
     desc: str = "",
     calibrator: LogisticRegression | None = None,
+    temperature: float = 1.0,
 ) -> dict:
     """Evaluate model and return full metrics dict.
 
     If `threshold` is provided (e.g., from val-optimized), use it directly.
     Otherwise, sweep to find the MCC-optimal threshold on this data.
-    If `calibrator` is provided, use Platt-calibrated probabilities.
+    If `calibrator` is provided, Platt-calibrated probabilities are used;
+    otherwise sigmoid(logit / temperature) is used (temperature scaling).
 
-    Returns dict with: mcc, threshold, accuracy, f1, precision, recall, auroc,
-    plus raw y_true and y_prob arrays.
+    Always computes MCC at fixed threshold=0.5 as a scaffold-agnostic
+    sanity check (reported as mcc_at_05 in the returned dict).
+
+    Returns dict with: mcc, mcc_at_05, threshold, accuracy, f1, precision,
+    recall, auroc, plus raw y_true and y_prob arrays.
     """
     model.eval()
     all_logits: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
 
     # Auto-detect model dtype for double precision support
-    model_dtype = next(model.parameters()).dtype
+    _raw = getattr(model, '_orig_mod', model)
+    model_dtype = next(_raw.parameters()).dtype
     eval_amp = device.type == "cuda" and model_dtype != torch.float64
 
     for batch in loader:
-        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
-        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
-        pm = batch["protein_mask"].to(device)
-        lm = batch["ligand_mask"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        pm = batch["protein_mask"].to(device, non_blocking=True)
+        lm = batch["ligand_mask"].to(device, non_blocking=True)
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
@@ -1183,11 +1378,14 @@ def _evaluate(
     raw_logits = np.concatenate(all_logits)
     targets = np.concatenate(all_targets).astype(int)
 
-    # Calibrated or raw probabilities
+    # Calibrated or temperature-scaled probabilities
     if calibrator is not None:
+        # Platt scaling takes priority when explicitly provided
         probs = calibrator.predict_proba(raw_logits.reshape(-1, 1))[:, 1]
     else:
-        probs = 1.0 / (1.0 + np.exp(-raw_logits))  # sigmoid
+        # Temperature scaling: sigmoid(logit / T); T=1.0 → plain sigmoid
+        scaled_logits = raw_logits / max(float(temperature), 1e-4)
+        probs = 1.0 / (1.0 + np.exp(-scaled_logits))
 
     if threshold is None:
         thr, mcc = _best_mcc_threshold(targets, probs)
@@ -1206,14 +1404,25 @@ def _evaluate(
     except ValueError:
         auroc = 0.0
 
+    # MCC at fixed threshold 0.5 — scaffold-agnostic sanity check
+    # (not optimised on any split, so valid even across distribution shifts)
+    _has_both_classes = len(np.unique(targets)) > 1
+    if _has_both_classes:
+        preds_at_05 = (probs >= 0.5).astype(int)
+        mcc_at_05 = float(matthews_corrcoef(targets, preds_at_05))
+    else:
+        mcc_at_05 = 0.0
+
     if desc:
         tqdm.write(
-            f"    {desc}: MCC={mcc:.4f}, AUROC={auroc:.4f}, "
-            f"F1={f1:.4f}, thr={thr:.3f}, acc={acc:.4f}"
+            f"    {desc}: MCC={mcc:.4f} (thr={thr:.3f}), "
+            f"MCC@0.5={mcc_at_05:.4f}, AUROC={auroc:.4f}, "
+            f"F1={f1:.4f}, acc={acc:.4f}"
         )
 
     return {
         "mcc": mcc,
+        "mcc_at_05": mcc_at_05,
         "threshold": thr,
         "accuracy": acc,
         "f1": f1,
@@ -1319,6 +1528,9 @@ class Level4CNNRunner(BaseLevelRunner):
         # --- Regularization techniques --------------------------------
         label_smooth = float(os.getenv("BENCHMARK_LEVEL4CNN_LABEL_SMOOTH", "0.0"))
         mixup_alpha = float(os.getenv("BENCHMARK_LEVEL4CNN_MIXUP_ALPHA", "0.0"))
+        contrastive_weight = float(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_WEIGHT", "0.0"))
+        cosine_feat = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_FEAT", "0") == "1"
+        contrastive_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM", "128"))
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1346,20 +1558,44 @@ class Level4CNNRunner(BaseLevelRunner):
             adapter_lr_mult=adapter_lr_mult,
             label_smooth=label_smooth,
             mixup_alpha=mixup_alpha,
+            contrastive_weight=contrastive_weight,
+            cosine_feat=cosine_feat,
+            contrastive_dim=contrastive_dim,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
             checkpoint_every=checkpoint_every,
         )
 
-        device = next(model.parameters()).device
+        # Unwrap torch.compile wrapper (if any) to access nn.Module API
+        _raw = getattr(model, '_orig_mod', model)
+        device = next(_raw.parameters()).device
 
-        # --- Platt Scaling calibration on train -------------------------
-        # Fitted on TRAIN (same data the model learned from) so that the
-        # val set remains fully independent for threshold selection.
-        # Protocol: Platt(train) → threshold(val) → evaluate(test)
-        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "1") == "1"
+        # ----------------------------------------------------------------
+        # Calibration strategy (controlled by env vars):
+        #
+        #  Temperature Scaling (default ON):
+        #    Fits a single scalar T on val logits → sigmoid(logit/T)
+        #    1 parameter ⇒ more robust generalisation across scaffold splits
+        #    Reference: Guo et al., "On Calibration of Modern Neural Networks",
+        #               ICML 2017.
+        #
+        #  Platt Scaling (default OFF, opt-in via BENCHMARK_LEVEL4CNN_PLATT=1):
+        #    Fits a 2-parameter logistic regression on train logits
+        #    More expressive but can overfit to training scaffold distribution
+        #
+        #  Protocol: calibrate(val/train) → threshold(val) → evaluate(test)
+        # ----------------------------------------------------------------
+        use_temperature = os.getenv("BENCHMARK_LEVEL4CNN_TEMPERATURE", "1") == "1"
+        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "0") == "1"
+
+        temperature = 1.0
         calibrator = None
+
+        if use_temperature:
+            tqdm.write("  Fitting temperature scaling on val set...")
+            temperature = _temperature_calibrate(model, val_loader, device)
+
         if use_platt:
             tqdm.write("  Fitting Platt calibration on train set...")
             calibrator = _platt_calibrate(model, model_train_loader, device)
@@ -1368,7 +1604,7 @@ class Level4CNNRunner(BaseLevelRunner):
         # Step 1: Evaluate on val to get val-optimized threshold
         val_result = _evaluate(
             model, val_loader, device, desc="Eval (val)",
-            calibrator=calibrator,
+            calibrator=calibrator, temperature=temperature,
         )
         val_threshold = val_result["threshold"]
 
@@ -1379,13 +1615,14 @@ class Level4CNNRunner(BaseLevelRunner):
             eval_result = _evaluate(
                 model, test_loader, device,
                 threshold=val_threshold, desc="Eval (test)",
-                calibrator=calibrator,
+                calibrator=calibrator, temperature=temperature,
             )
 
         # --- Save results in standard format --------------------------
         sc_key = "Split by Scaffold"
         cnn_metrics = {
             "mcc": round(eval_result["mcc"], 6),
+            "mcc_at_05": round(eval_result["mcc_at_05"], 6),
             "threshold": round(eval_result["threshold"], 4),
             "accuracy": round(eval_result["accuracy"], 6),
             "f1": round(eval_result["f1"], 6),
@@ -1394,12 +1631,13 @@ class Level4CNNRunner(BaseLevelRunner):
             "auc": round(eval_result["auroc"], 6),
             "best_val_mcc": round(train_info["best_val_mcc"], 6),
             "val_threshold": round(val_threshold, 4),
+            "temperature": round(temperature, 4),
         }
         result = {sc_key: {"MLP": cnn_metrics}}
 
         # Save checkpoint
         ckpt_path = os.path.join(output_dir, "level4_cnn_model.pt")
-        torch.save(model.state_dict(), ckpt_path)
+        torch.save(_raw.state_dict(), ckpt_path)
 
         # Save raw predictions for reproducibility
         np.savez(
@@ -1412,7 +1650,9 @@ class Level4CNNRunner(BaseLevelRunner):
             json.dump(result, fh, indent=2)
 
         tqdm.write(
-            f"  Level 4 CNN (seed {seed}): MCC={eval_result['mcc']:.4f}, "
+            f"  Level 4 CNN (seed {seed}): "
+            f"MCC={eval_result['mcc']:.4f} (thr={val_threshold:.3f}), "
+            f"MCC@0.5={eval_result['mcc_at_05']:.4f}, "
             f"AUROC={eval_result['auroc']:.4f}, F1={eval_result['f1']:.4f}"
         )
         return result
@@ -1483,9 +1723,13 @@ class Level4CNNRunner(BaseLevelRunner):
         except ValueError:
             auroc = 0.0
 
+        preds_at_05 = (ensemble_probs >= 0.5).astype(int)
+        mcc_at_05 = float(matthews_corrcoef(y_true.astype(int), preds_at_05)) if len(np.unique(y_true)) > 1 else 0.0
+
         tqdm.write(
             f"\n  ┌── Ensemble ({len(all_probs)} seeds) ──────────────────\n"
-            f"  │ MCC={mcc:.4f}  AUROC={auroc:.4f}  F1={f1:.4f}\n"
+            f"  │ MCC={mcc:.4f} (thr={thr:.3f})  MCC@0.5={mcc_at_05:.4f}\n"
+            f"  │ AUROC={auroc:.4f}  F1={f1:.4f}\n"
             f"  │ Precision={prec:.4f}  Recall={rec:.4f}  Acc={acc:.4f}\n"
             f"  │ Threshold={thr:.4f} (mean of val thresholds)\n"
             f"  └─────────────────────────────────────────"
@@ -1496,6 +1740,7 @@ class Level4CNNRunner(BaseLevelRunner):
         ensemble_data = {
             "n_seeds": len(all_probs),
             "mcc": round(mcc, 6),
+            "mcc_at_05": round(mcc_at_05, 6),
             "auroc": round(auroc, 6),
             "f1": round(f1, 6),
             "precision": round(prec, 6),

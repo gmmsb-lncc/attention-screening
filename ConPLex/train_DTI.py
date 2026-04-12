@@ -54,16 +54,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--task",
-    choices=[
-        "biosnap",
-        "bindingdb",
-        "davis",
-        "biosnap_prot",
-        "biosnap_mol",
-        "dti_dg",
-    ],
     type=str,
-    help="Task name. Could be biosnap, bindingdb, davis, biosnap_prot, biosnap_mol.",
+    help="Task name. Could be biosnap, bindingdb, davis, biosnap_prot, biosnap_mol, kinase_non_human, kinase_human, kinase_all.",
 )
 
 parser.add_argument(
@@ -568,4 +560,5 @@ def main():
     return model_max
 
 
-best_model = main()
+if __name__ == "__main__":
+    best_model = main()

@@ -19,7 +19,7 @@
 #
 # Requirements:
 #   - conda environment 'conplex' (created by setup_env.sh)
-#   - kinase datasets in DrugBAN/datasets/kinase/{non_human,human,all}/scaffold/
+#   - kinase datasets in scaffolds_splits/output/{non_human,human}_*.tsv
 #
 # Output:
 #   - Protocol 1: results/pretrained_{dataset}/results.json
@@ -43,8 +43,8 @@ DRUG_FEAT="${DRUG_FEAT:-MorganFeaturizer}"
 TARGET_FEAT="${TARGET_FEAT:-ProtBertFeaturizer}"
 CHECKPOINT="${CHECKPOINT:-models/protbert_epoch3_state_dict.pt}"
 
-# Source datasets from DrugBAN (same scaffold splits used across all baselines)
-KINASE_DATA_ROOT="${KINASE_DATA_ROOT:-${REPO_ROOT}/DrugBAN/datasets/kinase}"
+# Source datasets: thesis scaffold splits (TSV format in scaffolds_splits/output/)
+KINASE_DATA_ROOT="${KINASE_DATA_ROOT:-${REPO_ROOT}/scaffolds_splits/output}"
 
 # ── Hardware-aware auto-tuning ─────────────────────────────────────────────
 # Detect CPU count for DataLoader workers
@@ -59,7 +59,7 @@ VRAM_MB=$(python3 -c "
 import torch
 if torch.cuda.is_available():
     props = torch.cuda.get_device_properties(${GPU})
-    print(props.total_mem // (1024*1024))
+    print(props.total_memory // (1024*1024))
 else:
     print(0)
 " 2>/dev/null || echo 0)
@@ -111,10 +111,10 @@ export CUDA_VISIBLE_DEVICES="${GPU}"
 # ── Activate conda env ─────────────────────────────────────────────────────
 CONDA_SH=""
 for p in \
-  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh" \
-  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
   "${HOME}/miniconda3/etc/profile.d/conda.sh" \
-  "${HOME}/miniforge3/etc/profile.d/conda.sh"; do
+  "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+  "/opt/homebrew/anaconda3/etc/profile.d/conda.sh"; do
   [ -f "$p" ] && { CONDA_SH="$p"; break; }
 done
 [ -n "${CONDA_SH}" ] && source "${CONDA_SH}"
@@ -134,20 +134,25 @@ echo "[STEP 0] Converting kinase datasets to ConPLex format..."
 echo ""
 
 for ds in "${DATASETS[@]}"; do
-    SRC_DIR="${KINASE_DATA_ROOT}/${ds}/scaffold"
     DST_DIR="${SCRIPT_DIR}/dataset/kinase_${ds}"
-
-    if [ ! -d "${SRC_DIR}" ]; then
-        echo "[ERROR] Source not found: ${SRC_DIR}"
-        exit 1
-    fi
-
     mkdir -p "${DST_DIR}"
 
-    # Convert SMILES,Protein,Y → (index),SMILES,Target Sequence,Label
+    # Map split names to thesis TSV files
+    # Thesis files: {non_human,human}_{train,val,test}.tsv
+    # 'all' dataset: uses canonical universal_{train,val,test}.tsv
     for split in train val test; do
-        SRC="${SRC_DIR}/${split}.csv"
         DST="${DST_DIR}/${split}.csv"
+
+        if [ "${ds}" = "all" ]; then
+            SRC="${KINASE_DATA_ROOT}/universal_${split}.tsv"
+        else
+            SRC="${KINASE_DATA_ROOT}/${ds}_${split}.tsv"
+        fi
+
+        if [ ! -f "${SRC}" ]; then
+            echo "[ERROR] Source not found: ${SRC}"
+            exit 1
+        fi
 
         if [ -f "${DST}" ] && [ "${DST}" -nt "${SRC}" ]; then
             echo "  [SKIP] ${ds}/${split}.csv (already converted)"
@@ -156,13 +161,19 @@ for ds in "${DATASETS[@]}"; do
 
         python3 -c "
 import pandas as pd
-df = pd.read_csv('${SRC}')
-df = df.rename(columns={'Protein': 'Target Sequence', 'Y': 'Label'})
-df = df[['SMILES', 'Target Sequence', 'Label']]
-df.to_csv('${DST}', index=True)
-n_pos = int(df['Label'].sum())
-n_neg = len(df) - n_pos
-print(f'  [{split:5s}] {len(df):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
+split_name = '${split}'
+df = pd.read_csv('${SRC}', sep='\t')
+
+# Convert thesis format → ConPLex format
+out = pd.DataFrame()
+out['SMILES'] = df['canonical_smiles']
+out['Target Sequence'] = df['seq']
+out['Label'] = df['label'].astype(int)
+out = out.dropna().reset_index(drop=True)
+out.to_csv('${DST}', index=True)
+n_pos = int(out['Label'].sum())
+n_neg = len(out) - n_pos
+print(f'  [{split_name:5s}] {len(out):7d} pairs | pos={n_pos:6d} neg={n_neg:6d} | → ${DST}')
 "
     done
 done
@@ -201,7 +212,7 @@ if [ "${PROTOCOL}" = "1" ] || [ "${PROTOCOL}" = "all" ]; then
             echo "  ${ds}: $(cat "${RES}" | python3 -c "
 import sys, json
 r = json.load(sys.stdin)
-print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  n={r[\"n_test_samples\"]}')
+print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  MCC={r.get(\"MCC\", 0):.4f}  F1={r.get(\"F1\", 0):.4f}  n={r[\"n_test_samples\"]}')
 ")"
         fi
     done
@@ -231,7 +242,7 @@ contrastive_split: within
 
 drug_featurizer: ${DRUG_FEAT}
 target_featurizer: ${TARGET_FEAT}
-model_architecture: SimpleCoembeddingNoSigmoid
+model_architecture: SimpleCoembedding
 latent_dimension: 1024
 latent_distance: "Cosine"
 
@@ -260,43 +271,15 @@ log_file: ./logs/${EXP_ID}.log
 model_save_dir: ./best_models
 YAML
 
-            # Train with monkey-patched get_task_dir
-            WANDB_MODE=disabled python3 -c "
-import sys, os
-os.chdir('${SCRIPT_DIR}')
-sys.path.insert(0, '.')
-
-# Monkey-patch get_task_dir to include kinase datasets
-import src.data as data_module
-from pathlib import Path
-_orig_get_task_dir = data_module.get_task_dir
-def _patched_get_task_dir(task_name):
-    if task_name.startswith('kinase_'):
-        return Path('./dataset/' + task_name).resolve()
-    return _orig_get_task_dir(task_name)
-data_module.get_task_dir = _patched_get_task_dir
-
-# Enable CUDA optimizations
-import torch
-if torch.cuda.is_available():
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-
-from train_DTI import main, parser
-
-sys.argv = [
-    'train_DTI.py',
-    '--exp-id', '${EXP_ID}',
-    '--config', '${CONFIG_TMP}',
-    '--d', '${GPU}',
-    '--r', '${seed}',
-    '--epochs', '${EPOCHS}',
-    '--batch-size', '${BATCH_SIZE}',
-]
-
-main()
-"
+            # Train directly — kinase datasets are now registered in src/data.py
+            WANDB_MODE=disabled python3 train_DTI.py \
+                --exp-id "${EXP_ID}" \
+                --config "${CONFIG_TMP}" \
+                --task "kinase_${ds}" \
+                --d "${GPU}" \
+                --r "${seed}" \
+                --epochs "${EPOCHS}" \
+                --batch-size "${BATCH_SIZE}"
 
             echo "[P2] Training ${ds} rep${seed} done."
 
@@ -329,7 +312,7 @@ main()
                 echo "  ${ds} rep${seed}: $(cat "${RES}" | python3 -c "
 import sys, json
 r = json.load(sys.stdin)
-print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}')
+print(f'AUROC={r[\"AUROC\"]:.4f}  AUPRC={r[\"AUPRC\"]:.4f}  MCC={r.get(\"MCC\", 0):.4f}  F1={r.get(\"F1\", 0):.4f}')
 ")"
             fi
         done
@@ -358,13 +341,13 @@ for f in sorted(results_dir.glob('*/results.json')):
     protocol = 'P1-pretrained' if 'pretrained' in exp else 'P2-trained'
     dataset = exp.replace('pretrained_', '').replace('trained_', '').rsplit('_rep', 1)[0]
     seed = exp.rsplit('_rep', 1)[1] if '_rep' in exp else '-'
-    rows.append((protocol, dataset, seed, r.get('AUROC', 0), r.get('AUPRC', 0), r.get('n_test_samples', 0)))
+    rows.append((protocol, dataset, seed, r.get('AUROC', 0), r.get('AUPRC', 0), r.get('MCC', 0), r.get('F1', 0), r.get('n_test_samples', 0)))
 
 if rows:
-    print(f' {\"Protocol\":<15s} {\"Dataset\":<12s} {\"Seed\":<5s} {\"AUROC\":<8s} {\"AUPRC\":<8s} {\"N_test\":<8s}')
-    print(f' {\"-\"*15} {\"-\"*12} {\"-\"*5} {\"-\"*8} {\"-\"*8} {\"-\"*8}')
-    for p, d, s, au, ap, n in rows:
-        print(f' {p:<15s} {d:<12s} {s:<5s} {au:<8.4f} {ap:<8.4f} {n:<8d}')
+    print(f' {\"Protocol\":<15s} {\"Dataset\":<12s} {\"Seed\":<5s} {\"AUROC\":<8s} {\"AUPRC\":<8s} {\"MCC\":<8s} {\"F1\":<8s} {\"N_test\":<8s}')
+    print(f' {\"-\"*15} {\"-\"*12} {\"-\"*5} {\"-\"*8} {\"-\"*8} {\"-\"*8} {\"-\"*8} {\"-\"*8}')
+    for p, d, s, au, ap, mcc, f1, n in rows:
+        print(f' {p:<15s} {d:<12s} {s:<5s} {au:<8.4f} {ap:<8.4f} {mcc:<8.4f} {f1:<8.4f} {n:<8d}')
 else:
     print(' No results found yet.')
 print()
