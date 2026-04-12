@@ -86,49 +86,50 @@ seq_dict = {v:(i+1) for i,v in enumerate(seq_voc)}
 seq_dict_len = len(seq_dict)
 max_seq_len = 1000
 
-compound_iso_smiles = []
-for dt_name in ['kiba','davis', 'bindingdb']:
-    opts = ['train','test']
-    for opt in opts:
-        df = pd.read_csv('data/' + dt_name + '_' + opt + '.csv')
-        compound_iso_smiles += list( df['compound_iso_smiles'] )
-compound_iso_smiles = set(compound_iso_smiles)
-smile_graph = {}
-for smile in compound_iso_smiles:
-    g = smile_to_graph(smile)
-    smile_graph[smile] = g
-dir = 'data'
-datasets = ['davis', 'kiba', 'bindingdb']
-# convert to PyTorch data format
-for dataset in datasets:
-    processed_data_file_train = 'data/processed/' + dataset + '_train.pt'
-    processed_data_file_test = 'data/processed/' + dataset + '_test.pt'
-    tokenizer_file = f'{dir}/{dataset}_tokenizer.pkl'
-    if ((not os.path.isfile(processed_data_file_train)) or (not os.path.isfile(processed_data_file_test))):
-        df_train = pd.read_csv('data/' + dataset + '_train.csv')
-        df_test = pd.read_csv('data/' + dataset + '_test.csv')
+if __name__ == '__main__':
+    compound_iso_smiles = []
+    for dt_name in ['kiba','davis', 'bindingdb']:
+        opts = ['train','test']
+        for opt in opts:
+            df = pd.read_csv('data/' + dt_name + '_' + opt + '.csv')
+            compound_iso_smiles += list( df['compound_iso_smiles'] )
+    compound_iso_smiles = set(compound_iso_smiles)
+    smile_graph = {}
+    for smile in compound_iso_smiles:
+        g = smile_to_graph(smile)
+        smile_graph[smile] = g
+    dir = 'data'
+    datasets = ['davis', 'kiba', 'bindingdb']
+    # convert to PyTorch data format
+    for dataset in datasets:
+        processed_data_file_train = 'data/processed/' + dataset + '_train.pt'
+        processed_data_file_test = 'data/processed/' + dataset + '_test.pt'
+        tokenizer_file = f'{dir}/{dataset}_tokenizer.pkl'
+        if ((not os.path.isfile(processed_data_file_train)) or (not os.path.isfile(processed_data_file_test))):
+            df_train = pd.read_csv('data/' + dataset + '_train.csv')
+            df_test = pd.read_csv('data/' + dataset + '_test.csv')
 
-        all_smiles = set(df_train['compound_iso_smiles']).union(set(df_test['compound_iso_smiles']))
-        tokenizer = Tokenizer(Tokenizer.gen_vocabs(all_smiles))
+            all_smiles = set(df_train['compound_iso_smiles']).union(set(df_test['compound_iso_smiles']))
+            tokenizer = Tokenizer(Tokenizer.gen_vocabs(all_smiles))
 
-        with open(tokenizer_file, 'wb') as file:
-            pickle.dump(tokenizer, file)        
-        # Process train set
-        train_drugs, train_MTS, train_prots, train_Y = list(df_train['compound_iso_smiles']), list(df_train['target_smiles']), list(df_train['target_sequence']), list(df_train['affinity'])
-        XT = [seq_cat(t) for t in train_prots]
-        train_drugs, train_MTS, train_prots, train_Y = np.asarray(train_drugs), np.asarray(train_MTS), np.asarray(XT), np.asarray(train_Y)
-        train_XD = [torch.LongTensor(tokenizer.parse(smile)) for smile in train_MTS]
+            with open(tokenizer_file, 'wb') as file:
+                pickle.dump(tokenizer, file)        
+            # Process train set
+            train_drugs, train_MTS, train_prots, train_Y = list(df_train['compound_iso_smiles']), list(df_train['target_smiles']), list(df_train['target_sequence']), list(df_train['affinity'])
+            XT = [seq_cat(t) for t in train_prots]
+            train_drugs, train_MTS, train_prots, train_Y = np.asarray(train_drugs), np.asarray(train_MTS), np.asarray(XT), np.asarray(train_Y)
+            train_XD = [torch.LongTensor(tokenizer.parse(smile)) for smile in train_MTS]
 
-        # Process test set
-        test_drugs, test_MTS, test_prots, test_Y = list(df_test['compound_iso_smiles']), list(df_train['target_smiles']), list(df_test['target_sequence']), list(df_test['affinity'])
-        XT = [seq_cat(t) for t in test_prots]
-        test_drugs, test_MTS, test_prots, test_Y = np.asarray(test_drugs), np.asarray(test_MTS), np.asarray(XT), np.asarray(test_Y)
-        test_XD = [torch.LongTensor(tokenizer.parse(smile)) for smile in test_MTS]
+            # Process test set
+            test_drugs, test_MTS, test_prots, test_Y = list(df_test['compound_iso_smiles']), list(df_train['target_smiles']), list(df_test['target_sequence']), list(df_test['affinity'])
+            XT = [seq_cat(t) for t in test_prots]
+            test_drugs, test_MTS, test_prots, test_Y = np.asarray(test_drugs), np.asarray(test_MTS), np.asarray(XT), np.asarray(test_Y)
+            test_XD = [torch.LongTensor(tokenizer.parse(smile)) for smile in test_MTS]
 
-        print('preparing ', dataset + '_train.pt in pytorch format!')
-        train_data = TestbedDataset(root='data', dataset=dataset+'_train', xd=train_drugs, xdt=train_XD, xt=train_prots, y=train_Y,smile_graph=smile_graph)
-        print('preparing ', dataset + '_test.pt in pytorch format!')
-        test_data = TestbedDataset(root='data', dataset=dataset+'_test', xd=test_drugs, xdt=test_XD, xt=test_prots, y=test_Y,smile_graph=smile_graph)
-        print(processed_data_file_train, ' and ', processed_data_file_test, ' have been created')        
-    else:
-        print(processed_data_file_train, ' and ', processed_data_file_test, ' are already created')
+            print('preparing ', dataset + '_train.pt in pytorch format!')
+            train_data = TestbedDataset(root='data', dataset=dataset+'_train', xd=train_drugs, xdt=train_XD, xt=train_prots, y=train_Y,smile_graph=smile_graph)
+            print('preparing ', dataset + '_test.pt in pytorch format!')
+            test_data = TestbedDataset(root='data', dataset=dataset+'_test', xd=test_drugs, xdt=test_XD, xt=test_prots, y=test_Y,smile_graph=smile_graph)
+            print(processed_data_file_train, ' and ', processed_data_file_test, ' have been created')        
+        else:
+            print(processed_data_file_train, ' and ', processed_data_file_test, ' are already created')
