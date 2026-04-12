@@ -792,10 +792,10 @@ def _platt_calibrate(
     all_targets: list[np.ndarray] = []
 
     for batch in val_loader:
-        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
-        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
-        pm = batch["protein_mask"].to(device)
-        lm = batch["ligand_mask"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        pm = batch["protein_mask"].to(device, non_blocking=True)
+        lm = batch["ligand_mask"].to(device, non_blocking=True)
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
@@ -996,6 +996,16 @@ def _train_interaction_cnn(
         f"    Trainable params: {trainable:,} / {total:,}"
     )
 
+    # --- torch.compile for fused training kernels (PyTorch 2.x) -------
+    compiled = False
+    if hasattr(torch, 'compile') and device.type == 'cuda' and not use_double:
+        try:
+            model = torch.compile(model, mode='reduce-overhead')
+            compiled = True
+            tqdm.write("    torch.compile: enabled (reduce-overhead)")
+        except Exception as e:
+            tqdm.write(f"    torch.compile: unavailable ({e})")
+
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
     if use_adapter and adapter_lr_mult != 1.0:
@@ -1012,7 +1022,7 @@ def _train_interaction_cnn(
         optimizer = torch.optim.AdamW([
             {"params": adapter_params, "lr": lr * adapter_lr_mult},
             {"params": other_params,   "lr": lr},
-        ], weight_decay=weight_decay)
+        ], weight_decay=weight_decay, fused=(device.type == 'cuda' and not use_double))
         tqdm.write(
             f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
             f"other={lr:.2e} (mult={adapter_lr_mult}x)"
@@ -1020,6 +1030,7 @@ def _train_interaction_cnn(
     else:
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay,
+            fused=(device.type == 'cuda' and not use_double),
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
@@ -1096,11 +1107,11 @@ def _train_interaction_cnn(
         n_batches = 0
 
         for batch in train_loader:
-            p = batch["protein_matrix"].to(device=device, dtype=dtype)
-            l = batch["ligand_matrix"].to(device=device, dtype=dtype)
-            pm = batch["protein_mask"].to(device)
-            lm = batch["ligand_mask"].to(device)
-            y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+            p = batch["protein_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+            l = batch["ligand_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+            pm = batch["protein_mask"].to(device, non_blocking=True)
+            lm = batch["ligand_mask"].to(device, non_blocking=True)
+            y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
             # --- Mixup (only during training) ---------------------------
             if mixup_alpha > 0:
@@ -1148,11 +1159,11 @@ def _train_interaction_cnn(
 
         with torch.inference_mode():
             for batch in val_loader:
-                p = batch["protein_matrix"].to(device=device, dtype=dtype)
-                l = batch["ligand_matrix"].to(device=device, dtype=dtype)
-                pm = batch["protein_mask"].to(device)
-                lm = batch["ligand_mask"].to(device)
-                y = batch["label"].to(device=device, dtype=dtype).unsqueeze(1)
+                p = batch["protein_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+                l = batch["ligand_matrix"].to(device=device, dtype=dtype, non_blocking=True)
+                pm = batch["protein_mask"].to(device, non_blocking=True)
+                lm = batch["ligand_mask"].to(device, non_blocking=True)
+                y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     logits = model(p, l, pm, lm)
@@ -1224,6 +1235,14 @@ def _train_interaction_cnn(
         model.load_state_dict(best_state)
     model.to(device).eval()
 
+    # --- torch.compile for fused eval kernels (PyTorch 2.x) -----------
+    if hasattr(torch, 'compile') and device.type == 'cuda':
+        try:
+            model = torch.compile(model, mode='reduce-overhead')
+            tqdm.write("    torch.compile: enabled (reduce-overhead)")
+        except Exception as e:
+            tqdm.write(f"    torch.compile: unavailable ({e})")
+
     # --- Clean up checkpoint (training complete) -----------------------
     if checkpoint_dir is not None:
         assert isinstance(checkpoint_dir, str)
@@ -1266,10 +1285,10 @@ def _evaluate(
     eval_amp = device.type == "cuda" and model_dtype != torch.float64
 
     for batch in loader:
-        p = batch["protein_matrix"].to(device=device, dtype=model_dtype)
-        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype)
-        pm = batch["protein_mask"].to(device)
-        lm = batch["ligand_mask"].to(device)
+        p = batch["protein_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        l = batch["ligand_matrix"].to(device=device, dtype=model_dtype, non_blocking=True)
+        pm = batch["protein_mask"].to(device, non_blocking=True)
+        lm = batch["ligand_mask"].to(device, non_blocking=True)
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
