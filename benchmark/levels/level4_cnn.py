@@ -1574,31 +1574,32 @@ class Level4CNNRunner(BaseLevelRunner):
         # ----------------------------------------------------------------
         # Calibration strategy (controlled by env vars):
         #
-        #  Temperature Scaling (default ON):
-        #    Fits a single scalar T on val logits → sigmoid(logit/T)
-        #    1 parameter ⇒ more robust generalisation across scaffold splits
-        #    Reference: Guo et al., "On Calibration of Modern Neural Networks",
-        #               ICML 2017.
-        #
-        #  Platt Scaling (default OFF, opt-in via BENCHMARK_LEVEL4CNN_PLATT=1):
+        #  Platt Scaling (default ON):
         #    Fits a 2-parameter logistic regression on train logits
-        #    More expressive but can overfit to training scaffold distribution
+        #    Corrects both scale and bias — empirically superior under
+        #    scaffold splits (Human: +0.021 MCC vs Temperature, 4/5 seeds)
+        #    Reference: Platt, "Probabilistic Outputs for SVMs", 1999.
         #
-        #  Protocol: calibrate(val/train) → threshold(val) → evaluate(test)
+        #  Temperature Scaling (default OFF, opt-in via _TEMPERATURE=1):
+        #    Fits a single scalar T on val logits → sigmoid(logit/T)
+        #    1 parameter ⇒ lower risk of overfitting but corrects scale only
+        #    Reference: Guo et al., ICML 2017.
+        #
+        #  Protocol: calibrate(train/val) → threshold(val) → evaluate(test)
         # ----------------------------------------------------------------
-        use_temperature = os.getenv("BENCHMARK_LEVEL4CNN_TEMPERATURE", "1") == "1"
-        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "0") == "1"
+        use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "1") == "1"
+        use_temperature = os.getenv("BENCHMARK_LEVEL4CNN_TEMPERATURE", "0") == "1"
 
         temperature = 1.0
         calibrator = None
 
-        if use_temperature:
-            tqdm.write("  Fitting temperature scaling on val set...")
-            temperature = _temperature_calibrate(model, val_loader, device)
-
         if use_platt:
             tqdm.write("  Fitting Platt calibration on train set...")
             calibrator = _platt_calibrate(model, model_train_loader, device)
+
+        if use_temperature:
+            tqdm.write("  Fitting temperature scaling on val set...")
+            temperature = _temperature_calibrate(model, val_loader, device)
 
         # --- Evaluate -------------------------------------------------
         # Step 1: Evaluate on val to get val-optimized threshold
