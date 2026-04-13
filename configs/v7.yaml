@@ -1,0 +1,91 @@
+# ============================================================================
+# DT-Kinase Benchmark — v7 Configuration
+# ============================================================================
+# Usage:
+#   python3 run_from_config.py configs/v7.yaml --dataset non_human
+#   python3 run_from_config.py configs/v7.yaml --dataset human
+#   python3 run_from_config.py configs/v7.yaml --dataset all
+#   python3 run_from_config.py configs/v7.yaml --dataset non_human --dry-run
+# ============================================================================
+
+# --- Dataset & Embedding ---------------------------------------------------
+# 'dataset' is the DEFAULT — override via --dataset CLI flag
+dataset: non_human                # non_human | human | all
+embedding: 8M                    # 8M | 150M | 650M
+levels: 4cnn                     # comma-separated: 1a,2,3a,4cnn
+epochs: 500
+model_selection_metric: mcc       # mcc | auc | f1
+
+# --- Output ----------------------------------------------------------------
+# Use {dataset} placeholder — auto-replaced at runtime
+output_root: results/benchmark_{dataset}_{embedding}
+
+# --- Level 4 CNN Architecture (v7) ----------------------------------------
+level4_cnn:
+  variant: v7                     # v7 | v7_gated | v8 | v9 | v10
+  num_heads: 8                    # K projection heads
+  head_dim: 32                    # d_head per head
+  channels: 64                    # CNN output channels
+  batch_size: 256
+
+  # Regularisation
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # Precision
+  double: false                   # float64 (true = 2x slower, 2x memory)
+  no_amp: false                   # disable AMP (float32 only)
+  deterministic: false            # reproducible (20-30% slower)
+
+  # Training
+  patience: 15
+  focal: true                     # Focal Loss (gamma=2.0)
+  focal_gamma: 2.0
+
+  # Embedding Adapter
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true               # 4-head self-attention before MLP blocks
+    lr_mult: 5.0                  # differential learning rate for adapter
+    prot_dim: 256                 # bottleneck dimension (protein)
+    lig_dim: 512                  # bottleneck dimension (ligand)
+
+  # Calibration
+  calibration:
+    platt: true                   # 2-param logistic regression on train logits
+    temperature: false            # 1-param temperature scaling on val logits
+
+  # Contrastive (ConPLex-inspired, default OFF)
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  # MLP classifier head (default: Linear 64→1)
+  mlp_head: false
+
+  # Regularisation extras
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  # Train-to-zero mode (disable early stopping)
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  # Checkpointing
+  checkpoint_every: 50
+
+# --- Rigor Safeguards ------------------------------------------------------
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+# --- Acceptance Gate -------------------------------------------------------
+gate:
+  target_test_mcc: 0.6
+  max_test_mcc_std: 0.08
+
+# --- Warnings Suppression -------------------------------------------------
+suppress_warnings: true

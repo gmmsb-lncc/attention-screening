@@ -338,11 +338,13 @@ def main():
         val_metrics = {
             "val/aupr": torchmetrics.AveragePrecision,
             "val/auroc": torchmetrics.AUROC,
+            "val/mcc": torchmetrics.MatthewsCorrCoef,
         }
 
         test_metrics = {
             "test/aupr": torchmetrics.AveragePrecision,
             "test/auroc": torchmetrics.AUROC,
+            "test/mcc": torchmetrics.MatthewsCorrCoef,
         }
 
     # Initialize wandb
