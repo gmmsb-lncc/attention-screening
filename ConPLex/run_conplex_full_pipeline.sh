@@ -54,7 +54,7 @@ echo "════════════════════════�
 CONFIG_FILE="configs/kinase_config.yaml"
 echo "  Generating ${CONFIG_FILE}..."
 mkdir -p configs
-    cat > "$CONFIG_FILE" << 'YAML'
+cat > "$CONFIG_FILE" << 'YAML'
 task: davis
 contrastive_split: within
 
@@ -88,8 +88,7 @@ wandb_save: False
 log_file: ./logs/training.log
 model_save_dir: ./best_models
 YAML
-    echo "  ✓ Config created"
-fi
+echo "  ✓ Config created"
 
 # ── Prepare kinase datasets (auto-detect from benchmark splits) ────────────
 echo ""
