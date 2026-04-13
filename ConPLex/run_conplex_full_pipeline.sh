@@ -74,7 +74,7 @@ epochs: 50
 every_n_val: 1
 lr: 1e-4
 lr_t0: 10
-contrastive: True
+contrastive: False
 clr: 1e-5
 clr_t0: 10
 margin_fn: 'tanh_decay'
