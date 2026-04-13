@@ -187,7 +187,7 @@ def parse_args():
     parser.add_argument("--exp-id", required=True, help="Experiment name for output")
     parser.add_argument("--drug-featurizer", default="MorganFeaturizer")
     parser.add_argument("--target-featurizer", default="ProtBertFeaturizer")
-    parser.add_argument("--model-architecture", default="SimpleCoembeddingNoSigmoid")
+    parser.add_argument("--model-architecture", default="SimpleCoembedding")
     parser.add_argument("--latent-dimension", type=int, default=1024)
     parser.add_argument("--latent-distance", default="Cosine")
     parser.add_argument("--batch-size", type=int, default=256)
@@ -264,8 +264,6 @@ def main():
     target_shape = target_featurizer.shape
 
     arch_name = args.model_architecture
-    if arch_name == "SimpleCoembeddingNoSigmoid":
-        arch_name = "SimpleCoembedding"
 
     model = getattr(model_types, arch_name)(
         drug_shape=drug_shape,
