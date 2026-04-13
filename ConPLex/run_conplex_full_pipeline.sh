@@ -92,6 +92,25 @@ YAML
     echo "  ✓ Config created"
 fi
 
+# ── Prepare kinase datasets (auto-detect from benchmark splits) ────────────
+echo ""
+echo "━━━ Checking kinase datasets ━━━"
+DATASETS_OK=true
+for dataset in "${DATASETS[@]}"; do
+    data_dir="dataset/kinase_${dataset}"
+    if [ -f "${data_dir}/train.csv" ] && [ -f "${data_dir}/val.csv" ] && [ -f "${data_dir}/test.csv" ]; then
+        n_train=$(wc -l < "${data_dir}/train.csv")
+        echo "  ✓ kinase_${dataset}: train=${n_train} lines"
+    else
+        DATASETS_OK=false
+    fi
+done
+
+if [ "$DATASETS_OK" = false ]; then
+    echo "  → Some datasets missing. Running prepare_kinase_datasets.py..."
+    python prepare_kinase_datasets.py --output-dir ./dataset
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 1: Training
 # ═══════════════════════════════════════════════════════════════════════════════

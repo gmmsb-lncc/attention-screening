@@ -6,7 +6,8 @@
 #
 # Tested on:
 #   - MacBook Pro M1 (macOS, CPU-only, Python 3.10) ✓
-#   - diamante-02 (RTX 4090, CUDA 12.4, Python 3.10) — target GPU machine
+#   - diamante-02 (RTX 4090, CUDA 12.4, Python 3.10) ✓
+#   - diamante-02 (new install, CUDA 12.x, Python 3.10) ✓
 #
 # Installation order (CRITICAL — changing order breaks things):
 #   1. conda: Python 3.10 + scientific deps
@@ -23,6 +24,8 @@
 #   - deepchem, mol2vec not in requirements.txt but required by molecule.py
 #   - pytorch-lightning required by data.py
 #   - molecule.py had hardcoded MIT CSAIL AFS path → fixed to relative path
+#   - transformers 5.x breaks ProtBert slow tokenizer → pin <=4.45
+#   - sentencepiece required for ProtBert tokenizer (not in original deps)
 #
 # ConPLex architecture:
 #   - Protein encoders: ProtBert (default), ESM-1b, ProSE, D-SCRIPT, ProtT5
@@ -147,6 +150,9 @@ fi
 echo ""
 echo "[INFO] Step 4/6: Installing ConPLex-specific dependencies via pip..."
 
+# IMPORTANT: transformers must be pinned to >=4.38,<4.46
+# transformers 5.x removes support for ProtBert slow tokenizer instantiation.
+# sentencepiece is required by the BertTokenizer for Rostlab/prot_bert.
 pip install \
   fair-esm \
   dscript \
@@ -157,8 +163,10 @@ pip install \
   gensim \
   pytorch-lightning \
   torchmetrics \
-  transformers \
-  huggingface_hub \
+  "transformers>=4.38,<4.46" \
+  "huggingface_hub<1.0" \
+  sentencepiece \
+  protobuf \
   "mol2vec @ git+https://github.com/samoturk/mol2vec"
 
 # pytdc (TDC benchmark) — installed separately because its pandas>=2.1 req
@@ -179,28 +187,29 @@ pip install "pandas>=1.5,<2.1" 2>/dev/null || true
 
 # ── Step 6: Verify installation ──────────────────────────────────────────
 echo ""
-echo "[INFO] Step 6/6: Verifying installation..."
+echo "[INFO] Step 6/7: Verifying installation..."
 python3 << 'PYEOF'
 import sys, warnings
 warnings.filterwarnings("ignore")
 ok = True
 checks = [
-    ("torch",        "import torch; print(f'  torch {torch.__version__} | CUDA={torch.cuda.is_available()}')"),
-    ("dgl",          "import dgl; print(f'  dgl {dgl.__version__}')"),
-    ("esm",          "import esm; print(f'  fair-esm OK')"),
-    ("dscript",      "from dscript.language_model import lm_embed; print('  dscript OK')"),
-    ("transformers", "from transformers import AutoTokenizer, AutoModel; print('  transformers OK')"),
-    ("rdkit",        "from rdkit import Chem; from rdkit.Chem import AllChem; print('  rdkit OK')"),
-    ("omegaconf",    "from omegaconf import OmegaConf; print('  omegaconf OK')"),
-    ("torchmetrics", "import torchmetrics; print(f'  torchmetrics {torchmetrics.__version__}')"),
-    ("pysmiles",     "import pysmiles; print('  pysmiles OK')"),
-    ("deepchem",     "import deepchem as dc; print(f'  deepchem {dc.__version__}')"),
-    ("mol2vec",      "from mol2vec.features import mol2alt_sentence; print('  mol2vec OK')"),
-    ("wandb",        "import wandb; print(f'  wandb {wandb.__version__}')"),
-    ("sklearn",      "import sklearn; print(f'  sklearn {sklearn.__version__}')"),
-    ("gensim",       "import gensim; print(f'  gensim {gensim.__version__}')"),
-    ("lightning",    "import pytorch_lightning; print(f'  pytorch-lightning {pytorch_lightning.__version__}')"),
-    ("pkg_resources","import pkg_resources; print('  pkg_resources OK')"),
+    ("torch",         "import torch; print(f'  torch {torch.__version__} | CUDA={torch.cuda.is_available()}')"),
+    ("dgl",           "import dgl; print(f'  dgl {dgl.__version__}')"),
+    ("esm",           "import esm; print(f'  fair-esm OK')"),
+    ("dscript",       "from dscript.language_model import lm_embed; print('  dscript OK')"),
+    ("transformers",  "import transformers; print(f'  transformers {transformers.__version__}')"),
+    ("sentencepiece", "import sentencepiece; print(f'  sentencepiece {sentencepiece.__version__}')"),
+    ("rdkit",         "from rdkit import Chem; from rdkit.Chem import AllChem; print('  rdkit OK')"),
+    ("omegaconf",     "from omegaconf import OmegaConf; print('  omegaconf OK')"),
+    ("torchmetrics",  "import torchmetrics; print(f'  torchmetrics {torchmetrics.__version__}')"),
+    ("pysmiles",      "import pysmiles; print('  pysmiles OK')"),
+    ("deepchem",      "import deepchem as dc; print(f'  deepchem {dc.__version__}')"),
+    ("mol2vec",       "from mol2vec.features import mol2alt_sentence; print('  mol2vec OK')"),
+    ("wandb",         "import wandb; print(f'  wandb {wandb.__version__}')"),
+    ("sklearn",       "import sklearn; print(f'  sklearn {sklearn.__version__}')"),
+    ("gensim",        "import gensim; print(f'  gensim {gensim.__version__}')"),
+    ("lightning",     "import pytorch_lightning; print(f'  pytorch-lightning {pytorch_lightning.__version__}')"),
+    ("pkg_resources", "import pkg_resources; print('  pkg_resources OK')"),
 ]
 for name, code in checks:
     try:
@@ -208,6 +217,16 @@ for name, code in checks:
     except Exception as e:
         ok = False
         print(f"  [FAIL] {name}: {e}", file=sys.stderr)
+
+# Verify ProtBert tokenizer works (the most common failure point)
+try:
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained('Rostlab/prot_bert', do_lower_case=False, use_fast=False)
+    print(f'  ProtBert tokenizer OK: {type(tok).__name__}')
+except Exception as e:
+    ok = False
+    print(f"  [FAIL] ProtBert tokenizer: {e}", file=sys.stderr)
+
 if ok:
     print("\n  All checks passed.")
 else:
@@ -215,12 +234,28 @@ else:
     sys.exit(1)
 PYEOF
 
+# ── Step 7: Pre-download ProtBert model weights ──────────────────────────
+echo ""
+echo "[INFO] Step 7/7: Pre-downloading ProtBert model weights..."
+python3 << 'PYEOF'
+import warnings, os
+warnings.filterwarnings("ignore")
+cache_dir = os.path.join(os.path.dirname(os.path.abspath('.')), 'models', 'huggingface', 'transformers')
+os.makedirs(cache_dir, exist_ok=True)
+from transformers import AutoTokenizer, AutoModel
+print("  Downloading Rostlab/prot_bert tokenizer + model...")
+tok = AutoTokenizer.from_pretrained('Rostlab/prot_bert', do_lower_case=False, use_fast=False, cache_dir=cache_dir)
+model = AutoModel.from_pretrained('Rostlab/prot_bert', cache_dir=cache_dir)
+print(f"  ✓ ProtBert cached to {cache_dir}")
+PYEOF
+
 # ── Print summary ────────────────────────────────────────────────────────
 echo ""
 echo "============================================"
 echo " ConPLex environment ready"
 echo " Activate : conda activate ${ENV_NAME}"
-echo " Train    : cd ${SCRIPT_DIR} && python train_DTI.py --exp-id test --config configs/default_config.yaml --wandb-save False"
-echo " Datasets : ${SCRIPT_DIR}/dataset/{DAVIS,BIOSNAP,BindingDB,DUDe}"
+echo " Train    : cd ${SCRIPT_DIR} && python train_DTI.py --exp-id test --config configs/default_config.yaml"
+echo " Kinase   : cd ${SCRIPT_DIR} && bash run_conplex_full_pipeline.sh"
+echo " Datasets : ${SCRIPT_DIR}/dataset/{DAVIS,BIOSNAP,BindingDB,kinase_*}"
 echo " Weights  : ${SCRIPT_DIR}/models/"
 echo "============================================"
