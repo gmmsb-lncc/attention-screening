@@ -60,7 +60,7 @@ contrastive_split: within
 
 drug_featurizer: MorganFeaturizer
 target_featurizer: ProtBertFeaturizer
-model_architecture: SimpleCoembeddingNoSigmoid
+model_architecture: SimpleCoembedding
 latent_dimension: 1024
 latent_distance: "Cosine"
 
