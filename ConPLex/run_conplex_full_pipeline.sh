@@ -50,11 +50,10 @@ echo "  Results:    ${RESULTS_V2_DIR}"
 echo "  wandb:      DISABLED"
 echo "═══════════════════════════════════════════════════════════════════"
 
-# ── Generate kinase config if it doesn't exist ─────────────────────────────
+# ── Generate kinase config (always overwrite to ensure correctness) ────────
 CONFIG_FILE="configs/kinase_config.yaml"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "  Generating ${CONFIG_FILE}..."
-    mkdir -p configs
+echo "  Generating ${CONFIG_FILE}..."
+mkdir -p configs
     cat > "$CONFIG_FILE" << 'YAML'
 task: davis
 contrastive_split: within
