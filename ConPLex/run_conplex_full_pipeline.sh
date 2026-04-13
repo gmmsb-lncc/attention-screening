@@ -34,6 +34,9 @@ DATASETS=(non_human human)
 MODEL_SAVE_DIR="./best_models"
 RESULTS_V2_DIR="./results_v2"
 
+# Disable wandb globally — no login required
+export WANDB_MODE=disabled
+
 echo "═══════════════════════════════════════════════════════════════════"
 echo " ConPLex Full Pipeline — Train + Eval v2 (val-calibrated τ*)"
 echo "═══════════════════════════════════════════════════════════════════"
@@ -44,7 +47,50 @@ echo "  Seeds:      ${SEEDS[*]}"
 echo "  Datasets:   ${DATASETS[*]}"
 echo "  Model dir:  ${MODEL_SAVE_DIR}"
 echo "  Results:    ${RESULTS_V2_DIR}"
+echo "  wandb:      DISABLED"
 echo "═══════════════════════════════════════════════════════════════════"
+
+# ── Generate kinase config if it doesn't exist ─────────────────────────────
+CONFIG_FILE="configs/kinase_config.yaml"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "  Generating ${CONFIG_FILE}..."
+    mkdir -p configs
+    cat > "$CONFIG_FILE" << 'YAML'
+task: davis
+contrastive_split: within
+
+drug_featurizer: MorganFeaturizer
+target_featurizer: ProtBertFeaturizer
+model_architecture: SimpleCoembeddingNoSigmoid
+latent_dimension: 1024
+latent_distance: "Cosine"
+
+batch_size: 32
+contrastive_batch_size: 256
+shuffle: True
+num_workers: 0
+
+epochs: 50
+every_n_val: 1
+lr: 1e-4
+lr_t0: 10
+contrastive: True
+clr: 1e-5
+clr_t0: 10
+margin_fn: 'tanh_decay'
+margin_max: 0.25
+margin_t0: 10
+
+replicate: 0
+device: 0
+verbosity: 3
+
+wandb_save: False
+log_file: ./logs/training.log
+model_save_dir: ./best_models
+YAML
+    echo "  ✓ Config created"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 1: Training
@@ -58,6 +104,8 @@ else
     echo " PHASE 1: TRAINING (from scratch)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
+    mkdir -p logs
+
     for dataset in "${DATASETS[@]}"; do
         task="kinase_${dataset}"
         echo ""
@@ -73,21 +121,20 @@ else
             
             python train_DTI.py \
                 --exp-id "$exp_id" \
-                --config configs/kinase_config.yaml \
+                --config "$CONFIG_FILE" \
                 --task "$task" \
                 --d "$DEVICE" \
                 --r "$seed" \
                 --epochs "$EPOCHS" \
-                -b "$BATCH_SIZE" 2>&1 | tail -5
+                -b "$BATCH_SIZE" 2>&1 | tail -10
             
             # Verify checkpoint was saved
-            ckpt_pattern="${MODEL_SAVE_DIR}/${exp_id}/${exp_id}_best_model.pt"
             if ls ${MODEL_SAVE_DIR}/${exp_id}/${exp_id}_best_model*.pt 1>/dev/null 2>&1; then
-                echo "    ✓ Checkpoint saved"
+                n_ckpts=$(ls ${MODEL_SAVE_DIR}/${exp_id}/${exp_id}_best_model*.pt | wc -l)
+                latest=$(ls -t ${MODEL_SAVE_DIR}/${exp_id}/${exp_id}_best_model*.pt | head -1)
+                echo "    ✓ ${n_ckpts} checkpoint(s). Latest: $(basename $latest)"
             else
                 echo "    ✗ ERROR: No checkpoint found for ${exp_id}!"
-                echo "      Expected: ${ckpt_pattern}"
-                echo "      Directory contents:"
                 ls -la "${MODEL_SAVE_DIR}/${exp_id}/" 2>/dev/null || echo "      (directory does not exist)"
             fi
         done
@@ -111,15 +158,14 @@ for dataset in "${DATASETS[@]}"; do
         v2_exp_id="conplex_v2_${dataset}_rep${rep_idx}"
         data_dir="dataset/kinase_${dataset}"
         
-        # Find the best model checkpoint (could have epoch suffix)
+        # Find the best model checkpoint
         ckpt_dir="${MODEL_SAVE_DIR}/${exp_id}"
         
-        # Try both naming patterns: _best_model.pt and _best_model_epochXX.pt
+        # Prefer _best_model.pt (final), fallback to latest epoch checkpoint
         ckpt=""
         if [ -f "${ckpt_dir}/${exp_id}_best_model.pt" ]; then
             ckpt="${ckpt_dir}/${exp_id}_best_model.pt"
         else
-            # Find the latest epoch checkpoint
             ckpt=$(ls -t ${ckpt_dir}/${exp_id}_best_model_epoch*.pt 2>/dev/null | head -1)
         fi
         
