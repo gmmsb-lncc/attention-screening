@@ -28,7 +28,7 @@ DEVICE="${CUDA_DEVICE:-0}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
-SEEDS=(42 123 456)
+SEEDS=(42 123 456 789 1024)
 DATASETS=(non_human human)
 
 MODEL_SAVE_DIR="./best_models"
@@ -128,7 +128,7 @@ else
         echo ""
         echo "  ═══ Dataset: ${dataset} (task=${task}) ═══"
         
-        for rep_idx in 0 1 2; do
+        for rep_idx in $(seq 0 $((${#SEEDS[@]} - 1))); do
             seed="${SEEDS[$rep_idx]}"
             exp_id="trained_${dataset}_rep${rep_idx}"
             
@@ -170,7 +170,7 @@ for dataset in "${DATASETS[@]}"; do
     echo ""
     echo "  ═══ Dataset: ${dataset} ═══"
     
-    for rep_idx in 0 1 2; do
+    for rep_idx in $(seq 0 $((${#SEEDS[@]} - 1))); do
         exp_id="trained_${dataset}_rep${rep_idx}"
         v2_exp_id="conplex_v2_${dataset}_rep${rep_idx}"
         data_dir="dataset/kinase_${dataset}"
