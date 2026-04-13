@@ -238,7 +238,7 @@ def main():
         num_workers=args.num_workers,
     )
     datamodule.prepare_data()
-    datamodule.setup(stage="test")
+    datamodule.setup(stage=None)  # Load BOTH val and test (stage='test' skips val)
 
     # Build dataloaders for BOTH val and test
     def make_loader(dataset, desc):
