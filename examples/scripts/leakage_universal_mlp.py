@@ -6,16 +6,15 @@ Leakage analysis on Universal Datasets — GPU-accelerated MLP
 Reproduces Table 13 / Figure 19 of the thesis using the
 curated universal datasets (Human + Non-Human).
 
+Features:
+  - Protein: ESM-2-8M mean-pooled embedding (320-dim)
+  - Ligand:  Morgan fingerprint (2048-bit)
+  - Concatenated → MLP classifier (PyTorch + CUDA)
+
 For each dataset and each partition scenario (S1–S4, Scaffold):
   - Single train/test split following the scenario's partition rules
-  - MLP classifier on 2048-bit Morgan fingerprints (PyTorch + CUDA)
   - 10 seeds for variance estimation
   - Reports MCC mean ± std
-
-The KEY difference from CV: each scenario produces a DIFFERENT
-train/test partition from the same pool. S1 allows compound/scaffold
-leakage; Scaffold ensures structural disjunction; S4 ensures both
-compound AND kinase disjunction. The test set difficulty increases.
 
 Usage:
   python leakage_universal_mlp.py              # auto-detect GPU
@@ -65,7 +64,9 @@ N_SEEDS = 10
 BASE_SEED = 42
 FP_BITS = 2048
 FP_RADIUS = 2
-TEST_FRACTION = 0.20  # 80/20 split
+TEST_FRACTION = 0.20
+ESM_MODEL_NAME = "esm2_t6_8M_UR50D"
+ESM_DIM = 320  # embedding dimension for 8M model
 
 # ── MLP (PyTorch) ─────────────────────────────────────────────────────────
 class MLP(nn.Module):
@@ -87,6 +88,49 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
+# ── ESM-2 embeddings ──────────────────────────────────────────────────────
+def compute_esm_embeddings(
+    unique_seqs: list[str],
+    device: torch.device,
+    batch_size: int = 8,
+) -> dict[str, np.ndarray]:
+    """Compute mean-pooled ESM-2 embeddings for each unique sequence."""
+    import esm
+
+    print(f"  Loading ESM-2 model ({ESM_MODEL_NAME})...")
+    model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
+    batch_converter = alphabet.get_batch_converter()
+    model = model.eval().to(device)
+
+    embeddings = {}
+    total = len(unique_seqs)
+
+    for i in range(0, total, batch_size):
+        batch_seqs = unique_seqs[i:i + batch_size]
+        data = [(f"seq_{i+j}", seq) for j, seq in enumerate(batch_seqs)]
+        _, _, tokens = batch_converter(data)
+        tokens = tokens.to(device)
+
+        with torch.no_grad():
+            results = model(tokens, repr_layers=[6], return_contacts=False)
+            # results["representations"][6] shape: [batch, seq_len, 320]
+            reps = results["representations"][6]
+
+        for j, seq in enumerate(batch_seqs):
+            # Mean-pool over sequence (excluding BOS/EOS tokens)
+            seq_len = len(seq)
+            embedding = reps[j, 1:seq_len + 1, :].mean(dim=0).cpu().numpy()
+            embeddings[seq] = embedding
+
+        if (i // batch_size) % 10 == 0:
+            print(f"    ESM-2 progress: {min(i + batch_size, total)}/{total}")
+
+    # Free GPU memory
+    del model
+    torch.cuda.empty_cache()
+    return embeddings
+
+
 # ── fingerprints ───────────────────────────────────────────────────────────
 def smiles_to_fp(smiles: str) -> np.ndarray | None:
     mol = Chem.MolFromSmiles(smiles)
@@ -96,17 +140,25 @@ def smiles_to_fp(smiles: str) -> np.ndarray | None:
     return np.array(fp, dtype=np.float32)
 
 
-def build_fp_matrix(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    fps, labels, mask = [], [], []
+def build_feature_matrix(
+    df: pd.DataFrame,
+    esm_cache: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build concatenated [ESM-2 mean-pool (320) | Morgan FP (2048)] matrix."""
+    features, labels, mask = [], [], []
     for _, row in df.iterrows():
         fp = smiles_to_fp(row["canonical_smiles"])
-        if fp is not None:
-            fps.append(fp)
+        seq = row["seq"]
+        esm_emb = esm_cache.get(seq)
+
+        if fp is not None and esm_emb is not None:
+            concat = np.concatenate([esm_emb, fp])  # [320 + 2048] = [2368]
+            features.append(concat)
             labels.append(int(row["label"]))
             mask.append(True)
         else:
             mask.append(False)
-    return np.array(fps), np.array(labels), np.array(mask)
+    return np.array(features, dtype=np.float32), np.array(labels), np.array(mask)
 
 
 # ── scaffold ───────────────────────────────────────────────────────────────
@@ -135,7 +187,6 @@ def partition_by_group(df, group_col, seed):
     unique_groups = np.unique(groups)
     rng.shuffle(unique_groups)
 
-    # Select ~20% of groups for test
     n_test_groups = max(1, int(len(unique_groups) * TEST_FRACTION))
     test_groups = set(unique_groups[:n_test_groups])
 
@@ -160,9 +211,7 @@ def partition_s4(df, seed):
     test_compounds = set(compounds[:n_test_compounds])
     test_kinases = set(kinases[:n_test_kinases])
 
-    # Test: both compound AND kinase must be in test partition
     test_mask = df["chembl_id"].isin(test_compounds) & df["target_kinase"].isin(test_kinases)
-    # Train: neither compound NOR kinase is in test partition
     train_mask = ~df["chembl_id"].isin(test_compounds) & ~df["target_kinase"].isin(test_kinases)
 
     train_idx = np.where(train_mask)[0]
@@ -294,11 +343,29 @@ def main():
             print("  Computing scaffolds...")
             df["scaffold"] = df["canonical_smiles"].apply(get_scaffold)
 
-        # Build fingerprint matrix
-        print("  Computing Morgan fingerprints...")
-        X_all, y_all, valid_mask = build_fp_matrix(df)
+        # ── Compute ESM-2 embeddings for all unique sequences ──────────
+        unique_seqs = df["seq"].dropna().unique().tolist()
+        print(f"  Unique protein sequences: {len(unique_seqs)}")
+
+        esm_cache_path = output_dir / f"esm2_cache_{ds_name.lower().replace('-', '_')}.npz"
+        if esm_cache_path.exists():
+            print(f"  Loading cached ESM-2 embeddings from {esm_cache_path}")
+            cached = np.load(esm_cache_path, allow_pickle=True)
+            esm_cache = {k: cached[k] for k in cached.files}
+        else:
+            print(f"  Computing ESM-2 embeddings for {len(unique_seqs)} sequences...")
+            esm_cache = compute_esm_embeddings(unique_seqs, device)
+            print(f"  Caching ESM-2 embeddings to {esm_cache_path}")
+            np.savez_compressed(esm_cache_path, **esm_cache)
+
+        print(f"  ESM-2 cache size: {len(esm_cache)} sequences, dim={ESM_DIM}")
+
+        # ── Build feature matrix ───────────────────────────────────────
+        print("  Building feature matrix [ESM-2 (320) | Morgan FP (2048)]...")
+        X_all, y_all, valid_mask = build_feature_matrix(df, esm_cache)
         df_valid = df.loc[valid_mask].reset_index(drop=True)
-        print(f"  Valid molecules: {len(df_valid):,} / {len(df):,}")
+        print(f"  Valid samples: {len(df_valid):,} / {len(df):,}")
+        print(f"  Feature dim: {X_all.shape[1]} (ESM-2: {ESM_DIM} + FP: {FP_BITS})")
 
         ds_results = {}
 
@@ -317,7 +384,6 @@ def main():
                 y_tr = y_all[train_idx]
                 y_te = y_all[test_idx]
 
-                # Skip if single class in train or test
                 if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
                     print(f"    Seed {seed}: skipped (single class)")
                     continue
