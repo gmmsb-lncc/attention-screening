@@ -7,7 +7,7 @@ Reproduces Table 13 / Figure 19 of the thesis using the
 curated universal datasets (Human + Non-Human).
 
 Features:
-  - Protein: ESM-2-8M mean-pooled embedding (320-dim)
+  - Protein: ESM-2-8M mean-pooled embedding (320-dim), loaded from pre-computed .npy
   - Ligand:  Morgan fingerprint (2048-bit)
   - Concatenated → MLP classifier (PyTorch + CUDA)
 
@@ -44,19 +44,31 @@ warnings.filterwarnings("ignore")
 RDLogger.DisableLog("rdApp.*")
 
 # ── paths ──────────────────────────────────────────────────────────────────
-BASE = Path(__file__).resolve().parent.parent.parent / "scaffolds_splits" / "output"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SPLITS_DIR = REPO_ROOT / "scaffolds_splits" / "output"
+RESULTS_DIR = REPO_ROOT / "results"
 
 DATASETS = {
     "Non-Human": {
-        "train": BASE / "non_human_train.tsv",
-        "val":   BASE / "non_human_val.tsv",
-        "test":  BASE / "non_human_test.tsv",
+        "train": SPLITS_DIR / "non_human_train.tsv",
+        "val":   SPLITS_DIR / "non_human_val.tsv",
+        "test":  SPLITS_DIR / "non_human_test.tsv",
     },
     "Human": {
-        "train": BASE / "human_train.tsv",
-        "val":   BASE / "human_val.tsv",
-        "test":  BASE / "human_test.tsv",
+        "train": SPLITS_DIR / "human_train.tsv",
+        "val":   SPLITS_DIR / "human_val.tsv",
+        "test":  SPLITS_DIR / "human_test.tsv",
     },
+}
+
+# Pre-computed ESM-2 8M protein matrices: {seq_id}_matrix.npy → [seq_len, 320]
+PROTEIN_MATRIX_DIRS = {
+    "Non-Human": [
+        RESULTS_DIR / "protein_model_benchmark_non_human_v2" / "esm2_t6_8M_UR50D" / "build" / "protein_matrices",
+    ],
+    "Human": [
+        RESULTS_DIR / "protein_model_benchmark_human_v2" / "esm2_t6_8M_UR50D" / "build" / "protein_matrices",
+    ],
 }
 
 SCENARIOS = ["S1", "S2", "Scaffold", "S3", "S4"]
@@ -65,8 +77,6 @@ BASE_SEED = 42
 FP_BITS = 2048
 FP_RADIUS = 2
 TEST_FRACTION = 0.20
-ESM_MODEL_NAME = "esm2_t6_8M_UR50D"
-ESM_DIM = 320  # embedding dimension for 8M model
 
 # ── MLP (PyTorch) ─────────────────────────────────────────────────────────
 class MLP(nn.Module):
@@ -88,47 +98,35 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-# ── ESM-2 embeddings ──────────────────────────────────────────────────────
-def compute_esm_embeddings(
-    unique_seqs: list[str],
-    device: torch.device,
-    batch_size: int = 8,
-) -> dict[str, np.ndarray]:
-    """Compute mean-pooled ESM-2 embeddings for each unique sequence."""
-    import esm
+# ── Load pre-computed ESM-2 protein embeddings ─────────────────────────────
+def load_protein_embeddings(
+    unique_seq_ids: list,
+    protein_dirs: list[Path],
+) -> dict[int, np.ndarray]:
+    """Load pre-computed ESM-2 matrices and mean-pool to 320-dim vectors.
 
-    print(f"  Loading ESM-2 model ({ESM_MODEL_NAME})...")
-    model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
-    batch_converter = alphabet.get_batch_converter()
-    model = model.eval().to(device)
+    Files: {seq_id}_matrix.npy → [seq_len, embed_dim]
+    Returns: {seq_id: mean_pooled_vector [embed_dim]}
+    """
+    cache = {}
+    missing = 0
 
-    embeddings = {}
-    total = len(unique_seqs)
+    for seq_id in unique_seq_ids:
+        loaded = False
+        for pdir in protein_dirs:
+            fpath = pdir / f"{seq_id}_matrix.npy"
+            if fpath.exists():
+                matrix = np.load(fpath)  # [seq_len, 320]
+                cache[seq_id] = matrix.mean(axis=0).astype(np.float32)  # [320]
+                loaded = True
+                break
+        if not loaded:
+            missing += 1
 
-    for i in range(0, total, batch_size):
-        batch_seqs = unique_seqs[i:i + batch_size]
-        data = [(f"seq_{i+j}", seq) for j, seq in enumerate(batch_seqs)]
-        _, _, tokens = batch_converter(data)
-        tokens = tokens.to(device)
+    if missing > 0:
+        print(f"  WARNING: {missing}/{len(unique_seq_ids)} seq_ids not found in protein_matrices")
 
-        with torch.no_grad():
-            results = model(tokens, repr_layers=[6], return_contacts=False)
-            # results["representations"][6] shape: [batch, seq_len, 320]
-            reps = results["representations"][6]
-
-        for j, seq in enumerate(batch_seqs):
-            # Mean-pool over sequence (excluding BOS/EOS tokens)
-            seq_len = len(seq)
-            embedding = reps[j, 1:seq_len + 1, :].mean(dim=0).cpu().numpy()
-            embeddings[seq] = embedding
-
-        if (i // batch_size) % 10 == 0:
-            print(f"    ESM-2 progress: {min(i + batch_size, total)}/{total}")
-
-    # Free GPU memory
-    del model
-    torch.cuda.empty_cache()
-    return embeddings
+    return cache
 
 
 # ── fingerprints ───────────────────────────────────────────────────────────
@@ -142,17 +140,17 @@ def smiles_to_fp(smiles: str) -> np.ndarray | None:
 
 def build_feature_matrix(
     df: pd.DataFrame,
-    esm_cache: dict[str, np.ndarray],
+    protein_cache: dict[int, np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build concatenated [ESM-2 mean-pool (320) | Morgan FP (2048)] matrix."""
+    """Build concatenated [ESM-2 mean-pool | Morgan FP] matrix."""
     features, labels, mask = [], [], []
     for _, row in df.iterrows():
         fp = smiles_to_fp(row["canonical_smiles"])
-        seq = row["seq"]
-        esm_emb = esm_cache.get(seq)
+        seq_id = row["seq_id"]
+        prot_emb = protein_cache.get(seq_id) if not pd.isna(seq_id) else None
 
-        if fp is not None and esm_emb is not None:
-            concat = np.concatenate([esm_emb, fp])  # [320 + 2048] = [2368]
+        if fp is not None and prot_emb is not None:
+            concat = np.concatenate([prot_emb, fp])  # [320 + 2048]
             features.append(concat)
             labels.append(int(row["label"]))
             mask.append(True)
@@ -181,7 +179,7 @@ def partition_s1(df, seed):
 
 
 def partition_by_group(df, group_col, seed):
-    """Group-disjoint split: entities in test never appear in train."""
+    """Group-disjoint split."""
     rng = np.random.default_rng(seed)
     groups = df[group_col].fillna("__NA__").astype(str).values
     unique_groups = np.unique(groups)
@@ -343,29 +341,31 @@ def main():
             print("  Computing scaffolds...")
             df["scaffold"] = df["canonical_smiles"].apply(get_scaffold)
 
-        # ── Compute ESM-2 embeddings for all unique sequences ──────────
-        unique_seqs = df["seq"].dropna().unique().tolist()
-        print(f"  Unique protein sequences: {len(unique_seqs)}")
+        # ── Load pre-computed ESM-2 protein embeddings ─────────────────
+        unique_seq_ids = df["seq_id"].dropna().unique().tolist()
+        protein_dirs = PROTEIN_MATRIX_DIRS.get(ds_name, [])
+        print(f"  Unique seq_ids: {len(unique_seq_ids)}")
+        print(f"  Protein matrix dirs: {[str(p) for p in protein_dirs]}")
 
-        esm_cache_path = output_dir / f"esm2_cache_{ds_name.lower().replace('-', '_')}.npz"
-        if esm_cache_path.exists():
-            print(f"  Loading cached ESM-2 embeddings from {esm_cache_path}")
-            cached = np.load(esm_cache_path, allow_pickle=True)
-            esm_cache = {k: cached[k] for k in cached.files}
-        else:
-            print(f"  Computing ESM-2 embeddings for {len(unique_seqs)} sequences...")
-            esm_cache = compute_esm_embeddings(unique_seqs, device)
-            print(f"  Caching ESM-2 embeddings to {esm_cache_path}")
-            np.savez_compressed(esm_cache_path, **esm_cache)
+        protein_cache = load_protein_embeddings(unique_seq_ids, protein_dirs)
+        print(f"  Loaded {len(protein_cache)} protein embeddings")
 
-        print(f"  ESM-2 cache size: {len(esm_cache)} sequences, dim={ESM_DIM}")
+        if len(protein_cache) == 0:
+            print("  ERROR: No protein embeddings found! Check protein_matrices path.")
+            print("  Skipping this dataset.")
+            continue
+
+        # Sample an embedding to get dimension
+        sample_emb = next(iter(protein_cache.values()))
+        prot_dim = sample_emb.shape[0]
+        feat_dim = prot_dim + FP_BITS
+        print(f"  Protein dim: {prot_dim}, Feature dim: {feat_dim} (ESM-2 + FP)")
 
         # ── Build feature matrix ───────────────────────────────────────
-        print("  Building feature matrix [ESM-2 (320) | Morgan FP (2048)]...")
-        X_all, y_all, valid_mask = build_feature_matrix(df, esm_cache)
+        print("  Building feature matrix...")
+        X_all, y_all, valid_mask = build_feature_matrix(df, protein_cache)
         df_valid = df.loc[valid_mask].reset_index(drop=True)
         print(f"  Valid samples: {len(df_valid):,} / {len(df):,}")
-        print(f"  Feature dim: {X_all.shape[1]} (ESM-2: {ESM_DIM} + FP: {FP_BITS})")
 
         ds_results = {}
 
@@ -378,7 +378,7 @@ def main():
                 try:
                     train_idx, test_idx = partition(df_valid, scenario, seed)
                 except Exception as e:
-                    print(f"    Seed {seed}: ERROR partitioning: {e}")
+                    print(f"    Seed {seed}: ERROR: {e}")
                     continue
 
                 y_tr = y_all[train_idx]
@@ -387,7 +387,6 @@ def main():
                 if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
                     print(f"    Seed {seed}: skipped (single class)")
                     continue
-
                 if len(test_idx) < 10:
                     print(f"    Seed {seed}: skipped (test too small: {len(test_idx)})")
                     continue
