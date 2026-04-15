@@ -194,6 +194,19 @@ def partition_by_group(df, group_col, seed):
     return train_idx, test_idx
 
 
+def partition_scaffold_universal(df, seed):
+    """Scaffold: use the EXACT universal scaffold split (train.tsv → train, test.tsv → test).
+
+    This is deterministic — the partition is always the same (the official one).
+    Only the MLP initialization varies across seeds.
+    Requires '_split_origin' column with values 'train', 'val', 'test'.
+    """
+    # train = original train + val rows; test = original test rows
+    train_idx = np.where(df["_split_origin"].isin(["train", "val"]))[0]
+    test_idx = np.where(df["_split_origin"] == "test")[0]
+    return train_idx, test_idx
+
+
 def partition_s4(df, seed):
     """S4: double disjoint — compounds AND kinases in test are new."""
     rng = np.random.default_rng(seed)
@@ -223,7 +236,7 @@ def partition(df, scenario, seed):
     elif scenario == "S2":
         return partition_by_group(df, "chembl_id", seed)
     elif scenario == "Scaffold":
-        return partition_by_group(df, "scaffold", seed)
+        return partition_scaffold_universal(df, seed)
     elif scenario == "S3":
         return partition_by_group(df, "target_kinase", seed)
     elif scenario == "S4":
@@ -324,11 +337,13 @@ def main():
         print(f"  Dataset: {ds_name}")
         print(f"{'='*60}")
 
-        # Load and combine into single pool
+        # Load and combine into single pool, tracking origin
         dfs = []
-        for fpath in files.values():
+        for split_name, fpath in files.items():
             if fpath.exists():
-                dfs.append(pd.read_csv(fpath, sep="\t"))
+                tmp = pd.read_csv(fpath, sep="\t")
+                tmp["_split_origin"] = split_name  # "train", "val", or "test"
+                dfs.append(tmp)
             else:
                 print(f"  WARNING: {fpath} not found")
         df = pd.concat(dfs, ignore_index=True)
