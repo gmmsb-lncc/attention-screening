@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import traceback
 import warnings
 from pathlib import Path
 
@@ -31,7 +32,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 from sklearn.metrics import matthews_corrcoef
-from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
+from sklearn.model_selection import StratifiedKFold, GroupKFold
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
@@ -112,37 +113,74 @@ def get_scaffold(smiles: str) -> str:
 
 # ── splitting ──────────────────────────────────────────────────────────────
 def split_s1(df, n_folds, seed):
+    """S1: random stratified split."""
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     return list(skf.split(np.arange(len(df)), df["label"].values))
 
 
 def split_by_group(df, group_col, n_folds, seed):
+    """S2 (compound), S3 (kinase), Scaffold: group-disjoint split.
+
+    Uses GroupKFold (guarantees group disjunction) instead of
+    StratifiedGroupKFold (which failed to produce valid folds
+    for Scaffold due to class imbalance within groups).
+    """
     groups = df[group_col].values
-    sgkf = StratifiedGroupKFold(n_splits=n_folds, shuffle=True, random_state=seed)
-    return list(sgkf.split(np.arange(len(df)), df["label"].values, groups))
+    n_groups = len(np.unique(groups))
+
+    # Reduce n_folds if fewer groups than requested folds
+    effective_folds = min(n_folds, n_groups)
+    if effective_folds < 2:
+        raise ValueError(f"Only {n_groups} unique groups for '{group_col}', need ≥2")
+
+    gkf = GroupKFold(n_splits=effective_folds)
+    return list(gkf.split(np.arange(len(df)), df["label"].values, groups))
 
 
 def split_s4(df, n_folds, seed):
+    """S4: double disjoint — new compound AND new kinase in val.
+
+    For datasets with few kinases (e.g. Non-Human: 112), uses fewer
+    folds to ensure enough kinases can be held out per fold.
+    """
     rng = np.random.default_rng(seed)
+    n_kinases = df["target_kinase"].nunique()
+
+    # Adaptive fold count: need at least ~10 kinases per fold for S4
+    effective_folds = min(n_folds, max(2, n_kinases // 10))
+
     compounds = df["chembl_id"].unique()
     rng.shuffle(compounds)
-    fold_size = len(compounds) // n_folds
+
+    # Split kinases into folds first (ensures kinase disjunction)
+    kinases = df["target_kinase"].unique()
+    rng.shuffle(kinases)
+    kinase_fold_size = len(kinases) // effective_folds
+
     folds = []
-    for i in range(n_folds):
-        start = i * fold_size
-        end = start + fold_size if i < n_folds - 1 else len(compounds)
-        val_compounds = set(compounds[start:end])
-        val_mask = df["chembl_id"].isin(val_compounds)
-        train_mask = ~val_mask
-        train_kinases = set(df.loc[train_mask, "target_kinase"].unique())
-        val_kinase_ok = ~df["target_kinase"].isin(train_kinases)
-        val_final = val_mask & val_kinase_ok
-        val_kinases = set(df.loc[val_final, "target_kinase"].unique())
-        train_final = train_mask & ~df["target_kinase"].isin(val_kinases)
-        train_idx = np.where(train_final)[0]
-        val_idx = np.where(val_final)[0]
-        if len(val_idx) > 0 and len(train_idx) > 0:
+    for i in range(effective_folds):
+        # Kinase partition
+        k_start = i * kinase_fold_size
+        k_end = k_start + kinase_fold_size if i < effective_folds - 1 else len(kinases)
+        val_kinases = set(kinases[k_start:k_end])
+
+        # Compound partition (different from kinase partition)
+        c_fold_size = len(compounds) // effective_folds
+        c_start = i * c_fold_size
+        c_end = c_start + c_fold_size if i < effective_folds - 1 else len(compounds)
+        val_compounds = set(compounds[c_start:c_end])
+
+        # Val: both kinase AND compound must be in val partition
+        val_mask = df["chembl_id"].isin(val_compounds) & df["target_kinase"].isin(val_kinases)
+        # Train: neither kinase NOR compound is in val partition
+        train_mask = ~df["chembl_id"].isin(val_compounds) & ~df["target_kinase"].isin(val_kinases)
+
+        train_idx = np.where(train_mask)[0]
+        val_idx = np.where(val_mask)[0]
+
+        if len(val_idx) > 10 and len(train_idx) > 10:
             folds.append((train_idx, val_idx))
+
     return folds
 
 
@@ -180,12 +218,10 @@ def train_evaluate_fold(
     y_tr_t = torch.from_numpy(y_train.astype(np.float32)).to(device)
     X_v_t = torch.from_numpy(X_v.astype(np.float32)).to(device)
 
-    # Class weight for focal-like balancing
-    pos_weight = torch.tensor(
-        [(y_train == 0).sum() / max((y_train == 1).sum(), 1)],
-        dtype=torch.float32,
-        device=device,
-    )
+    # Class weight for balancing
+    n_pos = max((y_train == 1).sum(), 1)
+    n_neg = max((y_train == 0).sum(), 1)
+    pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32, device=device)
 
     # Model
     model = MLP(X_tr.shape[1]).to(device)
@@ -201,6 +237,7 @@ def train_evaluate_fold(
     model.train()
     best_loss = float("inf")
     patience, patience_counter = 10, 0
+    best_state = None
 
     for epoch in range(100):
         epoch_loss = 0.0
@@ -224,7 +261,8 @@ def train_evaluate_fold(
                 break
 
     # Eval
-    model.load_state_dict(best_state)
+    if best_state is not None:
+        model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
         logits = model(X_v_t)
@@ -262,6 +300,8 @@ def main():
         for fpath in files.values():
             if fpath.exists():
                 dfs.append(pd.read_csv(fpath, sep="\t"))
+            else:
+                print(f"  WARNING: {fpath} not found, skipping")
         df = pd.concat(dfs, ignore_index=True)
         print(f"  Total rows: {len(df):,}")
         print(f"  Unique compounds: {df['chembl_id'].nunique():,}")
@@ -282,8 +322,10 @@ def main():
             print(f"\n  --- Scenario {scenario} ---")
             try:
                 folds = get_splits(df_valid, scenario, N_FOLDS, SEED)
+                print(f"  Generated {len(folds)} folds")
             except Exception as e:
                 print(f"  ERROR splitting: {e}")
+                traceback.print_exc()
                 ds_results[scenario] = {"mean": float("nan"), "std": float("nan"), "n_folds": 0}
                 continue
 
@@ -292,12 +334,12 @@ def main():
                 y_tr = y_all[train_idx]
                 y_vl = y_all[val_idx]
                 if len(np.unique(y_tr)) < 2 or len(np.unique(y_vl)) < 2:
-                    print(f"    Fold {i}: skipped (single class)")
+                    print(f"    Fold {i}: skipped (single class in {'train' if len(np.unique(y_tr))<2 else 'val'})")
                     continue
 
                 mcc = train_evaluate_fold(X_all[train_idx], y_tr, X_all[val_idx], y_vl, device)
                 mccs.append(mcc)
-                print(f"    Fold {i}: MCC = {mcc:.3f}")
+                print(f"    Fold {i}: MCC = {mcc:.3f}  (train={len(train_idx):,}, val={len(val_idx):,})")
 
             if mccs:
                 mean_mcc = float(np.mean(mccs))
