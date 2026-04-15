@@ -201,8 +201,9 @@ def partition_scaffold_universal(df, seed):
     Only the MLP initialization varies across seeds.
     Requires '_split_origin' column with values 'train', 'val', 'test'.
     """
-    # train = original train + val rows; test = original test rows
-    train_idx = np.where(df["_split_origin"].isin(["train", "val"]))[0]
+    # train = original train rows ONLY; test = original test rows
+    # (val excluded from training — matches official benchmark protocol)
+    train_idx = np.where(df["_split_origin"] == "train")[0]
     test_idx = np.where(df["_split_origin"] == "test")[0]
     return train_idx, test_idx
 
