@@ -72,7 +72,7 @@ PROTEIN_MATRIX_DIRS = {
 }
 
 SCENARIOS = ["S1", "S2", "Scaffold", "S3", "S4"]
-N_SEEDS = 10
+N_SEEDS = 5
 BASE_SEED = 42
 FP_BITS = 2048
 FP_RADIUS = 2
