@@ -125,7 +125,7 @@ def split_by_group(df, group_col, n_folds, seed):
     StratifiedGroupKFold (which failed to produce valid folds
     for Scaffold due to class imbalance within groups).
     """
-    groups = df[group_col].values
+    groups = df[group_col].fillna("__NO_SCAFFOLD__").astype(str).values
     n_groups = len(np.unique(groups))
 
     # Reduce n_folds if fewer groups than requested folds
