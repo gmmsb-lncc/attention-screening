@@ -174,12 +174,14 @@ def get_scaffold(smiles: str) -> str:
 # Scaffold uses the official universal split. Others select 20% held-out
 # by scenario rules, then split it 50/50 for val and test.
 
-def _split_holdout_to_test(held_out_idx, seed):
-    """Split held-out indices 50/50 into val (discarded) and test."""
+def _split_holdout_to_val_test(held_out_idx, seed):
+    """Split held-out indices 50/50 into val and test."""
     rng = np.random.default_rng(seed + 999)
     rng.shuffle(held_out_idx)
     mid = len(held_out_idx) // 2
-    return held_out_idx[mid:]  # test half
+    val_idx = held_out_idx[:mid]
+    test_idx = held_out_idx[mid:]
+    return val_idx, test_idx
 
 
 def partition_s1(df, seed):
@@ -188,8 +190,8 @@ def partition_s1(df, seed):
         np.arange(len(df)), test_size=HOLDOUT_FRACTION,
         stratify=df["label"].values, random_state=seed,
     )
-    test_idx = _split_holdout_to_test(held_idx, seed)
-    return train_idx, test_idx
+    val_idx, test_idx = _split_holdout_to_val_test(held_idx, seed)
+    return train_idx, val_idx, test_idx
 
 
 def partition_by_group(df, group_col, seed):
@@ -203,15 +205,18 @@ def partition_by_group(df, group_col, seed):
     n_held_groups = max(1, int(len(unique_groups) * HOLDOUT_FRACTION))
     held_groups = list(unique_groups[:n_held_groups])
 
-    # Split held groups 50/50 → val groups (discard) + test groups
+    # Split held groups 50/50 → val groups + test groups
     mid = len(held_groups) // 2
+    val_groups = set(held_groups[:mid])
     test_groups = set(held_groups[mid:])
 
     held_mask = np.isin(groups, held_groups)
+    val_mask = np.isin(groups, list(val_groups))
     test_mask = np.isin(groups, list(test_groups))
     train_idx = np.where(~held_mask)[0]
+    val_idx = np.where(val_mask)[0]
     test_idx = np.where(test_mask)[0]
-    return train_idx, test_idx
+    return train_idx, val_idx, test_idx
 
 
 def partition_scaffold_universal(df, seed):
@@ -222,10 +227,11 @@ def partition_scaffold_universal(df, seed):
     Requires '_split_origin' column with values 'train', 'val', 'test'.
     """
     # train = original train rows ONLY; test = original test rows
-    # (val excluded from training — matches official benchmark protocol)
+    # val = original val rows — used for early stopping
     train_idx = np.where(df["_split_origin"] == "train")[0]
+    val_idx = np.where(df["_split_origin"] == "val")[0]
     test_idx = np.where(df["_split_origin"] == "test")[0]
-    return train_idx, test_idx
+    return train_idx, val_idx, test_idx
 
 
 def partition_s4(df, seed):
@@ -244,18 +250,22 @@ def partition_s4(df, seed):
     held_compounds = compounds[:n_held_compounds]
     held_kinases = kinases[:n_held_kinases]
 
-    # Split held compounds/kinases 50/50 → val (discard) + test
+    # Split held compounds/kinases 50/50 → val + test
     mid_c = len(held_compounds) // 2
     mid_k = len(held_kinases) // 2
     test_compounds = set(held_compounds[mid_c:])
     test_kinases = set(held_kinases[mid_k:])
+    val_compounds = set(held_compounds[:mid_c])
+    val_kinases = set(held_kinases[:mid_k])
 
     test_mask = df["chembl_id"].isin(test_compounds) & df["target_kinase"].isin(test_kinases)
+    val_mask = df["chembl_id"].isin(val_compounds) & df["target_kinase"].isin(val_kinases)
     train_mask = ~df["chembl_id"].isin(set(held_compounds)) & ~df["target_kinase"].isin(set(held_kinases))
 
     train_idx = np.where(train_mask)[0]
+    val_idx = np.where(val_mask)[0]
     test_idx = np.where(test_mask)[0]
-    return train_idx, test_idx
+    return train_idx, val_idx, test_idx
 
 
 def partition(df, scenario, seed):
@@ -273,22 +283,27 @@ def partition(df, scenario, seed):
         raise ValueError(f"Unknown scenario: {scenario}")
 
 
-# ── GPU training ───────────────────────────────────────────────────────────
+# ── GPU training ─────────────────────────────────────────────────────────────
 def train_evaluate(
     X_train: np.ndarray,
     y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
     device: torch.device,
     seed: int,
 ) -> float:
-    """Train MLP on GPU, return MCC on external test."""
+    """Train MLP on GPU with early stopping on val loss. Return MCC on test."""
     scaler = StandardScaler()
     X_tr = scaler.fit_transform(X_train)
+    X_va = scaler.transform(X_val)
     X_te = scaler.transform(X_test)
 
     X_tr_t = torch.from_numpy(X_tr.astype(np.float32)).to(device)
     y_tr_t = torch.from_numpy(y_train.astype(np.float32)).to(device)
+    X_va_t = torch.from_numpy(X_va.astype(np.float32)).to(device)
+    y_va_t = torch.from_numpy(y_val.astype(np.float32)).to(device)
     X_te_t = torch.from_numpy(X_te.astype(np.float32)).to(device)
 
     n_pos = max((y_train == 1).sum(), 1)
@@ -304,25 +319,29 @@ def train_evaluate(
     train_ds = TensorDataset(X_tr_t, y_tr_t)
     train_dl = DataLoader(train_ds, batch_size=2048, shuffle=True, drop_last=False)
 
-    model.train()
-    best_loss = float("inf")
+    best_val_loss = float("inf")
     patience, patience_counter = 10, 0
     best_state = None
 
     for epoch in range(100):
-        epoch_loss = 0.0
+        # ---- Train ----
+        model.train()
         for xb, yb in train_dl:
             optimizer.zero_grad(set_to_none=True)
             logits = model(xb)
             loss = criterion(logits, yb)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * len(xb)
         scheduler.step()
-        epoch_loss /= len(train_ds)
 
-        if epoch_loss < best_loss - 1e-4:
-            best_loss = epoch_loss
+        # ---- Val loss (early stopping) ----
+        model.eval()
+        with torch.no_grad():
+            val_logits = model(X_va_t)
+            val_loss = criterion(val_logits, y_va_t).item()
+
+        if val_loss < best_val_loss - 1e-4:
+            best_val_loss = val_loss
             patience_counter = 0
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
         else:
@@ -419,29 +438,34 @@ def main():
             for s in range(N_SEEDS):
                 seed = BASE_SEED + s
                 try:
-                    train_idx, test_idx = partition(df_valid, scenario, seed)
+                    train_idx, val_idx, test_idx = partition(df_valid, scenario, seed)
                 except Exception as e:
                     print(f"    Seed {seed}: ERROR: {e}")
                     continue
 
                 y_tr = y_all[train_idx]
+                y_va = y_all[val_idx]
                 y_te = y_all[test_idx]
 
                 if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
-                    print(f"    Seed {seed}: skipped (single class)")
+                    print(f"    Seed {seed}: skipped (single class in train/test)")
                     continue
                 if len(test_idx) < 10:
                     print(f"    Seed {seed}: skipped (test too small: {len(test_idx)})")
                     continue
+                if len(val_idx) < 10:
+                    print(f"    Seed {seed}: skipped (val too small: {len(val_idx)})")
+                    continue
 
                 mcc = train_evaluate(
                     X_all[train_idx], y_tr,
+                    X_all[val_idx], y_va,
                     X_all[test_idx], y_te,
                     device, seed,
                 )
                 mccs.append(mcc)
                 print(f"    Seed {seed}: MCC = {mcc:.3f}  "
-                      f"(train={len(train_idx):,}, test={len(test_idx):,})")
+                      f"(train={len(train_idx):,}, val={len(val_idx):,}, test={len(test_idx):,})")
 
             if mccs:
                 mean_mcc = float(np.mean(mccs))
