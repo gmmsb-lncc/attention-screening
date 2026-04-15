@@ -76,7 +76,8 @@ N_SEEDS = 10
 BASE_SEED = 42
 FP_BITS = 2048
 FP_RADIUS = 2
-TEST_FRACTION = 0.20
+TEST_FRACTION = 0.10     # ~10% of pool for test
+HOLDOUT_FRACTION = 0.20  # 20% held out → split into 10% val + 10% test
 
 # ── MLP (PyTorch) ─────────────────────────────────────────────────────────
 class MLP(nn.Module):
@@ -169,27 +170,46 @@ def get_scaffold(smiles: str) -> str:
 
 
 # ── partition strategies ───────────────────────────────────────────────────
+# All scenarios produce 80% train / 10% val (discarded) / 10% test.
+# Scaffold uses the official universal split. Others select 20% held-out
+# by scenario rules, then split it 50/50 for val and test.
+
+def _split_holdout_to_test(held_out_idx, seed):
+    """Split held-out indices 50/50 into val (discarded) and test."""
+    rng = np.random.default_rng(seed + 999)
+    rng.shuffle(held_out_idx)
+    mid = len(held_out_idx) // 2
+    return held_out_idx[mid:]  # test half
+
+
 def partition_s1(df, seed):
-    """S1: random stratified split. Compounds/scaffolds CAN leak."""
-    train_idx, test_idx = train_test_split(
-        np.arange(len(df)), test_size=TEST_FRACTION,
+    """S1: random stratified split → 80/10/10."""
+    train_idx, held_idx = train_test_split(
+        np.arange(len(df)), test_size=HOLDOUT_FRACTION,
         stratify=df["label"].values, random_state=seed,
     )
+    test_idx = _split_holdout_to_test(held_idx, seed)
     return train_idx, test_idx
 
 
 def partition_by_group(df, group_col, seed):
-    """Group-disjoint split."""
+    """Group-disjoint split → 80/10/10."""
     rng = np.random.default_rng(seed)
     groups = df[group_col].fillna("__NA__").astype(str).values
     unique_groups = np.unique(groups)
     rng.shuffle(unique_groups)
 
-    n_test_groups = max(1, int(len(unique_groups) * TEST_FRACTION))
-    test_groups = set(unique_groups[:n_test_groups])
+    # Select ~20% of groups for held-out
+    n_held_groups = max(1, int(len(unique_groups) * HOLDOUT_FRACTION))
+    held_groups = list(unique_groups[:n_held_groups])
 
+    # Split held groups 50/50 → val groups (discard) + test groups
+    mid = len(held_groups) // 2
+    test_groups = set(held_groups[mid:])
+
+    held_mask = np.isin(groups, held_groups)
     test_mask = np.isin(groups, list(test_groups))
-    train_idx = np.where(~test_mask)[0]
+    train_idx = np.where(~held_mask)[0]
     test_idx = np.where(test_mask)[0]
     return train_idx, test_idx
 
@@ -209,7 +229,7 @@ def partition_scaffold_universal(df, seed):
 
 
 def partition_s4(df, seed):
-    """S4: double disjoint — compounds AND kinases in test are new."""
+    """S4: double disjoint → 80/10/10."""
     rng = np.random.default_rng(seed)
 
     compounds = df["chembl_id"].unique()
@@ -217,14 +237,21 @@ def partition_s4(df, seed):
     rng.shuffle(compounds)
     rng.shuffle(kinases)
 
-    n_test_compounds = max(1, int(len(compounds) * TEST_FRACTION))
-    n_test_kinases = max(1, int(len(kinases) * TEST_FRACTION))
+    # 20% held-out for compounds and kinases
+    n_held_compounds = max(1, int(len(compounds) * HOLDOUT_FRACTION))
+    n_held_kinases = max(1, int(len(kinases) * HOLDOUT_FRACTION))
 
-    test_compounds = set(compounds[:n_test_compounds])
-    test_kinases = set(kinases[:n_test_kinases])
+    held_compounds = compounds[:n_held_compounds]
+    held_kinases = kinases[:n_held_kinases]
+
+    # Split held compounds/kinases 50/50 → val (discard) + test
+    mid_c = len(held_compounds) // 2
+    mid_k = len(held_kinases) // 2
+    test_compounds = set(held_compounds[mid_c:])
+    test_kinases = set(held_kinases[mid_k:])
 
     test_mask = df["chembl_id"].isin(test_compounds) & df["target_kinase"].isin(test_kinases)
-    train_mask = ~df["chembl_id"].isin(test_compounds) & ~df["target_kinase"].isin(test_kinases)
+    train_mask = ~df["chembl_id"].isin(set(held_compounds)) & ~df["target_kinase"].isin(set(held_kinases))
 
     train_idx = np.where(train_mask)[0]
     test_idx = np.where(test_mask)[0]
