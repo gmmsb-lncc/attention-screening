@@ -7,9 +7,15 @@ Reproduces Table 13 / Figure 19 of the thesis using the
 curated universal datasets (Human + Non-Human).
 
 For each dataset and each partition scenario (S1–S4, Scaffold):
-  - 10-fold stratified CV (seed=42)
+  - Single train/test split following the scenario's partition rules
   - MLP classifier on 2048-bit Morgan fingerprints (PyTorch + CUDA)
+  - 10 seeds for variance estimation
   - Reports MCC mean ± std
+
+The KEY difference from CV: each scenario produces a DIFFERENT
+train/test partition from the same pool. S1 allows compound/scaffold
+leakage; Scaffold ensures structural disjunction; S4 ensures both
+compound AND kinase disjunction. The test set difficulty increases.
 
 Usage:
   python leakage_universal_mlp.py              # auto-detect GPU
@@ -32,7 +38,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 from sklearn.metrics import matthews_corrcoef
-from sklearn.model_selection import StratifiedKFold, GroupKFold
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
@@ -55,10 +61,11 @@ DATASETS = {
 }
 
 SCENARIOS = ["S1", "S2", "Scaffold", "S3", "S4"]
-N_FOLDS = 10
-SEED = 42
+N_SEEDS = 10
+BASE_SEED = 42
 FP_BITS = 2048
 FP_RADIUS = 2
+TEST_FRACTION = 0.20  # 80/20 split
 
 # ── MLP (PyTorch) ─────────────────────────────────────────────────────────
 class MLP(nn.Module):
@@ -111,129 +118,104 @@ def get_scaffold(smiles: str) -> str:
         return smiles
 
 
-# ── splitting ──────────────────────────────────────────────────────────────
-def split_s1(df, n_folds, seed):
-    """S1: random stratified split."""
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
-    return list(skf.split(np.arange(len(df)), df["label"].values))
+# ── partition strategies ───────────────────────────────────────────────────
+def partition_s1(df, seed):
+    """S1: random stratified split. Compounds/scaffolds CAN leak."""
+    train_idx, test_idx = train_test_split(
+        np.arange(len(df)), test_size=TEST_FRACTION,
+        stratify=df["label"].values, random_state=seed,
+    )
+    return train_idx, test_idx
 
 
-def split_by_group(df, group_col, n_folds, seed):
-    """S2 (compound), S3 (kinase), Scaffold: group-disjoint split.
-
-    Uses GroupKFold (guarantees group disjunction) instead of
-    StratifiedGroupKFold (which failed to produce valid folds
-    for Scaffold due to class imbalance within groups).
-    """
-    groups = df[group_col].fillna("__NO_SCAFFOLD__").astype(str).values
-    n_groups = len(np.unique(groups))
-
-    # Reduce n_folds if fewer groups than requested folds
-    effective_folds = min(n_folds, n_groups)
-    if effective_folds < 2:
-        raise ValueError(f"Only {n_groups} unique groups for '{group_col}', need ≥2")
-
-    gkf = GroupKFold(n_splits=effective_folds)
-    return list(gkf.split(np.arange(len(df)), df["label"].values, groups))
-
-
-def split_s4(df, n_folds, seed):
-    """S4: double disjoint — new compound AND new kinase in val.
-
-    For datasets with few kinases (e.g. Non-Human: 112), uses fewer
-    folds to ensure enough kinases can be held out per fold.
-    """
+def partition_by_group(df, group_col, seed):
+    """Group-disjoint split: entities in test never appear in train."""
     rng = np.random.default_rng(seed)
-    n_kinases = df["target_kinase"].nunique()
+    groups = df[group_col].fillna("__NA__").astype(str).values
+    unique_groups = np.unique(groups)
+    rng.shuffle(unique_groups)
 
-    # Adaptive fold count: need at least ~10 kinases per fold for S4
-    effective_folds = min(n_folds, max(2, n_kinases // 10))
+    # Select ~20% of groups for test
+    n_test_groups = max(1, int(len(unique_groups) * TEST_FRACTION))
+    test_groups = set(unique_groups[:n_test_groups])
+
+    test_mask = np.isin(groups, list(test_groups))
+    train_idx = np.where(~test_mask)[0]
+    test_idx = np.where(test_mask)[0]
+    return train_idx, test_idx
+
+
+def partition_s4(df, seed):
+    """S4: double disjoint — compounds AND kinases in test are new."""
+    rng = np.random.default_rng(seed)
 
     compounds = df["chembl_id"].unique()
-    rng.shuffle(compounds)
-
-    # Split kinases into folds first (ensures kinase disjunction)
     kinases = df["target_kinase"].unique()
+    rng.shuffle(compounds)
     rng.shuffle(kinases)
-    kinase_fold_size = len(kinases) // effective_folds
 
-    folds = []
-    for i in range(effective_folds):
-        # Kinase partition
-        k_start = i * kinase_fold_size
-        k_end = k_start + kinase_fold_size if i < effective_folds - 1 else len(kinases)
-        val_kinases = set(kinases[k_start:k_end])
+    n_test_compounds = max(1, int(len(compounds) * TEST_FRACTION))
+    n_test_kinases = max(1, int(len(kinases) * TEST_FRACTION))
 
-        # Compound partition (different from kinase partition)
-        c_fold_size = len(compounds) // effective_folds
-        c_start = i * c_fold_size
-        c_end = c_start + c_fold_size if i < effective_folds - 1 else len(compounds)
-        val_compounds = set(compounds[c_start:c_end])
+    test_compounds = set(compounds[:n_test_compounds])
+    test_kinases = set(kinases[:n_test_kinases])
 
-        # Val: both kinase AND compound must be in val partition
-        val_mask = df["chembl_id"].isin(val_compounds) & df["target_kinase"].isin(val_kinases)
-        # Train: neither kinase NOR compound is in val partition
-        train_mask = ~df["chembl_id"].isin(val_compounds) & ~df["target_kinase"].isin(val_kinases)
+    # Test: both compound AND kinase must be in test partition
+    test_mask = df["chembl_id"].isin(test_compounds) & df["target_kinase"].isin(test_kinases)
+    # Train: neither compound NOR kinase is in test partition
+    train_mask = ~df["chembl_id"].isin(test_compounds) & ~df["target_kinase"].isin(test_kinases)
 
-        train_idx = np.where(train_mask)[0]
-        val_idx = np.where(val_mask)[0]
-
-        if len(val_idx) > 10 and len(train_idx) > 10:
-            folds.append((train_idx, val_idx))
-
-    return folds
+    train_idx = np.where(train_mask)[0]
+    test_idx = np.where(test_mask)[0]
+    return train_idx, test_idx
 
 
-def get_splits(df, scenario, n_folds, seed):
+def partition(df, scenario, seed):
     if scenario == "S1":
-        return split_s1(df, n_folds, seed)
+        return partition_s1(df, seed)
     elif scenario == "S2":
-        return split_by_group(df, "chembl_id", n_folds, seed)
+        return partition_by_group(df, "chembl_id", seed)
     elif scenario == "Scaffold":
-        return split_by_group(df, "scaffold", n_folds, seed)
+        return partition_by_group(df, "scaffold", seed)
     elif scenario == "S3":
-        return split_by_group(df, "target_kinase", n_folds, seed)
+        return partition_by_group(df, "target_kinase", seed)
     elif scenario == "S4":
-        return split_s4(df, n_folds, seed)
+        return partition_s4(df, seed)
     else:
         raise ValueError(f"Unknown scenario: {scenario}")
 
 
 # ── GPU training ───────────────────────────────────────────────────────────
-def train_evaluate_fold(
+def train_evaluate(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
     device: torch.device,
+    seed: int,
 ) -> float:
-    """Train MLP on GPU, return MCC on val."""
-    # Standardize
+    """Train MLP on GPU, return MCC on external test."""
     scaler = StandardScaler()
     X_tr = scaler.fit_transform(X_train)
-    X_v = scaler.transform(X_val)
+    X_te = scaler.transform(X_test)
 
-    # Tensors → GPU
     X_tr_t = torch.from_numpy(X_tr.astype(np.float32)).to(device)
     y_tr_t = torch.from_numpy(y_train.astype(np.float32)).to(device)
-    X_v_t = torch.from_numpy(X_v.astype(np.float32)).to(device)
+    X_te_t = torch.from_numpy(X_te.astype(np.float32)).to(device)
 
-    # Class weight for balancing
     n_pos = max((y_train == 1).sum(), 1)
     n_neg = max((y_train == 0).sum(), 1)
     pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32, device=device)
 
-    # Model
+    torch.manual_seed(seed)
     model = MLP(X_tr.shape[1]).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
 
-    # DataLoader
     train_ds = TensorDataset(X_tr_t, y_tr_t)
     train_dl = DataLoader(train_ds, batch_size=2048, shuffle=True, drop_last=False)
 
-    # Train
     model.train()
     best_loss = float("inf")
     patience, patience_counter = 10, 0
@@ -260,15 +242,14 @@ def train_evaluate_fold(
             if patience_counter >= patience:
                 break
 
-    # Eval
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
-        logits = model(X_v_t)
+        logits = model(X_te_t)
         preds = (logits > 0.0).cpu().numpy().astype(int)
 
-    return float(matthews_corrcoef(y_val, preds))
+    return float(matthews_corrcoef(y_test, preds))
 
 
 # ── main ───────────────────────────────────────────────────────────────────
@@ -296,21 +277,24 @@ def main():
         print(f"  Dataset: {ds_name}")
         print(f"{'='*60}")
 
+        # Load and combine into single pool
         dfs = []
         for fpath in files.values():
             if fpath.exists():
                 dfs.append(pd.read_csv(fpath, sep="\t"))
             else:
-                print(f"  WARNING: {fpath} not found, skipping")
+                print(f"  WARNING: {fpath} not found")
         df = pd.concat(dfs, ignore_index=True)
         print(f"  Total rows: {len(df):,}")
         print(f"  Unique compounds: {df['chembl_id'].nunique():,}")
         print(f"  Unique kinases: {df['target_kinase'].nunique()}")
 
+        # Ensure scaffold column
         if "scaffold" not in df.columns:
             print("  Computing scaffolds...")
             df["scaffold"] = df["canonical_smiles"].apply(get_scaffold)
 
+        # Build fingerprint matrix
         print("  Computing Morgan fingerprints...")
         X_all, y_all, valid_mask = build_fp_matrix(df)
         df_valid = df.loc[valid_mask].reset_index(drop=True)
@@ -320,36 +304,51 @@ def main():
 
         for scenario in SCENARIOS:
             print(f"\n  --- Scenario {scenario} ---")
-            try:
-                folds = get_splits(df_valid, scenario, N_FOLDS, SEED)
-                print(f"  Generated {len(folds)} folds")
-            except Exception as e:
-                print(f"  ERROR splitting: {e}")
-                traceback.print_exc()
-                ds_results[scenario] = {"mean": float("nan"), "std": float("nan"), "n_folds": 0}
-                continue
-
             mccs = []
-            for i, (train_idx, val_idx) in enumerate(folds):
-                y_tr = y_all[train_idx]
-                y_vl = y_all[val_idx]
-                if len(np.unique(y_tr)) < 2 or len(np.unique(y_vl)) < 2:
-                    print(f"    Fold {i}: skipped (single class in {'train' if len(np.unique(y_tr))<2 else 'val'})")
+
+            for s in range(N_SEEDS):
+                seed = BASE_SEED + s
+                try:
+                    train_idx, test_idx = partition(df_valid, scenario, seed)
+                except Exception as e:
+                    print(f"    Seed {seed}: ERROR partitioning: {e}")
                     continue
 
-                mcc = train_evaluate_fold(X_all[train_idx], y_tr, X_all[val_idx], y_vl, device)
+                y_tr = y_all[train_idx]
+                y_te = y_all[test_idx]
+
+                # Skip if single class in train or test
+                if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
+                    print(f"    Seed {seed}: skipped (single class)")
+                    continue
+
+                if len(test_idx) < 10:
+                    print(f"    Seed {seed}: skipped (test too small: {len(test_idx)})")
+                    continue
+
+                mcc = train_evaluate(
+                    X_all[train_idx], y_tr,
+                    X_all[test_idx], y_te,
+                    device, seed,
+                )
                 mccs.append(mcc)
-                print(f"    Fold {i}: MCC = {mcc:.3f}  (train={len(train_idx):,}, val={len(val_idx):,})")
+                print(f"    Seed {seed}: MCC = {mcc:.3f}  "
+                      f"(train={len(train_idx):,}, test={len(test_idx):,})")
 
             if mccs:
                 mean_mcc = float(np.mean(mccs))
                 std_mcc = float(np.std(mccs))
-                print(f"  {scenario}: MCC = {mean_mcc:.3f} ± {std_mcc:.3f} ({len(mccs)} folds)")
+                print(f"  {scenario}: MCC = {mean_mcc:.3f} ± {std_mcc:.3f} "
+                      f"({len(mccs)} seeds)")
             else:
                 mean_mcc, std_mcc = float("nan"), float("nan")
-                print(f"  {scenario}: No valid folds!")
+                print(f"  {scenario}: No valid runs!")
 
-            ds_results[scenario] = {"mean": round(mean_mcc, 3), "std": round(std_mcc, 3), "n_folds": len(mccs)}
+            ds_results[scenario] = {
+                "mean": round(mean_mcc, 3),
+                "std": round(std_mcc, 3),
+                "n_seeds": len(mccs),
+            }
 
         all_results[ds_name] = ds_results
 
