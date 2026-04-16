@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**semantic-screening** is an open-source platform for predicting protein-ligand interactions using deep learning. It implements the **DT-Kinase** architecture (CNN + Cross-Attention) and classical ML pipelines. The scientific goal is "semantic docking" — predicting compound activity against kinase targets using PLM embeddings of primary sequences, without requiring 3D structures.
+**semantic-screening** is an open-source framework for predicting protein-ligand interactions, focusing on kinase targets. It implements the **DT-Kinase** architecture (CNN 2D + Bi-modal Cross-Attention) and orchestrates baseline evaluations against state-of-the-art models (DrugBAN, GraphBAN, ConPLex). 
+
+The unifying scientific concept is **"semantic screening"**: predicting compound bioactivity by extracting meaning exclusively from the linear notation of sequences (amino acids for proteins, SMILES for ligands), without requiring 3D coordinates or heuristic descriptors. While DT-Kinase, GraphBAN, and ConPLex leverage pre-trained Language Models (PLMs), the framework also accommodates models trained entirely from scratch (such as DrugBAN), demonstrating that the semantic paradigm is defined by the input modality (1D primary sequences) rather than the specific encoding strategy.
 
 **Repository**: gmmsb-lncc/semantic-screening | **License**: MIT | **Python**: 3.9+ (env uses 3.12) | **PyTorch**: 2.0+
 
