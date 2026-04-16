@@ -10,51 +10,51 @@
 
 # --- Dataset & Embedding ---------------------------------------------------
 # 'dataset' is the DEFAULT — override via --dataset CLI flag
-dataset: non_human                # non_human | human | all
-embedding: 8M                    # 8M | 150M | 650M
-levels: 4cnn                     # comma-separated: 1a,2,3a,4cnn
+dataset: human # non_human | human | all
+embedding: 8M # 8M | 150M | 650M
+levels: 4cnn # comma-separated: 1a,2,3a,4cnn
 epochs: 500
-model_selection_metric: mcc       # mcc | auc | f1
+model_selection_metric: mcc # mcc | auc | f1
 
 # --- Output ----------------------------------------------------------------
 # Use {dataset} placeholder — auto-replaced at runtime
-output_root: results/benchmark_{dataset}_{embedding}
+output_root: results/benchmark_{dataset}_{embedding}_13_04_2026
 
 # --- Level 4 CNN Architecture (v7) ----------------------------------------
 level4_cnn:
-  variant: v7                     # v7 | v7_gated | v8 | v9 | v10
-  num_heads: 8                    # K projection heads
-  head_dim: 32                    # d_head per head
-  channels: 64                    # CNN output channels
-  batch_size: 128                 # thesis benchmark value (overrides previous 256)
+  variant: v7 # v7 | v7_gated | v8 | v9 | v10
+  num_heads: 8 # K projection heads
+  head_dim: 32 # d_head per head
+  channels: 64 # CNN output channels
+  batch_size: 128 # thesis benchmark value
 
   # Regularisation
   dropout: 0.35
   weight_decay: 0.04
 
   # Precision
-  double: false                   # float64 (true = 2x slower, 2x memory)
-  no_amp: false                   # disable AMP (float32 only)
-  deterministic: false            # reproducible (20-30% slower)
+  double: true # float64 (true = 2x slower, 2x memory)
+  no_amp: false # disable AMP (float32 only)
+  deterministic: false # reproducible (20-30% slower)
 
   # Training
   patience: 15
-  focal: true                     # Focal Loss (gamma=2.0)
+  focal: true # Focal Loss (gamma=2.0)
   focal_gamma: 2.0
 
   # Embedding Adapter
   adapter:
     enabled: true
     layers: 1
-    self_attn: true               # 4-head self-attention before MLP blocks
-    lr_mult: 5.0                  # differential learning rate for adapter
-    prot_dim: 256                 # bottleneck dimension (protein)
-    lig_dim: 512                  # bottleneck dimension (ligand)
+    self_attn: true # 4-head self-attention before MLP blocks
+    lr_mult: 5.0 # differential learning rate for adapter
+    prot_dim: 256 # bottleneck dimension (protein)
+    lig_dim: 512 # bottleneck dimension (ligand)
 
   # Calibration
   calibration:
-    platt: true                   # 2-param logistic regression on train logits
-    temperature: false            # 1-param temperature scaling on val logits
+    platt: true # 2-param logistic regression on train logits
+    temperature: false # 1-param temperature scaling on val logits
 
   # Contrastive (ConPLex-inspired, default OFF)
   contrastive_weight: 0.0
@@ -74,7 +74,7 @@ level4_cnn:
   train_to_zero_thr: 0.01
 
   # Checkpointing
-  checkpoint_every: 50
+  checkpoint_every: 10
 
 # --- Rigor Safeguards ------------------------------------------------------
 rigor:
