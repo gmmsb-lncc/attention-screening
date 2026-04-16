@@ -26,7 +26,7 @@ level4_cnn:
   num_heads: 8 # K projection heads
   head_dim: 32 # d_head per head
   channels: 64 # CNN output channels
-  batch_size: 256
+  batch_size: 128 # thesis benchmark value
 
   # Regularisation
   dropout: 0.35
