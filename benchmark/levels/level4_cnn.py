@@ -12,6 +12,12 @@ CNN to learn spatial patterns in the interaction maps and attention
 pooling to selectively aggregate relevant positions.
 
 End-to-end training — no separate MLP stage.
+
+Scope note: this is the canonical DT-Kinase v7 reference path and is
+pure classification (single logit + Focal/BCE loss). Multi-task
+regression heads (MultiTaskLoss, regression_head) exist in separate
+modules under src/classifier/ and src/attention_matrix/ for exploratory
+variants only; they are NOT used by the thesis benchmark.
 """
 
 from __future__ import annotations
