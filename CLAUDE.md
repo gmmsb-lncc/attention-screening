@@ -10,6 +10,17 @@ The unifying scientific concept is **"semantic screening"**: predicting compound
 
 **Repository**: gmmsb-lncc/semantic-screening | **License**: MIT | **Python**: 3.9+ (env uses 3.12) | **PyTorch**: 2.0+
 
+## Related Repository: PhD Thesis
+
+The sibling repository **`~/PhD`** (`/Users/sulfierry/PhD`) contains the LaTeX source for the doctoral thesis that formalizes this framework. It provides:
+
+- **Academic narrative** (Chapters 1–6): problem formulation, literature review, data curation methodology, architectural specification (DT-Kinase Levels 1–4), experimental results, and conclusions.
+- **Canonical definitions**: the "semantic screening" concept, scaffold split protocol, monotonic filter, multi-seed evaluation protocol (5 seeds), and MCC-optimal threshold calibration — all described with mathematical rigor.
+- **Figures and tables** (`tex/`, `figures/`): TikZ bar charts, architecture diagrams, and comparative tables that reference results produced by this repository's `benchmark/` module.
+- **Standardized model order**: DT-Kinase, ConPLex, DrugBAN, GraphBAN — used consistently in all legends, tables, and prose.
+
+When making changes to this codebase that affect reported metrics, architectural claims, or evaluation protocols, the corresponding thesis chapters in `~/PhD/tex/` must be updated to maintain consistency.
+
 ## Environment Setup
 
 ```bash
@@ -40,42 +51,79 @@ pytest tests/test_cross_attention_model.py  # Single test file
 
 Markers defined: `slow`, `integration`, `unit`, `regression`, `classifier`, `build`, `requires_gpu`, `requires_data`.
 
-## Architecture: DT-Kinase
+## Architecture: DT-Kinase (v7)
 
-### Parallel Pipelines
+The production architecture is **Level 4 CNN v7**, a hierarchical model with 4 ablation levels:
 
-1. **Classical ML Pipeline** (`src/integrated_pipeline.py`): Generates mean-pooled vector embeddings → trains 10 models (XGBoost, LightGBM, CatBoost, RF, SVM, etc) for both classification and regression.
-2. **DT-Kinase Deep Learning Pipeline** (`src/attention_matrix/`, `crossattention_split_analysis/`): Uses per-token matrix embeddings → CNN multi-scale encoders (kernels {3,5,7}) → bidirectional cross-attention → multi-task prediction (classification + regression jointly).
+| Level | Architecture | Input | Purpose |
+|-------|-------------|-------|---------|
+| 1 | KNN/MLP classifiers | Mean-pooled vectors (concat) | Baseline — no learned interaction |
+| 2 | MLP on concatenated embeddings | Per-token matrices (mean-pooled) | Learned combination, no interaction |
+| 3 | Bi-modal attention pooling | Per-token matrices | Selective aggregation, no 2D interaction |
+| 4 (v7) | CNN 2D + cross-attention + attention pooling | Per-token matrices | Full model — positional interaction maps |
 
-### Module Dependency Flow
+### Production Model: Level 4 CNN v7
+
+- **Encoders**: ESM-2 8M (protein, frozen) + MoLFormer (ligand, frozen)
+- **Projections**: Multi-head linear projections (K=8 heads, d_head=32)
+- **Interaction**: 2D cross-attention maps → CNN 2D encoder (channels=64)
+- **Pooling**: Hierarchical attention pooling (per-head → cross-head)
+- **Output**: Binary classification (active/inactive, pChEMBL ≥ 6.0)
+- **Config**: `configs/v7.yaml`
+
+### Key Source Files
 
 ```
-Input TSV (seq_id, seq, chembl_id, smiles, pchembl_value)
-    │
-    ├─→ src/build/embeddings/strategies/     # ESM-2, ESM-C, SMI-TED, MoLFormer
-    │
-    ├─→ src/classifier/ + src/regression/    # Classical ML (uses vectors)
-    │
-    └─→ src/attention_matrix/model.py        # DT-Kinase (uses matrices)
-            CrossAttentionModel              # Basic: single cross-attn layer
-            ImprovedCrossAttentionModel      # Deep: multi-layer + FFN + GELU
-        src/classifier/models/cross_attention_model.py
-            CrossAttentionAffinityModel      # Full DT-Kinase with CNN encoders
-            MultiTaskLoss                    # Joint classification + regression loss
+src/classifier/models/cross_attention_model.py   # Production model classes:
+    CrossAttentionAffinityModel                  # Full Level 4 CNN v7
+    MultiTaskLoss                                # Joint classification + regression
+    CNNEncoder, CrossAttention, MultiTaskHead    # Sub-modules
+
+benchmark/                                       # Orchestration layer:
+    orchestrator.py     # BenchmarkOrchestrator — runs all levels × seeds
+    levels/             # Level implementations (level1.py → level4_cnn.py)
+    config.py           # Runtime config from v7.yaml
+    metrics.py          # MCC, AUROC, AUPRC, F1, Precision, Recall
+    splits.py           # Scaffold split loader
+    visualization.py    # Result plots
+
+scaffolds_splits/                                # Data curation module:
+    splitter.py         # Bemis-Murcko scaffold split (80/10/10)
+    monotonic.py        # Monotonic profile filter
+    validation.py       # Split integrity checks
+```
+
+### Running the Benchmark
+
+```bash
+# Config-driven (production):
+python3 run_from_config.py configs/v7.yaml --dataset non_human
+python3 run_from_config.py configs/v7.yaml --dataset human
+python3 run_from_config.py configs/v7.yaml --dataset all
+python3 run_from_config.py configs/v7.yaml --dataset non_human --dry-run
+
+# Shell orchestrator:
+bash run_benchmark.sh
 ```
 
 ## Baseline Models Integration
 
-To rigorously evaluate DT-Kinase, the repository integrates several State-of-the-Art (SOTA) baseline models. Each resides in its own root directory with isolated environments to avoid dependency conflicts:
+Three SOTA baselines are evaluated under identical conditions. Each has its own directory and isolated environment:
 
-1. **DrugBAN** (`DrugBAN/`): Deep Bilinear Attention Network (MIT license).
-2. **GraphBAN** (`GraphBAN/`): Graph-based Bilinear Attention Network (MIT license).
-3. **ConPLex** (`ConPLex/`): Contrastive PLM-based exploration (structure-free, co-embedding with distance metrics) (MIT license).
+| Model | Directory | Encoders | Publication |
+|-------|-----------|----------|-------------|
+| **DrugBAN** | `DrugBAN/` | CNN 1D + GCN (trained from scratch, **no PLMs**) | *Nature Machine Intelligence* |
+| **GraphBAN** | `GraphBAN/` | ESM-1b + ChemBERTa + task-specific encoders | *Nature Communications* |
+| **ConPLex** | `ConPLex/` | ProtBERT + Morgan fingerprints (contrastive) | *PNAS* |
 
-**Evaluation Workflow**:
-- We use unified **scaffold splits** (train/val/test) for fair comparison.
-- Baseline datasets are usually located in `DrugBAN/datasets/kinase/{dataset}/scaffold/`.
-- Training and evaluation are run via dedicated shell scripts and python wrappers in each baseline directory (e.g., `ConPLex/run_conplex_kinase_benchmark.sh`, `DrugBAN/run_dtkinase_drugban.sh`).
+**`KinBAN/`** contains an experimental fork (work in progress).
+
+**Equitable Comparison Protocol** (formalized in the PhD thesis, Chapter 4):
+- **Same data**: identical scaffold splits (train/val/test) for all models
+- **Same seeds**: `[42, 123, 456, 789, 1024]` — 5 independent runs
+- **Same threshold**: MCC-optimal on validation set (no test leakage)
+- **Same metric**: MCC as primary, AUROC/AUPRC/F1 as secondary
+- Baseline training scripts: `DrugBAN/run_dtkinase_drugban.sh`, `ConPLex/run_conplex_kinase_benchmark.sh`
 
 ## Data Layout
 
@@ -91,29 +139,32 @@ To rigorously evaluate DT-Kinase, the repository integrates several State-of-the
 `./results/protein_model_benchmark_{human|non_human}_v2/{embedding_name}/build/`
 with subdirs: `protein_matrices/`, `ligand_matrices/`, `molformer_matrix/`, `attention_matrices/`.
 
-## Split Analysis Module (`crossattention_split_analysis/`)
+## Data Curation: `scaffolds_splits/`
 
-This is the most actively developed module. Key files:
+The production split module implements:
+- **Bemis-Murcko scaffold split** (80/10/10) ensuring no scaffold leaks between partitions
+- **Monotonic profile filter** removing trivially predictable kinases/compounds
+- **Universal split**: single partition over the combined Human + Non-Human pool
 
-- `config.py` — `TrainingConfig` dataclass, `SUPPORTED_EMBEDDINGS`, `DATASET_PATHS`, `AVAILABLE_SCENARIOS`, thresholds
-- `experiment.py` — `run_single_analysis()` (CLI entry), `run_crossattention_analysis()` (orchestrator), `run_scenario()` (single train/eval)
-- `data/splits.py` — Three split strategies: `split_random`, `split_by_compound`, `split_new_compound_new_kinase`
+## Legacy Split Module: `crossattention_split_analysis/`
 
-**Three data split scenarios** (hardest → easiest):
-1. `new_compound_new_kinase` — both compound AND kinase unseen in test (true generalization)
+Earlier exploration module with three split strategies (retained for reproducibility):
+1. `new_compound_new_kinase` — both unseen (hardest)
 2. `compound` — compound unseen, kinase may overlap
-3. `random` — random 80/10/10 split (baseline, allows data leakage)
+3. `random` — 80/10/10 random (allows leakage, baseline only)
 
-**Affinity threshold**: pChEMBL >= 6.0 (IC50 <= 1000 nM) → active.
+**Affinity threshold**: pChEMBL ≥ 6.0 (IC₅₀ ≤ 1 μM) → active.
 
 ## Key Development Notes
 
-- Default seeds for multi-seed experiments: `[42, 123, 456, 789, 1024]`
-- Model selection (early stopping) uses **validation MCC** or **validation AUPR/AUROC** depending on the pipeline, not loss.
-- `MultiTaskLoss` weights: classification=1.0, regression=0.5
-- ESM loading: `src/__init__.py` adds `llm/ESM/` to `sys.path`. **Never install ESM via pip**.
-- The `--use_attention` flag switches protein input from per-residue embeddings to attention matrices `[seq_len, seq_len]`.
-- The dataset `all` combines `human` + `non_human` by loading from both embedding directories.
+- **Production config**: `configs/v7.yaml` — all hyperparameters in one file
+- **Seeds**: `[42, 123, 456, 789, 1024]` — multi-seed protocol, partitions fixed
+- **Model selection**: best validation MCC checkpoint (DT-Kinase); DrugBAN/GraphBAN use validation AUROC; ConPLex uses validation AUPRC
+- **MultiTaskLoss weights**: classification=1.0, regression=0.5
+- **ESM loading**: `src/__init__.py` adds `llm/ESM/` to `sys.path`. **Never install ESM via pip** (causes segfaults).
+- **Dataset `all`**: combines `human` + `non_human` by loading from both embedding directories
+- **Embeddings are pre-computed**: ESM-2 and MoLFormer run once, stored as `.npy` matrices, reused across all seeds and epochs
+- **No cross-validation**: uses fixed scaffold split + 5-seed variance estimation (not k-fold)
 
 ## Adding a New Protein Model
 
