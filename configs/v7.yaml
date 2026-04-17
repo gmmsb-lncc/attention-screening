@@ -53,7 +53,7 @@ level4_cnn:
 
   # Calibration
   calibration:
-    platt: true # 2-param logistic regression on train logits
+    platt: true # 2-param logistic regression on val logits
     temperature: false # 1-param temperature scaling on val logits
 
   # Contrastive (ConPLex-inspired, default OFF)
