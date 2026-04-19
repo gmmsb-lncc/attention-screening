@@ -4,11 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**semantic-screening** is an open-source framework for predicting protein-ligand interactions, focusing on kinase targets. It implements the **DT-Kinase** architecture (CNN 2D + Bi-modal Cross-Attention) and orchestrates baseline evaluations against state-of-the-art models (DrugBAN, GraphBAN, ConPLex). 
+**semantic-screening** is an open-source framework for predicting protein-ligand interactions, focusing on kinase targets. It implements the **DT-Kinase** architecture (CNN 2D + Bi-modal Cross-Attention) and orchestrates baseline evaluations against state-of-the-art models (DrugBAN, GraphBAN, ConPLex).
 
 The unifying scientific concept is **"semantic screening"**: predicting compound bioactivity by extracting meaning exclusively from the linear notation of sequences (amino acids for proteins, SMILES for ligands), without requiring 3D coordinates or heuristic descriptors. While DT-Kinase, GraphBAN, and ConPLex leverage pre-trained Language Models (PLMs), the framework also accommodates models trained entirely from scratch (such as DrugBAN), demonstrating that the semantic paradigm is defined by the input modality (1D primary sequences) rather than the specific encoding strategy.
 
 **Repository**: gmmsb-lncc/semantic-screening | **License**: MIT | **Python**: 3.9+ (env uses 3.12) | **PyTorch**: 2.0+
+
+## Current Objectives (active work)
+
+Near-term priorities driving active commits:
+
+1. **Rerun v7 benchmark with Platt-on-val calibration.** A recent fix (PR #206) moved the Platt scaling fit from train logits to validation logits, matching the thesis text and standard Platt (1999) methodology. All MCC numbers published in the thesis Chapter 5 will be regenerated. The canonical config is `configs/v7.yaml` (with `batch_size: 128` override of the committed 256).
+2. **Complete the `All` dataset benchmark** (386,099 samples post-filter; Human + Non-Human combined). This is the last corpus not yet fully evaluated and is required before generating bootstrap CIs + paired Wilcoxon statistics over the four models.
+3. **Post-hoc statistical analysis**: once the rerun is done, run `scripts/thesis_followups/bootstrap_ci.py` on the saved logits to produce the CI/p-value tables that replace the current "x ± σ" rows in thesis tables 17 and 18.
+
+## PR workflow
+
+**Open PRs against `cross_attention_lite`, not `main`.** The `main` branch is reserved for stable releases; `cross_attention_lite` is the active integration branch. Use `gh pr create --base cross_attention_lite`.
+
+The pattern in recent history (PRs #199, #201, #204, #206) is one merge commit per topic, squashing from a task-specific working branch into `cross_attention_lite`.
 
 ## Related Repository: PhD Thesis
 
@@ -64,12 +78,24 @@ The production architecture is **Level 4 CNN v7**, a hierarchical model with 4 a
 
 ### Production Model: Level 4 CNN v7
 
-- **Encoders**: ESM-2 8M (protein, frozen) + MoLFormer (ligand, frozen)
+- **Encoders**: ESM-2 8M (protein, frozen, 320-dim) + MoLFormer (ligand, frozen, 768-dim)
+- **Adapters**: `EmbeddingAdapter` with 4-head self-attention + MLP bottleneck (prot=256, lig=512), output-layer zero-init → starts as identity
 - **Projections**: Multi-head linear projections (K=8 heads, d_head=32)
-- **Interaction**: 2D cross-attention maps → CNN 2D encoder (channels=64)
-- **Pooling**: Hierarchical attention pooling (per-head → cross-head)
-- **Output**: Binary classification (active/inactive, pChEMBL ≥ 6.0)
-- **Config**: `configs/v7.yaml`
+- **Interaction maps**: `M_k = P_k L_k^T / √d_h`, scores preserved raw (no softmax marginalization)
+- **CNN 2D**: 4 layers (8→32→64→64→64), dilation=2 only on layer 3, BatchNorm2d+GELU. No internal dropout.
+- **Pooling**: Hierarchical attention (ligand axis → protein axis), single learnable query per stage.
+- **Dropout**: p=0.35 applied to the pooled vector before the classifier (not inside CNN).
+- **Output**: Binary classification (active/inactive, pChEMBL ≥ 6.0) via `Linear(64, 1)` + BCEWithLogitsLoss.
+- **Loss**: Focal Loss (γ=2.0) with class weight `α_+ = clip(N_-/N_+, 1.0, 20.0)`.
+- **Calibration**: Platt scaling (2-parameter logistic regression) fit on **validation** logits (changed from train in PR #206).
+- **Threshold**: MCC-optimal on validation, 2-pass sweep (100 coarse + 100 fine ±0.05).
+- **Config**: `configs/v7.yaml` (source of truth; B=128, dropout=0.35, λ=0.04, patience=15, float64).
+
+### What is NOT the v7 benchmark
+
+- `src/classifier/models/cross_attention_model.py` contains `CrossAttentionAffinityModel`, `MultiTaskLoss`, etc. — these are **exploratory variants**, not the thesis benchmark path.
+- `src/attention_matrix/model.py` and `examples/crossattention_split_analysis/models/level5_lite/` are also experimental.
+- The canonical v7 training and evaluation pipeline lives in **`benchmark/levels/level4_cnn.py`** and is entry-pointed via `run_from_config.py configs/v7.yaml`.
 
 ### Key Source Files
 
@@ -157,14 +183,30 @@ Earlier exploration module with three split strategies (retained for reproducibi
 
 ## Key Development Notes
 
-- **Production config**: `configs/v7.yaml` — all hyperparameters in one file
-- **Seeds**: `[42, 123, 456, 789, 1024]` — multi-seed protocol, partitions fixed
-- **Model selection**: best validation MCC checkpoint (DT-Kinase); DrugBAN/GraphBAN use validation AUROC; ConPLex uses validation AUPRC
-- **MultiTaskLoss weights**: classification=1.0, regression=0.5
+- **Production config**: `configs/v7.yaml` — single source of truth for hyperparameters. Override only via env vars or CLI flags.
+- **Seeds**: `[42, 123, 456, 789, 1024]` — multi-seed protocol, partitions fixed across seeds.
+- **Model selection**: best validation MCC checkpoint (DT-Kinase); DrugBAN/GraphBAN use validation MCC; ConPLex uses validation MCC with threshold calibration (see `ConPLex/` scripts). All four models now use **MCC-optimal on val** for threshold selection (enforced for equitable comparison).
+- **Calibration**: Platt scaling on val logits (default ON via `BENCHMARK_LEVEL4CNN_PLATT=1`); Temperature scaling also on val (opt-in via `BENCHMARK_LEVEL4CNN_TEMPERATURE=1`).
+- **`MultiTaskLoss` is NOT used in v7.** Its presence in `src/classifier/` is vestigial from exploratory variants. The v7 benchmark uses pure `FocalLoss` → `BCEWithLogitsLoss`.
 - **ESM loading**: `src/__init__.py` adds `llm/ESM/` to `sys.path`. **Never install ESM via pip** (causes segfaults).
-- **Dataset `all`**: combines `human` + `non_human` by loading from both embedding directories
-- **Embeddings are pre-computed**: ESM-2 and MoLFormer run once, stored as `.npy` matrices, reused across all seeds and epochs
-- **No cross-validation**: uses fixed scaffold split + 5-seed variance estimation (not k-fold)
+- **Dataset `all`**: combines `human` + `non_human` by loading from both embedding directories. Post-filter total: 386,099 samples.
+- **Embeddings are pre-computed**: ESM-2 and MoLFormer run once, stored as `.npy` matrices under `protein_matrices/` and `molformer_matrix/`, reused across all seeds and epochs.
+- **Sequence limits**: MAX_SEQ_LEN=1024 for proteins (truncates C-terminal of atypically long kinases like ULK1); 512 for ligand SMILES tokens (rarely hit in practice).
+- **Non-determinism**: cuDNN non-deterministic reductions are active by default. σ over seeds captures both seed-dependent initialization AND GPU reduction noise. Strict determinism via `BENCHMARK_LEVEL4CNN_DETERMINISTIC=1` (20–30% slower).
+- **No cross-validation**: uses fixed scaffold split + 5-seed variance estimation (not k-fold).
+
+## Thesis follow-up scripts
+
+`scripts/thesis_followups/` contains non-architectural analyses for the upcoming thesis rerun:
+
+| Script | Purpose |
+|--------|---------|
+| `run_platt_vs_temperature.sh` | Calibration comparison table (both now fit on val) |
+| `run_pchembl_sensitivity.sh` | Activity threshold sweep τ ∈ {5.5, 6.0, 6.5, 7.0, 7.5} |
+| `run_cross_species.sh` + `eval_checkpoint_on_dataset.py` | H→NH and NH→H transfer (thesis Objective 5) |
+| `bootstrap_ci.py` | Post-hoc bootstrap CI + paired Wilcoxon on saved logits (no retraining) |
+
+`scripts/count_v7_params.py` prints the trainable/frozen parameter breakdown for v7.
 
 ## Adding a New Protein Model
 
