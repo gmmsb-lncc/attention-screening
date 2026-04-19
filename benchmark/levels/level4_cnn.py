@@ -215,7 +215,7 @@ class EmbeddingAdapter(nn.Module):
       - Optional per-residue self-attention before the MLP blocks
 
     Each MLP block:  Linear → GELU → Dropout → Linear + Skip → LayerNorm
-    Self-attention:  MultiheadAttention(1 head) + Skip → LayerNorm
+    Self-attention:  MultiheadAttention(4 heads) + Skip → LayerNorm
 
     References:
       Houlsby et al., "Parameter-Efficient Transfer Learning", ICML 2019.
@@ -1520,8 +1520,8 @@ class Level4CNNRunner(BaseLevelRunner):
             mode=self.mode,
         )
 
-        # In train mode: use all train data (CNN is end-to-end, no
-        # separate feature extraction stage that could leak).
+        # CNN training is end-to-end (no separate feature-extraction stage),
+        # so the full train loader is used for gradient steps.
         model_train_loader = train_loader
 
         # --- Train-to-zero mode ----------------------------------------
@@ -1581,7 +1581,7 @@ class Level4CNNRunner(BaseLevelRunner):
         # Calibration strategy (controlled by env vars):
         #
         #  Platt Scaling (default ON):
-        #    Fits a 2-parameter logistic regression on train logits
+        #    Fits a 2-parameter logistic regression on val logits
         #    Corrects both scale and bias — empirically superior under
         #    scaffold splits (Human: +0.021 MCC vs Temperature, 4/5 seeds)
         #    Reference: Platt, "Probabilistic Outputs for SVMs", 1999.
@@ -1591,7 +1591,7 @@ class Level4CNNRunner(BaseLevelRunner):
         #    1 parameter ⇒ lower risk of overfitting but corrects scale only
         #    Reference: Guo et al., ICML 2017.
         #
-        #  Protocol: calibrate(train/val) → threshold(val) → evaluate(test)
+        #  Protocol: calibrate(val) → threshold(val) → evaluate(test)
         # ----------------------------------------------------------------
         use_platt = os.getenv("BENCHMARK_LEVEL4CNN_PLATT", "1") == "1"
         use_temperature = os.getenv("BENCHMARK_LEVEL4CNN_TEMPERATURE", "0") == "1"
@@ -1600,8 +1600,8 @@ class Level4CNNRunner(BaseLevelRunner):
         calibrator = None
 
         if use_platt:
-            tqdm.write("  Fitting Platt calibration on train set...")
-            calibrator = _platt_calibrate(model, model_train_loader, device)
+            tqdm.write("  Fitting Platt calibration on val set...")
+            calibrator = _platt_calibrate(model, val_loader, device)
 
         if use_temperature:
             tqdm.write("  Fitting temperature scaling on val set...")
