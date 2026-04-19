@@ -30,13 +30,24 @@ from pathlib import Path
 from .base import Featurizer
 from ..utils import get_logger, canonicalize
 
-from mol2vec.features import (
-    mol2alt_sentence,
-    mol2sentence,
-    MolSentence,
-    sentences2vec,
-)
-from gensim.models import word2vec
+# mol2vec/gensim are only needed by Mol2VecFeaturizer, not by the
+# ProtBERT + Morgan inference path used in eval_conplex_v2. Wrap in
+# try/except so broken dependency chains (e.g., RDKit PandasTools
+# with pandas 2.2+) do not block module import.
+try:
+    from mol2vec.features import (
+        mol2alt_sentence,
+        mol2sentence,
+        MolSentence,
+        sentences2vec,
+    )
+    from gensim.models import word2vec
+    _MOL2VEC_AVAILABLE = True
+except Exception:  # pragma: no cover
+    mol2alt_sentence = mol2sentence = MolSentence = sentences2vec = None
+    word2vec = None
+    _MOL2VEC_AVAILABLE = False
+
 from torch.nn import ModuleList
 from torch.nn.functional import one_hot
 
