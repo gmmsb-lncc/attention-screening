@@ -23,7 +23,7 @@ set -euo pipefail
 # Configuration (edit if paths differ on your machine)
 # ---------------------------------------------------------------------------
 CONPLEX_DIR="${CONPLEX_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-CHECKPOINT_DIR="${CHECKPOINT_DIR:-/data/docktkinase/ConPLex/best_models}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-${CONPLEX_DIR}/best_models}"
 RESULTS_DIR="${RESULTS_DIR:-${CONPLEX_DIR}/results_v2}"
 DEVICE="${DEVICE:-0}"
 
