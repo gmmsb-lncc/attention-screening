@@ -36,7 +36,7 @@ PROTOCOL="${PROTOCOL:-all}"                    # 1 | 2 | all
 DATASET="${DATASET:-all}"                      # non_human | human | all | all_datasets
 GPU="${GPU:-0}"                                # CUDA device ID
 EPOCHS="${EPOCHS:-50}"                         # ConPLex paper uses 50
-SEEDS="${SEEDS:-0 1 2}"                        # 3 replicatas (paper uses 5)
+SEEDS="${SEEDS:-42 123 456 789 1024}"          # 5 sementes canônicas da tese (DT-Kinase, DrugBAN, GraphBAN)
 CONTRASTIVE="${CONTRASTIVE:-False}"            # Disable DUD-E contrastive by default
                                                # (kinase datasets don't have DUD-E decoys)
 DRUG_FEAT="${DRUG_FEAT:-MorganFeaturizer}"
