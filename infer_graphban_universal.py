@@ -34,10 +34,25 @@ def _to_f32(x):
     return torch.from_numpy(arr)
 
 
+def _cast_graph_f32(g):
+    """Cast todas ndata/edata float64 → float32. DGL default é float64."""
+    for k in list(g.ndata.keys()):
+        t = g.ndata[k]
+        if t.dtype == torch.float64:
+            g.ndata[k] = t.float()
+    for k in list(g.edata.keys()):
+        t = g.edata[k]
+        if t.dtype == torch.float64:
+            g.edata[k] = t.float()
+    return g
+
+
 def graph_collate_func(batch):
     """Collate para DTIDataset do GraphBAN (case_study). Retorna (v_d, fcfps, v_p, esm).
-    Força float32 em fcfp/esm — cache contém float64 e colide com autocast half."""
+    Força float32 em fcfp/esm + ndata/edata do grafo — cache contém float64 e
+    colide com autocast half."""
     drugs, fcfps, proteins, esms = zip(*batch)
+    drugs = [_cast_graph_f32(d) for d in drugs]
     drugs_batch = dgl.batch(drugs)
     fcfps_batch = _to_f32(np.stack([np.asarray(f, dtype=np.float32) for f in fcfps]))
     esms_batch = _to_f32(np.stack([np.asarray(e, dtype=np.float32) for e in esms]))
