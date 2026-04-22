@@ -75,7 +75,8 @@ def tsv_to_drugban_df(tsv_path: Path) -> pd.DataFrame:
 
 
 def load_model(checkpoint_path: Path, config: dict, device: torch.device) -> DrugBAN:
-    model = DrugBAN(**config["DRUGBAN"]).to(device)
+    # DrugBAN upstream: aceita yaml completo como kwargs (config["DRUG"], ["PROTEIN"], ["BCN"], ["DECODER"])
+    model = DrugBAN(**config).to(device)
     state = torch.load(checkpoint_path, map_location=device)
     if isinstance(state, dict) and "model_state_dict" in state:
         state = state["model_state_dict"]

@@ -59,7 +59,7 @@ def tsv_to_graphban_df(tsv_path: Path) -> pd.DataFrame:
 
 
 def load_model(checkpoint_path: Path, config: dict, device: torch.device):
-    model = GraphBAN(**config["GRAPHBAN"]).to(device)
+    model = GraphBAN(**config).to(device)
     state = torch.load(checkpoint_path, map_location=device)
     if isinstance(state, dict) and "model_state_dict" in state:
         state = state["model_state_dict"]
