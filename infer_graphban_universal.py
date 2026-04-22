@@ -71,12 +71,14 @@ def load_model(checkpoint_path: Path, config: dict, device: torch.device):
 @torch.no_grad()
 def predict(model, loader, device):
     ys, ps = [], []
+    use_amp = device.type == "cuda"
     for batch in loader:
         v_d, v_p, y = batch
-        v_d = v_d.to(device); v_p = v_p.to(device)
-        out = model(v_d, v_p)
+        v_d = v_d.to(device, non_blocking=True); v_p = v_p.to(device, non_blocking=True)
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+            out = model(v_d, v_p)
         logits = out[-1] if isinstance(out, tuple) else out
-        prob = torch.softmax(logits, dim=1)[:, 1]
+        prob = torch.softmax(logits.float(), dim=1)[:, 1]
         ys.append(y.numpy()); ps.append(prob.cpu().numpy())
     return np.concatenate(ys), np.concatenate(ps)
 
@@ -94,11 +96,14 @@ def main():
     ap.add_argument("--checkpoint-root", default="GraphBAN/results")
     ap.add_argument("--config", default="GraphBAN/configs/kinase_inductive.yaml")
     ap.add_argument("--output-dir", default="GraphBAN/results_universal")
-    ap.add_argument("--batch-size", type=int, default=64)
+    ap.add_argument("--batch-size", type=int, default=128)
+    ap.add_argument("--num-workers", type=int, default=4)
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
+    if device.type == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
 
     with open(REPO / args.config) as f:
         config = yaml.safe_load(f)
@@ -109,10 +114,15 @@ def main():
     print(f"val n={len(val_df)} pos={val_df['Y'].mean():.3f}")
     print(f"test n={len(test_df)} pos={test_df['Y'].mean():.3f}")
 
+    use_pin = device.type == "cuda"
     val_loader = DataLoader(DTIDataset(val_df.index.values, val_df),
-        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func)
+        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func,
+        num_workers=args.num_workers, pin_memory=use_pin,
+        persistent_workers=(args.num_workers > 0))
     test_loader = DataLoader(DTIDataset(test_df.index.values, test_df),
-        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func)
+        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func,
+        num_workers=args.num_workers, pin_memory=use_pin,
+        persistent_workers=(args.num_workers > 0))
 
     out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
