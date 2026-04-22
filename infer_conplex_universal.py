@@ -134,7 +134,7 @@ def main():
         if not ckpts: print(f"[skip] no .pt in {ckpt_dir}"); continue
         ckpt = ckpts[0]
         print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
-        model = SimpleCoembedding(drug_feat.shape, prot_feat.shape, latent_dim=1024).to(device)
+        model = SimpleCoembedding(drug_feat.shape, prot_feat.shape, latent_dimension=1024).to(device)
         state = torch.load(ckpt, map_location=device)
         model.load_state_dict(state, strict=False)
         model.eval()
