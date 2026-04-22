@@ -133,24 +133,24 @@ def predict(model, loader, y_true_all: np.ndarray, device):
     """Inferência GraphBAN. DTIDataset retorna (v_d, fcfps, v_p, esm);
     Y vem da DataFrame externa por ordenação (shuffle=False)."""
     ps = []
-    # AMP off: GraphBAN FCFP MLP recebe float32; autocast promove weights a half
-    # e colide com input float32/float64 no caso FP.
+    use_amp = device.type == "cuda"
     for batch in loader:
         v_d, fcfps, v_p, esms = batch
         v_d = v_d.to(device, non_blocking=True)
         v_p = v_p.to(device, non_blocking=True)
         fcfps = fcfps.to(device, non_blocking=True).float()
         esms = esms.to(device, non_blocking=True).float()
-        try:
-            out = model(v_d, v_p, fcfps, esms, device)
-        except TypeError:
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
             try:
-                out = model(v_d, fcfps, v_p, esms, device)
+                out = model(v_d, v_p, fcfps, esms, device)
             except TypeError:
                 try:
-                    out = model(v_d, v_p, fcfps, esms)
+                    out = model(v_d, fcfps, v_p, esms, device)
                 except TypeError:
-                    out = model(v_d, fcfps, v_p, esms)
+                    try:
+                        out = model(v_d, v_p, fcfps, esms)
+                    except TypeError:
+                        out = model(v_d, fcfps, v_p, esms)
         logits = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(logits.float(), dim=1)[:, 1]
         ps.append(prob.cpu().numpy())
