@@ -26,17 +26,17 @@ from dataloader import DTIDataset  # type: ignore
 from models import GraphBAN  # type: ignore
 from torch.utils.data import DataLoader
 
-try:
-    from dataloader import graph_collate_func  # type: ignore
-except ImportError:
-    import dgl  # fornecido pelo env 'graphban'
+import dgl  # fornecido pelo env 'graphban'
 
-    def graph_collate_func(batch):  # type: ignore[override]
-        drugs, proteins, labels = zip(*batch)
-        drugs_batch = dgl.batch(drugs)
-        proteins_batch = torch.as_tensor(np.array(proteins))
-        labels_batch = torch.as_tensor(np.array(labels))
-        return drugs_batch, proteins_batch, labels_batch
+
+def graph_collate_func(batch):
+    """Collate para DTIDataset do GraphBAN (case_study). Retorna (v_d, fcfps, v_p, esm)."""
+    drugs, fcfps, proteins, esms = zip(*batch)
+    drugs_batch = dgl.batch(drugs)
+    fcfps_batch = torch.as_tensor(np.stack(fcfps), dtype=torch.float32)
+    proteins_batch = torch.as_tensor(np.stack(proteins))
+    esms_batch = torch.as_tensor(np.stack(esms), dtype=torch.float32)
+    return drugs_batch, fcfps_batch, proteins_batch, esms_batch
 
 
 UNIVERSAL_TSV = {
@@ -123,18 +123,27 @@ def load_model(checkpoint_path: Path, config: dict, device: torch.device):
 
 
 @torch.no_grad()
-def predict(model, loader, device):
-    ys, ps = [], []
+def predict(model, loader, y_true_all: np.ndarray, device):
+    """Inferência GraphBAN. DTIDataset retorna (v_d, fcfps, v_p, esm);
+    Y vem da DataFrame externa por ordenação (shuffle=False)."""
+    ps = []
     use_amp = device.type == "cuda"
     for batch in loader:
-        v_d, v_p, y = batch
-        v_d = v_d.to(device, non_blocking=True); v_p = v_p.to(device, non_blocking=True)
+        v_d, fcfps, v_p, esms = batch
+        v_d = v_d.to(device, non_blocking=True)
+        v_p = v_p.to(device, non_blocking=True)
+        fcfps = fcfps.to(device, non_blocking=True)
+        esms = esms.to(device, non_blocking=True)
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            out = model(v_d, v_p)
+            # GraphBAN forward signature: model(v_d, v_p, fcfps, esm) — ajustar se falhar
+            try:
+                out = model(v_d, v_p, fcfps, esms)
+            except TypeError:
+                out = model(v_d, fcfps, v_p, esms)
         logits = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(logits.float(), dim=1)[:, 1]
-        ys.append(y.numpy()); ps.append(prob.cpu().numpy())
-    return np.concatenate(ys), np.concatenate(ps)
+        ps.append(prob.cpu().numpy())
+    return y_true_all, np.concatenate(ps)
 
 
 def best_checkpoint(seed_dir: Path) -> Path:
@@ -195,8 +204,8 @@ def main():
         ckpt = best_checkpoint(sd)
         print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
         m = load_model(ckpt, config, device)
-        vy, vp = predict(m, val_loader, device)
-        ty, tp = predict(m, test_loader, device)
+        vy, vp = predict(m, val_loader, val_df["Y"].to_numpy(), device)
+        ty, tp = predict(m, test_loader, test_df["Y"].to_numpy(), device)
         o.mkdir(exist_ok=True)
         np.savez(out_npz,
             val_y_true=vy, val_y_prob=vp, test_y_true=ty, test_y_prob=tp)
