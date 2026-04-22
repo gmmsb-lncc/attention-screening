@@ -22,9 +22,21 @@ if not GRAPHBAN_SRC.exists():
     GRAPHBAN_SRC = REPO / "GraphBAN" / "src"  # fallback para estrutura plana
 sys.path.insert(0, str(GRAPHBAN_SRC))
 
-from dataloader import DTIDataset, graph_collate_func  # type: ignore
+from dataloader import DTIDataset  # type: ignore
 from models import GraphBAN  # type: ignore
 from torch.utils.data import DataLoader
+
+try:
+    from dataloader import graph_collate_func  # type: ignore
+except ImportError:
+    import dgl  # fornecido pelo env 'graphban'
+
+    def graph_collate_func(batch):  # type: ignore[override]
+        drugs, proteins, labels = zip(*batch)
+        drugs_batch = dgl.batch(drugs)
+        proteins_batch = torch.as_tensor(np.array(proteins))
+        labels_batch = torch.as_tensor(np.array(labels))
+        return drugs_batch, proteins_batch, labels_batch
 
 
 UNIVERSAL_TSV = {

@@ -27,9 +27,23 @@ REPO_ROOT = Path(__file__).parent.resolve()
 DRUGBAN_SRC = REPO_ROOT / "DrugBAN" / "src"
 sys.path.insert(0, str(DRUGBAN_SRC))
 
-from dataloader import DTIDataset, graph_collate_func  # type: ignore
+from dataloader import DTIDataset  # type: ignore
 from models import DrugBAN  # type: ignore
 from torch.utils.data import DataLoader
+
+# graph_collate_func não exportado em DrugBAN/src/dataloader.py (padrão upstream).
+# Define local baseado no padrão DTIDataset.__getitem__ → (dgl_graph, np_array, label).
+try:
+    from dataloader import graph_collate_func  # type: ignore
+except ImportError:
+    import dgl  # fornecido pelo env 'drugban'
+
+    def graph_collate_func(batch):  # type: ignore[override]
+        drugs, proteins, labels = zip(*batch)
+        drugs_batch = dgl.batch(drugs)
+        proteins_batch = torch.as_tensor(np.array(proteins))
+        labels_batch = torch.as_tensor(np.array(labels))
+        return drugs_batch, proteins_batch, labels_batch
 
 
 UNIVERSAL_TSV = {
