@@ -121,15 +121,20 @@ def main():
         sd = REPO / args.checkpoint_root / args.corpus / f"seed_{seed}"
         if not sd.exists():
             print(f"[skip] {sd}"); continue
+        o = out_root / f"seed_{seed}"
+        out_npz = o / "raw_predictions.npz"
+        if out_npz.exists():
+            print(f"[seed {seed}] já concluído → {out_npz.relative_to(REPO)} (pulando)")
+            continue
         ckpt = best_checkpoint(sd)
         print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
         m = load_model(ckpt, config, device)
         vy, vp = predict(m, val_loader, device)
         ty, tp = predict(m, test_loader, device)
-        o = out_root / f"seed_{seed}"; o.mkdir(exist_ok=True)
-        np.savez(o / "raw_predictions.npz",
+        o.mkdir(exist_ok=True)
+        np.savez(out_npz,
             val_y_true=vy, val_y_prob=vp, test_y_true=ty, test_y_prob=tp)
-        print(f"  saved → {o/'raw_predictions.npz'}")
+        print(f"  saved → {out_npz.relative_to(REPO)}")
 
 
 if __name__ == "__main__":

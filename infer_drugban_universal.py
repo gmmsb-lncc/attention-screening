@@ -152,6 +152,11 @@ def main():
         if not seed_dir.exists():
             print(f"[skip] no dir {seed_dir}")
             continue
+        out_seed = out_root / f"seed_{seed}"
+        out_npz = out_seed / "raw_predictions.npz"
+        if out_npz.exists():
+            print(f"[seed {seed}] já concluído → {out_npz.relative_to(repo)} (pulando)")
+            continue
         ckpt = best_checkpoint(seed_dir)
         print(f"[seed {seed}] loading {ckpt.relative_to(repo)}")
         model = load_model(ckpt, config, device)
@@ -161,14 +166,13 @@ def main():
         print(f"  inferring test…")
         test_y, test_p = predict(model, test_loader, device)
 
-        out_seed = out_root / f"seed_{seed}"
         out_seed.mkdir(exist_ok=True)
         np.savez(
-            out_seed / "raw_predictions.npz",
+            out_npz,
             val_y_true=val_y, val_y_prob=val_p,
             test_y_true=test_y, test_y_prob=test_p,
         )
-        print(f"  saved → {out_seed/'raw_predictions.npz'}")
+        print(f"  saved → {out_npz.relative_to(repo)}")
 
     print("\nDone. Recalibrate via:")
     print(f"  python recalibrate_baselines_f1val.py --results-root {args.output_dir.replace('/results_universal', '')} --models DrugBAN --output RECALIB_F1VAL_DRUGBAN_UNIVERSAL.json")
