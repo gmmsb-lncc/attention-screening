@@ -28,16 +28,30 @@ def inspect(p: Path) -> None:
         keys = list(d.keys())
         print(f"  n keys: {len(keys)}")
         print(f"  first 5 keys: {keys[:5]}")
-        k = keys[0]
-        v = d[k]
-        print(f"  value[0] type: {type(v).__name__}")
-        if hasattr(v, "shape"):
-            print(f"  value[0] shape: {v.shape}")
-            print(f"  value[0] dtype: {v.dtype}")
-        elif hasattr(v, "__len__"):
-            print(f"  value[0] len: {len(v)}")
-        if isinstance(v, dict):
-            print(f"  value[0] sub-keys: {list(v.keys())[:10]}")
+        for k in keys:
+            v = d[k]
+            print(f"  === d[{k!r}] ===")
+            print(f"    type: {type(v).__name__}")
+            if hasattr(v, "columns"):
+                print(f"    columns: {list(v.columns)}")
+                print(f"    n rows: {len(v)}")
+                row = v.iloc[0]
+                for col in v.columns:
+                    val = row[col]
+                    if hasattr(val, "shape"):
+                        print(f"      {col}: {type(val).__name__} shape={val.shape} dtype={getattr(val, 'dtype', '?')}")
+                    elif isinstance(val, str):
+                        print(f"      {col}: str (len {len(val)}) = {val[:60]!r}")
+                    elif isinstance(val, (int, float)):
+                        print(f"      {col}: {type(val).__name__} = {val}")
+                    elif hasattr(val, "__len__"):
+                        print(f"      {col}: {type(val).__name__} len={len(val)}")
+                    else:
+                        print(f"      {col}: {type(val).__name__}")
+            elif hasattr(v, "shape"):
+                print(f"    shape: {v.shape}")
+            elif hasattr(v, "__len__"):
+                print(f"    len: {len(v)}")
     elif hasattr(d, "columns"):
         print(f"  DataFrame columns: {list(d.columns)}")
         print(f"  n rows: {len(d)}")
