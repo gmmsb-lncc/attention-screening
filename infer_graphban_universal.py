@@ -186,16 +186,8 @@ def predict(model, loader, y_true_all: np.ndarray, device):
                   f"v_d.edata={ {k: str(v_d.edata[k].dtype) for k in v_d.edata} }  "
                   f"fcfps={fcfps.dtype}  v_p={v_p.dtype}  esms={esms.dtype}")
             printed = True
-        try:
-            out = model(v_d, v_p, fcfps, esms, device)
-        except TypeError:
-            try:
-                out = model(v_d, fcfps, v_p, esms, device)
-            except TypeError:
-                try:
-                    out = model(v_d, v_p, fcfps, esms)
-                except TypeError:
-                    out = model(v_d, fcfps, v_p, esms)
+        # Assinatura canônica (run_baseline.py:322): (v_d, sm, v_p, esm, device)
+        out = model(v_d, fcfps, v_p, esms, device)
         logits = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(logits.float(), dim=1)[:, 1]
         ps.append(prob.cpu().numpy())
