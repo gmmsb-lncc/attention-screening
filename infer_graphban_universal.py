@@ -16,7 +16,10 @@ import torch
 import yaml
 
 REPO = Path(__file__).parent.resolve()
-GRAPHBAN_SRC = REPO / "GraphBAN" / "src"
+# GraphBAN upstream coloca módulos em src/case_study/ (inductive mode)
+GRAPHBAN_SRC = REPO / "GraphBAN" / "src" / "case_study"
+if not GRAPHBAN_SRC.exists():
+    GRAPHBAN_SRC = REPO / "GraphBAN" / "src"  # fallback para estrutura plana
 sys.path.insert(0, str(GRAPHBAN_SRC))
 
 from dataloader import DTIDataset, graph_collate_func  # type: ignore
