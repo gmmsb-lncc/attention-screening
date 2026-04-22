@@ -54,7 +54,8 @@ def predict(model, drug_feat, prot_feat, smiles_list, seq_list, device, batch_si
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True, choices=["non_human","human","all"])
-    ap.add_argument("--replicates", nargs="+", type=int, default=[0,1,2,3,4])
+    ap.add_argument("--seeds", nargs="+", type=int, default=[42,123,456,789,1024],
+                    help="Canonical seeds (replicate IDs) — deve bater com DrugBAN/GraphBAN")
     ap.add_argument("--checkpoint-root", default="ConPLex/best_models")
     ap.add_argument("--output-dir", default="ConPLex/results_universal")
     ap.add_argument("--batch-size", type=int, default=256)
@@ -72,21 +73,25 @@ def main():
     out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
 
-    for rep in args.replicates:
-        ckpt_dir = REPO / args.checkpoint_root / f"rep_{rep}"
-        if not ckpt_dir.exists():
-            print(f"[skip] {ckpt_dir}"); continue
+    for seed in args.seeds:
+        # ConPLex dir convention post-patch: rep_<seed> (seed == replicate id in run_conplex_*.sh)
+        for cand_name in [f"rep_{seed}", f"seed_{seed}", f"trained_{args.corpus}_rep{seed}"]:
+            ckpt_dir = REPO / args.checkpoint_root / cand_name
+            if ckpt_dir.exists():
+                break
+        else:
+            print(f"[skip] no dir for seed={seed} under {REPO / args.checkpoint_root}"); continue
         ckpts = list(ckpt_dir.glob("*.pt"))
-        if not ckpts: continue
+        if not ckpts: print(f"[skip] no .pt in {ckpt_dir}"); continue
         ckpt = ckpts[0]
-        print(f"[rep {rep}] {ckpt.relative_to(REPO)}")
+        print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
         model = SimpleCoembedding(drug_feat.shape, prot_feat.shape, latent_dim=1024).to(device)
         state = torch.load(ckpt, map_location=device)
         model.load_state_dict(state, strict=False)
         model.eval()
         vp = predict(model, drug_feat, prot_feat, val_smi, val_seq, device, args.batch_size)
         tp = predict(model, drug_feat, prot_feat, test_smi, test_seq, device, args.batch_size)
-        o = out_root / f"rep_{rep}"; o.mkdir(exist_ok=True)
+        o = out_root / f"seed_{seed}"; o.mkdir(exist_ok=True)
         np.savez(o / "raw_predictions.npz",
             val_y_true=val_y, val_y_prob=vp, test_y_true=test_y, test_y_prob=tp)
         print(f"  saved → {o/'raw_predictions.npz'}")
