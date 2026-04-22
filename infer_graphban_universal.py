@@ -29,13 +29,19 @@ from torch.utils.data import DataLoader
 import dgl  # fornecido pelo env 'graphban'
 
 
+def _to_f32(x):
+    arr = np.asarray(x, dtype=np.float32)
+    return torch.from_numpy(arr)
+
+
 def graph_collate_func(batch):
-    """Collate para DTIDataset do GraphBAN (case_study). Retorna (v_d, fcfps, v_p, esm)."""
+    """Collate para DTIDataset do GraphBAN (case_study). Retorna (v_d, fcfps, v_p, esm).
+    Força float32 em fcfp/esm — cache contém float64 e colide com autocast half."""
     drugs, fcfps, proteins, esms = zip(*batch)
     drugs_batch = dgl.batch(drugs)
-    fcfps_batch = torch.as_tensor(np.stack(fcfps), dtype=torch.float32)
+    fcfps_batch = _to_f32(np.stack([np.asarray(f, dtype=np.float32) for f in fcfps]))
+    esms_batch = _to_f32(np.stack([np.asarray(e, dtype=np.float32) for e in esms]))
     proteins_batch = torch.as_tensor(np.stack(proteins))
-    esms_batch = torch.as_tensor(np.stack(esms), dtype=torch.float32)
     return drugs_batch, fcfps_batch, proteins_batch, esms_batch
 
 
@@ -127,25 +133,24 @@ def predict(model, loader, y_true_all: np.ndarray, device):
     """Inferência GraphBAN. DTIDataset retorna (v_d, fcfps, v_p, esm);
     Y vem da DataFrame externa por ordenação (shuffle=False)."""
     ps = []
-    use_amp = device.type == "cuda"
+    # AMP off: GraphBAN FCFP MLP recebe float32; autocast promove weights a half
+    # e colide com input float32/float64 no caso FP.
     for batch in loader:
         v_d, fcfps, v_p, esms = batch
         v_d = v_d.to(device, non_blocking=True)
         v_p = v_p.to(device, non_blocking=True)
-        fcfps = fcfps.to(device, non_blocking=True)
-        esms = esms.to(device, non_blocking=True)
-        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            # GraphBAN case_study forward: (v_d, v_p, fcfps, esm, device) — ver upstream
+        fcfps = fcfps.to(device, non_blocking=True).float()
+        esms = esms.to(device, non_blocking=True).float()
+        try:
+            out = model(v_d, v_p, fcfps, esms, device)
+        except TypeError:
             try:
-                out = model(v_d, v_p, fcfps, esms, device)
+                out = model(v_d, fcfps, v_p, esms, device)
             except TypeError:
                 try:
-                    out = model(v_d, fcfps, v_p, esms, device)
+                    out = model(v_d, v_p, fcfps, esms)
                 except TypeError:
-                    try:
-                        out = model(v_d, v_p, fcfps, esms)
-                    except TypeError:
-                        out = model(v_d, fcfps, v_p, esms)
+                    out = model(v_d, fcfps, v_p, esms)
         logits = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(logits.float(), dim=1)[:, 1]
         ps.append(prob.cpu().numpy())
