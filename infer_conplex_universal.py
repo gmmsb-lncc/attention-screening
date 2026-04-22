@@ -93,6 +93,11 @@ def main():
                 break
         if ckpt_dir is None:
             print(f"[skip] no dir for seed={seed} (searched: {candidates})"); continue
+        o = out_root / f"seed_{seed}"
+        out_npz = o / "raw_predictions.npz"
+        if out_npz.exists():
+            print(f"[seed {seed}] já concluído → {out_npz.relative_to(REPO)} (pulando)")
+            continue
         ckpts = list(ckpt_dir.glob("*.pt"))
         if not ckpts: print(f"[skip] no .pt in {ckpt_dir}"); continue
         ckpt = ckpts[0]
@@ -103,10 +108,10 @@ def main():
         model.eval()
         vp = predict(model, drug_feat, prot_feat, val_smi, val_seq, device, args.batch_size)
         tp = predict(model, drug_feat, prot_feat, test_smi, test_seq, device, args.batch_size)
-        o = out_root / f"seed_{seed}"; o.mkdir(exist_ok=True)
-        np.savez(o / "raw_predictions.npz",
+        o.mkdir(exist_ok=True)
+        np.savez(out_npz,
             val_y_true=val_y, val_y_prob=vp, test_y_true=test_y, test_y_prob=tp)
-        print(f"  saved → {o/'raw_predictions.npz'}")
+        print(f"  saved → {out_npz.relative_to(REPO)}")
 
 
 if __name__ == "__main__":
