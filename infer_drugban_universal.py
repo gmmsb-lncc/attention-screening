@@ -88,12 +88,14 @@ def load_model(checkpoint_path: Path, config: dict, device: torch.device) -> Dru
 @torch.no_grad()
 def predict(model: DrugBAN, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
     ys, ps = [], []
+    use_amp = device.type == "cuda"
     for batch in loader:
         v_d, v_p, y = batch
-        v_d = v_d.to(device)
-        v_p = v_p.to(device)
-        _, _, _, f = model(v_d, v_p)
-        prob = torch.softmax(f, dim=1)[:, 1]
+        v_d = v_d.to(device, non_blocking=True)
+        v_p = v_p.to(device, non_blocking=True)
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+            _, _, _, f = model(v_d, v_p)
+        prob = torch.softmax(f.float(), dim=1)[:, 1]
         ys.append(y.numpy())
         ps.append(prob.cpu().numpy())
     return np.concatenate(ys), np.concatenate(ps)
@@ -113,13 +115,15 @@ def main():
     ap.add_argument("--checkpoint-root", default="DrugBAN/results")
     ap.add_argument("--config", default="DrugBAN/configs/kinase.yaml")
     ap.add_argument("--output-dir", default="DrugBAN/results_universal")
-    ap.add_argument("--batch-size", type=int, default=64)
-    ap.add_argument("--num-workers", type=int, default=0)
+    ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--num-workers", type=int, default=4)
     args = ap.parse_args()
 
     repo = REPO_ROOT
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
+    if device.type == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
 
     with open(repo / args.config) as f:
         config = yaml.safe_load(f)
@@ -135,13 +139,16 @@ def main():
     val_ds = DTIDataset(val_df.index.values, val_df)
     test_ds = DTIDataset(test_df.index.values, test_df)
 
+    use_pin = device.type == "cuda"
     val_loader = DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, collate_fn=graph_collate_func,
+        pin_memory=use_pin, persistent_workers=(args.num_workers > 0),
     )
     test_loader = DataLoader(
         test_ds, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, collate_fn=graph_collate_func,
+        pin_memory=use_pin, persistent_workers=(args.num_workers > 0),
     )
 
     out_root = repo / args.output_dir / args.corpus

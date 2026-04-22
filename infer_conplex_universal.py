@@ -40,16 +40,33 @@ def tsv_to_triples(tsv_path: Path):
     return df["canonical_smiles"].tolist(), df["seq"].tolist(), df["label"].astype(int).to_numpy()
 
 
+def _featurize_all(featurizer, items, label: str):
+    """Pre-computa todos os embeddings uma vez (CPU bottleneck) e cacheia em tensor."""
+    embs = []
+    unique = {}
+    for it in items:
+        if it in unique:
+            embs.append(unique[it])
+            continue
+        e = torch.as_tensor(featurizer(it), dtype=torch.float32)
+        unique[it] = e
+        embs.append(e)
+    print(f"    {label}: {len(items)} pares, {len(unique)} únicos featurizados")
+    return torch.stack(embs)
+
+
 @torch.no_grad()
-def predict(model, drug_feat, prot_feat, smiles_list, seq_list, device, batch_size=256):
+def predict(model, d_all, p_all, device, batch_size=1024):
+    """Inferência GPU-batched sobre embeddings pré-computados."""
+    use_amp = device.type == "cuda"
     probs = []
-    for i in range(0, len(smiles_list), batch_size):
-        smi_b = smiles_list[i:i+batch_size]
-        seq_b = seq_list[i:i+batch_size]
-        d_emb = torch.stack([torch.tensor(drug_feat(s), dtype=torch.float32) for s in smi_b]).to(device)
-        p_emb = torch.stack([torch.tensor(prot_feat(s), dtype=torch.float32) for s in seq_b]).to(device)
-        sim = model(d_emb, p_emb)  # cosine similarity scalar per pair
-        probs.append(sim.cpu().numpy())
+    n = d_all.shape[0]
+    for i in range(0, n, batch_size):
+        d_b = d_all[i:i+batch_size].to(device, non_blocking=True)
+        p_b = p_all[i:i+batch_size].to(device, non_blocking=True)
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+            sim = model(d_b, p_b)
+        probs.append(sim.float().cpu().numpy())
     return np.concatenate(probs)
 
 
@@ -60,17 +77,32 @@ def main():
                     help="Canonical seeds (replicate IDs) — deve bater com DrugBAN/GraphBAN")
     ap.add_argument("--checkpoint-root", default="ConPLex/best_models")
     ap.add_argument("--output-dir", default="ConPLex/results_universal")
-    ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--batch-size", type=int, default=1024)
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    if device.type == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
     drug_feat = MorganFeaturizer(save_dir=Path.cwd())
     prot_feat = ProtBertFeaturizer(save_dir=Path.cwd())
+    # Tentar mover ProtBert para GPU se featurizer suportar
+    if hasattr(prot_feat, "to") and device.type == "cuda":
+        try:
+            prot_feat.to(device)
+            print(f"  ProtBertFeaturizer movido para {device}")
+        except Exception as e:
+            print(f"  ProtBertFeaturizer permanece em CPU: {e}")
 
     val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
     val_smi, val_seq, val_y = tsv_to_triples(REPO / val_tsv)
     test_smi, test_seq, test_y = tsv_to_triples(REPO / test_tsv)
     print(f"val n={len(val_y)}  test n={len(test_y)}")
+    print("  pré-featurizando val/test (uma vez por corpus)…")
+    val_drug_emb = _featurize_all(drug_feat, val_smi, "val drug")
+    val_prot_emb = _featurize_all(prot_feat, val_seq, "val prot")
+    test_drug_emb = _featurize_all(drug_feat, test_smi, "test drug")
+    test_prot_emb = _featurize_all(prot_feat, test_seq, "test prot")
 
     out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
@@ -106,8 +138,8 @@ def main():
         state = torch.load(ckpt, map_location=device)
         model.load_state_dict(state, strict=False)
         model.eval()
-        vp = predict(model, drug_feat, prot_feat, val_smi, val_seq, device, args.batch_size)
-        tp = predict(model, drug_feat, prot_feat, test_smi, test_seq, device, args.batch_size)
+        vp = predict(model, val_drug_emb, val_prot_emb, device, args.batch_size)
+        tp = predict(model, test_drug_emb, test_prot_emb, device, args.batch_size)
         o.mkdir(exist_ok=True)
         np.savez(out_npz,
             val_y_true=val_y, val_y_prob=vp, test_y_true=test_y, test_y_prob=tp)
