@@ -133,6 +133,26 @@ def tsv_to_graphban_df(tsv_path: Path, fcfp_by_smiles: dict, esm_by_protein: dic
     return out
 
 
+def _install_linear_f32_hook(model: torch.nn.Module) -> None:
+    """Hook forward-pre em cada nn.Linear: cast input a float32 se for FP
+    Double. Resolve o caso em que molecule_FCFP materializa fingerprint
+    em float64 internamente (via RDKit), conflitando com pesos Float32."""
+    import torch.nn as nn
+
+    def pre_hook(_module, inputs):
+        new = []
+        for x in inputs:
+            if torch.is_tensor(x) and x.is_floating_point() and x.dtype != torch.float32:
+                new.append(x.to(torch.float32))
+            else:
+                new.append(x)
+        return tuple(new)
+
+    for m in model.modules():
+        if isinstance(m, nn.Linear):
+            m.register_forward_pre_hook(pre_hook)
+
+
 def load_model(checkpoint_path: Path, config: dict, device: torch.device):
     model = GraphBAN(**config).to(device)
     state = torch.load(checkpoint_path, map_location=device)
@@ -140,6 +160,8 @@ def load_model(checkpoint_path: Path, config: dict, device: torch.device):
         state = state["model_state_dict"]
     model.load_state_dict(state, strict=False)
     model.eval()
+    model = model.float()
+    _install_linear_f32_hook(model)
     return model
 
 
