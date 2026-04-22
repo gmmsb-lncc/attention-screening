@@ -100,11 +100,55 @@ def load_feature_lookups(corpus: str) -> tuple[dict, dict]:
     return fcfp_by_smiles, esm_by_protein
 
 
-def tsv_to_graphban_df(tsv_path: Path, fcfp_by_smiles: dict, esm_by_protein: dict) -> pd.DataFrame:
-    """Monta DataFrame no formato GraphBAN, reutilizando cache ESM/FCFP do treino."""
+def _compute_esm1b_for_missing(missing_seqs: list[str], device: torch.device) -> dict:
+    """Computa ESM-1b 1280-d pooled embedding para sequências ausentes do cache.
+    Usa esm.pretrained.esm1b_t33_650M_UR50S. Requer env com esm instalado."""
+    if not missing_seqs:
+        return {}
+    print(f"    computando ESM-1b para {len(missing_seqs)} proteínas ausentes do cache…")
+    import esm  # type: ignore
+    model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
+    model = model.to(device).eval()
+    batch_converter = alphabet.get_batch_converter()
+    out: dict = {}
+    # ESM-1b: limite 1022 tokens; truncar
+    MAX_LEN = 1022
+    BATCH = 4
+    with torch.no_grad():
+        for i in range(0, len(missing_seqs), BATCH):
+            chunk = missing_seqs[i:i+BATCH]
+            data = [(f"p{j}", s[:MAX_LEN]) for j, s in enumerate(chunk)]
+            _, _, tokens = batch_converter(data)
+            tokens = tokens.to(device)
+            res = model(tokens, repr_layers=[33], return_contacts=False)
+            reps = res["representations"][33]  # (B, L, 1280)
+            # Mean-pool excluindo tokens especiais (CLS=0, pad, EOS)
+            for j, seq in enumerate(chunk):
+                L = min(len(seq), MAX_LEN)
+                pooled = reps[j, 1:1+L].mean(0).cpu().numpy().astype(np.float32)
+                out[seq] = pooled
+    return out
+
+
+def tsv_to_graphban_df(
+    tsv_path: Path,
+    fcfp_by_smiles: dict,
+    esm_by_protein: dict,
+    device: torch.device,
+    compute_missing_esm: bool = True,
+) -> pd.DataFrame:
+    """Monta DataFrame no formato GraphBAN, reutilizando cache ESM/FCFP do treino.
+    Se compute_missing_esm=True e houver proteínas fora do cache, computa ESM-1b
+    on-the-fly para evitar zero-fill que invalida métrica."""
     df = pd.read_csv(tsv_path, sep="\t")
     smiles_list = df["canonical_smiles"].astype(str).tolist()
     protein_list = df["seq"].astype(str).tolist()
+    # Identificar proteínas ausentes ANTES de montar colunas
+    missing_prots = sorted({p for p in protein_list if p not in esm_by_protein})
+    if missing_prots and compute_missing_esm:
+        extra = _compute_esm1b_for_missing(missing_prots, device)
+        esm_by_protein.update(extra)
+        print(f"    cache ESM ampliado para {len(esm_by_protein)} proteínas")
     fcfp_col = []
     esm_col = []
     n_missing_fcfp = 0
@@ -222,8 +266,8 @@ def main():
     val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
     print("  montando DataFrame com features cacheadas do treino…")
     fcfp_lookup, esm_lookup = load_feature_lookups(args.corpus)
-    val_df = tsv_to_graphban_df(REPO / val_tsv, fcfp_lookup, esm_lookup)
-    test_df = tsv_to_graphban_df(REPO / test_tsv, fcfp_lookup, esm_lookup)
+    val_df = tsv_to_graphban_df(REPO / val_tsv, fcfp_lookup, esm_lookup, device)
+    test_df = tsv_to_graphban_df(REPO / test_tsv, fcfp_lookup, esm_lookup, device)
     print(f"val n={len(val_df)} pos={val_df['Y'].mean():.3f}")
     print(f"test n={len(test_df)} pos={test_df['Y'].mean():.3f}")
 
