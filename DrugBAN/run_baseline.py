@@ -12,7 +12,7 @@ Methodology alignment with DT-Kinase:
 - UNIVERSAL scaffold split (universal_train/val/test.tsv) — same scaffolds held out
   across all corpora, ensuring no scaffold leakage between human/non-human splits.
 - Same 5 canonical seeds {42, 123, 456, 789, 1024}
-- Threshold calibrated on validation set (MCC-optimal), applied to test
+- Threshold calibrated on validation set (F1-optimal, DrugBAN native criterion), applied to test
 - Model selection: DrugBAN uses val AUROC (its published criterion)
   DT-Kinase uses val MCC — each uses its own published protocol
 - Architecture/hyperparameters: as published in Bai et al., Nature Machine
@@ -357,11 +357,12 @@ def train_single_seed(
         trainer.best_model, val_generator, device, n_class,
     )
 
-    # Step 2: Optimize threshold on validation maximizing MCC (no test leakage)
-    val_threshold, val_best_mcc = optimize_threshold_on_validation(
-        val_y_true, val_y_prob, metric="mcc",
+    # Step 2: Optimize threshold on validation maximizing F1 (DrugBAN native criterion,
+    # without test leakage — partition moved from test to val; thesis decision)
+    val_threshold, val_best_f1 = optimize_threshold_on_validation(
+        val_y_true, val_y_prob, metric="f1",
     )
-    print(f"  Val-optimized threshold={val_threshold:.4f} (val MCC={val_best_mcc:.4f})")
+    print(f"  Val-optimized threshold={val_threshold:.4f} (val F1={val_best_f1:.4f})")
 
     # Step 3: Collect predictions on TRAIN set with best model (for overfit diagnosis)
     print("  Collecting train predictions...")
@@ -666,8 +667,8 @@ def main() -> None:
         "methodology": {
             "protocol": "DrugBAN as published (architecture + hyperparameters from paper)",
             "model_selection": "validation AUROC (DrugBAN published criterion)",
-            "threshold_optimization": "validation MCC-optimal (no test leakage)",
-            "threshold_metric": "mcc",
+            "threshold_optimization": "validation F1-optimal (DrugBAN native criterion, no test leakage)",
+            "threshold_metric": "f1",
             "features": {
                 "drug": "Molecular graph (GCN, atom features 75-d → 128-d hidden layers)",
                 "protein": "Sequence (CNN with kernels [3,6,9], 128 filters each)",
