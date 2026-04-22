@@ -23,9 +23,12 @@ import pandas as pd
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parent / "DrugBAN"))
-from src.dataloader import DTIDataset, graph_collate_func
-from src.models import DrugBAN
+REPO_ROOT = Path(__file__).parent.resolve()
+DRUGBAN_SRC = REPO_ROOT / "DrugBAN" / "src"
+sys.path.insert(0, str(DRUGBAN_SRC))
+
+from dataloader import DTIDataset, graph_collate_func  # type: ignore
+from models import DrugBAN  # type: ignore
 from torch.utils.data import DataLoader
 
 
@@ -99,7 +102,7 @@ def main():
     ap.add_argument("--num-workers", type=int, default=0)
     args = ap.parse_args()
 
-    repo = Path(__file__).parent.resolve()
+    repo = REPO_ROOT
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
