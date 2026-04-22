@@ -35,15 +35,15 @@ def _to_f32(x):
 
 
 def _cast_graph_f32(g):
-    """Cast todas ndata/edata float64 → float32. DGL default é float64."""
+    """Cast incondicional de qualquer ndata/edata floating a float32."""
     for k in list(g.ndata.keys()):
         t = g.ndata[k]
-        if t.dtype == torch.float64:
-            g.ndata[k] = t.float()
+        if t.is_floating_point() and t.dtype != torch.float32:
+            g.ndata[k] = t.to(torch.float32)
     for k in list(g.edata.keys()):
         t = g.edata[k]
-        if t.dtype == torch.float64:
-            g.edata[k] = t.float()
+        if t.is_floating_point() and t.dtype != torch.float32:
+            g.edata[k] = t.to(torch.float32)
     return g
 
 
@@ -149,15 +149,21 @@ def predict(model, loader, y_true_all: np.ndarray, device):
     Y vem da DataFrame externa por ordenação (shuffle=False)."""
     ps = []
     # AMP off: molecule_FCFP materializa fingerprint Morgan internamente em
-    # float64 (RDKit default); autocast promove weights a half e colide.
-    # Forçar model inteiro float32 + inputs float32 mantém consistência.
+    # float64 (RDKit default); cast explícito no grafo evita Double no Linear.
     model = model.float()
+    printed = False
     for batch in loader:
         v_d, fcfps, v_p, esms = batch
         v_d = v_d.to(device, non_blocking=True)
+        v_d = _cast_graph_f32(v_d)
         v_p = v_p.to(device, non_blocking=True)
         fcfps = fcfps.to(device, non_blocking=True).float()
         esms = esms.to(device, non_blocking=True).float()
+        if not printed:
+            print(f"    dtypes: v_d.ndata={ {k: str(v_d.ndata[k].dtype) for k in v_d.ndata} }  "
+                  f"v_d.edata={ {k: str(v_d.edata[k].dtype) for k in v_d.edata} }  "
+                  f"fcfps={fcfps.dtype}  v_p={v_p.dtype}  esms={esms.dtype}")
+            printed = True
         try:
             out = model(v_d, v_p, fcfps, esms, device)
         except TypeError:
