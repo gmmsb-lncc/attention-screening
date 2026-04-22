@@ -1,0 +1,160 @@
+"""
+Inferência DrugBAN sobre universal_val.tsv + universal_test.tsv.
+
+Carrega checkpoint existente, processa universal split (val + test),
+produz raw_predictions.npz alinhado a (n_val=69.318, n_test=41.441).
+
+Uso:
+    cd /Users/sulfierry/semantic-screening
+    source env/bin/activate
+    python infer_drugban_universal.py \\
+        --corpus all \\
+        --seeds 42 123 456 789 1024 \\
+        --output-dir DrugBAN/results_universal
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import torch
+import yaml
+
+sys.path.insert(0, str(Path(__file__).parent / "DrugBAN"))
+from src.dataloader import DTIDataset, graph_collate_func
+from src.models import DrugBAN
+from torch.utils.data import DataLoader
+
+
+UNIVERSAL_TSV = {
+    "non_human": (
+        "scaffolds_splits/output/non_human_val.tsv",
+        "scaffolds_splits/output/non_human_test.tsv",
+    ),
+    "human": (
+        "scaffolds_splits/output/human_val.tsv",
+        "scaffolds_splits/output/human_test.tsv",
+    ),
+    "all": (
+        "scaffolds_splits/output/universal_val.tsv",
+        "scaffolds_splits/output/universal_test.tsv",
+    ),
+}
+
+
+def tsv_to_drugban_df(tsv_path: Path) -> pd.DataFrame:
+    df = pd.read_csv(tsv_path, sep="\t")
+    out = pd.DataFrame(
+        {
+            "SMILES": df["canonical_smiles"].astype(str),
+            "Protein": df["seq"].astype(str),
+            "Y": df["label"].astype(int),
+        }
+    )
+    return out
+
+
+def load_model(checkpoint_path: Path, config: dict, device: torch.device) -> DrugBAN:
+    model = DrugBAN(**config["DRUGBAN"]).to(device)
+    state = torch.load(checkpoint_path, map_location=device)
+    if isinstance(state, dict) and "model_state_dict" in state:
+        state = state["model_state_dict"]
+    model.load_state_dict(state, strict=False)
+    model.eval()
+    return model
+
+
+@torch.no_grad()
+def predict(model: DrugBAN, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    ys, ps = [], []
+    for batch in loader:
+        v_d, v_p, y = batch
+        v_d = v_d.to(device)
+        v_p = v_p.to(device)
+        _, _, _, f = model(v_d, v_p)
+        prob = torch.softmax(f, dim=1)[:, 1]
+        ys.append(y.numpy())
+        ps.append(prob.cpu().numpy())
+    return np.concatenate(ys), np.concatenate(ps)
+
+
+def best_checkpoint(seed_dir: Path) -> Path:
+    candidates = sorted(seed_dir.glob("best_model_epoch_*.pth"))
+    if not candidates:
+        raise FileNotFoundError(f"no best_model found in {seed_dir}")
+    return candidates[0]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", required=True, choices=["non_human", "human", "all"])
+    ap.add_argument("--seeds", nargs="+", type=int, default=[42, 123, 456, 789, 1024])
+    ap.add_argument("--checkpoint-root", default="DrugBAN/results")
+    ap.add_argument("--config", default="DrugBAN/configs/kinase.yaml")
+    ap.add_argument("--output-dir", default="DrugBAN/results_universal")
+    ap.add_argument("--batch-size", type=int, default=64)
+    ap.add_argument("--num-workers", type=int, default=0)
+    args = ap.parse_args()
+
+    repo = Path(__file__).parent.resolve()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+
+    with open(repo / args.config) as f:
+        config = yaml.safe_load(f)
+
+    val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
+    print(f"Loading universal val: {val_tsv}")
+    val_df = tsv_to_drugban_df(repo / val_tsv)
+    print(f"  rows: {len(val_df)}  pos_rate: {val_df['Y'].mean():.3f}")
+    print(f"Loading universal test: {test_tsv}")
+    test_df = tsv_to_drugban_df(repo / test_tsv)
+    print(f"  rows: {len(test_df)}  pos_rate: {test_df['Y'].mean():.3f}")
+
+    val_ds = DTIDataset(val_df.index.values, val_df)
+    test_ds = DTIDataset(test_df.index.values, test_df)
+
+    val_loader = DataLoader(
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, collate_fn=graph_collate_func,
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, collate_fn=graph_collate_func,
+    )
+
+    out_root = repo / args.output_dir / args.corpus
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    for seed in args.seeds:
+        seed_dir = repo / args.checkpoint_root / args.corpus / f"seed_{seed}"
+        if not seed_dir.exists():
+            print(f"[skip] no dir {seed_dir}")
+            continue
+        ckpt = best_checkpoint(seed_dir)
+        print(f"[seed {seed}] loading {ckpt.relative_to(repo)}")
+        model = load_model(ckpt, config, device)
+
+        print(f"  inferring val…")
+        val_y, val_p = predict(model, val_loader, device)
+        print(f"  inferring test…")
+        test_y, test_p = predict(model, test_loader, device)
+
+        out_seed = out_root / f"seed_{seed}"
+        out_seed.mkdir(exist_ok=True)
+        np.savez(
+            out_seed / "raw_predictions.npz",
+            val_y_true=val_y, val_y_prob=val_p,
+            test_y_true=test_y, test_y_prob=test_p,
+        )
+        print(f"  saved → {out_seed/'raw_predictions.npz'}")
+
+    print("\nDone. Recalibrate via:")
+    print(f"  python recalibrate_baselines_f1val.py --results-root {args.output_dir.replace('/results_universal', '')} --models DrugBAN --output RECALIB_F1VAL_DRUGBAN_UNIVERSAL.json")
+
+
+if __name__ == "__main__":
+    main()
