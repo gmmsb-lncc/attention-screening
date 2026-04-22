@@ -135,11 +135,17 @@ def predict(model, loader, y_true_all: np.ndarray, device):
         fcfps = fcfps.to(device, non_blocking=True)
         esms = esms.to(device, non_blocking=True)
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            # GraphBAN forward signature: model(v_d, v_p, fcfps, esm) — ajustar se falhar
+            # GraphBAN case_study forward: (v_d, v_p, fcfps, esm, device) — ver upstream
             try:
-                out = model(v_d, v_p, fcfps, esms)
+                out = model(v_d, v_p, fcfps, esms, device)
             except TypeError:
-                out = model(v_d, fcfps, v_p, esms)
+                try:
+                    out = model(v_d, fcfps, v_p, esms, device)
+                except TypeError:
+                    try:
+                        out = model(v_d, v_p, fcfps, esms)
+                    except TypeError:
+                        out = model(v_d, fcfps, v_p, esms)
         logits = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(logits.float(), dim=1)[:, 1]
         ps.append(prob.cpu().numpy())
