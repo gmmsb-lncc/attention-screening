@@ -92,7 +92,7 @@ def main():
     ap.add_argument("--corpus", required=True, choices=["non_human","human","all"])
     ap.add_argument("--seeds", nargs="+", type=int, default=[42,123,456,789,1024])
     ap.add_argument("--checkpoint-root", default="GraphBAN/results")
-    ap.add_argument("--config", default="GraphBAN/configs/kinase.yaml")
+    ap.add_argument("--config", default="GraphBAN/configs/kinase_inductive.yaml")
     ap.add_argument("--output-dir", default="GraphBAN/results_universal")
     ap.add_argument("--batch-size", type=int, default=64)
     args = ap.parse_args()
