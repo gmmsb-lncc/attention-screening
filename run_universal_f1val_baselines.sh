@@ -30,7 +30,7 @@ OUTDIR="${OUTDIR:-./universal_f1val_results}"
 PYTHON="${PYTHON:-python}"
 
 # Nomes dos ambientes conda por modelo (conforme configuração em diamante-02)
-CONDA_ENV_DRUGBAN="${CONDA_ENV_DRUGBAN:-drgban}"
+CONDA_ENV_DRUGBAN="${CONDA_ENV_DRUGBAN:-drugban}"
 CONDA_ENV_GRAPHBAN="${CONDA_ENV_GRAPHBAN:-graphban}"
 CONDA_ENV_CONPLEX="${CONDA_ENV_CONPLEX:-conplex}"
 
