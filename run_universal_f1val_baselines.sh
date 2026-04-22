@@ -29,6 +29,21 @@ MODELS="${MODELS:-drugban graphban conplex}"
 OUTDIR="${OUTDIR:-./universal_f1val_results}"
 PYTHON="${PYTHON:-python}"
 
+# Nomes dos ambientes conda por modelo (conforme configuração em diamante-02)
+CONDA_ENV_DRUGBAN="${CONDA_ENV_DRUGBAN:-drgban}"
+CONDA_ENV_GRAPHBAN="${CONDA_ENV_GRAPHBAN:-graphban}"
+CONDA_ENV_CONPLEX="${CONDA_ENV_CONPLEX:-conplex}"
+
+# Garantir que `conda activate` funcione dentro do script
+CONDA_SH="$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh"
+if [[ -f "${CONDA_SH}" ]]; then
+    # shellcheck disable=SC1090
+    source "${CONDA_SH}"
+else
+    echo "[erro] conda.sh não encontrado; defina CONDA_SH ou garanta 'conda' no PATH" >&2
+    exit 1
+fi
+
 mkdir -p "${OUTDIR}/logs"
 echo "============================================================"
 echo " Universal split inference + F1-val recalibration"
@@ -40,16 +55,19 @@ echo "============================================================"
 
 for model in ${MODELS}; do
     case "${model}" in
-        drugban)  INFER="infer_drugban_universal.py";  CKPT_ROOT="DrugBAN/results";  OUT_INFER="DrugBAN/results_universal";  FLAG_SEEDS="--seeds" ;;
-        graphban) INFER="infer_graphban_universal.py"; CKPT_ROOT="GraphBAN/results"; OUT_INFER="GraphBAN/results_universal"; FLAG_SEEDS="--seeds" ;;
-        conplex)  INFER="infer_conplex_universal.py";  CKPT_ROOT="ConPLex/best_models"; OUT_INFER="ConPLex/results_universal"; FLAG_SEEDS="--seeds" ;;
+        drugban)  INFER="infer_drugban_universal.py";  CKPT_ROOT="DrugBAN/results";     OUT_INFER="DrugBAN/results_universal";  ENV_NAME="${CONDA_ENV_DRUGBAN}"  ;;
+        graphban) INFER="infer_graphban_universal.py"; CKPT_ROOT="GraphBAN/results";    OUT_INFER="GraphBAN/results_universal"; ENV_NAME="${CONDA_ENV_GRAPHBAN}" ;;
+        conplex)  INFER="infer_conplex_universal.py";  CKPT_ROOT="ConPLex/best_models"; OUT_INFER="ConPLex/results_universal";  ENV_NAME="${CONDA_ENV_CONPLEX}"  ;;
         *) echo "[erro] modelo desconhecido: ${model}"; continue ;;
     esac
+
+    echo ">>> [${model}] conda activate ${ENV_NAME}"
+    conda activate "${ENV_NAME}" || { echo "[erro] falha ao ativar ${ENV_NAME}"; exit 2; }
 
     for corpus in ${CORPORA}; do
         LOG="${OUTDIR}/logs/infer_${model}_${corpus}.log"
         echo ">>> [${model}/${corpus}] inferência sobre universal split (log: ${LOG})"
-        ${PYTHON} "${INFER}" --corpus "${corpus}" ${FLAG_SEEDS} ${SEEDS} \
+        ${PYTHON} "${INFER}" --corpus "${corpus}" --seeds ${SEEDS} \
             --checkpoint-root "${CKPT_ROOT}" \
             --output-dir "${OUT_INFER}" \
             2>&1 | tee "${LOG}"
@@ -63,6 +81,9 @@ for model in ${MODELS}; do
         --output "${RECALIB_OUT}" \
         2>&1 | tee "${OUTDIR}/logs/recalib_${model}.log"
     echo "    salvo: ${RECALIB_OUT}"
+
+    echo ">>> [${model}] conda deactivate"
+    conda deactivate
 done
 
 echo
