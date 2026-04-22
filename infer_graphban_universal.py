@@ -49,38 +49,66 @@ UNIVERSAL_TSV = {
 }
 
 
-def _compute_fcfp(smiles: str, radius: int = 2, n_bits: int = 1024) -> np.ndarray:
-    """FCFP fingerprint (Morgan com useFeatures=True) usado por GraphBAN."""
-    from rdkit import Chem
-    from rdkit.Chem import AllChem
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return np.zeros(n_bits, dtype=np.int8)
-    fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits, useFeatures=True)
-    arr = np.zeros((n_bits,), dtype=np.int8)
-    from rdkit.DataStructs import ConvertToNumpyArray
-    ConvertToNumpyArray(fp, arr)
-    return arr
+import pickle
 
 
-def tsv_to_graphban_df(tsv_path: Path) -> pd.DataFrame:
+def load_feature_lookups(corpus: str) -> tuple[dict, dict]:
+    """Carrega cache GraphBAN train+val+test e constrói lookups por-SMILES (fcfp) e
+    por-Protein (esm), sem recomputar ESM-1b."""
+    cache_path = REPO / f"GraphBAN/results/{corpus}/feature_cache/features_extracted.pkl"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Cache {cache_path} não encontrado. GraphBAN requer features pré-computadas."
+        )
+    print(f"    carregando cache: {cache_path.name}")
+    d = pickle.load(open(cache_path, "rb"))
+    fcfp_by_smiles: dict = {}
+    esm_by_protein: dict = {}
+    for split_name in ("train", "val", "test"):
+        if split_name not in d:
+            continue
+        df = d[split_name]
+        for _, row in df.iterrows():
+            s = row["SMILES"]
+            p = row["Protein"]
+            if s not in fcfp_by_smiles:
+                fcfp_by_smiles[s] = row["fcfp"]
+            if p not in esm_by_protein:
+                esm_by_protein[p] = row["esm"]
+    print(f"      {len(fcfp_by_smiles)} SMILES únicos com FCFP; {len(esm_by_protein)} proteínas únicas com ESM")
+    return fcfp_by_smiles, esm_by_protein
+
+
+def tsv_to_graphban_df(tsv_path: Path, fcfp_by_smiles: dict, esm_by_protein: dict) -> pd.DataFrame:
+    """Monta DataFrame no formato GraphBAN, reutilizando cache ESM/FCFP do treino."""
     df = pd.read_csv(tsv_path, sep="\t")
     smiles_list = df["canonical_smiles"].astype(str).tolist()
-    print(f"    computando FCFP ({len(smiles_list)} SMILES)…")
-    # Cache por SMILES único
-    unique = {}
+    protein_list = df["seq"].astype(str).tolist()
     fcfp_col = []
-    for s in smiles_list:
-        if s not in unique:
-            unique[s] = _compute_fcfp(s)
-        fcfp_col.append(unique[s])
-    print(f"      {len(unique)} SMILES únicos featurizados")
+    esm_col = []
+    n_missing_fcfp = 0
+    n_missing_esm = 0
+    for s, p in zip(smiles_list, protein_list):
+        if s in fcfp_by_smiles:
+            fcfp_col.append(fcfp_by_smiles[s])
+        else:
+            fcfp_col.append(np.zeros(384, dtype=np.float64))
+            n_missing_fcfp += 1
+        if p in esm_by_protein:
+            esm_col.append(esm_by_protein[p])
+        else:
+            esm_col.append(np.zeros(1280, dtype=np.float32))
+            n_missing_esm += 1
+    if n_missing_fcfp or n_missing_esm:
+        print(f"    AVISO: {n_missing_fcfp}/{len(smiles_list)} SMILES sem FCFP em cache; "
+              f"{n_missing_esm}/{len(protein_list)} proteínas sem ESM (zero-preenchidos)")
     out = pd.DataFrame({
         "SMILES": smiles_list,
-        "Protein": df["seq"].astype(str),
+        "Protein": protein_list,
         "Y": df["label"].astype(int),
     })
     out["fcfp"] = fcfp_col
+    out["esm"] = esm_col
     return out
 
 
@@ -135,8 +163,10 @@ def main():
         config = yaml.safe_load(f)
 
     val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
-    val_df = tsv_to_graphban_df(REPO / val_tsv)
-    test_df = tsv_to_graphban_df(REPO / test_tsv)
+    print("  montando DataFrame com features cacheadas do treino…")
+    fcfp_lookup, esm_lookup = load_feature_lookups(args.corpus)
+    val_df = tsv_to_graphban_df(REPO / val_tsv, fcfp_lookup, esm_lookup)
+    test_df = tsv_to_graphban_df(REPO / test_tsv, fcfp_lookup, esm_lookup)
     print(f"val n={len(val_df)} pos={val_df['Y'].mean():.3f}")
     print(f"test n={len(test_df)} pos={test_df['Y'].mean():.3f}")
 
