@@ -16,11 +16,13 @@ import torch
 import yaml
 
 REPO = Path(__file__).parent.resolve()
-CONPLEX_SRC = REPO / "ConPLex" / "src"
-sys.path.insert(0, str(CONPLEX_SRC))
+CONPLEX_ROOT = REPO / "ConPLex"
+CONPLEX_SRC = CONPLEX_ROOT / "src"
+sys.path.insert(0, str(CONPLEX_ROOT))  # permite 'from src.X import Y'
 
-from featurizer import Featurizer, MorganFeaturizer, ProtBertFeaturizer  # type: ignore
-from model import SimpleCoembedding  # type: ignore
+from src.featurizers.molecule import MorganFeaturizer  # type: ignore
+from src.featurizers.protein import ProtBertFeaturizer  # type: ignore
+from src.architectures import SimpleCoembedding  # type: ignore
 
 
 UNIVERSAL_TSV = {
@@ -73,14 +75,24 @@ def main():
     out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Mapear seed canônica para índice de réplica (0..len(seeds)-1)
+    # checkpoints em diamante-02 seguem padrão trained_<corpus>_rep<idx>
+    seed_to_rep = {s: i for i, s in enumerate(sorted(set(args.seeds)))}
     for seed in args.seeds:
-        # ConPLex dir convention post-patch: rep_<seed> (seed == replicate id in run_conplex_*.sh)
-        for cand_name in [f"rep_{seed}", f"seed_{seed}", f"trained_{args.corpus}_rep{seed}"]:
-            ckpt_dir = REPO / args.checkpoint_root / cand_name
-            if ckpt_dir.exists():
+        rep_idx = seed_to_rep[seed]
+        candidates = [
+            f"trained_{args.corpus}_rep{rep_idx}",
+            f"trained_{args.corpus}_rep{seed}",
+            f"rep_{seed}", f"seed_{seed}",
+        ]
+        ckpt_dir = None
+        for cand in candidates:
+            p = REPO / args.checkpoint_root / cand
+            if p.exists():
+                ckpt_dir = p
                 break
-        else:
-            print(f"[skip] no dir for seed={seed} under {REPO / args.checkpoint_root}"); continue
+        if ckpt_dir is None:
+            print(f"[skip] no dir for seed={seed} (searched: {candidates})"); continue
         ckpts = list(ckpt_dir.glob("*.pt"))
         if not ckpts: print(f"[skip] no .pt in {ckpt_dir}"); continue
         ckpt = ckpts[0]
