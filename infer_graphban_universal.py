@@ -49,13 +49,39 @@ UNIVERSAL_TSV = {
 }
 
 
+def _compute_fcfp(smiles: str, radius: int = 2, n_bits: int = 1024) -> np.ndarray:
+    """FCFP fingerprint (Morgan com useFeatures=True) usado por GraphBAN."""
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return np.zeros(n_bits, dtype=np.int8)
+    fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits, useFeatures=True)
+    arr = np.zeros((n_bits,), dtype=np.int8)
+    from rdkit.DataStructs import ConvertToNumpyArray
+    ConvertToNumpyArray(fp, arr)
+    return arr
+
+
 def tsv_to_graphban_df(tsv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(tsv_path, sep="\t")
-    return pd.DataFrame({
-        "SMILES": df["canonical_smiles"].astype(str),
+    smiles_list = df["canonical_smiles"].astype(str).tolist()
+    print(f"    computando FCFP ({len(smiles_list)} SMILES)…")
+    # Cache por SMILES único
+    unique = {}
+    fcfp_col = []
+    for s in smiles_list:
+        if s not in unique:
+            unique[s] = _compute_fcfp(s)
+        fcfp_col.append(unique[s])
+    print(f"      {len(unique)} SMILES únicos featurizados")
+    out = pd.DataFrame({
+        "SMILES": smiles_list,
         "Protein": df["seq"].astype(str),
         "Y": df["label"].astype(int),
     })
+    out["fcfp"] = fcfp_col
+    return out
 
 
 def load_model(checkpoint_path: Path, config: dict, device: torch.device):
