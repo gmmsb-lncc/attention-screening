@@ -21,7 +21,10 @@
 #     PYTHON   (default: python)
 # ============================================================================
 
-set -euo pipefail
+set -eo pipefail
+# Nota: 'set -u' intencionalmente omitido. Scripts de ativação conda
+# (p.ex. libblas_mkl_activate.sh) referenciam variáveis não-definidas
+# e falham sob 'set -u'.
 
 SEEDS="${SEEDS:-42 123 456 789 1024}"
 CORPORA="${CORPORA:-non_human human all}"
