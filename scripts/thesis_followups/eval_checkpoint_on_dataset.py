@@ -103,12 +103,20 @@ def _load_checkpoint_state(ckpt_path: Path, model: torch.nn.Module, device: torc
 
 
 def _build_loader(corpus: str, embedding: str, batch_size: int, mode: str):
-    """Return (train, val, test|None) loaders for a given corpus."""
+    """Return (train, val, test|None) loaders for a given corpus.
+
+    ``embedding`` is the shorthand (e.g. "8M") from v7.yaml.
+    ``build_matrix_dataloaders`` expects the FULL model name
+    (e.g. "esm2_t6_8M_UR50D") because that's what names the on-disk
+    `results/.../{model_name}/build/{protein_matrices,molformer_matrix}/`
+    subdirs. Translate via SUPPORTED_EMBEDDINGS.
+    """
     scaffold_dir = str(REPO / DEFAULT_SCAFFOLD_SPLIT_DIR)
-    dataset_type = "all"  # always resolve embedding dirs from both
+    dataset_type = "all"  # always resolve embedding dirs from both corpora
+    full_emb = SUPPORTED_EMBEDDINGS.get(embedding, embedding)
     return build_matrix_dataloaders(
         dataset_type=dataset_type,
-        embedding_name=embedding,
+        embedding_name=full_emb,
         scaffold_split_dir=scaffold_dir,
         batch_size=batch_size,
         dataset_source_filter=_CORPUS_FILTER[corpus],
