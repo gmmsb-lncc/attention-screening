@@ -58,6 +58,13 @@ def _build_model(v7_config: dict, embedding_name: str, device: torch.device) -> 
     adapter = l4.get("adapter", {})
     full_emb = SUPPORTED_EMBEDDINGS.get(embedding_name, embedding_name)
     protein_dim = PROTEIN_DIMS.get(full_emb, 320)
+    # Match training-time gate (benchmark/levels/level4_cnn.py:_train_interaction_cnn):
+    # contrastive_dim is zeroed when contrastive_weight == 0 so the projection
+    # heads are NOT instantiated. Otherwise ckpt mismatch: model has
+    # prot_contrast_proj / lig_contrast_proj but state_dict lacks them.
+    contrastive_weight = float(l4.get("contrastive_weight", 0.0))
+    raw_contrastive_dim = int(l4.get("contrastive_dim", 128))
+    contrastive_dim = raw_contrastive_dim if contrastive_weight > 0 else 0
     model = InteractionMapCNN(
         protein_dim=protein_dim,
         ligand_dim=MOLFORMER_DIM,
@@ -74,7 +81,7 @@ def _build_model(v7_config: dict, embedding_name: str, device: torch.device) -> 
         adapter_bottleneck_lig=int(adapter.get("lig_dim", 512)),
         adapter_layers=int(adapter.get("layers", 1)),
         adapter_self_attn=bool(adapter.get("self_attn", False)),
-        contrastive_dim=int(l4.get("contrastive_dim", 128)),
+        contrastive_dim=contrastive_dim,
         cosine_feat=bool(l4.get("cosine_feat", False)),
     )
     if bool(l4.get("double", False)):
