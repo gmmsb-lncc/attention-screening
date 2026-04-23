@@ -43,12 +43,15 @@ SEEDS=(${SEEDS:-42 123 456 789 1024})
 MODELS=(${MODELS:-dtkinase drugban graphban conplex})
 OUT_ROOT="${OUT_ROOT:-results/cross_matrix}"
 
-# DT-Kinase v7 checkpoint paths. Diamante-02 has them under results/
-# with per-corpus date-stamped dirs. Path ends at .../{corpus}; seed_{s}/
-# level4_cnn_model.pt is appended internally.
-V7_CKPT_HUMAN="${V7_CKPT_HUMAN:-results/benchmark_human_8M_01_04_2026/test/level4_cnn_8M/human}"
-V7_CKPT_NON_HUMAN="${V7_CKPT_NON_HUMAN:-results/benchmark_non_human_8M_13_05_2026/test/level4_cnn_8M/non_human}"
-V7_CKPT_ALL="${V7_CKPT_ALL:-results/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all}"
+# DT-Kinase v7 checkpoint paths. Default points at the consolidated
+# `semantic-screening-results` bundle (identical in diamante-02 and
+# local checkouts), which contains the canonical thesis checkpoints.
+# Path ends at .../{corpus}; seed_{s}/level4_cnn_model.pt is appended
+# internally. Override with V7_CKPT_{HUMAN,NON_HUMAN,ALL} if you want
+# to use the original date-stamped training dirs instead.
+V7_CKPT_HUMAN="${V7_CKPT_HUMAN:-results/semantic-screening-results/dt-kinase/benchmark_human_8M_01_04_2026/test/level4_cnn_8M/human}"
+V7_CKPT_NON_HUMAN="${V7_CKPT_NON_HUMAN:-results/semantic-screening-results/dt-kinase/benchmark_non_human_8M_13_05_2026/test/level4_cnn_8M/non_human}"
+V7_CKPT_ALL="${V7_CKPT_ALL:-results/semantic-screening-results/dt-kinase/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all}"
 
 V7_ENV="${V7_ENV:-env}"  # DT-Kinase: venv (env/bin/activate) or conda env name
 DRUGBAN_ENV="${DRUGBAN_ENV:-drugban}"
