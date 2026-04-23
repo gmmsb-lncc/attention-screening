@@ -50,7 +50,7 @@ V7_CKPT_HUMAN="${V7_CKPT_HUMAN:-results/benchmark_human_8M_01_04_2026/test/level
 V7_CKPT_NON_HUMAN="${V7_CKPT_NON_HUMAN:-results/benchmark_non_human_8M_13_05_2026/test/level4_cnn_8M/non_human}"
 V7_CKPT_ALL="${V7_CKPT_ALL:-results/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all}"
 
-V7_ENV="${V7_ENV:-docktkinase}"
+V7_ENV="${V7_ENV:-env}"  # DT-Kinase: venv (env/bin/activate) or conda env name
 DRUGBAN_ENV="${DRUGBAN_ENV:-drugban}"
 GRAPHBAN_ENV="${GRAPHBAN_ENV:-graphban}"
 CONPLEX_ENV="${CONPLEX_ENV:-conplex}"
@@ -72,13 +72,28 @@ fi
 CONDA_SH="${CONDA_BASE}/etc/profile.d/conda.sh"
 
 activate() {
-    # Usage: activate <env-name>  (to be called inside the subshell only)
-    # shellcheck disable=SC1090
-    source "${CONDA_SH}"
-    conda activate "$1" || {
-        echo "[fatal] cannot activate conda env '$1'" >&2
-        exit 1
-    }
+    # Usage: activate <env>  (inside a subshell).
+    # If <env> is a path to a venv (has bin/activate), source it;
+    # else treat as conda env name. MKL activate scripts in some conda envs
+    # reference MKL_INTERFACE_LAYER under `set -u` — disable nounset while
+    # sourcing / activating, then restore.
+    local env="$1"
+    set +u
+    if [ -f "${REPO_ROOT}/${env}/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${REPO_ROOT}/${env}/bin/activate"
+    elif [ -f "${env}/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${env}/bin/activate"
+    else
+        # shellcheck disable=SC1090
+        source "${CONDA_SH}"
+        conda activate "${env}" || {
+            echo "[fatal] cannot activate env '${env}' (not a venv path, not a conda env name)" >&2
+            exit 1
+        }
+    fi
+    set -u
 }
 
 echo "=============================================================="

@@ -158,7 +158,12 @@ def main():
         pin_memory=use_pin, persistent_workers=(args.num_workers > 0),
     )
 
-    out_root = repo / args.output_dir / args.corpus
+    # Cross-dataset mode (--test-tsv override): flat layout output_dir/seed_{s}/.
+    # Legacy diagonal mode keeps the output_dir/{corpus}/seed_{s}/ nesting.
+    if args.test_tsv is not None:
+        out_root = repo / args.output_dir
+    else:
+        out_root = repo / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
 
     for seed in args.seeds:
