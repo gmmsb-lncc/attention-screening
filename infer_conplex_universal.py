@@ -113,7 +113,12 @@ def main():
     test_drug_emb = _featurize_all(drug_feat, test_smi, "test drug")
     test_prot_emb = _featurize_all(prot_feat, test_seq, "test prot")
 
-    out_root = REPO / args.output_dir / args.corpus
+    # Cross-dataset mode (--test-tsv override): flat layout output_dir/seed_{s}/.
+    # Legacy diagonal mode keeps the output_dir/{corpus}/seed_{s}/ nesting.
+    if args.test_tsv is not None:
+        out_root = REPO / args.output_dir
+    else:
+        out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
 
     # Mapear seed canônica para índice de réplica (0..len(seeds)-1)
