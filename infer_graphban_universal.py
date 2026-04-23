@@ -253,6 +253,11 @@ def main():
     ap.add_argument("--output-dir", default="GraphBAN/results_universal")
     ap.add_argument("--batch-size", type=int, default=128)
     ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--val-tsv", default=None,
+                    help="Override val TSV (used to calibrate threshold). "
+                         "Defaults to the training corpus val TSV.")
+    ap.add_argument("--test-tsv", default=None,
+                    help="Override test TSV. Defaults to the training corpus test TSV.")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -263,11 +268,15 @@ def main():
     with open(REPO / args.config) as f:
         config = yaml.safe_load(f)
 
-    val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
+    default_val, default_test = UNIVERSAL_TSV[args.corpus]
+    val_tsv = Path(args.val_tsv) if args.val_tsv else REPO / default_val
+    test_tsv = Path(args.test_tsv) if args.test_tsv else REPO / default_test
+    print(f"  val tsv: {val_tsv}")
+    print(f"  test tsv: {test_tsv}")
     print("  montando DataFrame com features cacheadas do treino…")
     fcfp_lookup, esm_lookup = load_feature_lookups(args.corpus)
-    val_df = tsv_to_graphban_df(REPO / val_tsv, fcfp_lookup, esm_lookup, device)
-    test_df = tsv_to_graphban_df(REPO / test_tsv, fcfp_lookup, esm_lookup, device)
+    val_df = tsv_to_graphban_df(val_tsv, fcfp_lookup, esm_lookup, device)
+    test_df = tsv_to_graphban_df(test_tsv, fcfp_lookup, esm_lookup, device)
     print(f"val n={len(val_df)} pos={val_df['Y'].mean():.3f}")
     print(f"test n={len(test_df)} pos={test_df['Y'].mean():.3f}")
 

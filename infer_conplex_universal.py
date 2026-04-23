@@ -78,6 +78,11 @@ def main():
     ap.add_argument("--checkpoint-root", default="ConPLex/best_models")
     ap.add_argument("--output-dir", default="ConPLex/results_universal")
     ap.add_argument("--batch-size", type=int, default=1024)
+    ap.add_argument("--val-tsv", default=None,
+                    help="Override val TSV (used to calibrate threshold). "
+                         "Defaults to the training corpus val TSV.")
+    ap.add_argument("--test-tsv", default=None,
+                    help="Override test TSV. Defaults to the training corpus test TSV.")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -94,9 +99,13 @@ def main():
         except Exception as e:
             print(f"  ProtBertFeaturizer permanece em CPU: {e}")
 
-    val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
-    val_smi, val_seq, val_y = tsv_to_triples(REPO / val_tsv)
-    test_smi, test_seq, test_y = tsv_to_triples(REPO / test_tsv)
+    default_val, default_test = UNIVERSAL_TSV[args.corpus]
+    val_tsv = Path(args.val_tsv) if args.val_tsv else REPO / default_val
+    test_tsv = Path(args.test_tsv) if args.test_tsv else REPO / default_test
+    print(f"val tsv: {val_tsv}")
+    print(f"test tsv: {test_tsv}")
+    val_smi, val_seq, val_y = tsv_to_triples(val_tsv)
+    test_smi, test_seq, test_y = tsv_to_triples(test_tsv)
     print(f"val n={len(val_y)}  test n={len(test_y)}")
     print("  pré-featurizando val/test (uma vez por corpus)…")
     val_drug_emb = _featurize_all(drug_feat, val_smi, "val drug")
