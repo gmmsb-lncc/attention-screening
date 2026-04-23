@@ -40,7 +40,14 @@ cd "${REPO_ROOT}"
 SEEDS=(${SEEDS:-42 123 456 789 1024})
 MODELS=(${MODELS:-dtkinase drugban graphban conplex})
 OUT_ROOT="${OUT_ROOT:-results/cross_matrix}"
-V7_CKPT_ROOT="${V7_CKPT_ROOT:-results/v7_diagonal}"
+
+# DT-Kinase v7 checkpoint paths. Diamante-02 has them under results/
+# with per-corpus date-stamped dirs. Each path must end at
+# .../{corpus}/seed_{s}/level4_cnn_model.pt (we append seed_{s} internally).
+V7_CKPT_HUMAN="${V7_CKPT_HUMAN:-results/benchmark_human_8M_01_04_2026/test/level4_cnn_8M/human}"
+V7_CKPT_NON_HUMAN="${V7_CKPT_NON_HUMAN:-results/benchmark_non_human_8M_13_05_2026/test/level4_cnn_8M/non_human}"
+V7_CKPT_ALL="${V7_CKPT_ALL:-results/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all}"
+
 V7_ENV="${V7_ENV:-env}"
 DRUGBAN_ENV="${DRUGBAN_ENV:-drugban}"
 GRAPHBAN_ENV="${GRAPHBAN_ENV:-graphban}"
@@ -88,10 +95,19 @@ run_filter() {
     fi
 }
 
+v7_ckpt_root_for() {
+    case "$1" in
+        human)     echo "${V7_CKPT_HUMAN}" ;;
+        non_human) echo "${V7_CKPT_NON_HUMAN}" ;;
+        all)       echo "${V7_CKPT_ALL}" ;;
+    esac
+}
+
 run_dtkinase() {
     local train="$1" test="$2" seed="$3" out="$4"
     mkdir -p "${out}"
-    local ckpt="${V7_CKPT_ROOT}/${train}/seed_${seed}/level4_cnn_model.pt"
+    local root; root="$(v7_ckpt_root_for "${train}")"
+    local ckpt="${root}/seed_${seed}/level4_cnn_model.pt"
     if [ ! -f "${ckpt}" ]; then
         echo "[dtkinase ${train}->${test} s=${seed}] checkpoint missing: ${ckpt}"
         return
