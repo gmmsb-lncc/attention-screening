@@ -51,6 +51,45 @@ MODEL_LABELS = {
 CORPUS_LABELS = {"human": "H", "non_human": "NH", "all": "All"}
 
 
+def _f1_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """F1-optimal threshold via sorted sweep. Matches recalibrate_baselines_f1val
+    (DrugBAN + GraphBAN native criterion). Tie-break: closest to 0.5."""
+    y = y_true.astype(np.int64)
+    if y.size == 0 or len(np.unique(y)) < 2:
+        return 0.5
+    order = np.argsort(y_prob, kind="mergesort")[::-1]
+    ps, ls = y_prob[order], y[order]
+    total_pos = float((ls == 1).sum())
+    tp_cum = np.cumsum(ls == 1, dtype=np.float64)
+    fp_cum = np.cumsum(ls == 0, dtype=np.float64)
+    last_idx = np.r_[np.where(np.diff(ps) != 0)[0], len(ps) - 1]
+    tp = tp_cum[last_idx]
+    fp = fp_cum[last_idx]
+    fn = total_pos - tp
+    thr = ps[last_idx]
+    sentinel = np.nextafter(float(ps.max()), np.inf)
+    tp = np.r_[0.0, tp]
+    fp = np.r_[0.0, fp]
+    fn = np.r_[total_pos, fn]
+    thr = np.r_[sentinel, thr]
+    den = 2 * tp + fp + fn
+    sc = np.where(den > 0, (2 * tp) / den, 0.0)
+    best = float(np.nanmax(sc))
+    ties = np.where(np.isclose(sc, best, rtol=1e-9, atol=1e-12))[0]
+    bidx = int(ties[np.argmin(np.abs(thr[ties] - 0.5))])
+    return float(thr[bidx])
+
+
+# Per-model threshold criterion on the training-corpus validation set.
+# Matches the thesis protocol declared in capitulo5 tables.
+_MODEL_THRESHOLD_CRITERION = {
+    "dtkinase": "mcc",
+    "conplex":  "mcc",
+    "drugban":  "f1",
+    "graphban": "f1",
+}
+
+
 def _mcc_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     """Vectorised two-pass MCC-optimal threshold.
 
@@ -167,7 +206,12 @@ def _read_cell_dtkinase(seed_dir: Path) -> dict | None:
     return None
 
 
-def _read_cell_baseline(seed_dir: Path) -> dict | None:
+def _read_cell_baseline(seed_dir: Path, criterion: str = "mcc") -> dict | None:
+    """Read a baseline .npz and compute test metrics at the val-derived threshold.
+
+    criterion='mcc' → MCC-optimal on val (ConPLex native).
+    criterion='f1'  → F1-optimal on val (DrugBAN + GraphBAN native).
+    """
     npz = seed_dir / "raw_predictions.npz"
     if not npz.exists():
         return None
@@ -177,8 +221,13 @@ def _read_cell_baseline(seed_dir: Path) -> dict | None:
         return None
     val_y, val_p = d["val_y_true"], d["val_y_prob"]
     test_y, test_p = d["test_y_true"], d["test_y_prob"]
-    tau = _mcc_threshold(val_y, val_p)
-    return _metrics_from_preds(test_y, test_p, tau)
+    if criterion == "f1":
+        tau = _f1_threshold(val_y, val_p)
+    else:
+        tau = _mcc_threshold(val_y, val_p)
+    out = _metrics_from_preds(test_y, test_p, tau)
+    out["threshold_criterion"] = criterion
+    return out
 
 
 def _scan_cell(model: str, cell_dir: Path) -> dict:
@@ -196,7 +245,8 @@ def _scan_cell(model: str, cell_dir: Path) -> dict:
         if model == "dtkinase":
             cell = _read_cell_dtkinase(sd)
         else:
-            cell = _read_cell_baseline(sd)
+            criterion = _MODEL_THRESHOLD_CRITERION.get(model, "mcc")
+            cell = _read_cell_baseline(sd, criterion=criterion)
         if cell:
             per_seed[seed] = cell
     agg: dict[str, dict[str, float]] = {}
