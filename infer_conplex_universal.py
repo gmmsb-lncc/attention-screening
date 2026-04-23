@@ -121,11 +121,16 @@ def main():
         out_root = REPO / args.output_dir / args.corpus
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # Mapear seed canônica para índice de réplica (0..len(seeds)-1)
-    # checkpoints em diamante-02 seguem padrão trained_<corpus>_rep<idx>
-    seed_to_rep = {s: i for i, s in enumerate(sorted(set(args.seeds)))}
+    # Mapear seed canônica → índice de réplica segundo a ordem canônica fixa
+    # das 5 seeds da tese. Necessário ser independente de args.seeds porque
+    # o orchestrator cross-matrix chama com 1 seed por vez — enumerate
+    # sobre sorted(args.seeds) sempre retornaria 0 nesse caso.
+    CANONICAL_SEEDS = [42, 123, 456, 789, 1024]
+    seed_to_rep = {s: i for i, s in enumerate(CANONICAL_SEEDS)}
     for seed in args.seeds:
-        rep_idx = seed_to_rep[seed]
+        rep_idx = seed_to_rep.get(seed)
+        if rep_idx is None:
+            print(f"[skip] seed={seed} fora das canônicas {CANONICAL_SEEDS}"); continue
         candidates = [
             f"trained_{args.corpus}_rep{rep_idx}",
             f"trained_{args.corpus}_rep{seed}",
