@@ -100,6 +100,35 @@ def load_feature_lookups(corpus: str) -> tuple[dict, dict]:
     return fcfp_by_smiles, esm_by_protein
 
 
+def _compute_chemberta_for_missing(missing_smiles: list[str], device: torch.device) -> dict:
+    """Compute ChemBERTa-77M-MTR CLS embedding (384-d) for SMILES missing
+    from the training cache. Replicates GraphBAN/run_baseline.py
+    extract_chemberta_features. The GraphBAN dataloader expects a column
+    called ``fcfp`` even though its contents are ChemBERTa embeddings —
+    naming is upstream-legacy."""
+    if not missing_smiles:
+        return {}
+    print(f"    computando ChemBERTa (fcfp) para {len(missing_smiles)} SMILES ausentes do cache…")
+    from transformers import AutoTokenizer, RobertaModel  # type: ignore
+    model_name = "DeepChem/ChemBERTa-77M-MTR"
+    model = RobertaModel.from_pretrained(model_name, add_pooling_layer=False, use_safetensors=True)
+    model = model.to(device).eval()
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    out: dict = {}
+    with torch.no_grad():
+        for s in missing_smiles:
+            enc = tokenizer(s, return_tensors="pt", padding="max_length",
+                            max_length=290, truncation=True)
+            enc = {k: v.to(device) for k, v in enc.items()}
+            res = model(**enc)
+            emb = res.last_hidden_state[0, 0, :].cpu().numpy().astype(np.float64)
+            out[s] = emb
+    del model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return out
+
+
 def _compute_esm1b_for_missing(missing_seqs: list[str], device: torch.device) -> dict:
     """Computa ESM-1b 1280-d pooled embedding para sequências ausentes do cache.
     Usa esm.pretrained.esm1b_t33_650M_UR50S. Requer env com esm instalado."""
@@ -136,19 +165,26 @@ def tsv_to_graphban_df(
     esm_by_protein: dict,
     device: torch.device,
     compute_missing_esm: bool = True,
+    compute_missing_fcfp: bool = True,
 ) -> pd.DataFrame:
     """Monta DataFrame no formato GraphBAN, reutilizando cache ESM/FCFP do treino.
     Se compute_missing_esm=True e houver proteínas fora do cache, computa ESM-1b
-    on-the-fly para evitar zero-fill que invalida métrica."""
+    on-the-fly. Idem compute_missing_fcfp para SMILES ausentes (ChemBERTa 384-d).
+    Zero-fill invalida métrica em cross-dataset (40%+ SMILES ausentes em H->NH)."""
     df = pd.read_csv(tsv_path, sep="\t")
     smiles_list = df["canonical_smiles"].astype(str).tolist()
     protein_list = df["seq"].astype(str).tolist()
-    # Identificar proteínas ausentes ANTES de montar colunas
+    # Identificar proteínas e SMILES ausentes ANTES de montar colunas
     missing_prots = sorted({p for p in protein_list if p not in esm_by_protein})
     if missing_prots and compute_missing_esm:
         extra = _compute_esm1b_for_missing(missing_prots, device)
         esm_by_protein.update(extra)
         print(f"    cache ESM ampliado para {len(esm_by_protein)} proteínas")
+    missing_smiles = sorted({s for s in smiles_list if s not in fcfp_by_smiles})
+    if missing_smiles and compute_missing_fcfp:
+        extra = _compute_chemberta_for_missing(missing_smiles, device)
+        fcfp_by_smiles.update(extra)
+        print(f"    cache FCFP ampliado para {len(fcfp_by_smiles)} SMILES")
     fcfp_col = []
     esm_col = []
     n_missing_fcfp = 0
