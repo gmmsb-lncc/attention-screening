@@ -117,6 +117,11 @@ def main():
     ap.add_argument("--output-dir", default="DrugBAN/results_universal")
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--val-tsv", default=None,
+                    help="Override val TSV (used to calibrate threshold). "
+                         "Defaults to the training corpus val TSV.")
+    ap.add_argument("--test-tsv", default=None,
+                    help="Override test TSV. Defaults to the training corpus test TSV.")
     args = ap.parse_args()
 
     repo = REPO_ROOT
@@ -128,12 +133,14 @@ def main():
     with open(repo / args.config) as f:
         config = yaml.safe_load(f)
 
-    val_tsv, test_tsv = UNIVERSAL_TSV[args.corpus]
+    default_val, default_test = UNIVERSAL_TSV[args.corpus]
+    val_tsv = args.val_tsv if args.val_tsv is not None else str(repo / default_val)
+    test_tsv = args.test_tsv if args.test_tsv is not None else str(repo / default_test)
     print(f"Loading universal val: {val_tsv}")
-    val_df = tsv_to_drugban_df(repo / val_tsv)
+    val_df = tsv_to_drugban_df(Path(val_tsv))
     print(f"  rows: {len(val_df)}  pos_rate: {val_df['Y'].mean():.3f}")
     print(f"Loading universal test: {test_tsv}")
-    test_df = tsv_to_drugban_df(repo / test_tsv)
+    test_df = tsv_to_drugban_df(Path(test_tsv))
     print(f"  rows: {len(test_df)}  pos_rate: {test_df['Y'].mean():.3f}")
 
     val_ds = DTIDataset(val_df.index.values, val_df)
