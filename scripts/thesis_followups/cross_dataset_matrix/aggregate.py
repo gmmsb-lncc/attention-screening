@@ -52,27 +52,41 @@ CORPUS_LABELS = {"human": "H", "non_human": "NH", "all": "All"}
 
 
 def _mcc_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
-    """Two-pass MCC-optimal threshold (mirrors benchmark/levels/level4_cnn._best_mcc_threshold)."""
-    if y_true.size == 0 or len(np.unique(y_true)) < 2:
+    """Vectorised two-pass MCC-optimal threshold.
+
+    Matches the semantics of benchmark/levels/level4_cnn._best_mcc_threshold
+    (coarse grid + fine sweep) but avoids calling sklearn.matthews_corrcoef
+    per threshold — crucial for large validation sets (~69k rows).
+    """
+    y = y_true.astype(np.int64)
+    if y.size == 0 or len(np.unique(y)) < 2:
         return 0.5
-    grid = np.linspace(0.01, 0.99, 100)
-    anchors = np.unique(np.clip(y_prob, 0.01, 0.99))
-    thresholds = np.unique(np.concatenate([grid, anchors]))
-    best_thr, best_mcc = 0.5, -1.0
-    for thr in thresholds:
-        pred = (y_prob >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
-            best_thr = float(thr)
+
+    def _best(thresholds: np.ndarray) -> tuple[float, float]:
+        P = float((y == 1).sum())
+        N = float((y == 0).sum())
+        best_thr, best_mcc = 0.5, -1.0
+        for thr in thresholds:
+            pred = y_prob >= thr
+            tp = float((pred & (y == 1)).sum())
+            fp = float((pred & (y == 0)).sum())
+            fn = P - tp
+            tn = N - fp
+            denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+            if denom == 0:
+                continue
+            mcc = (tp * tn - fp * fn) / denom
+            if mcc > best_mcc:
+                best_mcc = mcc
+                best_thr = float(thr)
+        return best_thr, best_mcc
+
+    coarse = np.linspace(0.01, 0.99, 100)
+    best_thr, _ = _best(coarse)
     lo, hi = max(0.01, best_thr - 0.05), min(0.99, best_thr + 0.05)
-    for thr in np.linspace(lo, hi, 100):
-        pred = (y_prob >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
-            best_thr = float(thr)
-    return best_thr
+    fine = np.linspace(lo, hi, 100)
+    best_thr2, _ = _best(fine)
+    return float(best_thr2)
 
 
 def _metrics_from_preds(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> dict:
@@ -92,28 +106,65 @@ def _metrics_from_preds(y_true: np.ndarray, y_prob: np.ndarray, threshold: float
 
 
 def _read_cell_dtkinase(seed_dir: Path) -> dict | None:
+    """Read DT-Kinase v7 metrics. Supports two layouts:
+
+    1. Cross-dataset eval (eval_checkpoint_on_dataset.py output): metrics.json
+       carries full metrics + y_prob + raw_labels.
+    2. Diagonal benchmark output: level4_cnn_results.json + raw_predictions.npz
+       (npz has y_true + y_prob post-Platt; metrics live in the JSON).
+    """
+    # Layout 1: cross-dataset
     mpath = seed_dir / "metrics.json"
-    if not mpath.exists():
-        return None
-    with open(mpath) as fh:
-        m = json.load(fh)
-    auprc = 0.0
-    if "y_prob" in m and "raw_labels" in m:
-        y = np.asarray(m["raw_labels"])
-        p = np.asarray(m["y_prob"])
-        if len(np.unique(y)) == 2:
-            auprc = float(average_precision_score(y, p))
-    return {
-        "mcc": float(m.get("mcc", 0.0)),
-        "auroc": float(m.get("auroc", 0.0)),
-        "auprc": auprc,
-        "f1": float(m.get("f1", 0.0)),
-        "accuracy": float(m.get("accuracy", 0.0)),
-        "precision": float(m.get("precision", 0.0)),
-        "recall": float(m.get("recall", 0.0)),
-        "threshold": float(m.get("threshold", 0.5)),
-        "n": int(m.get("n_samples", 0)),
-    }
+    if mpath.exists():
+        with open(mpath) as fh:
+            m = json.load(fh)
+        auprc = 0.0
+        if "y_prob" in m and "raw_labels" in m:
+            y = np.asarray(m["raw_labels"])
+            p = np.asarray(m["y_prob"])
+            if len(np.unique(y)) == 2:
+                auprc = float(average_precision_score(y, p))
+        return {
+            "mcc": float(m.get("mcc", 0.0)),
+            "auroc": float(m.get("auroc", 0.0)),
+            "auprc": auprc,
+            "f1": float(m.get("f1", 0.0)),
+            "accuracy": float(m.get("accuracy", 0.0)),
+            "precision": float(m.get("precision", 0.0)),
+            "recall": float(m.get("recall", 0.0)),
+            "threshold": float(m.get("threshold", 0.5)),
+            "n": int(m.get("n_samples", 0)),
+        }
+
+    # Layout 2: diagonal benchmark output
+    jpath = seed_dir / "level4_cnn_results.json"
+    npz_path = seed_dir / "raw_predictions.npz"
+    if jpath.exists():
+        with open(jpath) as fh:
+            j = json.load(fh)
+        # nested format: {"Split by Scaffold": {"MLP": {...}}}
+        inner = next(iter(j.values())) if j else {}
+        if isinstance(inner, dict):
+            inner = next(iter(inner.values())) if inner else {}
+        auprc = 0.0
+        n = 0
+        if npz_path.exists():
+            d = np.load(npz_path, allow_pickle=True)
+            if "y_true" in d and "y_prob" in d and len(np.unique(d["y_true"])) == 2:
+                auprc = float(average_precision_score(d["y_true"], d["y_prob"]))
+                n = int(len(d["y_true"]))
+        return {
+            "mcc": float(inner.get("mcc", 0.0)),
+            "auroc": float(inner.get("auc", inner.get("auroc", 0.0))),
+            "auprc": auprc,
+            "f1": float(inner.get("f1", 0.0)),
+            "accuracy": float(inner.get("accuracy", 0.0)),
+            "precision": float(inner.get("precision", 0.0)),
+            "recall": float(inner.get("recall", 0.0)),
+            "threshold": float(inner.get("threshold", inner.get("val_threshold", 0.5))),
+            "n": n,
+        }
+    return None
 
 
 def _read_cell_baseline(seed_dir: Path) -> dict | None:
