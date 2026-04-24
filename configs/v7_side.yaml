@@ -35,7 +35,10 @@ level4_cnn_v8:
   num_heads: 8
   head_dim: 32
   channels: 64
-  batch_size: 128
+  # Per-token injection doubles both sequence dims → 2D cross-attention map
+  # is ~4× larger than v7's. With 24 GB VRAM (diamante-02 RTX 4090), batch
+  # 128 OOMs. 32 fits; tune up if your GPU has more headroom.
+  batch_size: 32
 
   dropout: 0.35
   weight_decay: 0.04
