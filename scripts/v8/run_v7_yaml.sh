@@ -18,7 +18,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 CORPUS="${CORPUS:-non_human}"
-V8ENV="${V8ENV:-v8env}"
+# Default: repo venv at ./env (setup.py). v7/v7+/v7_ban only need v7
+# dependencies — no ChemBERTa/BioBERT modules from v8 POC. Override
+# with V8ENV=v8env or other conda env as needed.
+V8ENV="${V8ENV:-env}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 # Config path — default v7.yaml (dot-product heads). Override with:
 #   V7_CONFIG=configs/v7_ban.yaml   # BAN (bilinear attention) variant
