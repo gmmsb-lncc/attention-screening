@@ -38,7 +38,13 @@ level4_cnn_v8:
   weight_decay: 0.04
 
   # Precision
-  double: true
+  # float32 + AMP para v8 — diferente do v7 (float64). Motivos:
+  #   (i)  cuDNN 9.x + float64 dispara CUDNN_STATUS_NOT_INITIALIZED em várias
+  #        GPUs; float32 resolve sem workaround.
+  #   (ii) AMP (fp16 autocast) só funciona com float32, dando ~2x throughput.
+  #   (iii) Precisão extra do float64 não é relevante no POC — se v8 beneficiar
+  #        da precisão numérica, pode subir para float64 depois.
+  double: false
   no_amp: false
   deterministic: false
 
