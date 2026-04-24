@@ -29,9 +29,13 @@ set -uo pipefail
 V8ENV_NAME="${V8ENV_NAME:-v8env}"
 ADMETENV_NAME="${ADMETENV_NAME:-admetenv}"
 PYTHON_VER="${PYTHON_VER:-3.11}"
-TORCH_VER="${TORCH_VER:-2.5.1}"
-TORCHVISION_VER="${TORCHVISION_VER:-0.20.1}"
-CUDA_INDEX="${CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
+# torch 2.4.1+cu121 empirically works with NVIDIA driver 12.4.0 on
+# diamante-02. cu124 wheels for torch 2.5.x enforce a stricter driver
+# version check that rejects driver 12.4.0. Stick with cu121 until the
+# host driver is upgraded.
+TORCH_VER="${TORCH_VER:-2.4.1}"
+TORCHVISION_VER="${TORCHVISION_VER:-0.19.1}"
+CUDA_INDEX="${CUDA_INDEX:-https://download.pytorch.org/whl/cu121}"
 
 if ! command -v conda &>/dev/null; then
     echo "[fatal] conda not on PATH" >&2; exit 1
