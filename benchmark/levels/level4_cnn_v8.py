@@ -137,6 +137,11 @@ class InteractionMapCNNv8(InteractionMapCNN):
         # behaviour: AttentionPool → single CLS-equivalent token.
         chemberta_per_token: bool = False,
         biobert_per_token: bool = False,
+        # Cap on side-feature sequence length in per-token mode. The 2D
+        # cross-attention map area is (L_prot + L_biobert) × (L_mol + L_cb),
+        # and CNN activations scale with map area × channels. Default 128
+        # keeps memory feasible on 24 GB GPUs with batch 32.
+        max_side_len: int = 128,
         **kwargs,
     ) -> None:
         # Forward adapter-related kwargs explicitly to parent AND keep them for
@@ -161,6 +166,7 @@ class InteractionMapCNNv8(InteractionMapCNN):
         self.enable_taxonomy = enable_taxonomy
         self.chemberta_per_token = chemberta_per_token
         self.biobert_per_token = biobert_per_token
+        self.max_side_len = int(max_side_len)
 
         # ---- Pre-attention injection ----
         # v8 = v7 + multi-source. The injected CLS-equivalent tokens go
@@ -333,6 +339,11 @@ class InteractionMapCNNv8(InteractionMapCNN):
                 # preserved. Full ChemBERTa sequence joins MoLFormer tokens
                 # in the cross-attention map with ESM → CNN processes both
                 # jointly. Valid-token mask concatenated too.
+                # Cap side seq length to control 2D cross-attn map size
+                # (OOM control: map area grows with L_c × L_b).
+                if chemberta_tokens.size(1) > self.max_side_len:
+                    chemberta_tokens = chemberta_tokens[:, :self.max_side_len]
+                    chemberta_mask = chemberta_mask[:, :self.max_side_len]
                 cb_toks = self.chemberta_proj(chemberta_tokens)             # (B, L_c, ligand_dim)
                 cb_toks = self.chemberta_adapter(cb_toks)                   # (B, L_c, ligand_dim)
                 ligand_matrix = torch.cat([cb_toks, ligand_matrix], dim=1)
@@ -348,6 +359,9 @@ class InteractionMapCNNv8(InteractionMapCNN):
                 )
         if self.enable_biobert and biobert_tokens is not None:
             if self.biobert_per_token:
+                if biobert_tokens.size(1) > self.max_side_len:
+                    biobert_tokens = biobert_tokens[:, :self.max_side_len]
+                    biobert_mask = biobert_mask[:, :self.max_side_len]
                 bb_toks = self.biobert_proj(biobert_tokens)                  # (B, L_b, protein_dim)
                 bb_toks = self.biobert_adapter(bb_toks)                      # (B, L_b, protein_dim)
                 protein_matrix = torch.cat([bb_toks, protein_matrix], dim=1)
