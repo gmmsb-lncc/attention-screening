@@ -230,12 +230,16 @@ def main() -> None:
     no_amp = bool(l4.get("no_amp", False))
     dtype = torch.float64 if use_double else torch.float32
     use_amp = device.type == "cuda" and not no_amp and not use_double
-    # cuDNN 9.x does not fully support float64 Conv2d — triggers
-    # CUDNN_STATUS_NOT_INITIALIZED. Disable cuDNN when the model runs in
-    # double precision, forcing the native CUDA fallback kernels.
+    # cuDNN control. On diamante-02 the bundled cuDNN 9.x triggers
+    # CUDNN_STATUS_NOT_INITIALIZED on Conv2d regardless of dtype — presumed
+    # driver/cuDNN ABI mismatch. Allow disabling via env var; also disable
+    # automatically when double precision is on (cuDNN float64 Conv2d path
+    # is unreliable).
+    disable_cudnn = os.environ.get("V8_DISABLE_CUDNN", "1") == "1"
     if device.type == "cuda":
-        torch.backends.cudnn.enabled = not use_double
-        torch.backends.cudnn.benchmark = not use_double
+        torch.backends.cudnn.enabled = (not disable_cudnn) and (not use_double)
+        torch.backends.cudnn.benchmark = torch.backends.cudnn.enabled
+        print(f"  cuDNN: enabled={torch.backends.cudnn.enabled}")
 
     batch_size = int(l4.get("batch_size", 128))
     scaffold_dir = str(REPO / DEFAULT_SCAFFOLD_SPLIT_DIR)
