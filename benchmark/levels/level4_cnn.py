@@ -1078,14 +1078,21 @@ def _train_interaction_cnn(
     )
 
     # --- torch.compile for fused training kernels (PyTorch 2.x) -------
+    # Disable via BENCHMARK_LEVEL4CNN_NO_COMPILE=1 (default on diamante-02:
+    # dynamic cross-attention shapes trigger noisy symbolic_shapes warnings
+    # and repeated recompiles; gain is marginal without cuDNN).
     compiled = False
-    if hasattr(torch, 'compile') and device.type == 'cuda' and not use_double:
+    no_compile = os.getenv("BENCHMARK_LEVEL4CNN_NO_COMPILE", "0") == "1"
+    if (hasattr(torch, 'compile') and device.type == 'cuda'
+            and not use_double and not no_compile):
         try:
             model = torch.compile(model, mode='reduce-overhead')
             compiled = True
             tqdm.write("    torch.compile: enabled (reduce-overhead)")
         except Exception as e:
             tqdm.write(f"    torch.compile: unavailable ({e})")
+    elif no_compile:
+        tqdm.write("    torch.compile: disabled via BENCHMARK_LEVEL4CNN_NO_COMPILE=1")
 
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))

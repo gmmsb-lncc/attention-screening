@@ -47,10 +47,16 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-${N_CPU}}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-# Force fp32 + cuDNN off (diamante-02 constraints).
+# Force fp32 + cuDNN off (diamante-02 constraints). NO_AMP/DOUBLE are
+# yaml-controlled (run_from_config.py clobbers external env from yaml)
+# so these exports only matter for DISABLE_CUDNN and NO_COMPILE which
+# have no yaml mapping. Keep the DOUBLE/NO_AMP exports for documentation.
 export BENCHMARK_LEVEL4CNN_DOUBLE="${BENCHMARK_LEVEL4CNN_DOUBLE:-0}"
 export BENCHMARK_LEVEL4CNN_NO_AMP="${BENCHMARK_LEVEL4CNN_NO_AMP:-1}"
 export BENCHMARK_LEVEL4CNN_DISABLE_CUDNN="${BENCHMARK_LEVEL4CNN_DISABLE_CUDNN:-1}"
+# torch.compile produces dynamo symbolic_shapes warnings on dynamic cross-
+# attention maps + recompiles frequently. Disable by default.
+export BENCHMARK_LEVEL4CNN_NO_COMPILE="${BENCHMARK_LEVEL4CNN_NO_COMPILE:-1}"
 
 echo "=============================================================="
 echo "v7.yaml canonical run (run_from_config.py)"
