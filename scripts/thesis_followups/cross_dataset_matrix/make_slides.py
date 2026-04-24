@@ -82,7 +82,12 @@ def _heatmap(model: str, trains: dict, out_path: Path) -> None:
                 M[i, j] = m
                 S[i, j] = s
     fig, ax = plt.subplots(figsize=(5.2, 4.4))
-    im = ax.imshow(M, cmap="RdYlGn", vmin=0.0, vmax=0.8, aspect="auto")
+    # Explicit lightgrey for NaN cells so missing data is visually obvious
+    # (matplotlib renders NaN as transparent by default → looks broken).
+    cmap = plt.get_cmap("RdYlGn").copy()
+    cmap.set_bad(color="#e0e0e0")
+    masked = np.ma.masked_invalid(M)
+    im = ax.imshow(masked, cmap=cmap, vmin=0.0, vmax=0.8, aspect="auto")
     ax.set_xticks(range(3))
     ax.set_yticks(range(3))
     ax.set_xticklabels([CORPORA_LABELS[c] for c in CORPORA], fontsize=10)
@@ -93,7 +98,8 @@ def _heatmap(model: str, trains: dict, out_path: Path) -> None:
     for i in range(3):
         for j in range(3):
             if np.isnan(M[i, j]):
-                ax.text(j, i, "—", ha="center", va="center", color="grey", fontsize=10)
+                ax.text(j, i, "n/d", ha="center", va="center",
+                        color="#555555", fontsize=10, fontweight="bold")
             else:
                 color = "black" if 0.2 <= M[i, j] <= 0.6 else "white"
                 marker = "*" if i == j else ""
@@ -186,18 +192,41 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
             rows.append(f"  {i} & {MODEL_LABELS.get(m, m)} & ${fmt.format(s[key])}$ \\\\")
         return "\n".join(rows)
 
-    narrative_winner = (
-        f"O modelo com maior MCC médio na \\textbf{{diagonal}} "
-        f"(teste no mesmo corpus do treino) foi "
-        f"\\textbf{{{MODEL_LABELS.get(best_diag[0], best_diag[0])}}} "
-        f"(MCC={best_diag[1]['diag_mean']:.4f}). "
-        f"Na \\textbf{{transferência cross-corpus}} (fora da diagonal), "
-        f"\\textbf{{{MODEL_LABELS.get(best_off[0], best_off[0])}}} "
-        f"liderou (MCC={best_off[1]['off_mean']:.4f}). "
-        f"A menor queda diagonal $\\to$ off-diagonal foi de "
-        f"\\textbf{{{MODEL_LABELS.get(best_transfer[0], best_transfer[0])}}} "
-        f"($\\Delta$={best_transfer[1]['drop']:+.4f})."
-    )
+    # Detect empty-diagonal aggregation (missing --diagonal-* args).
+    any_diag = any(s["n_diag"] > 0 for s in summaries.values())
+
+    # Build off-diagonal "close runners-up" narrative: first and second
+    # places may be within noise. Threshold for "technical tie" = 0.01.
+    off_rank = sorted_off  # already sorted desc
+    tie_note = ""
+    if len(off_rank) >= 2:
+        gap = off_rank[0][1]["off_mean"] - off_rank[1][1]["off_mean"]
+        if gap < 0.01:
+            tie_note = (
+                f"Empate técnico com "
+                f"\\textbf{{{MODEL_LABELS.get(off_rank[1][0], off_rank[1][0])}}} "
+                f"($\\Delta$ = {gap:.3f})."
+            )
+
+    # Identify best / worst cells per model (for BEST/WORST transfer slides).
+    best_cells = {}
+    worst_cells = {}
+    for model, trains in data.items():
+        if model.startswith("_") or not isinstance(trains, dict):
+            continue
+        entries = []
+        for tr in CORPORA:
+            for te in CORPORA:
+                if tr == te:
+                    continue
+                m, s, n = _cell_mean(trains.get(tr, {}).get(te, {}))
+                if n > 0 and not np.isnan(m):
+                    entries.append((tr, te, m, s, n))
+        if not entries:
+            continue
+        entries.sort(key=lambda r: r[2], reverse=True)
+        best_cells[model] = entries[0]
+        worst_cells[model] = entries[-1]
 
     # Model-specific explanations drawn from architecture
     def _explain(model: str) -> str:
@@ -264,7 +293,16 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
 \scriptsize Linha: corpus de treino. Coluna: corpus de teste. * = diagonal.
 \end{frame}
 
-\begin{frame}{Ranking — Performance intra-corpus (diagonal)}
+""" + ("""\\begin{frame}{Ranking --- Performance intra-corpus (diagonal)}
+\\centering
+\\textbf{Diagonais não agregadas nesta execução.}\\\\[0.5em]
+\\scriptsize
+Diagonais (train == test) ficam em diretórios separados, passados a
+\\texttt{aggregate.py} via \\texttt{--diagonal-<model>-<corpus>}.
+Sem esses caminhos o script trata como ausentes.\\\\[0.5em]
+Para incluir: re-rodar \\texttt{aggregate.py} com argumentos canônicos
+(ver \\texttt{CLAUDE.md} §\\,``Cross-dataset matrix infra'').
+\\end{frame}""" if not any_diag else r"""\begin{frame}{Ranking --- Performance intra-corpus (diagonal)}
 \centering
 \includegraphics[width=0.85\textwidth]{""" + figp("bar_diag.pdf") + r"""}
 \\[1em]
@@ -275,12 +313,15 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
 """ + _row_rank(sorted_diag, "diag_mean") + r"""
 \bottomrule
 \end{tabular}
+\end{frame}""") + r"""
+
+\begin{frame}{Ranking --- Transferência (off-diagonal)}
+\centering
+\includegraphics[width=0.78\textwidth]{""" + figp("bar_offdiag.pdf") + r"""}
 \end{frame}
 
-\begin{frame}{Ranking — Transferência (off-diagonal)}
+\begin{frame}{Ranking --- Transferência (off-diagonal): tabela}
 \centering
-\includegraphics[width=0.85\textwidth]{""" + figp("bar_offdiag.pdf") + r"""}
-\\[1em]
 \begin{tabular}{clc}
 \toprule
 \# & Modelo & MCC médio (cross) \\
@@ -290,34 +331,124 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
 \end{tabular}
 \end{frame}
 
+\begin{frame}{Melhor transfer: \emph{all} $\to$ \emph{non\_human}}
+Todos os modelos atingem o \textbf{maior MCC off-diagonal} nesse par:
+\begin{itemize}
+  \item DrugBAN: $0.585 \pm 0.017$
+  \item GraphBAN: $0.578 \pm 0.027$
+  \item DT-Kinase v7: $0.466 \pm 0.046$
+  \item ConPLex: n/d
+\end{itemize}
+\textbf{Por quê:} corpus \emph{all} = humano $\cup$ não-humano cobre a
+distribuição do teste não-humano de forma completa. Modelo viu todas
+as kinases de teste $\Rightarrow$ performance quase-diagonal.
+\end{frame}
+
+\begin{frame}{Pior transfer: \emph{non\_human} $\to$ \emph{human}}
+Colapso geral:
+\begin{itemize}
+  \item ConPLex: $0.049 \pm 0.016$
+  \item DT-Kinase v7: $0.080 \pm 0.017$
+  \item GraphBAN: $0.100 \pm 0.015$
+  \item DrugBAN: $0.103 \pm 0.010$
+\end{itemize}
+\textbf{Por quê:} kinases humanas formam subset filogenético homogêneo;
+treinar só em outros organismos deixa lacunas não cobertas.
+\end{frame}
+
 \begin{frame}{Especificidade de corpus ($\Delta$ = diag $-$ off)}
 \centering
-\includegraphics[width=0.85\textwidth]{""" + figp("bar_drop.pdf") + r"""}
+\includegraphics[width=0.78\textwidth]{""" + figp("bar_drop.pdf") + r"""}
 \\[0.5em]
-\scriptsize $\Delta$ pequeno $\Rightarrow$ modelo transfere bem. $\Delta$ grande $\Rightarrow$ corpus-specific.
+\scriptsize $\Delta$ pequeno $\Rightarrow$ transfere bem. $\Delta$ grande $\Rightarrow$ corpus-specific.
 \end{frame}
 
 \begin{frame}{Resultado principal}
-""" + narrative_winner + r"""
+\textbf{Melhor transferência cross-corpus:}\\[0.5em]
+\textbf{""" + MODEL_LABELS.get(off_rank[0][0], off_rank[0][0]) + r"""}
+\\[0.3em]
+MCC $=$ """ + f"{off_rank[0][1]['off_mean']:.4f}" + r""".
+\\[0.8em]
+""" + tie_note + r"""
 \end{frame}
 
-\begin{frame}{Por que GraphBAN se destacou? (se aplicável)}
-Se GraphBAN liderou transferência:
+\begin{frame}{Por que DrugBAN liderou? (1/2)}
+\textbf{BAN explícito sem PLM:}
 \begin{itemize}
-  \item \textbf{Knowledge distillation (ESM-1b + ChemBERTa $\to$ GCN student)}: teacher treinado em dados massivos fornece \emph{soft labels} que regularizam, evitando memorização do corpus específico.
-  \item \textbf{Grafo bipartite inductive}: topologia explícita ligante–alvo não depende de coordenadas 3D nem features estatísticas do corpus.
-  \item \textbf{ChemBERTa teacher em MoleculeNet (supervisão externa)}: injetar conhecimento de tarefas multi-domínio antes do fine-tuning no corpus-alvo atua como \emph{prior} que suaviza distribuição shift.
-  \item \textbf{BAN (Bilinear Attention Network)}: captura interações explícitas substructure-domínio; agregação robusta a variações de corpus.
+  \item \textbf{Bilinear Attention Network} aprende matriz $W_k$ cruzando
+    features ligante-proteína em espaço nativo.
+  \item Sem bottleneck de projeção $\Rightarrow$ preserva 100\% da
+    informação de ligante.
+  \item GCN sobre grafo molecular aprende topologia específica de
+    kinases sem viés de pré-treino genérico.
 \end{itemize}
-\textit{Referência}: Zhang \emph{et al.}, \emph{GraphBAN: an induc\-tive framework for drug–target interaction}, \emph{Nat.\ Commun.} (2024).
+\scriptsize Bai \emph{et al.}, \emph{Nat.\ Mach.\ Intell.} 2023.
 \end{frame}
 
-\begin{frame}{Discussão — distribution shift}
-\textbf{Queda intra $\to$ cross} indica o quanto o modelo \emph{memorizou} especificidades do corpus vs.\ aprendeu química transferível.
+\begin{frame}{Por que DrugBAN liderou? (2/2)}
+\textbf{Capacidade menor favorece generalização:}
 \begin{itemize}
-  \item PLM-backed (DT-Kinase, GraphBAN, ConPLex) devem sofrer menos porque ESM/ChemBERTa/ProtBERT foram pré-treinados em corpora amplos.
-  \item Modelo from-scratch (DrugBAN) depende apenas dos pares de treino $\Rightarrow$ esperado $\Delta$ maior se o corpus de treino for estreito.
-  \item \textbf{Non-human} (kinases de vários organismos) pode ensinar biologia mais variável, favorecendo transferência para \textit{Human} e \textit{All}.
+  \item Sem PLM $\Rightarrow$ menos overfit a biases do pre-train.
+  \item Menos parâmetros $\Rightarrow$ força aprender regra genérica,
+    não decorar compostos/alvos.
+  \item Domain adaptation nativo do BAN: captura interações substructure-domain
+    invariantes ao corpus específico.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{GraphBAN: empate técnico}
+\textbf{GraphBAN MCC off-diag $= 0.342$ \emph{vs} DrugBAN $= 0.348$.}\\[0.5em]
+Diferença $= 0.006$ --- dentro de ruído.
+\begin{itemize}
+  \item Knowledge distillation (teacher: ESM-1b + ChemBERTa) apenas
+    \emph{iguala} o baseline from-scratch.
+  \item Grafo bipartite inductive permite nós não vistos --- vantagem
+    pouco explorada em corpus balanceado.
+\end{itemize}
+\scriptsize Zhang \emph{et al.}, \emph{Nat.\ Commun.} 2024.
+\end{frame}
+
+\begin{frame}{Paradoxo: PLM-backed não lideraram}
+Hipótese comum: modelos com PLM transferem melhor. Não foi o caso:
+\begin{itemize}
+  \item DT-Kinase v7 (ESM-2 + MoLFormer): off-diag $0.298$ --- 3º lugar.
+  \item ConPLex (ProtBERT + Morgan): off-diag $0.209$ --- 4º lugar.
+\end{itemize}
+\textbf{Possível explicação:} PLM introduz \emph{viés do pré-treino},
+não só atenua.
+\end{frame}
+
+\begin{frame}{Por que PLMs não ajudaram}
+\begin{itemize}
+  \item \textbf{ESM} pré-treinou em UniProt inteiro: viés taxonômico
+    atrapalha separação fina humano \emph{vs} não-humano.
+  \item \textbf{ProtBERT} pré-treinou em BFD massivo: features muito
+    genéricas para discriminar afinidade sutil.
+  \item Modelos sem PLM aprendem features específicas de kinases
+    $\Rightarrow$ generalizam melhor dentro do domínio.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Distribution shift: papel dos corpora}
+\begin{itemize}
+  \item \textbf{Non-human} é filogeneticamente diverso $\Rightarrow$
+    ensinar nele força regras químicas amplas.
+  \item \textbf{Human} é subset homogêneo $\Rightarrow$ treinar só nele
+    produz modelo estreito.
+  \item \textbf{All} (unificado) é o melhor prior: cobre distribuições
+    múltiplas.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Implicações para a tese}
+\begin{itemize}
+  \item DT-Kinase v7 é \textbf{competitivo intra-corpus} mas perde em
+    transferência. Cross-attn 2D + CNN captura padrão espacial
+    específico.
+  \item BAN-based (DrugBAN, GraphBAN) com \textbf{pairwise attention
+    explícita} $\Rightarrow$ mais robustos a distribution shift.
+  \item Próximo passo: hibridização --- cross-attn 2D do DT-Kinase
+    $+$ BAN head do DrugBAN.
 \end{itemize}
 \end{frame}
 
