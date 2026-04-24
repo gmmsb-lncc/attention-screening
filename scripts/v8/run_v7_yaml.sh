@@ -20,6 +20,9 @@ cd "${REPO_ROOT}"
 CORPUS="${CORPUS:-non_human}"
 V8ENV="${V8ENV:-v8env}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+# Single seed default for fast iteration. Expand to "42 123 456 789 1024"
+# for full thesis multi-seed protocol once config is validated.
+export SEEDS="${SEEDS:-42}"
 
 activate_env() {
     local env="$1"
@@ -63,6 +66,7 @@ echo "v7.yaml canonical run (run_from_config.py)"
 echo "  config:    configs/v7.yaml"
 echo "  corpus:    ${CORPUS}"
 echo "  env:       ${V8ENV}"
+echo "  seeds:     ${SEEDS}"
 echo "  overrides: DOUBLE=${BENCHMARK_LEVEL4CNN_DOUBLE} NO_AMP=${BENCHMARK_LEVEL4CNN_NO_AMP} DISABLE_CUDNN=${BENCHMARK_LEVEL4CNN_DISABLE_CUDNN}"
 echo "=============================================================="
 
