@@ -228,14 +228,22 @@ def main() -> None:
     protein_dim = PROTEIN_DIMS.get(embedding_name, 320)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cudnn.benchmark = True
 
     use_double = bool(l4.get("double", False))
     no_amp = bool(l4.get("no_amp", False))
     dtype = torch.float64 if use_double else torch.float32
     use_amp = device.type == "cuda" and not no_amp and not use_double
+
+    # TF32: OK when AMP is on (fp16 path dominates anyway). With AMP off +
+    # fp32 path, TF32 truncates matmul mantissa to ~10 bits (fp16-like
+    # precision) which kills accuracy in the deep cross-attention stack.
+    # Turn TF32 off whenever we are in pure-fp32 mode (no_amp + !double).
+    pure_fp32 = (not use_amp) and (not use_double)
+    tf32_on = not pure_fp32
+    torch.backends.cuda.matmul.allow_tf32 = tf32_on
+    torch.backends.cudnn.allow_tf32 = tf32_on
+    torch.backends.cudnn.benchmark = True
+    print(f"  precision: dtype={dtype} use_amp={use_amp} tf32={tf32_on}")
     # cuDNN control. On diamante-02 the bundled cuDNN 9.x triggers
     # CUDNN_STATUS_NOT_INITIALIZED on Conv2d regardless of dtype — presumed
     # driver/cuDNN ABI mismatch. Allow disabling via env var; also disable
