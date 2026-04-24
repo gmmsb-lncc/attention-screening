@@ -51,6 +51,12 @@ from benchmark.levels.level4_cnn_v8 import (  # noqa: E402
 # ============================================================================
 
 _ABLATION_ENABLES = {
+    # v7-baseline: all v8 features OFF. InteractionMapCNNv8 degrades to
+    # InteractionMapCNN (v7). Same loaders/optimizer/env knobs as v8 runs,
+    # so this isolates whether underperformance is due to v8 features or
+    # the shared training env (cuDNN off, no_amp, LR choice, etc.).
+    "v7-baseline": dict(chemberta=False, admet=False, classyfire=False,
+                        biobert=False, pfam=False, taxonomy=False),
     "v8-lig":  dict(chemberta=True,  admet=True,  classyfire=True,
                     biobert=False, pfam=False, taxonomy=False),
     "v8-prot": dict(chemberta=False, admet=False, classyfire=False,
