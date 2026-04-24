@@ -86,20 +86,20 @@ echo "=============================================================="
 
 # ---------------------------------------------------------------------------
 # Phase 1: pre-compute feature caches
+#   Most features run in V8ENV (torch 2.5.1+cu124, GPU).
+#   ADMET-AI runs in ADMETENV (isolated; pulls torch/lightning/chemprop
+#   that would clobber V8ENV's torch).
 # ---------------------------------------------------------------------------
 if [ "${SKIP_CACHE}" != "1" ]; then
     (
-        activate_env
-        echo "--- precompute chemberta ---"
+        activate_env "${V8ENV}"
+        echo "--- precompute chemberta (${V8ENV}) ---"
         python3 scripts/v8/precompute_chemberta_ligand.py --corpus "${CORPUS}"
 
-        echo "--- precompute admet-ai ---"
-        python3 scripts/v8/precompute_admet_ligand.py --corpus "${CORPUS}"
-
-        echo "--- precompute classyfire ---"
+        echo "--- precompute classyfire (${V8ENV}) ---"
         python3 scripts/v8/precompute_classyfire_ligand.py --corpus "${CORPUS}"
 
-        # Protein features needed only when any ablation uses the protein side
+        # Protein features only if any ablation uses the protein side
         needs_prot=0
         for abl in "${ABLATIONS[@]}"; do
             if [ "${abl}" = "v8-prot" ] || [ "${abl}" = "v8-full" ]; then
@@ -107,26 +107,33 @@ if [ "${SKIP_CACHE}" != "1" ]; then
             fi
         done
         if [ "${needs_prot}" = "1" ]; then
-            echo "--- fetch UniProt annotations ---"
+            echo "--- fetch UniProt annotations (${V8ENV}) ---"
             python3 scripts/v8/fetch_uniprot_annotations.py --corpus "${CORPUS}"
 
-            echo "--- precompute biobert ---"
+            echo "--- precompute biobert (${V8ENV}) ---"
             python3 scripts/v8/precompute_biobert_target.py --corpus "${CORPUS}"
 
             if [ -z "${PFAM_HMM}" ]; then
                 echo "[warn] PFAM_HMM not set — skipping Pfam cache (features will be zero-filled)"
             else
-                echo "--- precompute pfam ---"
+                echo "--- precompute pfam (${V8ENV}) ---"
                 python3 scripts/v8/precompute_pfam_target.py --corpus "${CORPUS}" --hmm "${PFAM_HMM}"
             fi
 
             if [ -z "${TAXDUMP}" ]; then
                 echo "[warn] TAXDUMP not set — skipping Taxonomy cache (features will be zero-filled)"
             else
-                echo "--- precompute taxonomy ---"
+                echo "--- precompute taxonomy (${V8ENV}) ---"
                 python3 scripts/v8/precompute_taxonomy_target.py --corpus "${CORPUS}" --taxdump "${TAXDUMP}"
             fi
         fi
+    )
+
+    # ADMET runs in its dedicated env (CPU only, torch clobber isolated)
+    (
+        activate_env "${ADMETENV}"
+        echo "--- precompute admet-ai (${ADMETENV}) ---"
+        python3 scripts/v8/precompute_admet_ligand.py --corpus "${CORPUS}"
     )
 fi
 
@@ -146,7 +153,7 @@ for ablation in "${ABLATIONS[@]}"; do
         echo "  train ${ablation}/${CORPUS}/seed_${seed}"
         echo "================================================================"
         (
-            activate_env
+            activate_env "${V8ENV}"
             python3 scripts/v8/train_v8.py \
                 --config configs/v8.yaml \
                 --dataset "${CORPUS}" \
