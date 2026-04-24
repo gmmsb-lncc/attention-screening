@@ -196,13 +196,26 @@ def main() -> None:
     }
     print(f"[v8 {args.ablation}/{args.dataset}/seed={args.seed}] enabled: {per_feature}")
 
-    # Auto-detect real feature dims from cache (fallback to config)
+    # Auto-detect real feature dims from the cache (fallback to config values
+    # when a cache is absent). Essential for variable-width features like
+    # ADMET (dim depends on admet_ai version / physchem flag), ClassyFire
+    # (vocab size depends on corpus), Pfam (top-K is corpus-specific), and
+    # Taxonomy (lineage vocab is corpus-specific).
+    admet_dim = _infer_dim_from_cache(cache_root, args.dataset, "admet",
+                                       v8["ligand"]["admet"]["dim"])
     classyfire_dim = _infer_dim_from_cache(cache_root, args.dataset, "classyfire",
                                            v8["ligand"]["classyfire"]["dim"])
+    chemberta_dim = _infer_dim_from_cache(cache_root, args.dataset, "chemberta",
+                                           v8["ligand"]["chemberta"]["dim"])
+    biobert_dim = _infer_dim_from_cache(cache_root, args.dataset, "biobert",
+                                         v8["protein"]["biobert"]["dim"])
     pfam_dim = _infer_dim_from_cache(cache_root, args.dataset, "pfam",
                                      v8["protein"]["pfam"]["dim"])
     taxonomy_dim = _infer_dim_from_cache(cache_root, args.dataset, "taxonomy",
                                          v8["protein"]["taxonomy"]["dim"])
+    print(f"  feature dims (detected): chemberta={chemberta_dim}  admet={admet_dim}  "
+          f"classyfire={classyfire_dim}  biobert={biobert_dim}  pfam={pfam_dim}  "
+          f"taxonomy={taxonomy_dim}")
 
     embedding_short = cfg.get("embedding", "8M")
     embedding_name = SUPPORTED_EMBEDDINGS.get(embedding_short, embedding_short)
@@ -259,9 +272,9 @@ def main() -> None:
         enable_biobert=per_feature["biobert"],
         enable_pfam=per_feature["pfam"],
         enable_taxonomy=per_feature["taxonomy"],
-        chemberta_dim=int(v8["ligand"]["chemberta"]["dim"]),
-        biobert_dim=int(v8["protein"]["biobert"]["dim"]),
-        admet_dim=int(v8["ligand"]["admet"]["dim"]),
+        chemberta_dim=chemberta_dim,
+        biobert_dim=biobert_dim,
+        admet_dim=admet_dim,
         classyfire_dim=classyfire_dim,
         pfam_dim=pfam_dim,
         taxonomy_dim=taxonomy_dim,
@@ -389,10 +402,8 @@ def main() -> None:
         "test_accuracy": float(test_metrics["accuracy"]),
         "n_test": int(len(test_metrics["y_true"])),
         "enabled": per_feature,
-        "feature_dims": dict(chemberta=int(v8["ligand"]["chemberta"]["dim"]),
-                             admet=int(v8["ligand"]["admet"]["dim"]),
-                             classyfire=classyfire_dim,
-                             biobert=int(v8["protein"]["biobert"]["dim"]),
+        "feature_dims": dict(chemberta=chemberta_dim, admet=admet_dim,
+                             classyfire=classyfire_dim, biobert=biobert_dim,
                              pfam=pfam_dim, taxonomy=taxonomy_dim),
     }
     (out_dir / "metrics.json").write_text(json.dumps(report, indent=2))
