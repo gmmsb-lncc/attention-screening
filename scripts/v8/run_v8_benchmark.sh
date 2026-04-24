@@ -129,12 +129,38 @@ if [ "${SKIP_CACHE}" != "1" ]; then
         fi
     )
 
-    # ADMET runs in its dedicated env (CPU only, torch clobber isolated)
-    (
-        activate_env "${ADMETENV}"
-        echo "--- precompute admet-ai (${ADMETENV}) ---"
-        python3 scripts/v8/precompute_admet_ligand.py --corpus "${CORPUS}"
-    )
+    # ADMET runs in its dedicated env (CPU only, torch clobber isolated).
+    # Gracefully skip when cache is already complete or the env is missing.
+    admet_cache_dir="${CACHE_ROOT}/admet_${CORPUS}"
+    if [ -d "${admet_cache_dir}" ]; then
+        admet_have="$(find "${admet_cache_dir}" -name '*.npy' 2>/dev/null | wc -l)"
+    else
+        admet_have=0
+    fi
+    # Expected = unique chembl_id count for corpus (count rows of train/val/test
+    # deduped by chembl_id). Approximation using header+row count:
+    if [ "${CORPUS}" = "all" ]; then
+        stem="scaffolds_splits/output/universal"
+    else
+        stem="scaffolds_splits/output/${CORPUS}"
+    fi
+    admet_need="$(awk -F'\t' 'NR>1 {print $1}' \
+        "${stem}_train.tsv" "${stem}_val.tsv" "${stem}_test.tsv" 2>/dev/null \
+        | sort -u | wc -l)"
+
+    if [ "${admet_have}" -ge "${admet_need}" ] && [ "${admet_need}" -gt 0 ]; then
+        echo "--- admet cache complete (${admet_have}/${admet_need}), skipping ---"
+    elif conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ADMETENV}"; then
+        (
+            activate_env "${ADMETENV}"
+            echo "--- precompute admet-ai (${ADMETENV}) ---"
+            python3 scripts/v8/precompute_admet_ligand.py --corpus "${CORPUS}"
+        )
+    else
+        echo "[warn] admet cache incomplete (${admet_have}/${admet_need}) and conda env '${ADMETENV}' not found."
+        echo "       create it via: bash scripts/v8/setup_v8env.sh"
+        echo "       skipping ADMET — training will zero-fill admet features."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
