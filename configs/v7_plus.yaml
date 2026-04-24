@@ -73,18 +73,22 @@ level4_cnn:
     platt: true
     temperature: false
 
-  contrastive_weight: 0.0
+  # Tier C: contrastive aux loss (ConPLex-inspired regularizer).
+  # Pooled prot+lig features get projected to 128-d unit sphere.
+  # Aux loss = InfoNCE pulling positive pairs (label=1) close, pushing
+  # negatives apart. Weight 0.3 = 30% of total loss. Acts as feature
+  # regularizer without changing primary task. Should help generalization.
+  contrastive_weight: 0.3
   contrastive_dim: 128
-  cosine_feat: false
-  cosine_sim: false
+  cosine_feat: true        # add cosine_sim(prot, lig) as scalar feature to classifier
+  cosine_sim: false        # do NOT replace dot-product with cosine inside heads
 
   mlp_head: true           # ↑ Linear(64,1) → MLP(64, hidden, 1)
 
-  # Tier B: multi-head attention pool. v7 has 1 query per stage in HierPool;
-  # raising to 4 lets each stage learn diverse attention patterns (e.g. one
-  # head focuses on hot-spot residues, another on hydrophobic clusters).
-  # Concat heads → project back to channels dim. Backward compat at 1.
-  pool_num_heads: 4
+  # Tier B reverted. pool_num_heads=4 caused regression 0.500 → 0.456
+  # (head_proj Xavier init disrupted v7's single-query identity at t=0).
+  # Could fix with zero-init head_proj or mean aggregation; deferring.
+  pool_num_heads: 1
 
   label_smooth: 0.0
   mixup_alpha: 0.0
