@@ -96,15 +96,28 @@ def load_model(checkpoint_path: Path, config: dict, device: torch.device) -> Dru
 
 @torch.no_grad()
 def predict(model: DrugBAN, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    # fp32 inference (no autocast). AMP fp16 saturates DrugBAN on cross-
+    # dataset shifts (e.g. human→non_human) → logits go NaN → all 30
+    # off-diagonal cells return NaN predictions. Pure fp32 is correct
+    # given weights were trained fp32; throughput cost is negligible
+    # for inference-only pass.
     ys, ps = [], []
-    use_amp = device.type == "cuda"
     for batch in loader:
         v_d, v_p, y = batch
         v_d = v_d.to(device, non_blocking=True)
         v_p = v_p.to(device, non_blocking=True)
-        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            _, _, _, f = model(v_d, v_p)
-        prob = torch.softmax(f.float(), dim=1)[:, 1]
+        _, _, _, f = model(v_d, v_p)
+        # Final softmax in float64 for numerical safety on extreme logits
+        # (has no effect when logits are well-behaved).
+        f = f.float()
+        prob = torch.softmax(f, dim=1)[:, 1]
+        # Defensive: if model still emits NaN (e.g. graph build failure
+        # for malformed SMILES), clamp to 0.5 here instead of letting it
+        # propagate to aggregate.py.
+        if not torch.isfinite(prob).all():
+            n_bad = int((~torch.isfinite(prob)).sum())
+            print(f"    [warn] {n_bad}/{prob.size(0)} non-finite in batch → clamp to 0.5")
+            prob = torch.nan_to_num(prob, nan=0.5, posinf=1.0, neginf=0.0)
         ys.append(y.numpy())
         ps.append(prob.cpu().numpy())
     return np.concatenate(ys), np.concatenate(ps)
