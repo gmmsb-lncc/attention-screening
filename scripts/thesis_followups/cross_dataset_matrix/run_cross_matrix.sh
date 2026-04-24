@@ -99,6 +99,36 @@ activate() {
     set -u
 }
 
+# ----------------------------------------------------------------------------
+# Pre-flight: prune models whose upstream source is missing. Baselines
+# vendor upstream under <Model>/src (gitignored). On hosts that did not
+# run <Model>/setup_env.sh, infer_<model>_universal.py fatal-exits at
+# import time. Detect and skip silently instead of repeating the fatal
+# once per (pair × seed).
+# ----------------------------------------------------------------------------
+REPO_ROOT_ABS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+_pruned=()
+for m in "${MODELS[@]}"; do
+    case "${m}" in
+        drugban)
+            if [ ! -f "${REPO_ROOT_ABS}/DrugBAN/src/dataloader.py" ]; then
+                echo "[preflight] DrugBAN upstream missing at DrugBAN/src/ — skipping model 'drugban'"
+                echo "            install via: bash DrugBAN/setup_env.sh"
+                continue
+            fi
+            ;;
+        graphban)
+            if [ ! -f "${REPO_ROOT_ABS}/GraphBAN/src/dataloader.py" ] \
+               && [ ! -f "${REPO_ROOT_ABS}/GraphBAN/src/case_study/dataloader.py" ]; then
+                echo "[preflight] GraphBAN upstream missing at GraphBAN/src/ — skipping model 'graphban'"
+                continue
+            fi
+            ;;
+    esac
+    _pruned+=("${m}")
+done
+MODELS=("${_pruned[@]}")
+
 echo "=============================================================="
 echo "Cross-dataset matrix"
 echo "  CONDA_BASE:    ${CONDA_BASE}"
