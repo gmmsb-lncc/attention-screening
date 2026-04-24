@@ -190,12 +190,18 @@ class InteractionMapCNNv8(InteractionMapCNN):
                     nn.Linear(chemberta_dim, ligand_dim),
                     nn.LayerNorm(ligand_dim),
                 )
+                # Zero-init projection output → injection is ZERO at init →
+                # model starts exactly as v7 baseline. Gradient must prove
+                # injection helps. Prevents shortcut memorization via
+                # per-sample fingerprint hashing.
+                nn.init.zeros_(self.chemberta_proj[0].weight)
+                nn.init.zeros_(self.chemberta_proj[0].bias)
                 self.chemberta_adapter = EmbeddingAdapter(
                     dim=ligand_dim,
                     bottleneck=adapter_bottleneck_lig,
                     dropout=dropout,
                     num_layers=adapter_layers,
-                    use_self_attn=True,  # multi-token → self-attn informative
+                    use_self_attn=False,  # avoid non-zero-init residual at t=0
                 )
             else:
                 self.chemberta_pool = AttentionPool1D(chemberta_dim)
@@ -217,12 +223,15 @@ class InteractionMapCNNv8(InteractionMapCNN):
                     nn.Linear(biobert_dim, protein_dim),
                     nn.LayerNorm(protein_dim),
                 )
+                # Zero-init projection output → v7-init behaviour at t=0.
+                nn.init.zeros_(self.biobert_proj[0].weight)
+                nn.init.zeros_(self.biobert_proj[0].bias)
                 self.biobert_adapter = EmbeddingAdapter(
                     dim=protein_dim,
                     bottleneck=adapter_bottleneck_prot,
                     dropout=dropout,
                     num_layers=adapter_layers,
-                    use_self_attn=True,
+                    use_self_attn=False,
                 )
             else:
                 self.biobert_pool = AttentionPool1D(biobert_dim)
