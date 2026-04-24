@@ -129,6 +129,13 @@ def _mcc_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
 
 
 def _metrics_from_preds(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> dict:
+    # Sanitize non-finite predictions (some baselines emit NaN/Inf in cross-
+    # dataset eval when input distribution deviates from train). Replace
+    # with 0.5 (uninformative prior) and log count; keeps pipeline running.
+    n_bad = int(np.sum(~np.isfinite(y_prob)))
+    if n_bad:
+        print(f"    [warn] {n_bad} non-finite predictions → clamped to 0.5")
+        y_prob = np.nan_to_num(y_prob, nan=0.5, posinf=1.0, neginf=0.0)
     preds = (y_prob >= threshold).astype(int)
     two_class = len(np.unique(y_true)) == 2
     return {
@@ -141,6 +148,7 @@ def _metrics_from_preds(y_true: np.ndarray, y_prob: np.ndarray, threshold: float
         "recall": float(recall_score(y_true, preds, zero_division=0)),
         "threshold": float(threshold),
         "n": int(len(y_true)),
+        "n_nan_clamped": n_bad,
     }
 
 
@@ -160,7 +168,8 @@ def _read_cell_dtkinase(seed_dir: Path) -> dict | None:
         auprc = 0.0
         if "y_prob" in m and "raw_labels" in m:
             y = np.asarray(m["raw_labels"])
-            p = np.asarray(m["y_prob"])
+            p = np.nan_to_num(np.asarray(m["y_prob"], dtype=float),
+                               nan=0.5, posinf=1.0, neginf=0.0)
             if len(np.unique(y)) == 2:
                 auprc = float(average_precision_score(y, p))
         return {
@@ -190,7 +199,9 @@ def _read_cell_dtkinase(seed_dir: Path) -> dict | None:
         if npz_path.exists():
             d = np.load(npz_path, allow_pickle=True)
             if "y_true" in d and "y_prob" in d and len(np.unique(d["y_true"])) == 2:
-                auprc = float(average_precision_score(d["y_true"], d["y_prob"]))
+                p_clean = np.nan_to_num(np.asarray(d["y_prob"], dtype=float),
+                                         nan=0.5, posinf=1.0, neginf=0.0)
+                auprc = float(average_precision_score(d["y_true"], p_clean))
                 n = int(len(d["y_true"]))
         return {
             "mcc": float(inner.get("mcc", 0.0)),
@@ -221,6 +232,9 @@ def _read_cell_baseline(seed_dir: Path, criterion: str = "mcc") -> dict | None:
         return None
     val_y, val_p = d["val_y_true"], d["val_y_prob"]
     test_y, test_p = d["test_y_true"], d["test_y_prob"]
+    # Sanitize NaN/Inf in val probs before threshold search too.
+    val_p = np.nan_to_num(np.asarray(val_p, dtype=float),
+                           nan=0.5, posinf=1.0, neginf=0.0)
     if criterion == "f1":
         tau = _f1_threshold(val_y, val_p)
     else:
