@@ -382,6 +382,7 @@ def main() -> None:
         }, tmp)
         os.replace(tmp, ckpt_path)
 
+    _debug_first = True
     for epoch in range(start_epoch, epochs + 1):
         model.train()
         running = 0.0
@@ -401,7 +402,14 @@ def main() -> None:
                 loss = loss_fn(logits, y)
             scaler.scale(loss).backward()
             scaler.unscale_(optim)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if _debug_first:
+                print(f"  [debug batch 1] logits mean={logits.mean().item():.4f} "
+                      f"std={logits.std().item():.4f} "
+                      f"min={logits.min().item():.4f} max={logits.max().item():.4f}")
+                print(f"  [debug batch 1] loss={loss.item():.4f}  grad_norm={float(grad_norm):.4f}")
+                print(f"  [debug batch 1] y pos={(y == 1).sum().item()}/{y.size(0)}")
+                _debug_first = False
             scaler.step(optim)
             scaler.update()
             running += loss.item() * y.size(0)
