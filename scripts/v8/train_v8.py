@@ -320,15 +320,59 @@ def main() -> None:
     scaler = torch.amp.GradScaler(enabled=use_amp)
     epochs = int(cfg.get("epochs", 200))
     patience = int(l4.get("patience", 20))
+    ckpt_every = int(l4.get("checkpoint_every", 5))
 
     best_val_mcc = -1.0
     best_state = None
     epochs_without_improve = 0
+    start_epoch = 1
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = out_dir / "checkpoint.pt"
 
-    for epoch in range(1, epochs + 1):
+    # ---- Resume from checkpoint if present ----
+    if ckpt_path.exists():
+        try:
+            ck = torch.load(ckpt_path, map_location=device, weights_only=False)
+            model.load_state_dict(ck["model_state"])
+            optim.load_state_dict(ck["optim_state"])
+            if "scaler_state" in ck and ck["scaler_state"] is not None:
+                scaler.load_state_dict(ck["scaler_state"])
+            best_val_mcc = float(ck["best_val_mcc"])
+            best_state = {k: v.to(device=device, dtype=dtype) for k, v in ck["best_state"].items()}
+            epochs_without_improve = int(ck["epochs_without_improve"])
+            start_epoch = int(ck["epoch"]) + 1
+            if "torch_rng" in ck:
+                torch.random.set_rng_state(ck["torch_rng"])
+            if "np_rng" in ck:
+                np.random.set_state(ck["np_rng"])
+            print(f"  resume: checkpoint @ epoch {ck['epoch']}  "
+                  f"best_val_MCC={best_val_mcc:.4f}  epochs_without_improve={epochs_without_improve}")
+        except Exception as e:
+            print(f"  [warn] checkpoint corrupted or incompatible ({e}) — starting from scratch")
+            start_epoch = 1
+
+    def _save_checkpoint(epoch: int) -> None:
+        tmp = ckpt_path.with_suffix(".pt.tmp")
+        torch.save({
+            "epoch": epoch,
+            "model_state": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+            "optim_state": optim.state_dict(),
+            "scaler_state": scaler.state_dict() if use_amp else None,
+            "best_val_mcc": best_val_mcc,
+            "best_state": best_state if best_state is not None else
+                          {k: v.detach().cpu() for k, v in model.state_dict().items()},
+            "epochs_without_improve": epochs_without_improve,
+            "torch_rng": torch.random.get_rng_state(),
+            "np_rng": np.random.get_state(),
+            "ablation": args.ablation,
+            "dataset": args.dataset,
+            "seed": args.seed,
+        }, tmp)
+        os.replace(tmp, ckpt_path)
+
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         running = 0.0
         for batch in train_loader:
@@ -363,9 +407,15 @@ def main() -> None:
             epochs_without_improve = 0
         else:
             epochs_without_improve += 1
-            if epochs_without_improve >= patience:
-                print(f"  early stop at epoch {epoch} (best val_MCC={best_val_mcc:.4f})")
-                break
+
+        # Periodic resumable checkpoint
+        if epoch % ckpt_every == 0 or val_mcc > best_val_mcc - 1e-12:
+            _save_checkpoint(epoch)
+
+        if epochs_without_improve >= patience:
+            print(f"  early stop at epoch {epoch} (best val_MCC={best_val_mcc:.4f})")
+            _save_checkpoint(epoch)
+            break
 
     assert best_state is not None
     model.load_state_dict(best_state)
@@ -407,6 +457,11 @@ def main() -> None:
                              pfam=pfam_dim, taxonomy=taxonomy_dim),
     }
     (out_dir / "metrics.json").write_text(json.dumps(report, indent=2))
+
+    # Training complete — remove resumable checkpoint to save disk space.
+    if ckpt_path.exists():
+        ckpt_path.unlink()
+
     print(f"[done] MCC={test_metrics['mcc']:.4f} AUROC={test_metrics['auroc']:.4f} "
           f"→ {out_dir}")
 
