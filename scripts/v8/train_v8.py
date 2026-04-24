@@ -229,6 +229,7 @@ def main() -> None:
         enabled=per_feature,
         cache_root=cache_root,
         dataset_source_filter=_CORPUS_FILTER[args.dataset],
+        cache_corpus=args.dataset,     # v8 caches built per corpus (non_human/human/all)
         mode="test",
     )
 

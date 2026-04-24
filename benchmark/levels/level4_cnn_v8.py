@@ -423,8 +423,15 @@ def build_v8_dataloaders(
     enabled: dict[str, bool],
     cache_root: Path,
     dataset_source_filter: Optional[str] = None,
+    cache_corpus: Optional[str] = None,
     mode: str = "test",
 ) -> tuple[DataLoader, DataLoader, Optional[DataLoader]]:
+    """dataset_type controls protein/ligand matrix directory resolution
+    ('all' searches both Human and Non-Human .npy dirs). cache_corpus
+    controls which v8 cache directory is read ('non_human' for
+    precompute_*_ligand.py --corpus non_human). Defaults to dataset_type.
+    """
+    cache_c = cache_corpus or dataset_type
     protein_dirs, ligand_dirs = _resolve_matrix_dirs(dataset_type, embedding_name)
 
     train_df = read_split_file(os.path.join(scaffold_split_dir, "scenarios/Sc", "universal_train.tsv"))
@@ -444,7 +451,7 @@ def build_v8_dataloaders(
     def _make(df, shuffle):
         _validate_matrix_coverage(df, protein_dirs, ligand_dirs)
         base = MatrixDataset(df, protein_dirs, ligand_dirs)
-        v8 = MatrixDatasetV8(base, cache_root=cache_root, corpus=dataset_type, enabled=enabled)
+        v8 = MatrixDatasetV8(base, cache_root=cache_root, corpus=cache_c, enabled=enabled)
         return DataLoader(
             v8, batch_size=batch_size, shuffle=shuffle,
             collate_fn=collate_v8, **_loader_kwargs(),
