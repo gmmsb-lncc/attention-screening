@@ -32,13 +32,15 @@ level4_cnn:
   dropout: 0.35
   weight_decay: 0.04
 
-  # Precision
-  double: true # float64 (true = 2x slower, 2x memory)
-  no_amp: false # disable AMP (float32 only)
+  # Precision — fp32 default on diamante-02 (cuDNN 9.x + driver 12.4 ABI
+  # mismatch blocks fp64 Conv2d). TF32 auto-off in pure-fp32 path
+  # (level4_cnn.py). Restore double: true on hosts with healthy cuDNN.
+  double: false # float64 (true = 2x slower, 2x memory)
+  no_amp: true # disable AMP (required when running fp32 without TF32)
   deterministic: false # reproducible (20-30% slower)
 
   # Training
-  patience: 15
+  patience: 5
   focal: true # Focal Loss (gamma=2.0)
   focal_gamma: 2.0
 
