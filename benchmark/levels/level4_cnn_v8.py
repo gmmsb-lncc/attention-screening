@@ -41,6 +41,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from benchmark.levels.level4_cnn import (
     InteractionMapCNN,
+    EmbeddingAdapter,
     FocalLoss,
     _best_mcc_threshold,
     _platt_calibrate,
@@ -125,14 +126,23 @@ class InteractionMapCNNv8(InteractionMapCNN):
         protein_dim: int = 320,
         ligand_dim: int = 768,
         cnn_channels: int = 64,
+        dropout: float = 0.3,
+        adapter_bottleneck_prot: int = 256,
+        adapter_bottleneck_lig: int = 512,
+        adapter_layers: int = 1,
         **kwargs,
     ) -> None:
-        # Parent uses protein_dim/ligand_dim/cnn_channels, forward them.
+        # Forward adapter-related kwargs explicitly to parent AND keep them for
+        # reuse by v8's EmbeddingAdapter wrappers on injected tokens.
         super().__init__(
             *args,
             protein_dim=protein_dim,
             ligand_dim=ligand_dim,
             cnn_channels=cnn_channels,
+            dropout=dropout,
+            adapter_bottleneck_prot=adapter_bottleneck_prot,
+            adapter_bottleneck_lig=adapter_bottleneck_lig,
+            adapter_layers=adapter_layers,
             **kwargs,
         )
 
@@ -143,35 +153,48 @@ class InteractionMapCNNv8(InteractionMapCNN):
         self.enable_pfam = enable_pfam
         self.enable_taxonomy = enable_taxonomy
 
-        # ---- Pre-attention injection (attention-pooled + projection) ----
-        # Dropout after the projection suppresses per-compound memorization via
-        # the CLS-equivalent token — without it, the 5x adapter LR turned this
-        # path into a shortcut that let the model memorize train compounds in
-        # 1 epoch (val MCC collapsed from ~0.5 to 0.1 despite the extra signal).
-        v8_injection_dropout = 0.5
+        # ---- Pre-attention injection ----
+        # v8 = v7 + multi-source. The injected CLS-equivalent tokens go
+        # through the SAME non-linear machinery as v7 tokens:
+        #   AttentionPool → Linear (dim-align) → LayerNorm → EmbeddingAdapter
+        # The EmbeddingAdapter (4-head self-attn + MLP bottleneck, zero-init)
+        # mirrors v7's prot_adapter / lig_adapter. It gives the injection
+        # its own non-linear transform instead of a naked linear projection,
+        # matching user's principle that "v8 surge a partir do v7".
+        # No extra dropout here — the adapter's internal dropout + the
+        # post-pool LayerNorm cover regularization.
         if enable_chemberta:
             self.chemberta_pool = AttentionPool1D(chemberta_dim)
             self.chemberta_proj = nn.Sequential(
                 nn.Linear(chemberta_dim, ligand_dim),
                 nn.LayerNorm(ligand_dim),
-                nn.Dropout(v8_injection_dropout),
+            )
+            # Adapter over the injected token (acts on shape (B, 1, ligand_dim))
+            self.chemberta_adapter = EmbeddingAdapter(
+                dim=ligand_dim,
+                bottleneck=adapter_bottleneck_lig,
+                dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=False,  # single token → self-attn trivial
             )
         if enable_biobert:
             self.biobert_pool = AttentionPool1D(biobert_dim)
             self.biobert_proj = nn.Sequential(
                 nn.Linear(biobert_dim, protein_dim),
                 nn.LayerNorm(protein_dim),
-                nn.Dropout(v8_injection_dropout),
             )
-        # Shared dropout for post-pool concat features (admet/classyfire/...).
-        self.v8_post_pool_dropout = nn.Dropout(v8_injection_dropout)
+            self.biobert_adapter = EmbeddingAdapter(
+                dim=protein_dim,
+                bottleneck=adapter_bottleneck_prot,
+                dropout=dropout,
+                num_layers=adapter_layers,
+                use_self_attn=False,
+            )
 
         # ---- Post-pool concat ----
-        # Each feature gets its own LayerNorm before concat — critical for
-        # features with heterogeneous scales (ADMET endpoints span orders of
-        # magnitude: logS in [-7, 0], Caco-2 permeability etc.). Without
-        # normalization, unnormalized dims dominate the first classifier layer
-        # and gradient flow collapses.
+        # LayerNorm per-feature (escala heterogênea: ADMET endpoints span
+        # logS ∈ [-7,0], Caco-2 perm ∈ [-6,-4] etc.) + shared dropout
+        # (matches v7's post-pool dropout).
         extra_post = 0
         if enable_admet:
             self.admet_norm = nn.LayerNorm(admet_dim)
@@ -258,18 +281,25 @@ class InteractionMapCNNv8(InteractionMapCNN):
             taxonomy = taxonomy.to(_dtype)
 
         # ---- Pre-attention token injection ----
+        # For each injected modality: AttentionPool → Linear+LayerNorm →
+        # EmbeddingAdapter → concat as extra token at position 0 of the
+        # backbone sequence. The injected token then goes through the
+        # backbone's own prot_adapter/lig_adapter (shared with v7 tokens)
+        # and the 2D cross-attention map.
         if self.enable_chemberta and chemberta_tokens is not None:
-            cb_vec = self.chemberta_pool(chemberta_tokens, chemberta_mask)
-            cb_vec = self.chemberta_proj(cb_vec)  # (B, ligand_dim)
-            ligand_matrix = torch.cat([cb_vec.unsqueeze(1), ligand_matrix], dim=1)
+            cb_vec = self.chemberta_pool(chemberta_tokens, chemberta_mask)  # (B, 384)
+            cb_vec = self.chemberta_proj(cb_vec)                            # (B, ligand_dim)
+            cb_tok = self.chemberta_adapter(cb_vec.unsqueeze(1))            # (B, 1, ligand_dim)
+            ligand_matrix = torch.cat([cb_tok, ligand_matrix], dim=1)
             ligand_mask = torch.cat(
                 [torch.ones(ligand_mask.size(0), 1, dtype=ligand_mask.dtype, device=ligand_mask.device),
                  ligand_mask], dim=1,
             )
         if self.enable_biobert and biobert_tokens is not None:
             bb_vec = self.biobert_pool(biobert_tokens, biobert_mask)
-            bb_vec = self.biobert_proj(bb_vec)  # (B, protein_dim)
-            protein_matrix = torch.cat([bb_vec.unsqueeze(1), protein_matrix], dim=1)
+            bb_vec = self.biobert_proj(bb_vec)
+            bb_tok = self.biobert_adapter(bb_vec.unsqueeze(1))
+            protein_matrix = torch.cat([bb_tok, protein_matrix], dim=1)
             protein_mask = torch.cat(
                 [torch.ones(protein_mask.size(0), 1, dtype=protein_mask.dtype, device=protein_mask.device),
                  protein_mask], dim=1,
@@ -329,16 +359,16 @@ class InteractionMapCNNv8(InteractionMapCNN):
         if self.cosine_feat and self._cos_sim_feat is not None:
             pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
 
-        # ---- Post-pool concat (each feature normalized + dropout) ----
+        # ---- Post-pool concat (LayerNorm per feature) ----
         extras = []
         if self.enable_admet and admet is not None:
-            extras.append(self.v8_post_pool_dropout(self.admet_norm(admet)))
+            extras.append(self.admet_norm(admet))
         if self.enable_classyfire and classyfire is not None:
-            extras.append(self.v8_post_pool_dropout(self.classyfire_norm(classyfire)))
+            extras.append(self.classyfire_norm(classyfire))
         if self.enable_pfam and pfam is not None:
-            extras.append(self.v8_post_pool_dropout(self.pfam_norm(pfam)))
+            extras.append(self.pfam_norm(pfam))
         if self.enable_taxonomy and taxonomy is not None:
-            extras.append(self.v8_post_pool_dropout(self.taxonomy_norm(taxonomy)))
+            extras.append(self.taxonomy_norm(taxonomy))
         if extras:
             pooled = torch.cat([pooled] + extras, dim=-1)
 

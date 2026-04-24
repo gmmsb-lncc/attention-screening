@@ -293,22 +293,25 @@ def main() -> None:
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  model built: {trainable:,} trainable params")
 
-    # ---- Optimizer: 3 param groups ----
-    # Base LR for v8 reduced to 1e-4 (vs 1e-3 in v7). Rationale: the CLS-
-    # equivalent injection + per-feature LayerNorm adds enough per-compound
-    # discriminative capacity that at lr=1e-3 the model memorizes train in
-    # 1 epoch (train_loss→0, val_MCC~0.1). Slower LR + post-pool dropout
-    # keeps the new signal from dominating the frozen backbone.
-    lr = float(os.environ.get("V8_BASE_LR", "1e-4"))
+    # ---- Optimizer: 3 param groups (v7 default LR preserved) ----
+    # Base LR 1e-3 matches v7 (v8 inherits v7 training dynamics). v8-specific
+    # modules (AttentionPool1D, proj, adapter on injection, post-pool
+    # LayerNorms) go into their own group: same LR as v7 "other" params
+    # (no adapter_lr_mult×5 boost, which would accelerate memorization of
+    # per-compound identity).
+    lr = float(os.environ.get("V8_BASE_LR", "1e-3"))
     weight_decay = float(l4.get("weight_decay", 0.02))
     lr_mult = float(adapter.get("lr_mult", 1.0))
 
     if adapter.get("enabled", False):
         ap_list = list(model.prot_adapter.parameters()) + list(model.lig_adapter.parameters())
         ap_ids = {id(p) for p in ap_list}
-        # v8-specific modules — random-init; NOT boosted by adapter_lr_mult.
+        # v8-specific modules (including adapter-wrapped injection) — random-
+        # init, so NO adapter_lr_mult boost (that boost exists for v7 adapters
+        # because they are zero-init).
         v8_modules: list = []
-        for name in ("chemberta_pool", "chemberta_proj", "biobert_pool", "biobert_proj",
+        for name in ("chemberta_pool", "chemberta_proj", "chemberta_adapter",
+                     "biobert_pool", "biobert_proj", "biobert_adapter",
                      "admet_norm", "classyfire_norm", "pfam_norm", "taxonomy_norm"):
             if hasattr(model, name):
                 v8_modules.extend(getattr(model, name).parameters())
@@ -321,13 +324,13 @@ def main() -> None:
         ]
         if v8_modules:
             param_groups.append(
-                {"params": v8_modules, "lr": lr, "weight_decay": weight_decay * 5.0},
+                {"params": v8_modules, "lr": lr, "weight_decay": weight_decay},
             )
         optim = torch.optim.AdamW(
             param_groups, fused=(device.type == "cuda" and not use_double),
         )
-        print(f"  optim: adapter lr={lr*lr_mult:.2e} (×{lr_mult}), "
-              f"v7 other lr={lr:.2e}, v8 new lr={lr:.2e} (weight_decay ×5)")
+        print(f"  optim: v7 adapter lr={lr*lr_mult:.2e} (×{lr_mult}), "
+              f"v7 other lr={lr:.2e}, v8 modules lr={lr:.2e}")
     else:
         optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay,
                                   fused=(device.type == "cuda" and not use_double))
