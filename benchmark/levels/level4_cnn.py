@@ -993,10 +993,6 @@ def _train_interaction_cnn(
         torch.set_num_threads(n_cpus)
         torch.set_num_interop_threads(max(1, n_cpus // 2))
         tqdm.write(f"    CPU mode: using {n_cpus} threads")
-    else:
-        # GPU: enable TF32 for faster matmuls on Ampere+
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
 
     # --- Precision flags ----------------------------------------------
     use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
@@ -1007,13 +1003,29 @@ def _train_interaction_cnn(
     use_amp = device.type == "cuda" and not no_amp and not use_double
     scaler = torch.amp.GradScaler(enabled=use_amp)
 
+    # TF32: OK with AMP (fp16 path dominates). With AMP off + fp32, TF32
+    # truncates matmul mantissa to ~10 bits (fp16-like precision) which
+    # kills accuracy in deep cross-attention stacks. Disable in pure-fp32.
+    if device.type == "cuda":
+        pure_fp32 = (not use_amp) and (not use_double)
+        tf32_on = not pure_fp32
+        torch.backends.cuda.matmul.allow_tf32 = tf32_on
+        torch.backends.cudnn.allow_tf32 = tf32_on
+
+    # cuDNN disable knob: diamante-02 driver 12.4 + cuDNN 9.x ABI mismatch
+    # triggers CUDNN_STATUS_NOT_INITIALIZED on Conv2d regardless of dtype.
+    # Also auto-disabled when double=true (cuDNN fp64 Conv2d unreliable).
+    disable_cudnn = os.getenv("BENCHMARK_LEVEL4CNN_DISABLE_CUDNN", "0") == "1"
+    if device.type == "cuda":
+        torch.backends.cudnn.enabled = (not disable_cudnn) and (not use_double)
+
     if deterministic:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
         torch.use_deterministic_algorithms(True, warn_only=True)
         tqdm.write("    Deterministic mode: ON (cudnn.benchmark=False)")
     elif device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.benchmark = torch.backends.cudnn.enabled
 
     precision_info = [f"variant={variant}"]
     if use_double:
