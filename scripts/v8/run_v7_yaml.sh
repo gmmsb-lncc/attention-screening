@@ -20,6 +20,9 @@ cd "${REPO_ROOT}"
 CORPUS="${CORPUS:-non_human}"
 V8ENV="${V8ENV:-v8env}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+# Config path — default v7.yaml (dot-product heads). Override with:
+#   V7_CONFIG=configs/v7_ban.yaml   # BAN (bilinear attention) variant
+V7_CONFIG="${V7_CONFIG:-configs/v7.yaml}"
 # Single seed default for fast iteration. Expand to "42 123 456 789 1024"
 # for full thesis multi-seed protocol once config is validated.
 export SEEDS="${SEEDS:-42}"
@@ -62,8 +65,8 @@ export BENCHMARK_LEVEL4CNN_DISABLE_CUDNN="${BENCHMARK_LEVEL4CNN_DISABLE_CUDNN:-1
 export BENCHMARK_LEVEL4CNN_NO_COMPILE="${BENCHMARK_LEVEL4CNN_NO_COMPILE:-1}"
 
 echo "=============================================================="
-echo "v7.yaml canonical run (run_from_config.py)"
-echo "  config:    configs/v7.yaml"
+echo "run_from_config.py"
+echo "  config:    ${V7_CONFIG}"
 echo "  corpus:    ${CORPUS}"
 echo "  env:       ${V8ENV}"
 echo "  seeds:     ${SEEDS}"
@@ -72,5 +75,5 @@ echo "=============================================================="
 
 (
     activate_env "${V8ENV}"
-    python3 run_from_config.py configs/v7.yaml --dataset "${CORPUS}" ${EXTRA_ARGS}
+    python3 run_from_config.py "${V7_CONFIG}" --dataset "${CORPUS}" ${EXTRA_ARGS}
 )
