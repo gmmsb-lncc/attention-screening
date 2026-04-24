@@ -1,0 +1,124 @@
+# ============================================================================
+# DT-Kinase Benchmark — v8 Configuration
+# ============================================================================
+# Extensão multi-source do v7. Adiciona features cuja informação provém de
+# fontes externas ao SMILES/sequência de entrada.
+#
+# Ablações controladas por `v8.ligand_enable` e `v8.protein_enable`:
+#   - v8-lig  : v8.ligand_enable=true, v8.protein_enable=false
+#   - v8-prot : v8.ligand_enable=false, v8.protein_enable=true
+#   - v8-full : ambos true
+#
+# Usage:
+#   python3 run_from_config.py configs/v8.yaml --dataset non_human
+#   BENCHMARK_LEVEL4CNN_V8_LIG_ONLY=1 python3 run_from_config.py configs/v8.yaml --dataset non_human
+# ============================================================================
+
+# --- Dataset & Embedding ---------------------------------------------------
+dataset: non_human             # POC inicial: Non-Human (corpus pequeno)
+embedding: 8M                  # mesmo backbone do v7
+levels: 4cnn_v8                # novo runner
+epochs: 500
+model_selection_metric: mcc
+
+# --- Output ----------------------------------------------------------------
+output_root: results/benchmark_v8_{dataset}_{embedding}
+
+# --- Level 4 CNN v8 Architecture ------------------------------------------
+level4_cnn_v8:
+  # Backbone (igual ao v7)
+  variant: v7
+  num_heads: 8
+  head_dim: 32
+  channels: 64
+  batch_size: 128
+
+  # Regularisation
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # Precision
+  double: true
+  no_amp: false
+  deterministic: false
+
+  # Training
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  # Embedding Adapter
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 5.0
+    prot_dim: 256
+    lig_dim: 512
+
+  # Calibration
+  calibration:
+    platt: true
+    temperature: false
+
+  # MLP classifier head (default: single Linear)
+  mlp_head: false
+
+  # --- v8 NEW feature gates ------------------------------------------------
+  v8:
+    # Cache root for all per-sample feature arrays (*.npy per chembl_id/seq_id)
+    cache_root: data/embeddings/v8
+
+    # High-level enable switches (ablation handles)
+    ligand_enable: true       # ChemBERTa + ADMET + ClassyFire
+    protein_enable: true      # BioBERT + Pfam + Taxonomy
+
+    # Fine-grained per-feature gates (override ligand_enable/protein_enable)
+    ligand:
+      chemberta:
+        enable: true
+        dim: 384
+      admet:
+        enable: true
+        dim: 41
+      classyfire:
+        enable: true
+        dim: 230
+    protein:
+      biobert:
+        enable: true
+        dim: 768
+      pfam:
+        enable: true
+        dim: 50
+      taxonomy:
+        enable: true
+        dim: 10
+
+  # --- Contrastive (default off, herda do v7) ------------------------------
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+# --- Rigor Safeguards ------------------------------------------------------
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+# --- Acceptance Gate -------------------------------------------------------
+# Objetivo POC: v8-full supera v7 por MCC >= +0,010
+gate:
+  target_test_mcc: 0.52
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true
