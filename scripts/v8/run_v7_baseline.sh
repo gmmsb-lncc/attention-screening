@@ -28,6 +28,9 @@ CORPUS="${CORPUS:-non_human}"
 SEEDS=(${SEEDS:-42})
 OUT_ROOT="${OUT_ROOT:-results/v8}"
 V8ENV="${V8ENV:-v8env}"
+# Default: faithful v7 config (double: true). Override with V7_CONFIG to
+# test alternative knobs (e.g. V7_CONFIG=configs/v8.yaml for float32 path).
+V7_CONFIG="${V7_CONFIG:-configs/v7_baseline.yaml}"
 
 activate_env() {
     local env="$1"
@@ -61,6 +64,7 @@ echo "  corpus:   ${CORPUS}"
 echo "  seeds:    ${SEEDS[*]}"
 echo "  out_root: ${OUT_ROOT}"
 echo "  env:      ${V8ENV}"
+echo "  config:   ${V7_CONFIG}"
 echo "=============================================================="
 
 for seed in "${SEEDS[@]}"; do
@@ -77,7 +81,7 @@ for seed in "${SEEDS[@]}"; do
     (
         activate_env "${V8ENV}"
         python3 scripts/v8/train_v8.py \
-            --config configs/v8.yaml \
+            --config "${V7_CONFIG}" \
             --dataset "${CORPUS}" \
             --seed "${seed}" \
             --ablation v7-baseline \

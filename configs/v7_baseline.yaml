@@ -1,0 +1,112 @@
+# ============================================================================
+# v7-baseline — faithful v7 reproduction runnable via train_v8.py.
+# ============================================================================
+# Uses level4_cnn_v8 runner with all v8 feature gates OFF (controlled by
+# ablation=v7-baseline in train_v8.py). Config values mirror configs/v7.yaml
+# (double: true, focal, adapter), so InteractionMapCNNv8 degrades to pure
+# InteractionMapCNN (v7).
+#
+# Purpose: apples-to-apples control for v8 on diamante-02. If this recovers
+# v7 reference MCC (~0.506 NH), env is fine and v8 collapse is feature-
+# attributable. If this also collapses, root cause is env-level.
+#
+# Key difference vs configs/v8.yaml: double: true. cuDNN auto-disables when
+# double=true (train_v8.py:L240) — compatible with diamante-02 driver.
+#
+# Usage (invoked by scripts/v8/run_v7_baseline.sh):
+#   python3 scripts/v8/train_v8.py --config configs/v7_baseline.yaml \
+#       --dataset non_human --seed 42 --ablation v7-baseline \
+#       --output-dir results/v8/non_human/v7-baseline/seed_42
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn_v8
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/v7_baseline_{dataset}_{embedding}
+
+level4_cnn_v8:
+  variant: v7
+  num_heads: 8
+  head_dim: 32
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # Faithful v7: float64 + AMP off. cuDNN auto-disables when double=true.
+  double: true
+  no_amp: true
+  deterministic: false
+
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 5.0
+    prot_dim: 256
+    lig_dim: 512
+
+  calibration:
+    platt: true
+    temperature: false
+
+  mlp_head: false
+
+  # v8 feature section kept for runner compatibility. All gates OFF via
+  # ablation=v7-baseline; nothing in this section is consumed at runtime.
+  v8:
+    cache_root: data/embeddings/v8
+    ligand_enable: false
+    protein_enable: false
+    ligand:
+      chemberta:
+        enable: false
+        dim: 384
+      admet:
+        enable: false
+        dim: 41
+      classyfire:
+        enable: false
+        dim: 230
+    protein:
+      biobert:
+        enable: false
+        dim: 768
+      pfam:
+        enable: false
+        dim: 50
+      taxonomy:
+        enable: false
+        dim: 10
+
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.50
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true
