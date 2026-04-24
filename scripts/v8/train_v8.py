@@ -335,8 +335,11 @@ def main() -> None:
         for name in ("chemberta_pool", "chemberta_proj", "chemberta_adapter",
                      "biobert_pool", "biobert_proj", "biobert_adapter",
                      "admet_norm", "classyfire_norm", "pfam_norm", "taxonomy_norm"):
-            if hasattr(model, name):
-                v8_modules.extend(getattr(model, name).parameters())
+            # Per-token mode sets *_pool to None (skips AttentionPool1D).
+            # hasattr still returns True so we must filter None explicitly.
+            mod = getattr(model, name, None)
+            if mod is not None:
+                v8_modules.extend(mod.parameters())
         v8_ids = {id(p) for p in v8_modules}
         other = [p for p in model.parameters()
                  if id(p) not in ap_ids and id(p) not in v8_ids and p.requires_grad]
