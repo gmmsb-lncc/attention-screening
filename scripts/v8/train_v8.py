@@ -293,21 +293,41 @@ def main() -> None:
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  model built: {trainable:,} trainable params")
 
-    # ---- Optimizer (differential LR for adapter) ----
-    lr = 1e-3
+    # ---- Optimizer: 3 param groups ----
+    # Base LR for v8 reduced to 1e-4 (vs 1e-3 in v7). Rationale: the CLS-
+    # equivalent injection + per-feature LayerNorm adds enough per-compound
+    # discriminative capacity that at lr=1e-3 the model memorizes train in
+    # 1 epoch (train_loss→0, val_MCC~0.1). Slower LR + post-pool dropout
+    # keeps the new signal from dominating the frozen backbone.
+    lr = float(os.environ.get("V8_BASE_LR", "1e-4"))
     weight_decay = float(l4.get("weight_decay", 0.02))
     lr_mult = float(adapter.get("lr_mult", 1.0))
-    if lr_mult != 1.0 and adapter.get("enabled", False):
-        a_ids = set()
+
+    if adapter.get("enabled", False):
         ap_list = list(model.prot_adapter.parameters()) + list(model.lig_adapter.parameters())
-        for p in ap_list:
-            a_ids.add(id(p))
-        other = [p for p in model.parameters() if id(p) not in a_ids and p.requires_grad]
+        ap_ids = {id(p) for p in ap_list}
+        # v8-specific modules — random-init; NOT boosted by adapter_lr_mult.
+        v8_modules: list = []
+        for name in ("chemberta_pool", "chemberta_proj", "biobert_pool", "biobert_proj",
+                     "admet_norm", "classyfire_norm", "pfam_norm", "taxonomy_norm"):
+            if hasattr(model, name):
+                v8_modules.extend(getattr(model, name).parameters())
+        v8_ids = {id(p) for p in v8_modules}
+        other = [p for p in model.parameters()
+                 if id(p) not in ap_ids and id(p) not in v8_ids and p.requires_grad]
+        param_groups = [
+            {"params": ap_list, "lr": lr * lr_mult, "weight_decay": weight_decay},
+            {"params": other,   "lr": lr,           "weight_decay": weight_decay},
+        ]
+        if v8_modules:
+            param_groups.append(
+                {"params": v8_modules, "lr": lr, "weight_decay": weight_decay * 5.0},
+            )
         optim = torch.optim.AdamW(
-            [{"params": ap_list, "lr": lr * lr_mult}, {"params": other, "lr": lr}],
-            weight_decay=weight_decay,
-            fused=(device.type == "cuda" and not use_double),
+            param_groups, fused=(device.type == "cuda" and not use_double),
         )
+        print(f"  optim: adapter lr={lr*lr_mult:.2e} (×{lr_mult}), "
+              f"v7 other lr={lr:.2e}, v8 new lr={lr:.2e} (weight_decay ×5)")
     else:
         optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay,
                                   fused=(device.type == "cuda" and not use_double))

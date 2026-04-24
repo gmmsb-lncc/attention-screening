@@ -144,18 +144,27 @@ class InteractionMapCNNv8(InteractionMapCNN):
         self.enable_taxonomy = enable_taxonomy
 
         # ---- Pre-attention injection (attention-pooled + projection) ----
+        # Dropout after the projection suppresses per-compound memorization via
+        # the CLS-equivalent token — without it, the 5x adapter LR turned this
+        # path into a shortcut that let the model memorize train compounds in
+        # 1 epoch (val MCC collapsed from ~0.5 to 0.1 despite the extra signal).
+        v8_injection_dropout = 0.5
         if enable_chemberta:
             self.chemberta_pool = AttentionPool1D(chemberta_dim)
             self.chemberta_proj = nn.Sequential(
                 nn.Linear(chemberta_dim, ligand_dim),
                 nn.LayerNorm(ligand_dim),
+                nn.Dropout(v8_injection_dropout),
             )
         if enable_biobert:
             self.biobert_pool = AttentionPool1D(biobert_dim)
             self.biobert_proj = nn.Sequential(
                 nn.Linear(biobert_dim, protein_dim),
                 nn.LayerNorm(protein_dim),
+                nn.Dropout(v8_injection_dropout),
             )
+        # Shared dropout for post-pool concat features (admet/classyfire/...).
+        self.v8_post_pool_dropout = nn.Dropout(v8_injection_dropout)
 
         # ---- Post-pool concat ----
         # Each feature gets its own LayerNorm before concat — critical for
@@ -320,16 +329,16 @@ class InteractionMapCNNv8(InteractionMapCNN):
         if self.cosine_feat and self._cos_sim_feat is not None:
             pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
 
-        # ---- Post-pool concat (each feature normalized independently) ----
+        # ---- Post-pool concat (each feature normalized + dropout) ----
         extras = []
         if self.enable_admet and admet is not None:
-            extras.append(self.admet_norm(admet))
+            extras.append(self.v8_post_pool_dropout(self.admet_norm(admet)))
         if self.enable_classyfire and classyfire is not None:
-            extras.append(self.classyfire_norm(classyfire))
+            extras.append(self.v8_post_pool_dropout(self.classyfire_norm(classyfire)))
         if self.enable_pfam and pfam is not None:
-            extras.append(self.pfam_norm(pfam))
+            extras.append(self.v8_post_pool_dropout(self.pfam_norm(pfam)))
         if self.enable_taxonomy and taxonomy is not None:
-            extras.append(self.taxonomy_norm(taxonomy))
+            extras.append(self.v8_post_pool_dropout(self.taxonomy_norm(taxonomy)))
         if extras:
             pooled = torch.cat([pooled] + extras, dim=-1)
 
