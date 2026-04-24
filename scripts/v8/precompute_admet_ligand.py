@@ -18,6 +18,12 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# ADMET-AI via Lightning hits CUDA init even when we don't need the GPU.
+# If the installed torch is compiled against a newer CUDA than the driver
+# supports, the Lightning trainer crashes during Accelerator setup.
+# Force CPU unless the user explicitly opts in via ADMET_USE_CUDA=1.
+if os.environ.get("ADMET_USE_CUDA", "0") != "1":
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 import numpy as np
 import pandas as pd
@@ -74,7 +80,7 @@ def main() -> None:
         sys.exit(1)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"  device={device}")
+    print(f"  device={device}  (set ADMET_USE_CUDA=1 to force GPU if driver supports it)")
     model = ADMETModel()                     # loads default 41-endpoint bundle
 
     # Batch predict across all todo SMILES; ADMETModel.predict returns DataFrame.
