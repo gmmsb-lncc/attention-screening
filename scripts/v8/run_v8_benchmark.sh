@@ -32,24 +32,32 @@ PFAM_HMM="${PFAM_HMM:-}"
 TAXDUMP="${TAXDUMP:-}"
 CACHE_ROOT="${CACHE_ROOT:-data/embeddings/v8}"
 OUT_ROOT="${OUT_ROOT:-results/v8}"
-V7_ENV="${V7_ENV:-env}"
+# Two envs required (see scripts/v8/setup_v8env.sh):
+#   V8ENV    — training + ChemBERTa/BioBERT/Pfam/Taxonomy/ClassyFire/UniProt
+#   ADMETENV — admet_ai precompute only (isolated; admet_ai drags many deps
+#              incompatible with the training torch version)
+# Allow V7_ENV as a fallback alias for V8ENV for backward compat with earlier
+# invocations.
+V8ENV="${V8ENV:-${V7_ENV:-v8env}}"
+ADMETENV="${ADMETENV:-admetenv}"
 SKIP_CACHE="${SKIP_CACHE:-0}"
 
 # ---------------------------------------------------------------------------
-# Env activation (venv or conda)
+# Env activation (venv-path OR conda env name)
 # ---------------------------------------------------------------------------
 activate_env() {
+    local env="$1"
     set +u
-    if [ -f "${REPO_ROOT}/${V7_ENV}/bin/activate" ]; then
+    if [ -f "${REPO_ROOT}/${env}/bin/activate" ]; then
         # shellcheck disable=SC1091
-        source "${REPO_ROOT}/${V7_ENV}/bin/activate"
+        source "${REPO_ROOT}/${env}/bin/activate"
     elif command -v conda &>/dev/null; then
         CONDA_BASE="$(conda info --base)"
         # shellcheck disable=SC1091
         source "${CONDA_BASE}/etc/profile.d/conda.sh"
-        conda activate "${V7_ENV}" || { echo "[fatal] cannot activate '${V7_ENV}'" >&2; exit 1; }
+        conda activate "${env}" || { echo "[fatal] cannot activate '${env}'" >&2; exit 1; }
     else
-        echo "[fatal] no venv at ${V7_ENV} and no conda" >&2
+        echo "[fatal] no venv at ${env} and no conda" >&2
         exit 1
     fi
     set -u

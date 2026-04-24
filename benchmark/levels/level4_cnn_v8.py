@@ -318,12 +318,18 @@ class InteractionMapCNNv8(InteractionMapCNN):
 class MatrixDatasetV8(Dataset):
     """Wraps v7 MatrixDataset and optionally loads per-sample v8 caches.
 
+    MatrixDataset.__getitem__ returns a 5-tuple
+    (protein_mat, ligand_mat, label, seq_id, chembl_id). We re-wrap into
+    a dict that also carries the requested v8 feature tensors.
+
     Cache layout (per corpus):
       data/embeddings/v8/{feature}_{corpus}/{key}.npy
     where {key} is chembl_id (ligand) or seq_id (protein).
 
     mmap_mode="r" is used for large per-token caches (ChemBERTa/BioBERT)
-    to avoid loading the entire cache into RAM.
+    to avoid loading the entire cache into RAM. We copy into a writable
+    contiguous array before `torch.from_numpy` to silence PyTorch's
+    non-writable-tensor warning.
     """
 
     PER_TOKEN_FEATURES = {"chemberta", "biobert"}
@@ -351,59 +357,87 @@ class MatrixDatasetV8(Dataset):
         if not path.exists():
             raise FileNotFoundError(f"v8 cache missing: {path}")
         if feature in self.PER_TOKEN_FEATURES:
-            return np.load(path, mmap_mode="r")
-        return np.load(path)
+            # mmap'd read → copy to writable contiguous ndarray
+            arr = np.load(path, mmap_mode="r")
+            return np.ascontiguousarray(arr, dtype=np.float32)
+        return np.load(path).astype(np.float32, copy=False)
 
     def __getitem__(self, idx: int) -> dict:
-        sample = self.base[idx]
-        # Need chembl_id + seq_id — base dataset uses df internally, expose keys.
-        # MatrixDataset stores df; we access via the same index.
-        df = self.base._df  # type: ignore[attr-defined]
-        row = df.iloc[idx]
-        chembl_id = str(row["chembl_id"])
-        seq_id = str(row["seq_id"])
-
+        # Base dataset returns a 5-tuple
+        protein_mat, ligand_mat, label, seq_id, chembl_id = self.base[idx]
+        chembl_id = str(chembl_id)
+        seq_id = str(seq_id)
+        sample: dict = {
+            "protein_mat": protein_mat,
+            "ligand_mat": ligand_mat,
+            "label": label,
+            "seq_id": seq_id,
+            "chembl_id": chembl_id,
+        }
         if "chemberta" in self.cache_dirs:
-            arr = self._load_feature("chemberta", chembl_id)
-            sample["chemberta_tokens"] = torch.from_numpy(np.asarray(arr, dtype=np.float32))
+            sample["chemberta_tokens"] = torch.from_numpy(self._load_feature("chemberta", chembl_id))
         if "admet" in self.cache_dirs:
-            sample["admet"] = torch.from_numpy(self._load_feature("admet", chembl_id).astype(np.float32))
+            sample["admet"] = torch.from_numpy(self._load_feature("admet", chembl_id))
         if "classyfire" in self.cache_dirs:
-            sample["classyfire"] = torch.from_numpy(self._load_feature("classyfire", chembl_id).astype(np.float32))
+            sample["classyfire"] = torch.from_numpy(self._load_feature("classyfire", chembl_id))
         if "biobert" in self.cache_dirs:
-            arr = self._load_feature("biobert", seq_id)
-            sample["biobert_tokens"] = torch.from_numpy(np.asarray(arr, dtype=np.float32))
+            sample["biobert_tokens"] = torch.from_numpy(self._load_feature("biobert", seq_id))
         if "pfam" in self.cache_dirs:
-            sample["pfam"] = torch.from_numpy(self._load_feature("pfam", seq_id).astype(np.float32))
+            sample["pfam"] = torch.from_numpy(self._load_feature("pfam", seq_id))
         if "taxonomy" in self.cache_dirs:
-            sample["taxonomy"] = torch.from_numpy(self._load_feature("taxonomy", seq_id).astype(np.float32))
+            sample["taxonomy"] = torch.from_numpy(self._load_feature("taxonomy", seq_id))
         return sample
 
 
-def collate_v8(batch: list[dict]) -> dict:
-    """Collate that pads v7 matrices (delegated) and v8 per-token features.
+def _pad_token_batch(tensors: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Stack variable-length (L, D) tensors into (B, L_max, D) with mask."""
+    max_len = max(t.shape[0] for t in tensors)
+    dim = tensors[0].shape[1]
+    padded = torch.zeros(len(tensors), max_len, dim, dtype=torch.float32)
+    mask = torch.zeros(len(tensors), max_len, dtype=torch.float32)
+    for i, t in enumerate(tensors):
+        L = t.shape[0]
+        padded[i, :L] = t
+        mask[i, :L] = 1.0
+    return padded, mask
 
-    Fixed-size features (admet, classyfire, pfam, taxonomy) are simply
-    stacked. Per-token features (chemberta_tokens, biobert_tokens) are
-    padded along the sequence axis with an accompanying mask.
+
+def collate_v8(batch: list[dict]) -> dict:
+    """Collate dict samples from MatrixDatasetV8.
+
+    Replicates the v7 collate behavior on (protein_mat, ligand_mat, label)
+    using pad_matrices, then stacks v8 fixed-size features and pads
+    per-token features along the sequence axis with mask.
     """
-    out = collate_matrices(batch)
-    # Per-token v8 features: pad
+    from benchmark.levels.matrix_utils import pad_matrices  # local import
+
+    protein_mats = [s["protein_mat"] for s in batch]
+    ligand_mats = [s["ligand_mat"] for s in batch]
+    labels = [s["label"] for s in batch]
+    seq_ids = [s["seq_id"] for s in batch]
+    chembl_ids = [s["chembl_id"] for s in batch]
+
+    protein_batch, protein_mask = pad_matrices(protein_mats)
+    ligand_batch, ligand_mask = pad_matrices(ligand_mats)
+
+    out = {
+        "protein_matrix": torch.from_numpy(protein_batch),
+        "ligand_matrix": torch.from_numpy(ligand_batch),
+        "protein_mask": torch.from_numpy(protein_mask),
+        "ligand_mask": torch.from_numpy(ligand_mask),
+        "label": torch.tensor(labels, dtype=torch.float32),
+        "seq_id": seq_ids,
+        "chembl_id": chembl_ids,
+    }
+
+    # Per-token v8 features
     for key, mask_key in (("chemberta_tokens", "chemberta_mask"),
                          ("biobert_tokens", "biobert_mask")):
         if key in batch[0]:
-            tensors = [s[key] for s in batch]
-            max_len = max(t.shape[0] for t in tensors)
-            dim = tensors[0].shape[1]
-            padded = torch.zeros(len(tensors), max_len, dim, dtype=torch.float32)
-            mask = torch.zeros(len(tensors), max_len, dtype=torch.float32)
-            for i, t in enumerate(tensors):
-                L = t.shape[0]
-                padded[i, :L] = t
-                mask[i, :L] = 1.0
+            padded, mask = _pad_token_batch([s[key] for s in batch])
             out[key] = padded
             out[mask_key] = mask
-    # Fixed-size features: stack
+    # Fixed-size v8 features
     for key in ("admet", "classyfire", "pfam", "taxonomy"):
         if key in batch[0]:
             out[key] = torch.stack([s[key] for s in batch], dim=0)
