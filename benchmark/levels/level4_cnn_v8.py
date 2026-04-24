@@ -158,14 +158,23 @@ class InteractionMapCNNv8(InteractionMapCNN):
             )
 
         # ---- Post-pool concat ----
+        # Each feature gets its own LayerNorm before concat — critical for
+        # features with heterogeneous scales (ADMET endpoints span orders of
+        # magnitude: logS in [-7, 0], Caco-2 permeability etc.). Without
+        # normalization, unnormalized dims dominate the first classifier layer
+        # and gradient flow collapses.
         extra_post = 0
         if enable_admet:
+            self.admet_norm = nn.LayerNorm(admet_dim)
             extra_post += admet_dim
         if enable_classyfire:
+            self.classyfire_norm = nn.LayerNorm(classyfire_dim)
             extra_post += classyfire_dim
         if enable_pfam:
+            self.pfam_norm = nn.LayerNorm(pfam_dim)
             extra_post += pfam_dim
         if enable_taxonomy:
+            self.taxonomy_norm = nn.LayerNorm(taxonomy_dim)
             extra_post += taxonomy_dim
         self.extra_post_dim = extra_post
 
@@ -311,16 +320,16 @@ class InteractionMapCNNv8(InteractionMapCNN):
         if self.cosine_feat and self._cos_sim_feat is not None:
             pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
 
-        # ---- Post-pool concat ----
+        # ---- Post-pool concat (each feature normalized independently) ----
         extras = []
         if self.enable_admet and admet is not None:
-            extras.append(admet)
+            extras.append(self.admet_norm(admet))
         if self.enable_classyfire and classyfire is not None:
-            extras.append(classyfire)
+            extras.append(self.classyfire_norm(classyfire))
         if self.enable_pfam and pfam is not None:
-            extras.append(pfam)
+            extras.append(self.pfam_norm(pfam))
         if self.enable_taxonomy and taxonomy is not None:
-            extras.append(taxonomy)
+            extras.append(self.taxonomy_norm(taxonomy))
         if extras:
             pooled = torch.cat([pooled] + extras, dim=-1)
 

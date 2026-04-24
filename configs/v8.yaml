@@ -38,14 +38,12 @@ level4_cnn_v8:
   weight_decay: 0.04
 
   # Precision
-  # float32 + AMP para v8 — diferente do v7 (float64). Motivos:
-  #   (i)  cuDNN 9.x + float64 dispara CUDNN_STATUS_NOT_INITIALIZED em várias
-  #        GPUs; float32 resolve sem workaround.
-  #   (ii) AMP (fp16 autocast) só funciona com float32, dando ~2x throughput.
-  #   (iii) Precisão extra do float64 não é relevante no POC — se v8 beneficiar
-  #        da precisão numérica, pode subir para float64 depois.
+  # float32 + AMP OFF para v8 POC. AMP desabilitado porque com cuDNN disabled
+  # em diamante-02 (driver 12.4 + bundled cuDNN 9.x ABI mismatch), alguns
+  # kernels fp16 não têm fallback → NaN gradients → scaler skip every step
+  # → model stays at init. AMP só se V8_DISABLE_CUDNN=0.
   double: false
-  no_amp: false
+  no_amp: true
   deterministic: false
 
   # Training
