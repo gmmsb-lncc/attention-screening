@@ -40,8 +40,16 @@ def main() -> int:
 
     rows = []
     for model, trains in data.items():
+        # Skip top-level non-model entries (e.g. "_leakage") and
+        # malformed branches.
+        if model.startswith("_") or not isinstance(trains, dict):
+            continue
         for train, tests in trains.items():
+            if not isinstance(tests, dict):
+                continue
             for test, cell in tests.items():
+                if not isinstance(cell, dict):
+                    continue
                 per = cell.get("per_seed", {})
                 if not isinstance(per, dict):
                     continue
