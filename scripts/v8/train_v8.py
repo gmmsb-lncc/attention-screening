@@ -304,6 +304,7 @@ def main() -> None:
         enable_taxonomy=per_feature["taxonomy"],
         chemberta_per_token=bool(v8["ligand"]["chemberta"].get("per_token", False)),
         biobert_per_token=bool(v8["protein"]["biobert"].get("per_token", False)),
+        max_side_len=int(v8.get("max_side_len", 128)),
         chemberta_dim=chemberta_dim,
         biobert_dim=biobert_dim,
         admet_dim=admet_dim,

@@ -35,10 +35,10 @@ level4_cnn_v8:
   num_heads: 8
   head_dim: 32
   channels: 64
-  # Per-token injection doubles both sequence dims → 2D cross-attention map
-  # is ~4× larger than v7's. With 24 GB VRAM (diamante-02 RTX 4090), batch
-  # 128 OOMs. 32 fits; tune up if your GPU has more headroom.
-  batch_size: 32
+  # Per-token injection grows both sequence dims → 2D cross-attention map
+  # larger than v7's. With max_side_len=128 cap (see v8.max_side_len below)
+  # and batch 16, fits in 24 GB VRAM. Raise batch if GPU has headroom.
+  batch_size: 16
 
   dropout: 0.35
   weight_decay: 0.04
@@ -69,6 +69,10 @@ level4_cnn_v8:
 
   v8:
     cache_root: data/embeddings/v8
+    # Cap per-token side-feature seq length. Applies only in per-token
+    # mode. Map area grows with (L_prot + L_b_cap) × (L_lig + L_c_cap)
+    # → CNN activations × channels. 128 is safe for 24 GB + batch 16.
+    max_side_len: 128
     ligand_enable: true
     protein_enable: true
     ligand:
