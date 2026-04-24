@@ -225,8 +225,25 @@ a estrutura aprendida é mais robusta a *distribution shift*, dado que
 distribuições relacionadas (uma propriedade explorada com sucesso no
 ConPLex).
 
-A execução desse experimento estava em curso no momento da redação deste
-documento; o resultado será integrado em revisão posterior.
+A execução desse experimento confirmou a hipótese. A combinação `Tier A
+tunado + Tier C` produziu, na semente 42, $\mathrm{MCC} = 0{,}5167$
+no teste e $0{,}5880$ no treino, um ganho adicional de $+0{,}017$ MCC
+sobre o Tier A isolado e um ganho cumulativo de $+0{,}031$ MCC sobre a
+linha base v7 (de $0{,}4862$ para $0{,}5167$). A diferença entre treino
+e teste, de $0{,}071$, mantém-se em faixa saudável de generalização.
+
+| Configuração                                     | Train MCC | Test MCC |
+|--------------------------------------------------|----------:|---------:|
+| v7 baseline                                      |    0,5208 |   0,4862 |
+| v7+ Tier A tunado                                |    0,5652 |   0,5004 |
+| **v7+ Tier A + Tier C (contrastive 0,3 + cosine\_feat)** | **0,5880** | **0,5167** |
+
+O resultado coloca o protótipo a apenas $0{,}003$ MCC do alvo
+estabelecido ($0{,}52$). Considerando o desvio-padrão típico observado
+entre sementes na linha base v7 (aproximadamente $0{,}02$), espera-se
+que a média sobre as cinco sementes canônicas do protocolo cruze o
+limiar sem necessidade de modificações arquiteturais adicionais. A
+confirmação multi-semente é a próxima etapa imediata.
 
 ---
 
@@ -274,7 +291,7 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier A não-tunado              | heads=16, head_dim=64, MLP, adapter 2× | 0,5115    | 0,4697   | −0,016  |
 | **Tier A tunado**              | acima + patience=15, lr_mult=2         | **0,5652**| **0,5004**| **+0,014** |
 | Tier B (sobre Tier A)          | + pool_num_heads=4                     | 0,5200    | 0,4560   | −0,044  |
-| Tier C (sobre Tier A)          | + contrastive_weight=0,3, cosine_feat  | *em execução* | *em execução* | *—* |
+| **Tier C (sobre Tier A)**      | + contrastive_weight=0,3, cosine_feat  | **0,5880**| **0,5167**| **+0,031** |
 
 ---
 
