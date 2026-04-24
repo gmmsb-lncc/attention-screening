@@ -214,6 +214,13 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
 \usepackage{xcolor}
 \usepackage{amsmath}
 \usepackage{hyperref}
+\usepackage{newunicodechar}
+% Defensive: map common Unicode punctuation that may leak from python
+% f-strings into the Beamer body. Without these, pdflatex aborts with
+% "Unicode character ... not set up for use with LaTeX".
+\newunicodechar{−}{$-$}  % U+2212 minus
+\newunicodechar{–}{--}    % U+2013 en-dash
+\newunicodechar{—}{---}  % U+2014 em-dash
 
 \title{Matriz Cross-Dataset 3×3}
 \subtitle{DT-Kinase \emph{vs}.\ baselines \textit{semantic screening}}
@@ -283,7 +290,7 @@ def _build_tex(data: dict, summaries: dict, fig_dir: Path, tex_path: Path) -> No
 \end{tabular}
 \end{frame}
 
-\begin{frame}{Especificidade de corpus ($\Delta$ = diag − off)}
+\begin{frame}{Especificidade de corpus ($\Delta$ = diag $-$ off)}
 \centering
 \includegraphics[width=0.85\textwidth]{""" + figp("bar_drop.pdf") + r"""}
 \\[0.5em]
