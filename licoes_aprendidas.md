@@ -321,7 +321,7 @@ nesta linha de pesquisa.
 
 ---
 
-## 9. Considerações finais e próximos passos
+## 9. Considerações finais
 
 A jornada documentada neste registro confirma que a arquitetura
 DT-Kinase v7 é um sistema bem balanceado dentro de seu próprio espaço
@@ -332,22 +332,130 @@ regime inicial de treinamento. Tentativas indiscriminadas de aumentar
 expressividade — como o *pool* multi-cabeça do Tier B — podem
 prejudicar a rede se não respeitarem essa continuidade.
 
-O alvo de $\mathrm{MCC} \geq 0,52$ permanece em aberto. As três
-possibilidades mais promissoras para fechá-lo, em ordem decrescente de
-risco-retorno, são: (i) confirmar o resultado do Tier C em execução,
-e se positivo, combinar Tier A com a perda contrastiva como
-configuração de referência; (ii) investigar uma versão corrigida do
-*pool* multi-cabeça com inicialização-zero da projeção `head_proj`,
-preservando a identidade do v7 no instante inicial; e (iii) considerar
-LoRA sobre as duas camadas superiores dos PLMs ESM-2 e MoLFormer, o
-que relaxaria a hipótese mais profunda — a do viés taxonômico — sem
-substituir o paradigma de *backbones* congelados característico da
-metodologia proposta.
+O Tier C, executado com sucesso, posicionou a configuração de
+referência (Tier A tunado combinado com perda contrastiva auxiliar)
+em $\mathrm{MCC} = 0{,}5167$ na semente 42, a apenas $0{,}003$ do
+alvo $0{,}52$. A próxima etapa imperativa, antes de qualquer nova
+modificação arquitetural, é a confirmação multi-semente desse
+protótipo, reportando $\mathrm{MCC} \pm \sigma$ sobre as cinco
+sementes canônicas. Se a média multi-semente cruzar o limiar, a
+configuração `v7+` torna-se candidata natural à substituição do v7
+canônico, com atualização correspondente na tabela do capítulo 5
+da tese e nas referências do `CLAUDE.md`. Caso contrário, o
+diagnóstico apontará caminhos específicos a explorar dentre as
+direções discutidas na seção subsequente.
 
-Independentemente do caminho escolhido, a próxima etapa deve incluir
-necessariamente a confirmação multi-semente do melhor protótipo,
-reportando $\mathrm{MCC} \pm \sigma$ sobre as cinco sementes canônicas
-do protocolo da tese.
+---
+
+## 10. Direções adicionais de otimização
+
+A discussão presente nesta seção tem caráter prospectivo. As cinco
+direções aqui apresentadas foram selecionadas por satisfazerem
+simultaneamente três critérios: preservam a identidade arquitetural
+do v7 (*cross-attention* 2D, CNN bidimensional, *HierPool*, *backbones*
+congelados); apresentam baixo custo de implementação relativo ao ganho
+esperado; e são cientificamente defensáveis no contexto da tese,
+oferecendo motivação biológica ou matemática que se pode articular no
+texto metodológico.
+
+A primeira direção — e provavelmente a mais robusta em termos de
+relação custo-benefício — é a adoção de *Stochastic Weight Averaging*
+(SWA) ou, alternativamente, médias móveis exponenciais dos pesos
+durante o treinamento. O mecanismo consiste em manter, em paralelo aos
+pesos do otimizador, uma cópia média dos parâmetros da rede,
+atualizada a cada iteração com fator de decaimento controlado;
+no momento da avaliação, essa cópia substitui os pesos do otimizador.
+A literatura (Izmailov et al., 2018) reporta que essa técnica
+suaviza a paisagem de *loss* explorada pelo modelo, levando-o a
+mínimos mais largos e, consequentemente, a melhor generalização. O
+ganho esperado situa-se entre $0{,}005$ e $0{,}02$ MCC, sem custo
+computacional adicional e sem qualquer alteração arquitetural — apenas
+um *hook* no laço de treinamento e a substituição dos pesos antes da
+calibração de Platt.
+
+A segunda direção é a ativação do regime de *Mixup* sobre os mapas de
+interação 2D, controlado pelo parâmetro `mixup_alpha` já existente no
+código mas atualmente desabilitado. *Mixup* (Zhang et al., 2018) gera,
+durante o treinamento, combinações lineares aleatórias de pares de
+exemplos com pesos amostrados de uma distribuição Beta($\alpha,\alpha$);
+o classificador é treinado a prever a combinação correspondente das
+*labels*. No domínio proteína-ligante, isso pode ser interpretado como
+treinar o modelo a reconhecer interações em padrões intermediários
+entre exemplos reais — uma forma de *data augmentation* implícita que
+suaviza a fronteira de decisão. Valores razoáveis de $\alpha$ situam-se
+entre $0{,}2$ e $0{,}4$. O ganho típico em domínios análogos (DTI,
+classificação molecular) é de $0{,}01$ a $0{,}02$ MCC, ao custo de uma
+linha de configuração.
+
+A terceira direção, mais ambiciosa porém ainda dentro do paradigma de
+v7, é a introdução de *deep supervision* na pilha CNN. A ideia é
+acoplar um classificador auxiliar a uma camada intermediária da CNN
+(tipicamente a segunda ou terceira) cujo *loss* contribui para o
+gradiente com peso reduzido, da ordem de $0{,}3$. O efeito conhecido é
+forçar as camadas intermediárias a aprender representações
+preditivamente úteis em si, ao invés de meramente intermediárias para
+camadas posteriores; o classificador auxiliar é descartado em
+inferência. Esse mecanismo é particularmente relevante quando a
+profundidade da CNN cresce ou quando sua convergência é lenta —
+sintomas que o Tier A revelou marginais mas presentes. A
+implementação requer aproximadamente cinquenta linhas de código e o
+ganho esperado fica entre $0{,}005$ e $0{,}015$ MCC.
+
+A quarta direção, com motivação biológica explícita, é a aplicação de
+uma penalidade de esparsidade $L_1$ sobre as distribuições de atenção
+do *HierPool*. Sob o ponto de vista biológico, ligações específicas
+proteína-ligante envolvem tipicamente um pequeno número de resíduos
+em sítios ativos bem definidos, não uma distribuição uniforme ao longo
+da cadeia inteira. Forçar as distribuições *softmax* das *queries* a
+serem esparsas — concentradas em poucas posições — alinha o
+mecanismo de atenção com essa intuição. Tecnicamente, basta
+adicionar um termo $\lambda \sum_{i,j} |a_{ij}|$ ao *loss* total, com
+$\lambda$ pequeno (por exemplo $10^{-3}$), incidindo sobre as
+distribuições de atenção do `_AxisAttentionPool`. Além de ganho
+modesto em MCC ($0{,}005$ a $0{,}01$), oferece uma narrativa
+metodológica forte para o capítulo da tese, conectando a arquitetura
+à fenomenologia biológica do problema.
+
+A quinta direção, finalmente, é a aplicação de *test-time augmentation*
+durante a fase de inferência, explorando o fato de que cada molécula
+admite múltiplas representações SMILES canonicalmente equivalentes mas
+sintaticamente distintas. A técnica consiste em gerar, para cada
+exemplo de teste, $K$ representações SMILES aleatorizadas (por exemplo
+$K = 5$), processar cada uma pelo modelo, e calcular a média das $K$
+probabilidades resultantes antes da limiarização. Isso aproxima a
+estimativa pontual de uma *posterior preditiva*, reduzindo a variância
+do classificador. O custo é apenas em inferência (sem alterar o
+treinamento), e o ganho típico em tarefas de classificação molecular
+fica entre $0{,}005$ e $0{,}015$ MCC. A implementação envolve a
+geração de SMILES aleatórios via RDKit (`Chem.MolToSmiles(mol,
+doRandom=True)`) e uma adaptação do passo de inferência.
+
+Para além dessas cinco direções, duas opções de maior risco e maior
+potencial permanecem disponíveis caso o teto observado sob v7 puro se
+revele insuficiente. A primeira é a aplicação de LoRA (Low-Rank
+Adaptation, Hu et al., 2022) às duas camadas superiores dos PLMs
+ESM-2 e MoLFormer, relaxando o regime estritamente congelado dos
+*backbones* sem retreiná-los completamente; a segunda é o aumento da
+escala do PLM proteico, substituindo ESM-2 8M por ESM-2 35M ou 150M, o
+que requer reconstruir os caches de *embeddings* mas pode oferecer
+ganho substancial pela maior capacidade representacional. Ambas as
+opções comprometem parcialmente a identidade do v7 e devem ser
+consideradas apenas após esgotar as primeiras cinco direções.
+
+A tabela seguinte sumariza o ranqueamento dessas direções segundo a
+heurística de relação custo-benefício, considerando ganho esperado em
+MCC, custo de implementação, risco metodológico e fidelidade ao
+paradigma proposto.
+
+| Direção                                   | ΔMCC esperado | Custo impl | Risco | Identidade v7 |
+|-------------------------------------------|--------------:|:----------:|:-----:|:-------------:|
+| SWA / EMA dos pesos                       | $+0{,}005$ a $+0{,}02$ | baixo      | baixo | preservada |
+| *Mixup* sobre mapas de interação          | $+0{,}01$ a $+0{,}02$  | trivial    | médio | preservada |
+| *Deep supervision* em camada CNN          | $+0{,}005$ a $+0{,}015$| médio      | médio | preservada |
+| Esparsidade $L_1$ sobre atenção           | $+0{,}005$ a $+0{,}01$ | trivial    | baixo | preservada |
+| SMILES *test-time augmentation*           | $+0{,}005$ a $+0{,}015$| baixo      | baixo | preservada |
+| LoRA nas camadas superiores dos PLMs      | $+0{,}02$ a $+0{,}04$  | médio-alto | médio | parcial |
+| Aumento da escala de ESM (8M → 35M / 150M)| $+0{,}02$ a $+0{,}05$  | alto       | alto  | parcial |
 
 ---
 
@@ -369,3 +477,11 @@ Hu *et al.*, "LoRA: Low-rank adaptation of large language models",
 
 Chicco & Jurman, "The advantages of the Matthews correlation coefficient
 (MCC) over F1 score and accuracy", *BMC Genomics* (2020).
+
+Izmailov *et al.*, "Averaging weights leads to wider optima and better
+generalization", *UAI* (2018).
+
+Zhang *et al.*, "mixup: Beyond empirical risk minimization", *ICLR*
+(2018).
+
+Lee *et al.*, "Deeply-supervised nets", *AISTATS* (2015).
