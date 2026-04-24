@@ -274,10 +274,15 @@ def predict(model, loader, y_true_all: np.ndarray, device):
     return y_true_all, np.concatenate(ps)
 
 
-def best_checkpoint(seed_dir: Path) -> Path:
+def best_checkpoint(seed_dir: Path) -> Path | None:
+    """Return first best_model_epoch_*.pth or None if absent.
+
+    Cross-dataset matrix runs across all (corpus × seed) combos but checkpoints
+    may be incomplete on some hosts (e.g. diamante-02 only has NH trained
+    locally). Caller must handle None → skip seed.
+    """
     cands = sorted(seed_dir.glob("best_model_epoch_*.pth"))
-    if not cands: raise FileNotFoundError(seed_dir)
-    return cands[0]
+    return cands[0] if cands else None
 
 
 def main():
@@ -344,6 +349,9 @@ def main():
             print(f"[seed {seed}] já concluído → {out_npz.relative_to(REPO)} (pulando)")
             continue
         ckpt = best_checkpoint(sd)
+        if ckpt is None:
+            print(f"[skip seed={seed}] no best_model_epoch_*.pth in {sd.relative_to(REPO)}")
+            continue
         print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
         m = load_model(ckpt, config, device)
         vy, vp = predict(m, val_loader, val_df["Y"].to_numpy(), device)

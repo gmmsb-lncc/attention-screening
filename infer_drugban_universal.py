@@ -25,6 +25,15 @@ import yaml
 
 REPO_ROOT = Path(__file__).parent.resolve()
 DRUGBAN_SRC = REPO_ROOT / "DrugBAN" / "src"
+if not (DRUGBAN_SRC / "dataloader.py").exists():
+    sys.stderr.write(
+        f"[fatal] DrugBAN upstream not installed at {DRUGBAN_SRC}.\n"
+        f"        DrugBAN/src/ is gitignored (upstream clone).\n"
+        f"        Install via: bash DrugBAN/setup_env.sh\n"
+        f"        Or clone upstream:\n"
+        f"          git clone https://github.com/peizhenbai/DrugBAN.git {DRUGBAN_SRC}\n"
+    )
+    sys.exit(2)
 sys.path.insert(0, str(DRUGBAN_SRC))
 
 from dataloader import DTIDataset  # type: ignore
@@ -101,11 +110,15 @@ def predict(model: DrugBAN, loader: DataLoader, device: torch.device) -> tuple[n
     return np.concatenate(ys), np.concatenate(ps)
 
 
-def best_checkpoint(seed_dir: Path) -> Path:
+def best_checkpoint(seed_dir: Path) -> Path | None:
+    """Return first best_model_epoch_*.pth or None if absent.
+
+    Cross-dataset matrix runs across all (corpus × seed) combos but checkpoints
+    may be incomplete on some hosts (e.g. diamante-02 may only have NH).
+    Caller must handle None → skip seed.
+    """
     candidates = sorted(seed_dir.glob("best_model_epoch_*.pth"))
-    if not candidates:
-        raise FileNotFoundError(f"no best_model found in {seed_dir}")
-    return candidates[0]
+    return candidates[0] if candidates else None
 
 
 def main():
@@ -177,6 +190,9 @@ def main():
             print(f"[seed {seed}] já concluído → {out_npz.relative_to(repo)} (pulando)")
             continue
         ckpt = best_checkpoint(seed_dir)
+        if ckpt is None:
+            print(f"[skip seed={seed}] no best_model_epoch_*.pth in {seed_dir.relative_to(repo)}")
+            continue
         print(f"[seed {seed}] loading {ckpt.relative_to(repo)}")
         model = load_model(ckpt, config, device)
 
