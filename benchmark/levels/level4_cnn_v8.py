@@ -221,6 +221,24 @@ class InteractionMapCNNv8(InteractionMapCNN):
         pfam: Optional[torch.Tensor] = None,
         taxonomy: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        # Model dtype drives all non-mask extras (feature tensors come in as
+        # float32 from the .npy cache; when the model is configured with
+        # `double: true` in v7.yaml, weights are float64 and we must cast
+        # features to match — otherwise F.linear raises dtype mismatch).
+        _dtype = next(self.parameters()).dtype
+        if chemberta_tokens is not None and chemberta_tokens.dtype != _dtype:
+            chemberta_tokens = chemberta_tokens.to(_dtype)
+        if biobert_tokens is not None and biobert_tokens.dtype != _dtype:
+            biobert_tokens = biobert_tokens.to(_dtype)
+        if admet is not None and admet.dtype != _dtype:
+            admet = admet.to(_dtype)
+        if classyfire is not None and classyfire.dtype != _dtype:
+            classyfire = classyfire.to(_dtype)
+        if pfam is not None and pfam.dtype != _dtype:
+            pfam = pfam.to(_dtype)
+        if taxonomy is not None and taxonomy.dtype != _dtype:
+            taxonomy = taxonomy.to(_dtype)
+
         # ---- Pre-attention token injection ----
         if self.enable_chemberta and chemberta_tokens is not None:
             cb_vec = self.chemberta_pool(chemberta_tokens, chemberta_mask)
@@ -357,10 +375,12 @@ class MatrixDatasetV8(Dataset):
         if not path.exists():
             raise FileNotFoundError(f"v8 cache missing: {path}")
         if feature in self.PER_TOKEN_FEATURES:
-            # mmap'd read → copy to writable contiguous ndarray
+            # mmap'd read → force WRITABLE copy (np.array with copy=True).
+            # np.ascontiguousarray with matching dtype returns a view that
+            # inherits the mmap's read-only flag, which PyTorch warns about.
             arr = np.load(path, mmap_mode="r")
-            return np.ascontiguousarray(arr, dtype=np.float32)
-        return np.load(path).astype(np.float32, copy=False)
+            return np.array(arr, dtype=np.float32, copy=True)
+        return np.load(path).astype(np.float32, copy=True)
 
     def __getitem__(self, idx: int) -> dict:
         # Base dataset returns a 5-tuple
