@@ -130,6 +130,13 @@ class InteractionMapCNNv8(InteractionMapCNN):
         adapter_bottleneck_prot: int = 256,
         adapter_bottleneck_lig: int = 512,
         adapter_layers: int = 1,
+        # Per-token injection mode (preserves seq info instead of CLS-pool).
+        # When True, all L chemberta tokens are projected and concatenated
+        # alongside MoLFormer tokens (same for biobert vs ESM). Adapter uses
+        # self-attention (multi-token). When False (default), legacy v8
+        # behaviour: AttentionPool → single CLS-equivalent token.
+        chemberta_per_token: bool = False,
+        biobert_per_token: bool = False,
         **kwargs,
     ) -> None:
         # Forward adapter-related kwargs explicitly to parent AND keep them for
@@ -152,6 +159,8 @@ class InteractionMapCNNv8(InteractionMapCNN):
         self.enable_biobert = enable_biobert
         self.enable_pfam = enable_pfam
         self.enable_taxonomy = enable_taxonomy
+        self.chemberta_per_token = chemberta_per_token
+        self.biobert_per_token = biobert_per_token
 
         # ---- Pre-attention injection ----
         # v8 = v7 + multi-source. The injected CLS-equivalent tokens go
@@ -164,32 +173,64 @@ class InteractionMapCNNv8(InteractionMapCNN):
         # No extra dropout here — the adapter's internal dropout + the
         # post-pool LayerNorm cover regularization.
         if enable_chemberta:
-            self.chemberta_pool = AttentionPool1D(chemberta_dim)
-            self.chemberta_proj = nn.Sequential(
-                nn.Linear(chemberta_dim, ligand_dim),
-                nn.LayerNorm(ligand_dim),
-            )
-            # Adapter over the injected token (acts on shape (B, 1, ligand_dim))
-            self.chemberta_adapter = EmbeddingAdapter(
-                dim=ligand_dim,
-                bottleneck=adapter_bottleneck_lig,
-                dropout=dropout,
-                num_layers=adapter_layers,
-                use_self_attn=False,  # single token → self-attn trivial
-            )
+            # Per-token mode: project each token, adapter uses self-attn to
+            # process the full (B, L_c, ligand_dim) tensor. Preserves the
+            # matrix structure so ChemBERTa positions join MoLFormer in the
+            # 2D cross-attention map with ESM and flow through CNN + pool.
+            # CLS mode: legacy v8 — single pooled token injected.
+            if chemberta_per_token:
+                self.chemberta_pool = None  # unused in per-token mode
+                self.chemberta_proj = nn.Sequential(
+                    nn.Linear(chemberta_dim, ligand_dim),
+                    nn.LayerNorm(ligand_dim),
+                )
+                self.chemberta_adapter = EmbeddingAdapter(
+                    dim=ligand_dim,
+                    bottleneck=adapter_bottleneck_lig,
+                    dropout=dropout,
+                    num_layers=adapter_layers,
+                    use_self_attn=True,  # multi-token → self-attn informative
+                )
+            else:
+                self.chemberta_pool = AttentionPool1D(chemberta_dim)
+                self.chemberta_proj = nn.Sequential(
+                    nn.Linear(chemberta_dim, ligand_dim),
+                    nn.LayerNorm(ligand_dim),
+                )
+                self.chemberta_adapter = EmbeddingAdapter(
+                    dim=ligand_dim,
+                    bottleneck=adapter_bottleneck_lig,
+                    dropout=dropout,
+                    num_layers=adapter_layers,
+                    use_self_attn=False,  # single token → self-attn trivial
+                )
         if enable_biobert:
-            self.biobert_pool = AttentionPool1D(biobert_dim)
-            self.biobert_proj = nn.Sequential(
-                nn.Linear(biobert_dim, protein_dim),
-                nn.LayerNorm(protein_dim),
-            )
-            self.biobert_adapter = EmbeddingAdapter(
-                dim=protein_dim,
-                bottleneck=adapter_bottleneck_prot,
-                dropout=dropout,
-                num_layers=adapter_layers,
-                use_self_attn=False,
-            )
+            if biobert_per_token:
+                self.biobert_pool = None
+                self.biobert_proj = nn.Sequential(
+                    nn.Linear(biobert_dim, protein_dim),
+                    nn.LayerNorm(protein_dim),
+                )
+                self.biobert_adapter = EmbeddingAdapter(
+                    dim=protein_dim,
+                    bottleneck=adapter_bottleneck_prot,
+                    dropout=dropout,
+                    num_layers=adapter_layers,
+                    use_self_attn=True,
+                )
+            else:
+                self.biobert_pool = AttentionPool1D(biobert_dim)
+                self.biobert_proj = nn.Sequential(
+                    nn.Linear(biobert_dim, protein_dim),
+                    nn.LayerNorm(protein_dim),
+                )
+                self.biobert_adapter = EmbeddingAdapter(
+                    dim=protein_dim,
+                    bottleneck=adapter_bottleneck_prot,
+                    dropout=dropout,
+                    num_layers=adapter_layers,
+                    use_self_attn=False,
+                )
 
         # ---- Post-pool concat ----
         # LayerNorm per-feature (escala heterogênea: ADMET endpoints span
@@ -287,23 +328,39 @@ class InteractionMapCNNv8(InteractionMapCNN):
         # backbone's own prot_adapter/lig_adapter (shared with v7 tokens)
         # and the 2D cross-attention map.
         if self.enable_chemberta and chemberta_tokens is not None:
-            cb_vec = self.chemberta_pool(chemberta_tokens, chemberta_mask)  # (B, 384)
-            cb_vec = self.chemberta_proj(cb_vec)                            # (B, ligand_dim)
-            cb_tok = self.chemberta_adapter(cb_vec.unsqueeze(1))            # (B, 1, ligand_dim)
-            ligand_matrix = torch.cat([cb_tok, ligand_matrix], dim=1)
-            ligand_mask = torch.cat(
-                [torch.ones(ligand_mask.size(0), 1, dtype=ligand_mask.dtype, device=ligand_mask.device),
-                 ligand_mask], dim=1,
-            )
+            if self.chemberta_per_token:
+                # (B, L_c, 384) → (B, L_c, ligand_dim) per-token, matrix form
+                # preserved. Full ChemBERTa sequence joins MoLFormer tokens
+                # in the cross-attention map with ESM → CNN processes both
+                # jointly. Valid-token mask concatenated too.
+                cb_toks = self.chemberta_proj(chemberta_tokens)             # (B, L_c, ligand_dim)
+                cb_toks = self.chemberta_adapter(cb_toks)                   # (B, L_c, ligand_dim)
+                ligand_matrix = torch.cat([cb_toks, ligand_matrix], dim=1)
+                ligand_mask = torch.cat([chemberta_mask, ligand_mask], dim=1)
+            else:
+                cb_vec = self.chemberta_pool(chemberta_tokens, chemberta_mask)  # (B, 384)
+                cb_vec = self.chemberta_proj(cb_vec)                            # (B, ligand_dim)
+                cb_tok = self.chemberta_adapter(cb_vec.unsqueeze(1))            # (B, 1, ligand_dim)
+                ligand_matrix = torch.cat([cb_tok, ligand_matrix], dim=1)
+                ligand_mask = torch.cat(
+                    [torch.ones(ligand_mask.size(0), 1, dtype=ligand_mask.dtype, device=ligand_mask.device),
+                     ligand_mask], dim=1,
+                )
         if self.enable_biobert and biobert_tokens is not None:
-            bb_vec = self.biobert_pool(biobert_tokens, biobert_mask)
-            bb_vec = self.biobert_proj(bb_vec)
-            bb_tok = self.biobert_adapter(bb_vec.unsqueeze(1))
-            protein_matrix = torch.cat([bb_tok, protein_matrix], dim=1)
-            protein_mask = torch.cat(
-                [torch.ones(protein_mask.size(0), 1, dtype=protein_mask.dtype, device=protein_mask.device),
-                 protein_mask], dim=1,
-            )
+            if self.biobert_per_token:
+                bb_toks = self.biobert_proj(biobert_tokens)                  # (B, L_b, protein_dim)
+                bb_toks = self.biobert_adapter(bb_toks)                      # (B, L_b, protein_dim)
+                protein_matrix = torch.cat([bb_toks, protein_matrix], dim=1)
+                protein_mask = torch.cat([biobert_mask, protein_mask], dim=1)
+            else:
+                bb_vec = self.biobert_pool(biobert_tokens, biobert_mask)
+                bb_vec = self.biobert_proj(bb_vec)
+                bb_tok = self.biobert_adapter(bb_vec.unsqueeze(1))
+                protein_matrix = torch.cat([bb_tok, protein_matrix], dim=1)
+                protein_mask = torch.cat(
+                    [torch.ones(protein_mask.size(0), 1, dtype=protein_mask.dtype, device=protein_mask.device),
+                     protein_mask], dim=1,
+                )
 
         # ---- Run parent's forward up to the pooled vector ----
         # Replicate parent's logic, stop before self.classifier, append extras.

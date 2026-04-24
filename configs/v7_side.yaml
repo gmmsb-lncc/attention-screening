@@ -1,0 +1,116 @@
+# ============================================================================
+# v7-side — v7 + per-token side representations (inspired by v8)
+# ============================================================================
+# MoLFormer (ligand) + ESM-2 8M (protein) remain as default backbones.
+# ChemBERTa-77M-MTR (ligand) and BioBERT (protein) are injected alongside
+# as per-token matrices, concatenated on the sequence dim BEFORE v7's
+# EmbeddingAdapter. The combined sequence flows through the existing
+# v7 pipeline unchanged: adapter → cross-attention 2D map → CNN → pool.
+#
+# Key differences vs v8:
+# - per-token injection (preserves matrix form, joins cross-attn map)
+#   NOT attention-pool → single CLS-equivalent token
+# - post-pool features (ADMET, ClassyFire, Pfam, Taxonomy) disabled
+#   (user directive: keep v7 defaults + side representations only)
+#
+# Ablation: v7-side (both sides). For single-side, use:
+#   ABLATIONS=v7-side-lig  (chemberta only)
+#   ABLATIONS=v7-side-prot (biobert only)
+# (not yet wired; today only v7-side with both on is exposed).
+#
+# Usage:
+#   SEEDS="42" bash scripts/v8/run_v7_side.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn_v8
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/v7_side_{dataset}_{embedding}
+
+level4_cnn_v8:
+  variant: v7
+  num_heads: 8
+  head_dim: 32
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # fp32 + AMP off + cuDNN off (diamante-02 constraints; TF32 auto-off in
+  # pure-fp32 path so matmul is true fp32). Revert on healthy-cuDNN hosts.
+  double: false
+  no_amp: true
+  deterministic: false
+
+  patience: 5
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 5.0
+    prot_dim: 256
+    lig_dim: 512
+
+  calibration:
+    platt: true
+    temperature: false
+
+  mlp_head: false
+
+  v8:
+    cache_root: data/embeddings/v8
+    ligand_enable: true
+    protein_enable: true
+    ligand:
+      chemberta:
+        enable: true
+        dim: 384
+        per_token: true   # <-- matrix form preserved, joins cross-attn map
+      admet:
+        enable: false
+        dim: 41
+      classyfire:
+        enable: false
+        dim: 230
+    protein:
+      biobert:
+        enable: true
+        dim: 768
+        per_token: true   # <-- same for protein side
+      pfam:
+        enable: false
+        dim: 50
+      taxonomy:
+        enable: false
+        dim: 10
+
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.52
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true

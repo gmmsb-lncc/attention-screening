@@ -57,6 +57,12 @@ _ABLATION_ENABLES = {
     # the shared training env (cuDNN off, no_amp, LR choice, etc.).
     "v7-baseline": dict(chemberta=False, admet=False, classyfire=False,
                         biobert=False, pfam=False, taxonomy=False),
+    # v7-side: ChemBERTa (ligand) + BioBERT (protein) injected as per-token
+    # matrices alongside MoLFormer/ESM. Post-pool features off (ADMET/
+    # ClassyFire/Pfam/Taxonomy). Use with chemberta_per_token: true and
+    # biobert_per_token: true in the config.
+    "v7-side": dict(chemberta=True, admet=False, classyfire=False,
+                    biobert=True, pfam=False, taxonomy=False),
     "v8-lig":  dict(chemberta=True,  admet=True,  classyfire=True,
                     biobert=False, pfam=False, taxonomy=False),
     "v8-prot": dict(chemberta=False, admet=False, classyfire=False,
@@ -296,6 +302,8 @@ def main() -> None:
         enable_biobert=per_feature["biobert"],
         enable_pfam=per_feature["pfam"],
         enable_taxonomy=per_feature["taxonomy"],
+        chemberta_per_token=bool(v8["ligand"]["chemberta"].get("per_token", False)),
+        biobert_per_token=bool(v8["protein"]["biobert"].get("per_token", False)),
         chemberta_dim=chemberta_dim,
         biobert_dim=biobert_dim,
         admet_dim=admet_dim,
