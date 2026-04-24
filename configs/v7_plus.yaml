@@ -80,6 +80,12 @@ level4_cnn:
 
   mlp_head: true           # ↑ Linear(64,1) → MLP(64, hidden, 1)
 
+  # Tier B: multi-head attention pool. v7 has 1 query per stage in HierPool;
+  # raising to 4 lets each stage learn diverse attention patterns (e.g. one
+  # head focuses on hot-spot residues, another on hydrophobic clusters).
+  # Concat heads → project back to channels dim. Backward compat at 1.
+  pool_num_heads: 4
+
   label_smooth: 0.0
   mixup_alpha: 0.0
 

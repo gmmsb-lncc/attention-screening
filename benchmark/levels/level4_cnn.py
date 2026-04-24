@@ -139,23 +139,40 @@ class _AxisAttentionPool(nn.Module):
     Mask convention: ``True = padding`` (will be ignored).
     """
 
-    def __init__(self, dim: int) -> None:
+    def __init__(self, dim: int, num_heads: int = 1) -> None:
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
+        self.num_heads = num_heads
+        # Multi-head learnable queries. Each head learns to attend to a
+        # different aspect of the input sequence (e.g. one head focuses on
+        # high-affinity residues, another on aromatic substructures, etc.).
+        # Single-head reduces to original v7 behaviour.
+        self.queries = nn.Parameter(torch.randn(1, num_heads, dim) * 0.02)
         self.scale = dim ** -0.5
         self.norm = nn.LayerNorm(dim)
+        # When multi-head, concat outputs (H × D) and project back to D.
+        # Identity in single-head mode keeps backward compatibility.
+        if num_heads > 1:
+            self.head_proj = nn.Linear(num_heads * dim, dim)
+        else:
+            self.head_proj = nn.Identity()
 
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
         """Pool [B, L, D] → [B, D]."""
-        q = self.query.expand(x.size(0), -1, -1)          # [B, 1, D]
-        scores = torch.bmm(q, x.transpose(1, 2)) * self.scale  # [B, 1, L]
+        B = x.size(0)
+        q = self.queries.expand(B, -1, -1)                # [B, H, D]
+        scores = torch.bmm(q, x.transpose(1, 2)) * self.scale  # [B, H, L]
 
         if pad_mask is not None:
             scores = scores.masked_fill(pad_mask.unsqueeze(1), float("-inf"))
 
-        attn = torch.softmax(scores, dim=-1)                # [B, 1, L]
-        pooled = torch.bmm(attn, x)                         # [B, 1, D]
-        return self.norm(pooled.squeeze(1))                  # [B, D]
+        attn = torch.softmax(scores, dim=-1)                # [B, H, L]
+        pooled = torch.bmm(attn, x)                         # [B, H, D]
+        if self.num_heads > 1:
+            pooled = pooled.reshape(B, -1)                   # [B, H*D]
+            pooled = self.head_proj(pooled)                  # [B, D]
+        else:
+            pooled = pooled.squeeze(1)                       # [B, D]
+        return self.norm(pooled)                              # [B, D]
 
 
 class _HierarchicalPool(nn.Module):
@@ -170,10 +187,10 @@ class _HierarchicalPool(nn.Module):
       (2) which protein residues matter overall
     """
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, num_heads: int = 1) -> None:
         super().__init__()
-        self.lig_pool = _AxisAttentionPool(channels)
-        self.prot_pool = _AxisAttentionPool(channels)
+        self.lig_pool = _AxisAttentionPool(channels, num_heads=num_heads)
+        self.prot_pool = _AxisAttentionPool(channels, num_heads=num_heads)
 
     def forward(
         self,
@@ -326,6 +343,7 @@ class InteractionMapCNN(nn.Module):
         adapter_self_attn: bool = False,
         contrastive_dim: int = 128,
         cosine_feat: bool = False,
+        pool_num_heads: int = 1,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -480,7 +498,7 @@ class InteractionMapCNN(nn.Module):
                 nn.BatchNorm2d(cnn_channels),
                 nn.GELU(),
             )
-            self.pool = _HierarchicalPool(cnn_channels)
+            self.pool = _HierarchicalPool(cnn_channels, num_heads=pool_num_heads)
             self.dropout = nn.Dropout(dropout)
             clf_in = cnn_channels + (1 if cosine_feat else 0)
             if mlp_head:
@@ -973,6 +991,7 @@ def _train_interaction_cnn(
     contrastive_weight: float = 0.0,
     cosine_feat: bool = False,
     contrastive_dim: int = 128,
+    pool_num_heads: int = 1,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
@@ -1057,6 +1076,7 @@ def _train_interaction_cnn(
         adapter_self_attn=adapter_self_attn,
         contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
         cosine_feat=cosine_feat,
+        pool_num_heads=pool_num_heads,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1528,6 +1548,7 @@ class Level4CNNRunner(BaseLevelRunner):
         adapter_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS", "1"))
         adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
         adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
+        pool_num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_POOL_HEADS", "1"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1586,6 +1607,7 @@ class Level4CNNRunner(BaseLevelRunner):
             contrastive_weight=contrastive_weight,
             cosine_feat=cosine_feat,
             contrastive_dim=contrastive_dim,
+            pool_num_heads=pool_num_heads,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,

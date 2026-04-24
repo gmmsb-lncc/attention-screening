@@ -162,6 +162,7 @@ def build_env(cfg: dict) -> dict[str, str]:
         "contrastive_dim":    "BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM",
         "label_smooth":  "BENCHMARK_LEVEL4CNN_LABEL_SMOOTH",
         "mixup_alpha":   "BENCHMARK_LEVEL4CNN_MIXUP_ALPHA",
+        "pool_num_heads": "BENCHMARK_LEVEL4CNN_POOL_HEADS",
         "train_to_zero_thr":  "BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR",
         "checkpoint_every":   "BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY",
     }
