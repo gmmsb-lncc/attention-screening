@@ -2,6 +2,28 @@
 
 Guidance for Claude Code operating on this repository.
 
+## Context files (versioned, sync across machines)
+
+When resuming work after `/clear`, host change, or fresh repo clone,
+these documents reconstitute the full project state. None are
+gitignored; all sync via `git pull`.
+
+| File | Purpose | Read when |
+|---|---|---|
+| `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
+| `licoes_aprendidas.md` | optimization track narrative + 14 methodological lessons + §9 operational snapshot + §10 future directions | when planning next experiment or interpreting a result |
+| `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
+| `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
+| `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
+| `configs/*.yaml` | training configurations (each carries inline docstring) | when running or comparing variants |
+| `git log --oneline -30` | recent commits with detailed messages explaining each change | when reconstructing recent decisions |
+
+**Update rule**: any new methodological insight goes to
+`licoes_aprendidas.md` (with explicit lesson number). Any new
+multi-seed result goes to `experiments_log.md` (table row + YAML
+stanza). Any new config/env knob/runner script gets a row in the
+`CLAUDE.md` tables below.
+
 ## Project overview
 
 **semantic-screening** — framework for protein-ligand interaction prediction on kinases. Implements **DT-Kinase** (Level 4 CNN v7, CNN 2D + bi-modal cross-attention) and evaluates it against three baselines (**DrugBAN**, **GraphBAN**, **ConPLex**) under an identical protocol.
