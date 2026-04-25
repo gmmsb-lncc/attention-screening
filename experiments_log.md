@@ -57,6 +57,7 @@ referenciar este registro.
 | 15 | v7_asymF (A+C+F + asym adapter + pre-norm) 3-seed | d01 | 3 | 42,123,456 | — | 0,4611 ± 0,0279 | 0,028 | 0,7951 | −0,045 | regrediu; pre-norm + LoRA + asym todos juntos sem ablação |
 | 16 | v7_plus_F_adapt (A+C+F + §6.5 fixes + THR=f1, SEL=f1) 3-seed | d01 | 3 | 42,123,456 | — | 0,4929 ± 0,0160 | 0,016 | 0,8105 | −0,013 | F1=0,7868; selection acoplado a F1 (matched) |
 | 17 | v7_plus_F_adapt_v2 (A+C+F + §6.5 + THR=f1, SEL=mcc) 3-seed | d01 | 3 | 42,123,456 | — | **0,4590 ± 0,0517** | **0,052** | 0,7778 | **−0,047** | DESCARTADO; AUROC+σ pioraram → lição 16: matched objective |
+| 18 | v7+F + λ=0.5 composite (matched mcc/mcc) 3-seed | **d02** | 3 | 42,123,456 | — | **0,4606 ± 0,0518** | **0,052** | 0,7988 | **−0,056** (cross-host adj.) | suspeita §6.5 prejudicial em treino curto → lição 17 |
 
 ---
 
@@ -163,6 +164,47 @@ notes: |
   típico recall~0.85, precision~0.73).
 
   Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
+```
+
+### v7+F + λ=0.5 composite criterion (matched mcc/mcc) 3-seed em `diamante-02`
+
+```yaml
+config: configs/v7_plus_F.yaml
+host: diamante-02
+corpus: non_human
+embedding: 8M
+seeds: [42, 123, 456]
+elapsed_seconds: 1352.5
+env:
+  BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS: 0.5
+  BENCHMARK_LEVEL4CNN_DISABLE_CUDNN: 1
+  (THRESHOLD_METRIC, SELECTION_METRIC: ambos default = mcc)
+results:
+  level4_cnn_mlp:
+    accuracy:  0.724638 ± 0.024595
+    mcc:       0.460639 ± 0.051773
+    f1:        0.774815 ± 0.018915
+    precision: 0.685694 ± 0.019463
+    recall:    0.890608 ± 0.017783
+    auc:       0.798839 ± 0.019926
+notes: |
+  Configuração metodologicamente "limpa": critérios matched (mcc/mcc),
+  apenas λ=0.5 composite isolado (lição 14). Esperava-se neutro ou
+  marginalmente positivo. Regrediu -0.056 MCC vs v7+F histórico
+  (ajustando cross-host drift +0.009).
+
+  Padrão notável: TODOS os 4 experimentos recentes sobre v7+F
+  regrediram (asymF, adapt, adapt_v2, λ=0.5). Interseção comum:
+  todos rodam código atual com §6.5 fixes hardcoded. v7+F histórico
+  (0.5260) foi pre-§6.5.
+
+  Hipótese (lição 17): §6.5 (pre-norm + LoRA gates + zero-init
+  self_attn) torna adapter NO-OP demais em t=0; em treino curto
+  (~30-50 epochs com early stop), gates não acordam → capacidade
+  efetiva subutilizada.
+
+  Próximo passo crítico: isolar §6.5 via flag legacy, comparar
+  v7+F com adapter antigo vs adapter atual no mesmo host.
 ```
 
 ### v7_plus_F_adapt_v2 (A+C+F + §6.5 + THR=f1, SEL=mcc) 3-seed em `diamante-01`
