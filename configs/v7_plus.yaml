@@ -91,14 +91,23 @@ level4_cnn:
   pool_num_heads: 1
 
   # Tier D: Stochastic Weight Averaging (Izmailov et al., UAI 2018).
-  # From epoch 5 onward, maintain running average of weights; after
-  # training, run update_bn over train_loader and replace model with
-  # averaged version for evaluation. Smooths loss landscape exploration
-  # → wider minima → better generalization. swa_start=0 disables.
-  swa_start: 5
+  # First experiment with swa_start=5 REGRESSED test MCC (-0.021):
+  # vanilla SWA assumes long training with diverse SGD trajectory in
+  # the convergence region. Our short training (~12 epochs) doesn't
+  # produce that trajectory, so averaging across the active learning
+  # phase pulled weights backward. Disabled. Future option: replace
+  # with Greedy Model Soup (Wortsman 2022) which only includes
+  # checkpoints that improve val_MCC.
+  swa_start: 0
 
   label_smooth: 0.0
-  mixup_alpha: 0.0
+
+  # Tier E: Mixup data augmentation on interaction maps. Pairs of training
+  # samples are blended via Beta(α, α); the classifier learns interpolated
+  # labels. Acts on input space (orthogonal to Tier A's capacity scaling
+  # and Tier C's feature-space regularization). α=0.3 is the literature
+  # sweet spot for binary classification (Zhang et al., ICLR 2018).
+  mixup_alpha: 0.3
 
   train_to_zero: false
   train_to_zero_thr: 0.01
