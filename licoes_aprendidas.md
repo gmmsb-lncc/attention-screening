@@ -442,6 +442,184 @@ explorada pela rede, podendo levar diferentes inicializações a
 mínimos genuinamente diferentes. A confirmação multi-semente
 discriminará entre essas hipóteses.
 
+## 6.4. Tier "BAN-híbrido" — segunda violação de identidade-init
+
+A primeira frente experimental sob o regime de identidade relaxada
+($\S 6{.}3$) foi a configuração `v7_ban_F`, empilhando o cabeçote BAN
+bilinear (`variant=v8`) sobre `v7+F` (Tier A + C + F). A motivação
+era atacar a Hipótese 1 (gargalo de projeção) usando o tensor
+$W_\mathrm{ban} \in \mathbb{R}^{K \times D_p \times D_l}$ com 1,96M
+parâmetros adicionais, preservando o resto do *pipeline* (CNN,
+*HierPool*, classificador). A expectativa era ganho aditivo de
+$+0{,}015$ a $+0{,}030$ MCC sobre `v7+F`.
+
+| Configuração     | n | Test MCC               | $\sigma$ | $\Delta$ vs `v7+F` |
+|------------------|---|------------------------|---------:|-------------------:|
+| v7+F (canônico)  | 3 | $0{,}5260 \pm 0{,}0274$ | 0,027 | —                 |
+| v7+F + BAN       | 3 | $0{,}5028 \pm 0{,}0462$ | **0,046** | $-0{,}023$        |
+
+A regressão foi acompanhada de aumento de $\sigma$ de aproximadamente
+$70\%$, padrão diagnóstico já familiar: instabilidade entre sementes
+indica perturbação inicial não controlada. A inspeção do código
+revelou que $W_\mathrm{ban}$ é inicializado por
+`nn.init.xavier_uniform_(self.W_ban[k])` — mesma família de
+inicialização que causou o fracasso do Tier B (multi-cabeça do
+*pool*) e do v8-side. No instante $t=0$, a interação é
+$M_k = P \cdot W_k \cdot L^\top \neq 0$, gerando 16 mapas
+aleatórios mas seed-específicos que o CNN downstream nunca enfrentou
+durante o treinamento de v7. A consequência é a familiar
+divergência entre sementes — cada uma encontra um mínimo
+qualitativamente diferente.
+
+A décima segunda lição que emerge é a generalização da segunda:
+**a violação de identidade-init não é específica de uma família
+de transformação; aplica-se uniformemente a qualquer perturbação
+não-zero que se acrescente ao caminho de informação**. O Tier B
+violou-a com `Linear(4D, D)` Xavier no *pool*; v8-side violou-a
+com projeções de injeção lateral; v7_ban_F violou-a com o tensor
+bilinear $W_\mathrm{ban}$ Xavier. O remédio é estruturalmente o
+mesmo em todos os casos: começar com a transformação produzindo
+zero ou identidade, deixando o gradiente decidir quando ativá-la.
+
+A correção possível para `v7_ban_F` é uma versão **BAN-residual**
+em que a interação se compõe como
+$M_k = (P_\text{proj}^k)(L_\text{proj}^k)^\top + \alpha_k \cdot P W_k L^\top$,
+com $\alpha_k$ aprendível inicializado em zero — exatamente o
+princípio aplicado às portas LoRA-style do `EmbeddingAdapter`. Sob
+essa parametrização, o modelo começa idêntico ao v7 (caminho
+*dot-product* puro) e o gradiente ativa o termo bilinear apenas
+onde seja útil. Esse caminho fica registrado como direção a
+explorar, não testado nesta etapa por priorização da revisão do
+adapter.
+
+## 6.5. Revisão estrutural do `EmbeddingAdapter`
+
+A análise crítica do componente `EmbeddingAdapter` revelou três
+imperfeições estruturais que, embora isoladamente pequenas, em
+conjunto comprometem o princípio de identidade-init que tem sido
+o leitmotiv da abordagem.
+
+A primeira imperfeição é que o ramo de auto-atenção opcional
+(`use_self_attn=true`) inicializava sua projeção de saída com
+inicialização Xavier padrão do PyTorch, em desacordo com a
+inicialização-zero aplicada explicitamente à projeção de saída
+do bloco MLP. No instante $t=0$, o vetor `attn_out` era ruído
+gaussiano com escala não-trivial, e o resíduo
+`x + attn_out` desviava da identidade no primeiro *forward*. O
+remédio aplicado consistiu em zerar explicitamente
+`self.self_attn.out_proj.weight` e `bias`, alinhando o
+sub-componente de auto-atenção com o sub-componente MLP.
+
+A segunda imperfeição é a ausência de portas escalares aprendíveis
+(*gates*) controlando a contribuição de cada sub-camada. Sem essa
+camada de defesa, qualquer perturbação inicial dos pesos internos
+da sub-camada propaga-se diretamente ao resíduo. A introdução de
+`attn_scale` e `mlp_scales` — parâmetros escalares inicializados
+em zero — adiciona uma camada de proteção independente da
+inicialização interna: mesmo que pesos da sub-camada sejam
+perturbados, a saída é multiplicada por zero e a saída do
+*adapter* permanece exatamente igual ao *input*. À medida que o
+gradiente flui durante o treinamento, esses *gates* gradualmente
+aumentam, ativando a contribuição da sub-camada de forma
+controlada. Esta é uma transposição direta do princípio de LoRA
+(Hu et al., 2022) ao componente `EmbeddingAdapter`.
+
+A terceira imperfeição é a arquitetura *post-norm* da implementação
+original — `x = LayerNorm(x + sublayer(x))`. Mesmo quando a
+contribuição da sub-camada é zero (com *gates* zerados), a
+LayerNorm renormaliza o *input* e produz uma saída diferente do
+*input* recebido. Em testes empíricos, com $\alpha = 0$, a
+diferença máxima absoluta entre saída e *input* foi de $0{,}42$,
+indicando que o *adapter* ainda transformava deterministicamente o
+sinal. A reformulação para *pre-norm* — `x = x + sublayer(LayerNorm(x))` —
+elimina esse efeito completamente: com $\alpha = 0$, a diferença
+máxima é $0{,}00 \times 10^{0}$ (identidade exata). Pre-norm é
+também a configuração mais estável para *stacks* mais profundas
+(Xiong et al., ICML 2020), o que se torna relevante quando se
+considera o caso assimétrico discutido a seguir.
+
+Uma quarta direção, decorrente do *insight* de domínio articulado
+durante o desenvolvimento, foi a introdução de **assimetria
+estrutural entre os ramos proteico e ligante**. Em domínios de
+*kinase*, o sítio de ligação ATP é altamente conservado entre
+proteínas — a maior parte da informação discriminativa para a
+predição de afinidade reside no lado do ligante. A configuração
+original tratava ambos os ramos simetricamente em termos de número
+de camadas e cabeças de atenção; isso desperdiça capacidade no lado
+proteico, onde os *features* já são em grande parte universais, e
+sub-aloca capacidade no lado do ligante, onde a discriminação fina
+ocorre. A configuração `v7_asymF` exemplifica a inversão da
+assimetria: ramo proteico com 1 camada MLP e 4 cabeças de atenção
+(*head\_dim* $= 80$); ramo do ligante com 2 camadas MLP e 12
+cabeças de atenção (*head\_dim* $= 64$). O custo total em parâmetros
+é de $+12\%$ ($6{,}08\text{M} \to 6{,}81\text{M}$),
+concentrado precisamente onde a teoria do domínio sugere ganho.
+
+A décima terceira lição que emerge desta revisão é que **assimetria
+estrutural orientada por conhecimento de domínio é um eixo
+legítimo de otimização arquitetural, distinto do escalonamento
+homogêneo de capacidade**. Aumentar `num_heads` de $K$ para $2K$
+em ambos os ramos é escalonamento; aumentar somente no ramo onde
+a teoria do problema sugere maior demanda de discriminação é
+informação prévia. As duas operações têm a mesma magnitude de
+custo computacional, mas a segunda incorpora explicitamente a
+estrutura do problema. O experimento `v7_asymF` testará
+empiricamente se a assimetria ligante-favorita produz ganho
+mensurável.
+
+## 6.6. Critério composto de seleção de *checkpoint*
+
+A análise diagnóstica das duas épocas vizinhas (Epoch 77 e Epoch 80
+de uma das execuções de `v7+F`) revelou um padrão de divergência
+entre `val_loss` e `val_mcc` que merece registro metodológico. As
+métricas observadas foram: Epoch 77 com `val_loss = 0{,}1626` e
+`val_mcc = 0{,}5928`; Epoch 80 com `val_loss = 0{,}1890` (subida
+de $+16\%$) e `val_mcc = 0{,}6054` (subida de $+2{,}1\%$).
+
+Esse padrão é diagnóstico de *threshold gaming*: o modelo aprende
+a produzir *logits* extremos (saturados perto de 0 ou 1) que
+maximizam o MCC no *threshold* ótimo, mas degradam a calibração
+probabilística — o que se reflete em `val_loss` mais alta. O
+comportamento é especialmente perigoso em pipelines como o nosso,
+em que a seleção do melhor *checkpoint* se baseia exclusivamente
+no `val_mcc`: a configuração escolhida será aquela com calibração
+pior, e cuja transferência ao conjunto de teste tende a degradar
+mais que o esperado.
+
+A confirmação empírica veio da semente 123 desse mesmo experimento:
+o *checkpoint* selecionado por `val_mcc = 0{,}6054` produziu
+$\mathrm{MCC}_\text{test} = 0{,}4494$, um *gap* val→test de
+$0{,}156$ MCC. Em contraste, a perda de AUROC val→test foi de
+apenas $0{,}057$, indicando que a capacidade de *ranqueamento* do
+modelo se preservou — o que falhou foi a calibração e a transferência
+do *threshold* específico.
+
+A solução metodológica adotada é o uso de um **critério composto**
+de seleção de *checkpoint*:
+$$\text{score} = \mathrm{val\_mcc} - \lambda \cdot \mathrm{val\_loss}$$
+em que $\lambda \geq 0$ pondera o quanto a calibração penaliza
+ganhos discriminativos. Com $\lambda = 0$, o critério recupera o
+comportamento original (seleção pura por `val_mcc`); com
+$\lambda = 0{,}5$, aplicado retroativamente ao exemplo das épocas
+77 e 80, a Epoch 77 (com calibração superior) é selecionada por
+margem estreita ($0{,}5115$ vs $0{,}5109$). Aplicado a Epoch 80
+quando $\lambda = 1{,}0$, a margem cresce significativamente
+(Epoch 77: $0{,}4302$, Epoch 80: $0{,}4164$).
+
+A décima quarta lição é registrada: **métricas discretas dependentes
+de *threshold* devem ser avaliadas em conjunto com métricas
+contínuas que reflitam calibração, especialmente em estágios
+tardios do treinamento onde a otimização tende a explorar regiões
+de saturação dos *logits***. A seleção mono-métrica
+(`val_mcc` apenas) pode favorecer *checkpoints* que parecem
+melhores em validação mas generalizam pior ao conjunto de teste.
+A heurística operacional: sempre que se observar `val_loss`
+aumentando enquanto `val_mcc` aumenta, a configuração está
+provavelmente em regime de *threshold gaming* e o *checkpoint*
+imediatamente anterior — com `val_loss` mais baixo e `val_mcc`
+ligeiramente menor — é frequentemente o candidato mais confiável
+para o conjunto de teste.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
@@ -668,6 +846,7 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier E+F empilhados (v7-pro, 5-seed d01)     | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576$ | $0{,}4961 \pm 0{,}0245$ | $-0{,}018$ (vs v7+ A+C 5-seed) |
 | Tier E isolado (v7+E, 3-seed d01)            | A+C + mixup_alpha=0,3                  | —         | $0{,}4988 \pm 0{,}0254$ | $-0{,}016$ Mixup deletério |
 | **Tier F isolado (v7+F, 3-seed d01)**        | A+C + label_smooth=0,05                | —         | $\mathbf{0{,}5260 \pm 0{,}0274}$ | $\mathbf{+0{,}012}$ candidato a canônico |
+| BAN-híbrido (v7_ban_F, 3-seed d01)            | A+C+F + variant=v8 (Xavier W_ban)     | $0{,}599 \pm 0{,}034$ | $0{,}5028 \pm 0{,}0462$ | $-0{,}023$ vs v7+F (regrediu, $\sigma$ inflada) |
 
 ---
 
@@ -873,8 +1052,14 @@ paradigma proposto.
 | Direção                                   | ΔMCC esperado | Custo impl | Risco | Identidade v7 | Status |
 |-------------------------------------------|--------------:|:----------:|:-----:|:-------------:|:-------|
 | SWA / EMA dos pesos                       | $+0{,}005$ a $+0{,}02$ | baixo      | baixo | preservada | testado, regrediu (Tier D) |
-| *Mixup* sobre mapas de interação          | $+0{,}01$ a $+0{,}02$  | trivial    | médio | preservada | **ativo (Tier E em `v7-pro`)** |
-| *Label smoothing* sobre o alvo            | $+0{,}005$ a $+0{,}015$| trivial    | baixo | preservada | **ativo (Tier F em `v7-pro`)** |
+| *Mixup* sobre mapas de interação          | $+0{,}01$ a $+0{,}02$  | trivial    | médio | preservada | testado, regrediu isolado (Tier E) |
+| *Label smoothing* sobre o alvo            | $+0{,}005$ a $+0{,}015$| trivial    | baixo | preservada | **validado isolado (Tier F): +0,012 MCC** |
+| Cabeçote BAN bilinear (`variant=v8`)      | $+0{,}015$ a $+0{,}030$| trivial    | médio | parcial | testado, regrediu (Xavier-init W_ban) |
+| BAN-residual com $\alpha$-gate identidade-init | $+0{,}010$ a $+0{,}025$| médio      | baixo | parcial | pendente |
+| Pre-norm no `EmbeddingAdapter`            | marginal isolado | trivial | baixo | preservada | **implementado** |
+| `EmbeddingAdapter` com gates LoRA-style   | $+0{,}005$ a $+0{,}015$| baixo | baixo | preservada | **implementado** |
+| Adapter assimétrico (ligante > proteína)  | $+0{,}010$ a $+0{,}020$| baixo | médio | preservada | **implementado, pendente teste** (`v7_asymF`) |
+| Critério composto val_mcc − λ·val_loss    | $+0{,}005$ a $+0{,}015$| baixo | baixo | preservada | **implementado** (env knob) |
 | *Deep supervision* em camada CNN          | $+0{,}005$ a $+0{,}015$| médio      | médio | preservada | pendente |
 | Esparsidade $L_1$ sobre atenção           | $+0{,}005$ a $+0{,}01$ | trivial    | baixo | preservada | pendente |
 | SMILES *test-time augmentation*           | $+0{,}005$ a $+0{,}015$| baixo      | baixo | preservada | pendente |
