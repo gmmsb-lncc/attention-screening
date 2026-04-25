@@ -94,7 +94,7 @@ bash run_benchmark.sh                         # shell orchestrator
 
 ## DT-Kinase optimization variants (2026-04)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (16 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline.
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (17 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **OPEN QUESTION (§6.9, lição 17)**: §6.5 EmbeddingAdapter fixes (hardcoded since `58805ca`/`abc4167`) may be regressive in short-training regime — needs isolation experiment via legacy flag.
 
 | Config | Tiers | Status (NH) | Notes |
 |---|---|---|---|

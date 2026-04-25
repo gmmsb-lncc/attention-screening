@@ -770,6 +770,109 @@ arqueológico do experimento refutado. A infraestrutura de
 sua composição (matched vs decoupled) é restrita à matched
 pelo princípio empírico desta seção.
 
+## 6.9. Padrão regressivo sistemático — suspeita sobre as correções §6.5
+
+A execução em `diamante-02` da configuração `v7+F` com critério
+composto $\lambda = 0{,}5$ (lição 14, $\S 6{.}6$) e critérios
+*matched* (THRESHOLD=mcc, SELECTION=mcc) — portanto sem nenhuma
+das fontes de regressão identificadas em $\S 6{.}7$ ou $\S 6{.}8$
+— produziu três sementes com
+$\mathrm{MCC}_{\text{test}} = 0{,}4606 \pm 0{,}0518$, $\mathrm{F1} = 0{,}7748$,
+AUROC $= 0{,}7988$. Ajustando pelo *drift* *cross-host* documentado
+($+0{,}009$ MCC na transição `diamante-02` $\to$ `diamante-01`,
+$\S 8$), o valor correspondente em `diamante-01` projetado seria
+$\approx 0{,}4696$. A referência canônica $v7+F$ medida em
+`diamante-01` é $0{,}5260 \pm 0{,}0274$. A regressão líquida é,
+portanto, $-0{,}056$ MCC sob o mesmo critério matched que produziu
+o número canônico.
+
+Esse resultado completa um padrão regressivo notável:
+
+| Variante (sobre v7+F) | $\Delta$ MCC | $\sigma$ |
+|---|---:|---:|
+| `v7_asymF` (asym adapter) | $-0{,}045$ | $0{,}028$ |
+| `v7+F_adapt` (matched F1) | $-0{,}013$ | $0{,}016$ |
+| `v7+F_adapt_v2` (mismatched) | $-0{,}047$ | $0{,}052$ |
+| `v7+F` + $\lambda = 0{,}5$ composite (d02) | $-0{,}056$ | $0{,}052$ |
+
+Quatro experimentos consecutivos, com modificações ortogonais
+entre si — assimetria estrutural, mudança de critério de
+*threshold*, *decoupling* de critérios, *composite criterion* —
+**todos regrediram vs a referência $v7+F$**. A interseção comum
+desses quatro experimentos é uma única coisa: todos eles foram
+executados sob o código atual da classe `EmbeddingAdapter`,
+que incorpora as três correções estruturais documentadas em
+$\S 6{.}5$ (pre-norm; LoRA gates inicializados em zero; zero-init
+da projeção de saída do *self-attention*) — correções introduzidas
+nos *commits* `58805ca` e `abc4167`, posteriores à medição da
+referência canônica $v7+F = 0{,}5260$. A referência foi, portanto,
+medida com a versão **antiga** do *adapter* (post-norm; Xavier-init
+do *self-attn*; sem *gates* escalares).
+
+A hipótese mais econômica que explica o padrão é que **as três
+correções estruturais $\S 6{.}5$, individualmente justificáveis
+sob o princípio de identity-init, conjuntamente tornam o
+*adapter* tão próximo do *no-op* que ele simplesmente não tem
+tempo de ativar-se de forma útil no regime de treinamento curto
+($\sim 30$–$50$ épocas) que caracteriza essa pipeline**. Em
+particular: pre-norm + *gates* zerados + zero-init da projeção
+*self-attn* fazem com que, em $t = 0$, $\partial \mathcal{L}/\partial \alpha$
+seja proporcional ao próprio *gate* (zero) multiplicado por
+*activations* — gradiente extremamente pequeno. O *adapter*
+"acorda" devagar; quando *patience* dispara, mal saiu da
+identidade. O resultado empírico é uma capacidade efetiva
+inferior à do *adapter* antigo, que partia de uma perturbação
+não-trivial (mas pequena, devida à zero-init do MLP final) e
+chegava ao final do treinamento com magnitude maior.
+
+A décima sétima lição é registrada: **garantias estruturais de
+identidade-init em $t = 0$ podem ser contraproducentes em
+regimes de treinamento curto**. O princípio de identity-init é
+defensivo: protege contra inicializações ruins. Mas, ao mesmo
+tempo, retarda a ativação do componente. Em treinamentos longos
+(centenas de épocas), o componente acaba ativando e o trade-off
+favorece identity-init. Em treinamentos curtos com *early
+stopping* agressivo (*patience* $= 15$ sobre $\sim 30$ épocas
+úteis), o componente pode nunca chegar a contribuir — *gates*
+permanecem próximos de zero, *adapter* permanece próximo de
+no-op, capacidade efetiva é subutilizada. O Tier B (lição 2) e
+o BAN-F (lição 12) regrediram por inicialização **muito longe**
+da identidade; o $v7+F_\text{adapt}$ e variantes regrediram,
+plausivelmente, por inicialização **muito próxima** da
+identidade. Há uma janela ótima de inicialização que depende
+do orçamento de épocas disponível.
+
+A direção experimental imediata para validar essa hipótese é
+**isolar empiricamente a contribuição de $\S 6{.}5$** sobre o
+*baseline* $v7+F$, executando duas configurações pareadas:
+
+1. $v7+F$ com a classe `EmbeddingAdapter` revertida ao
+   comportamento pré-$\S 6{.}5$ (post-norm; Xavier-init do
+   *self-attn*; sem *gates*) — re-validar a referência $0{,}5260$
+   sob o código atual usando uma *flag* de compatibilidade
+   `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1`;
+2. $v7+F$ com a classe `EmbeddingAdapter` no estado atual
+   (com $\S 6{.}5$ ativo) — medir o número que o código atual
+   produz sob critérios matched, sem mudanças adicionais.
+
+Se (1) reproduzir $0{,}5260 \pm 0{,}027$ e (2) produzir
+$\sim 0{,}47$, a hipótese de $\S 6{.}5$-é-contraproducente é
+empiricamente sustentada. Nesse caso, $\S 6{.}5$ deve ser
+movida para um regime opt-in (env *flag* desabilitada por
+*default*), preservando a *legacy* como a configuração
+canônica do componente.
+
+Contraditoriamente, se (1) produzir um valor próximo a (2),
+a hipótese é refutada e a regressão se deve a outro fator
+ainda não isolado (por exemplo, mudanças incidentais em outras
+partes do código entre commits `bd159e8` e `f904fb9`).
+
+Esse experimento de isolamento é, no momento, o mais
+informativo possível, e tem precedência sobre qualquer nova
+direção exploratória — sem ele, todas as comparações
+subsequentes contra $v7+F = 0{,}5260$ são confundidas pela
+mudança não-intencional na semântica do *adapter*.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
