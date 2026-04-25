@@ -392,6 +392,56 @@ ou se é a combinação que produz o efeito adverso. Os arquivos
 `configs/v7_plus_E.yaml` (Tier A+C+E) e `configs/v7_plus_F.yaml`
 (Tier A+C+F) foram criados para essa finalidade.
 
+A execução das duas ablações em três sementes em `diamante-01`
+desambiguou a pergunta sobre qual componente carrega o efeito
+adverso. Os resultados estão sumarizados na tabela abaixo.
+
+| Configuração                | n | Test MCC                | $\Delta$ vs canônico |
+|-----------------------------|---|-------------------------|---------------------:|
+| v7+ A+C (canônico)          | 5 | $0{,}5143 \pm 0{,}0079$ | —                    |
+| v7+E (A+C + Mixup)          | 3 | $0{,}4988 \pm 0{,}0254$ | $-0{,}016$           |
+| **v7+F (A+C + label smoothing)** | 3 | $\mathbf{0{,}5260 \pm 0{,}0274}$ | $\mathbf{+0{,}012}$ |
+| v7-pro (A+C+E+F)            | 5 | $0{,}4961 \pm 0{,}0245$ | $-0{,}018$           |
+
+A imagem é nítida. O Tier E (Mixup) é, isoladamente, deletério: a
+configuração `v7+E` regrediu em $-0{,}016$ MCC sobre o canônico, em
+magnitude virtualmente idêntica à do empilhamento E+F ($-0{,}018$).
+O Tier F (*label smoothing*), em contrapartida, apresentou ganho
+positivo isolado de $+0{,}012$ MCC. A interpretação que se sustenta
+é que `v7-pro` regrediu **porque continha Mixup**, e que o ganho
+modesto trazido pelo *label smoothing* foi mais que cancelado pelo
+prejuízo do Mixup. A configuração de melhor desempenho atual passa
+a ser portanto `v7+F` (Tier A + C + F), ainda pendente de
+validação em cinco sementes.
+
+A décima primeira lição é registrada: **resultados de empilhamento
+adverso devem ser ablacionados antes de se descartar quaisquer
+componentes individuais**. Foi tentador, ao observar a regressão de
+`v7-pro`, descartar tanto Mixup quanto *label smoothing*; a
+ablação isolada mostrou que somente um dos dois é responsável pelo
+efeito adverso, e que o outro permanece útil. Componentes não devem
+ser julgados culpados pela performance ruim de uma configuração que
+os contém quando outros componentes potencialmente deletérios
+estão presentes simultaneamente. A regra prática: ao observar
+regressão em uma configuração com $n$ componentes novos, a primeira
+intervenção é executar $n$ ablações isoladas, não rejeitar todos os
+$n$ em bloco.
+
+Sobre o aspecto das variâncias: ambas as ablações de três sementes
+apresentaram $\sigma \approx 0{,}025\text{–}0{,}027$, contra
+$\sigma = 0{,}008$ da configuração canônica em cinco sementes. Duas
+explicações coexistem como hipóteses, e somente o experimento de
+cinco sementes em `v7+F` poderá discriminá-las. A primeira é
+estatística: a estimativa de $\sigma$ a partir de apenas três
+amostras carrega aproximadamente setenta por cento de incerteza
+relativa, e $\sigma$ aparente de $0{,}027$ pode ser consistente
+com $\sigma$ verdadeiro de $0{,}008$ dentro do intervalo de
+confiança. A segunda é mecânica: o *label smoothing*, embora
+determinístico em sua aplicação, modifica a paisagem de *loss*
+explorada pela rede, podendo levar diferentes inicializações a
+mínimos genuinamente diferentes. A confirmação multi-semente
+discriminará entre essas hipóteses.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
@@ -615,7 +665,9 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | **Tier C (5-seed média)**      | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm 0{,}036$ | $\mathbf{0{,}514 \pm 0{,}008}$ | $\mathbf{+0{,}008}$ (mean) |
 | Tier D (sobre Tier A+C, seed 42) | SWA vanilla, swa_start=5            | 0,5088    | 0,4964    | $-0{,}021$ regrediu |
 | Tier E+F empilhados (v7-pro, seed 42 d01)     | + mixup_alpha=0,3, label_smooth=0,05 | $0{,}5870$ | $0{,}5320$ | $+0{,}046$ (single, vs v7) |
-| **Tier E+F empilhados (v7-pro, 5-seed d01)** | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm \text{var}$ | $\mathbf{0{,}4961 \pm 0{,}0245}$ | $\mathbf{-0{,}018}$ (vs v7+ A+C 5-seed) |
+| Tier E+F empilhados (v7-pro, 5-seed d01)     | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576$ | $0{,}4961 \pm 0{,}0245$ | $-0{,}018$ (vs v7+ A+C 5-seed) |
+| Tier E isolado (v7+E, 3-seed d01)            | A+C + mixup_alpha=0,3                  | —         | $0{,}4988 \pm 0{,}0254$ | $-0{,}016$ Mixup deletério |
+| **Tier F isolado (v7+F, 3-seed d01)**        | A+C + label_smooth=0,05                | —         | $\mathbf{0{,}5260 \pm 0{,}0274}$ | $\mathbf{+0{,}012}$ candidato a canônico |
 
 ---
 
