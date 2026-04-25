@@ -249,11 +249,13 @@ class EmbeddingAdapter(nn.Module):
     ) -> None:
         super().__init__()
 
+        # Legacy flag (lição 17 §6.9 isolation): when True, reverts the
+        # three §6.5 changes simultaneously (zero-init self_attn out_proj,
+        # LoRA scalar gates, pre-norm) back to the pre-58805ca/abc4167
+        # behaviour that produced v7+F=0.5260 ± 0.027.
+        self._legacy = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY", "0") == "1"
+
         # --- Optional self-attention (context-aware adaptation) --------
-        # num_heads is now tunable per-adapter (formerly hardcoded to 4).
-        # For ligand (D=768) values 8 or 12 give more useful per-head dim
-        # than the original 4 (which produced 192-d per head, too coarse
-        # for local feature attention).
         self.use_self_attn = use_self_attn
         if use_self_attn:
             assert dim % num_heads == 0, (
@@ -261,22 +263,21 @@ class EmbeddingAdapter(nn.Module):
             self.self_attn = nn.MultiheadAttention(
                 embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True,
             )
-            # Zero-init the output projection so attn_out = 0 at t=0 →
-            # x + α·attn_out = x → adapter starts as identity, consistent
-            # with the MLP block's zero-init principle (lesson 2 of
-            # licoes_aprendidas.md §7).
-            nn.init.zeros_(self.self_attn.out_proj.weight)
-            nn.init.zeros_(self.self_attn.out_proj.bias)
+            if not self._legacy:
+                # §6.5: zero-init out_proj so attn_out = 0 at t=0
+                nn.init.zeros_(self.self_attn.out_proj.weight)
+                nn.init.zeros_(self.self_attn.out_proj.bias)
+            # else: leave PyTorch default (Xavier-uniform) — pre-§6.5
             self.attn_norm = nn.LayerNorm(dim)
-            # Learnable scalar gate (LoRA-style α). Zero-init → adapter
-            # starts at exact identity; gradient activates the attention
-            # contribution only when it improves the loss.
-            self.attn_scale = nn.Parameter(torch.zeros(1))
+            if not self._legacy:
+                # §6.5: LoRA-style scalar gate, init zero
+                self.attn_scale = nn.Parameter(torch.zeros(1))
 
         # --- Stacked MLP bottleneck blocks ----------------------------
         self.mlp_blocks = nn.ModuleList()
         self.mlp_norms = nn.ModuleList()
-        self.mlp_scales = nn.ParameterList()
+        if not self._legacy:
+            self.mlp_scales = nn.ParameterList()
         for _ in range(num_layers):
             block = nn.Sequential(
                 nn.Linear(dim, bottleneck),
@@ -284,28 +285,33 @@ class EmbeddingAdapter(nn.Module):
                 nn.Dropout(dropout),
                 nn.Linear(bottleneck, dim),
             )
-            # Zero-init output layer → starts as identity
+            # Zero-init output layer → starts as identity (kept in BOTH
+            # regimes — predates §6.5, lesson 2)
             nn.init.zeros_(block[-1].weight)
             nn.init.zeros_(block[-1].bias)
             self.mlp_blocks.append(block)
             self.mlp_norms.append(nn.LayerNorm(dim))
-            # Learnable scalar gate per MLP block (LoRA-style). Initially
-            # zero, so x + α·block(x) = x at t=0 even if block weights
-            # were perturbed (defense-in-depth on top of zero-init).
-            self.mlp_scales.append(nn.Parameter(torch.zeros(1)))
+            if not self._legacy:
+                # §6.5: per-block LoRA scalar gate, init zero
+                self.mlp_scales.append(nn.Parameter(torch.zeros(1)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Pre-norm architecture (Xiong et al., 2020): LayerNorm applied
-        # BEFORE each sublayer rather than after the residual sum. With
-        # scale gates initialized at zero, output = x exactly at t=0
-        # (post-norm would still re-normalize x via attn_norm). Pre-norm
-        # also stabilizes deeper stacks when num_layers > 1.
+        if self._legacy:
+            # Pre-§6.5: post-norm residual without scalar gates.
+            #   self-attn:  x = LayerNorm(x + attn_out)
+            #   MLP block:  x = LayerNorm(x + block(x))
+            if self.use_self_attn:
+                attn_out, _ = self.self_attn(x, x, x)
+                x = self.attn_norm(x + attn_out)
+            for block, norm in zip(self.mlp_blocks, self.mlp_norms):
+                x = norm(x + block(x))
+            return x
+
+        # §6.5: pre-norm with LoRA scalar gates (Xiong et al., 2020).
         if self.use_self_attn:
             x_n = self.attn_norm(x)
             attn_out, _ = self.self_attn(x_n, x_n, x_n)
             x = x + self.attn_scale * attn_out
-
-        # Stacked MLP blocks with gated pre-norm residual.
         for block, norm, scale in zip(
             self.mlp_blocks, self.mlp_norms, self.mlp_scales
         ):
