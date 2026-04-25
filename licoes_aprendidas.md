@@ -269,6 +269,44 @@ exploração das direções catalogadas na seção subsequente.
 
 ---
 
+## 6.1. Tier D — falha do SWA vanilla e a lição sobre regimes de treino
+
+A primeira tentativa de aplicar Stochastic Weight Averaging na
+configuração Tier A+C (com $\mathrm{swa\_start} = 5$) produziu uma
+regressão acentuada de $-0{,}021$ MCC no teste e de $-0{,}079$ MCC
+no treino, resultado oposto ao esperado.
+
+| Configuração                                | Train MCC | Test MCC |   Δ |
+|---------------------------------------------|----------:|---------:|----:|
+| v7+ Tier A+C (seed 42, sem SWA)             |    0,5880 |   0,5167 |  —  |
+| v7+ Tier A+C+D (SWA vanilla, swa_start=5)   |    0,5088 |   0,4964 | $-0{,}021$ |
+
+A queda simultânea no treino e no teste descarta novamente a hipótese
+de *overfit* clássico e indica que o procedimento moveu os pesos para
+uma região do espaço de parâmetros que classifica pior em todas as
+distribuições. A análise pós-falha esclareceu o motivo: o método SWA
+publicado por Izmailov et al. (2018) supõe (i) treinamento longo, da
+ordem de centenas de épocas; (ii) taxa de aprendizado constante e
+elevada, ou esquema cíclico; e (iii) acumulação iniciada apenas após
+convergência clara, tipicamente nos últimos 25% da trajetória total.
+Nenhuma dessas condições é satisfeita pelo nosso pipeline, que termina
+em torno de doze épocas com Adam e *early stop* baseado em
+$\mathrm{val\_mcc}$. Iniciar o averaging na quinta época significou
+mediar pesos capturados na **fase de aprendizado ativo**, não na
+fase de oscilação em torno de um mínimo já encontrado, puxando a média
+para uma região anterior à convergência efetiva do modelo.
+
+A lição metodológica é portanto a quarta a registrar: **a aplicabilidade
+de uma técnica depende criticamente do regime experimental em que ela
+foi originalmente proposta**. SWA na sua forma vanilla pressupõe um
+regime que nosso pipeline não tem; aplicá-lo cegamente, ignorando essa
+mismatch, produziu resultado anti-intuitivo. A correção apropriada
+não é desabilitar o averaging em si, mas substituí-lo por uma variante
+adequada ao nosso regime — *Greedy Model Soup* (Wortsman et al., ICML
+2022) é um candidato natural, pois inclui apenas *checkpoints* que
+melhoram $\mathrm{val\_mcc}$, evitando contaminação por épocas
+prematuras. Esse caminho fica registrado como direção a explorar.
+
 ## 7. Síntese das observações
 
 A trajetória experimental conduzida até aqui ofereceu três lições de
@@ -305,6 +343,38 @@ inicialização. Mudanças cuja diferença sobre v7 fica abaixo desse
 limiar não devem ser interpretadas como benefício antes da validação
 multi-semente.
 
+A quarta lição, decorrente da regressão observada no Tier D, é que
+**a aplicabilidade empírica de uma técnica é condicionada ao regime
+experimental em que ela foi originalmente formulada**. SWA na sua
+forma canônica supõe trajetórias de SGD diversas em torno de um
+mínimo já alcançado, condição que pressupõe treinamento longo (na
+ordem das centenas de épocas) e taxa de aprendizado elevada. Nosso
+*pipeline* (Adam, *early stop* em ~12 épocas) não satisfaz essas
+condições. Aplicar SWA cegamente — médiando *checkpoints* da fase de
+aprendizado ativo, não da fase de oscilação em torno do ótimo —
+produziu o oposto do efeito desejado. A regra operacional resultante:
+antes de adotar qualquer técnica documentada na literatura, verificar
+explicitamente se o regime experimental em que ela foi validada
+corresponde ao regime atual; quando há *mismatch*, escolher uma
+variante adaptada (no caso do SWA, *Greedy Model Soup* é o candidato
+natural).
+
+A quinta lição, articulada empiricamente após o Tier C mas
+metodologicamente importante por si só, é que **overfitting via
+seleção baseada em validação não compromete o teste quando este é
+escrupulosamente independente**. O protocolo de *scaffold split* com
+propagação de *scaffolds* compartilhados, com vazamento entre
+*corpora* verificado em zero, garante essa independência. Sob esse
+regime, técnicas que dependem explicitamente do desempenho em
+validação — tais como busca de limiar ótimo, calibração Platt,
+seleção do melhor *checkpoint* e (futuramente) *Greedy Model Soup* —
+são metodologicamente legítimas e desejáveis. O *overfitting* que
+exige vigilância é o tipo identificável pelo colapso súbito de
+$\mathrm{train\_loss}$ a zero em poucas épocas (memorização via
+*fingerprint* de identidade no *input*), exemplificado pela falha do
+v7-side, e que se previne por construção arquitetural
+(inicialização-identidade) antes que se manifeste no treino.
+
 A tabela abaixo consolida o progresso observado até este ponto.
 
 | Etapa                          | Mudança                                | Train MCC | Test MCC | Δ vs v7 |
@@ -315,6 +385,7 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier B (sobre Tier A)          | + pool_num_heads=4                     | 0,5200    | 0,4560   | −0,044  |
 | Tier C (seed 42 isolada)       | + contrastive_weight=0,3, cosine_feat  | 0,5880    | 0,5167    | +0,031 (single)|
 | **Tier C (5-seed média)**      | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm 0{,}036$ | $\mathbf{0{,}514 \pm 0{,}008}$ | $\mathbf{+0{,}008}$ (mean) |
+| Tier D (sobre Tier A+C, seed 42) | SWA vanilla, swa_start=5            | 0,5088    | 0,4964    | $-0{,}021$ regrediu |
 
 ---
 
