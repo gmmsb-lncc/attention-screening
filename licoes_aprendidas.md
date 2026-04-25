@@ -947,6 +947,46 @@ sem intervenção manual a cada iteração futura. Tais artefatos —
 configuração — devem acompanhar qualquer entrega final na tese,
 de modo que terceiros possam reproduzir os números reportados.
 
+### Estado operacional atual (snapshot)
+
+A configuração que se encontra em execução é `v7_asymF` em três
+sementes ($42, 123, 456$) sobre *non\_human* em `diamante-01`. A
+configuração combina simultaneamente quatro elementos validados
+ou implementados nas etapas anteriores: Tier A (capacidade
+escalada), Tier C (perda contrastiva auxiliar), Tier F (*label
+smoothing* $\varepsilon = 0{,}05$, validado isolado em $\S 6{.}2$),
+e a revisão estrutural completa do `EmbeddingAdapter` ($\S 6{.}5$ —
+*pre-norm*, *gates* LoRA-style, projeção de auto-atenção
+zero-init, e assimetria estrutural com dois blocos MLP e doze
+cabeças de atenção no ramo do ligante contra um bloco e quatro
+cabeças no ramo proteico). O critério de seleção composto
+($\S 6{.}6$) está ativo via
+$\mathrm{BENCHMARK\_LEVEL4CNN\_SELECTION\_LAMBDA\_LOSS} = 0{,}5$.
+
+O resultado dessa execução determina a próxima decisão. Caso a
+média de teste cruze $0{,}53$ MCC, `v7_asymF` é promovido a
+candidato canônico para validação cinco-sementes posterior.
+Caso fique entre $0{,}51$ e $0{,}53$, a contribuição da assimetria
+arquitetural é considerada marginal e não suficiente para
+justificar o aumento de $12\%$ em parâmetros sobre `v7+F`. Caso
+fique abaixo de $0{,}51$, a assimetria é deletéria e deve ser
+revertida; a investigação migra para BAN-residual com $\alpha$-gate
+identity-init ($\S 6{.}4$) ou LoRA nas camadas superiores dos
+PLMs ($\S 10$).
+
+Configurações de uso imediato e seus respectivos *output\_root*
+encontram-se sumarizadas:
+
+| Config | Tiers | `output_root` | Status |
+|---|---|---|---|
+| `configs/v7.yaml` | linha base | `results/benchmark_{dataset}_{embedding}_13_04_2026` | tese referência |
+| `configs/v7_plus.yaml` | A + C | `results/benchmark_plus_*` | canônico validado 5-seed |
+| `configs/v7_plus_F.yaml` | A + C + F | `results/benchmark_plusF_*` | melhor validado 3-seed |
+| `configs/v7_asymF.yaml` | A + C + F + adapter assimétrico | `results/benchmark_asymF_*` | em execução |
+| `configs/v7_ban_F.yaml` | A + C + F + BAN | `results/benchmark_banF_*` | regrediu (W_ban Xavier) |
+| `configs/v7_pro.yaml` | A + C + E + F | `results/benchmark_pro_*` | descartado (Mixup) |
+| `configs/v7_plus_E.yaml` | A + C + E | `results/benchmark_plusE_*` | descartado (Mixup) |
+
 ---
 
 ## 10. Direções adicionais de otimização
