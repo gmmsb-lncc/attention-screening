@@ -845,8 +845,27 @@ def _best_threshold(
 
 
 def _threshold_metric_env() -> str:
-    """Read BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC; default 'mcc'."""
+    """Read BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC; default 'mcc'.
+
+    Controls which metric the val-set threshold sweep maximises. The
+    chosen threshold is then applied to the test set for reporting.
+    """
     return str(os.getenv("BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC", "mcc")).lower()
+
+
+def _selection_metric_env() -> str:
+    """Read BENCHMARK_LEVEL4CNN_SELECTION_METRIC; defaults to threshold metric.
+
+    Controls which metric the checkpoint-selection composite score
+    maximises during training. Decouples model selection from the
+    reporting threshold (lesson 15 in licoes_aprendidas.md §6.7).
+    Typical use: THRESHOLD=f1 (matches DrugBAN/GraphBAN reporting) +
+    SELECTION=mcc (preserves discriminative epoch picking).
+    """
+    val = os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_METRIC")
+    if val is None:
+        return _threshold_metric_env()
+    return str(val).lower()
 
 
 def _best_mcc_threshold(
@@ -1386,31 +1405,32 @@ def _train_interaction_cnn(
         probs = np.concatenate(val_probs) if val_probs else np.array([])
         targets = np.concatenate(val_targets) if val_targets else np.array([])
 
-        # Threshold + selection score in the active metric (mcc|f1).
-        thr, val_score = _best_mcc_threshold(targets.astype(int), probs)
-        # Always compute REAL val MCC and val F1 at the chosen threshold
-        # for unambiguous logging (the active selection metric is reported
-        # as `score` separately).
+        # Threshold for reporting (test eval will reuse): chosen by
+        # THRESHOLD_METRIC env (mcc|f1). Selection score is computed
+        # independently by SELECTION_METRIC env (defaults to threshold
+        # metric). See licoes_aprendidas §6.7 — lesson 15.
+        threshold_metric = _threshold_metric_env()
+        selection_metric = _selection_metric_env()
+
+        thr, _thr_score = _best_threshold(
+            targets.astype(int), probs, metric=threshold_metric)
+        if selection_metric == threshold_metric:
+            val_selection_score = _thr_score
+        else:
+            _, val_selection_score = _best_threshold(
+                targets.astype(int), probs, metric=selection_metric)
+
+        # Real val MCC and val F1 at the reporting threshold (display).
         _val_preds = (probs >= thr).astype(int)
         val_mcc = float(matthews_corrcoef(targets.astype(int), _val_preds))
         val_f1 = float(f1_score(targets.astype(int), _val_preds, zero_division=0))
-        active_metric = _threshold_metric_env()
 
         # --- Composite selection criterion -----------------------------
-        # Pure val-metric selection is vulnerable to threshold gaming:
-        # late in training the model can produce extreme logits that
-        # maximize the discrete metric at a sharp threshold while
-        # degrading val_loss (calibration collapses). The composite
-        # penalizes loss increase to filter those epochs out:
-        #     score = val_<metric> - λ · val_loss
-        # λ=0 recovers pure val_<metric> behaviour. λ=0.5 is a balanced
-        # default. <metric> is mcc by default; f1 when env
-        # BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC=f1 (matches DrugBAN /
-        # GraphBAN native criterion).
+        # score = val_<selection_metric> - λ · val_loss
+        # λ=0 recovers pure val_<selection_metric> behaviour.
         _lambda_loss = float(os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS", "0.0"))
-        composite_score = float(val_score) - _lambda_loss * float(avg_val)
+        composite_score = float(val_selection_score) - _lambda_loss * float(avg_val)
 
-        # Early stopping on composite score (disabled in train-to-zero mode)
         improved = composite_score > best_score
         marker = " ★" if improved else ""
 
@@ -1425,7 +1445,7 @@ def _train_interaction_cnn(
                 f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
                 f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
                 f"val_f1={val_f1:.4f}, thr={thr:.3f} "
-                f"[{active_metric}={val_score:.4f}] "
+                f"[sel:{selection_metric}={val_selection_score:.4f}] "
                 f"({no_improve}/{patience}){marker}"
             )
         sys.stdout.flush()
