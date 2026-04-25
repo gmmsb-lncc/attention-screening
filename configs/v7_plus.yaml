@@ -90,6 +90,13 @@ level4_cnn:
   # Could fix with zero-init head_proj or mean aggregation; deferring.
   pool_num_heads: 1
 
+  # Tier D: Stochastic Weight Averaging (Izmailov et al., UAI 2018).
+  # From epoch 5 onward, maintain running average of weights; after
+  # training, run update_bn over train_loader and replace model with
+  # averaged version for evaluation. Smooths loss landscape exploration
+  # → wider minima → better generalization. swa_start=0 disables.
+  swa_start: 5
+
   label_smooth: 0.0
   mixup_alpha: 0.0
 

@@ -163,6 +163,7 @@ def build_env(cfg: dict) -> dict[str, str]:
         "label_smooth":  "BENCHMARK_LEVEL4CNN_LABEL_SMOOTH",
         "mixup_alpha":   "BENCHMARK_LEVEL4CNN_MIXUP_ALPHA",
         "pool_num_heads": "BENCHMARK_LEVEL4CNN_POOL_HEADS",
+        "swa_start":      "BENCHMARK_LEVEL4CNN_SWA_START",
         "train_to_zero_thr":  "BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR",
         "checkpoint_every":   "BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY",
     }
