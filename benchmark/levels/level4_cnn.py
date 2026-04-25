@@ -1386,21 +1386,29 @@ def _train_interaction_cnn(
         probs = np.concatenate(val_probs) if val_probs else np.array([])
         targets = np.concatenate(val_targets) if val_targets else np.array([])
 
-        thr, val_mcc = _best_mcc_threshold(targets.astype(int), probs)
+        # Threshold + selection score in the active metric (mcc|f1).
+        thr, val_score = _best_mcc_threshold(targets.astype(int), probs)
+        # Always compute REAL val MCC and val F1 at the chosen threshold
+        # for unambiguous logging (the active selection metric is reported
+        # as `score` separately).
+        _val_preds = (probs >= thr).astype(int)
+        val_mcc = float(matthews_corrcoef(targets.astype(int), _val_preds))
+        val_f1 = float(f1_score(targets.astype(int), _val_preds, zero_division=0))
+        active_metric = _threshold_metric_env()
 
         # --- Composite selection criterion -----------------------------
-        # Pure val_mcc selection is vulnerable to threshold gaming: late
-        # in training the model can produce extreme logits that maximize
-        # MCC at a sharp threshold while degrading val_loss (calibration
-        # collapses). The composite penalizes loss increase to filter
-        # those epochs out:
-        #     score = val_mcc - λ · val_loss
-        # λ=0 recovers pure val_mcc behaviour. λ=0.5 is a balanced
-        # default — applied to the Epoch 77 vs 80 example from the
-        # diagnostic discussion, λ=0.5 selects 77 (lower loss) over 80
-        # (higher mcc but worse calibration).
+        # Pure val-metric selection is vulnerable to threshold gaming:
+        # late in training the model can produce extreme logits that
+        # maximize the discrete metric at a sharp threshold while
+        # degrading val_loss (calibration collapses). The composite
+        # penalizes loss increase to filter those epochs out:
+        #     score = val_<metric> - λ · val_loss
+        # λ=0 recovers pure val_<metric> behaviour. λ=0.5 is a balanced
+        # default. <metric> is mcc by default; f1 when env
+        # BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC=f1 (matches DrugBAN /
+        # GraphBAN native criterion).
         _lambda_loss = float(os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS", "0.0"))
-        composite_score = float(val_mcc) - _lambda_loss * float(avg_val)
+        composite_score = float(val_score) - _lambda_loss * float(avg_val)
 
         # Early stopping on composite score (disabled in train-to-zero mode)
         improved = composite_score > best_score
@@ -1410,13 +1418,15 @@ def _train_interaction_cnn(
             tqdm.write(
                 f"    Epoch {epoch:3d}: loss={avg_train:.6f}, "
                 f"val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, "
-                f"thr={thr:.3f}{marker}"
+                f"val_f1={val_f1:.4f}, thr={thr:.3f}{marker}"
             )
         else:
             tqdm.write(
                 f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
                 f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
-                f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
+                f"val_f1={val_f1:.4f}, thr={thr:.3f} "
+                f"[{active_metric}={val_score:.4f}] "
+                f"({no_improve}/{patience}){marker}"
             )
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1578,11 +1588,13 @@ def _evaluate(
         probs = 1.0 / (1.0 + np.exp(-scaled_logits))
 
     if threshold is None:
-        thr, mcc = _best_mcc_threshold(targets, probs)
+        # Pick threshold by active metric (mcc|f1) but always report
+        # MCC computed via matthews_corrcoef at that threshold.
+        thr, _ = _best_mcc_threshold(targets, probs)
     else:
         thr = threshold
-        preds_for_mcc = (probs >= thr).astype(int)
-        mcc = float(matthews_corrcoef(targets, preds_for_mcc))
+    preds_for_mcc = (probs >= thr).astype(int)
+    mcc = float(matthews_corrcoef(targets, preds_for_mcc))
 
     preds = (probs >= thr).astype(int)
     acc = float(accuracy_score(targets, preds))
