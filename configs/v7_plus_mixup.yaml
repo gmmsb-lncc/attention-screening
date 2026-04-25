@@ -1,5 +1,5 @@
 # ============================================================================
-# DT-Kinase v7+ — Tier A capacity upgrades (preserves v7 identity)
+# DT-Kinase v7+ MIXUP variant — Tier A + C + E (Mixup)
 # ============================================================================
 # Scales v7's capacity bottlenecks WITHOUT changing the architecture family:
 # cross-attention 2D dot-product heads + 4-layer 2D CNN + HierPool are
@@ -33,7 +33,7 @@ levels: 4cnn
 epochs: 500
 model_selection_metric: mcc
 
-output_root: results/benchmark_plus_{dataset}_{embedding}
+output_root: results/benchmark_plusmixup_{dataset}_{embedding}
 
 level4_cnn:
   variant: v7              # same v7 dot-product heads, NOT v8 BAN
@@ -102,13 +102,11 @@ level4_cnn:
 
   label_smooth: 0.0
 
-  # Tier E (Mixup) deferred. configs/v7_plus.yaml is the canonical
-  # configuration containing only tiers that have passed multi-seed
-  # validation. Tier A + Tier C: NH 5-seed = 0.514 ± 0.008.
-  # Tier E (mixup_alpha=0.3) hypothesis untested. Once validated on
-  # NH multi-seed, will be added here. Test variant lives in
-  # configs/v7_plus_mixup.yaml.
-  mixup_alpha: 0.0
+  # Tier E (Mixup) experimental variant. α=0.3 sweet spot for binary
+  # classification (Zhang et al., ICLR 2018). Acts on input space,
+  # orthogonal to Tier A capacity scaling and Tier C feature-space
+  # regularization. Awaiting NH multi-seed validation.
+  mixup_alpha: 0.3
 
   train_to_zero: false
   train_to_zero_thr: 0.01
