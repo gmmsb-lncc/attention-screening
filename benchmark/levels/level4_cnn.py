@@ -996,6 +996,7 @@ def _train_interaction_cnn(
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
     checkpoint_every: int = 50,
+    swa_start: int = 0,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -1184,6 +1185,20 @@ def _train_interaction_cnn(
     # --- Checkpoint paths ---------------------------------------------
     ckpt_path = os.path.join(checkpoint_dir, "training_checkpoint.pt") if checkpoint_dir else None
 
+    # --- Stochastic Weight Averaging (SWA) setup ----------------------
+    # When swa_start > 0, an AveragedModel is maintained in parallel and
+    # updated each epoch starting at swa_start. After training, BN
+    # running stats are recomputed via update_bn over train_loader, and
+    # the SWA model substitutes the best-checkpoint model for Platt /
+    # threshold / test evaluation. Izmailov et al., UAI 2018.
+    swa_enabled = swa_start > 0
+    swa_model = None
+    if swa_enabled:
+        from torch.optim.swa_utils import AveragedModel
+        _raw_for_swa = getattr(model, '_orig_mod', model)
+        swa_model = AveragedModel(_raw_for_swa).to(device)
+        tqdm.write(f"    SWA enabled: averaging weights from epoch {swa_start} onward")
+
     # --- Training loop ------------------------------------------------
     best_score = -float("inf")
     best_state = None
@@ -1323,6 +1338,11 @@ def _train_interaction_cnn(
         else:
             no_improve += 1
 
+        # --- SWA update (after epoch >= swa_start) -------------------
+        if swa_enabled and epoch >= swa_start:
+            _raw_for_swa = getattr(model, '_orig_mod', model)
+            swa_model.update_parameters(_raw_for_swa)
+
         if train_to_zero:
             # In train-to-zero mode: stop only when both losses are below threshold
             if avg_train < train_to_zero_threshold and avg_val < train_to_zero_threshold:
@@ -1348,8 +1368,21 @@ def _train_interaction_cnn(
                 use_amp, epoch, best_score, best_state, no_improve,
             )
 
-    # --- Restore best model -------------------------------------------
-    if best_state is not None:
+    # --- Restore best model OR finalize SWA ---------------------------
+    if swa_enabled and swa_model is not None:
+        # SWA path: recompute BN running stats with averaged weights
+        # (critical — without this the BN-CNN diverges from the new
+        # averaged Conv2d weights and predictions become unreliable).
+        from torch.optim.swa_utils import update_bn
+        tqdm.write("    SWA: recomputing BN running statistics over train_loader …")
+        update_bn(train_loader, swa_model, device=device)
+        # Replace the model used for downstream Platt / threshold / test
+        # with the SWA-averaged weights. Wrapper unwrap matches existing
+        # convention.
+        _raw_restore = getattr(model, '_orig_mod', model)
+        _raw_restore.load_state_dict(swa_model.module.state_dict())
+        tqdm.write("    SWA: averaged weights loaded into model")
+    elif best_state is not None:
         _raw_restore = getattr(model, '_orig_mod', model)
         _raw_restore.load_state_dict(best_state)
     # Call .to().eval() on the wrapper (delegates to _orig_mod internally)
@@ -1549,6 +1582,7 @@ class Level4CNNRunner(BaseLevelRunner):
         adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
         adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
         pool_num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_POOL_HEADS", "1"))
+        swa_start = int(os.getenv("BENCHMARK_LEVEL4CNN_SWA_START", "0"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1608,6 +1642,7 @@ class Level4CNNRunner(BaseLevelRunner):
             cosine_feat=cosine_feat,
             contrastive_dim=contrastive_dim,
             pool_num_heads=pool_num_heads,
+            swa_start=swa_start,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,

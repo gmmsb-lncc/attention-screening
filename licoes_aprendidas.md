@@ -225,25 +225,47 @@ a estrutura aprendida é mais robusta a *distribution shift*, dado que
 distribuições relacionadas (uma propriedade explorada com sucesso no
 ConPLex).
 
-A execução desse experimento confirmou a hipótese. A combinação `Tier A
-tunado + Tier C` produziu, na semente 42, $\mathrm{MCC} = 0{,}5167$
-no teste e $0{,}5880$ no treino, um ganho adicional de $+0{,}017$ MCC
-sobre o Tier A isolado e um ganho cumulativo de $+0{,}031$ MCC sobre a
-linha base v7 (de $0{,}4862$ para $0{,}5167$). A diferença entre treino
-e teste, de $0{,}071$, mantém-se em faixa saudável de generalização.
+A execução do experimento na semente 42 produziu $\mathrm{MCC} = 0{,}5167$
+no teste e $0{,}5880$ no treino, um ganho aparente de $+0{,}017$ MCC
+sobre o Tier A isolado e $+0{,}031$ MCC sobre a linha base v7. Esses
+números, contudo, refletem uma única semente e devem ser interpretados
+apenas como sinal preliminar; a confirmação multi-semente subsequente
+revelou um quadro mais sóbrio.
 
-| Configuração                                     | Train MCC | Test MCC |
-|--------------------------------------------------|----------:|---------:|
-| v7 baseline                                      |    0,5208 |   0,4862 |
-| v7+ Tier A tunado                                |    0,5652 |   0,5004 |
-| **v7+ Tier A + Tier C (contrastive 0,3 + cosine\_feat)** | **0,5880** | **0,5167** |
+A execução do mesmo protótipo nas cinco sementes canônicas
+($42, 123, 456, 789, 1024$) produziu uma média de teste de
+$0{,}5143 \pm 0{,}0079$ — abaixo do alvo $0{,}52$ por aproximadamente
+$0{,}006$ MCC, e $0{,}003$ abaixo do que a semente 42 isoladamente
+sugeria. A tabela abaixo consolida o cenário comparativo.
 
-O resultado coloca o protótipo a apenas $0{,}003$ MCC do alvo
-estabelecido ($0{,}52$). Considerando o desvio-padrão típico observado
-entre sementes na linha base v7 (aproximadamente $0{,}02$), espera-se
-que a média sobre as cinco sementes canônicas do protocolo cruze o
-limiar sem necessidade de modificações arquiteturais adicionais. A
-confirmação multi-semente é a próxima etapa imediata.
+| Configuração                              | Test MCC (seed 42) | Test MCC (5-seed) |
+|-------------------------------------------|-------------------:|------------------:|
+| v7 baseline                               | 0,4862             | $0{,}506 \pm 0{,}020$* |
+| v7+ Tier A tunado                         | 0,5004             | (não medido)      |
+| **v7+ Tier A + Tier C**                   | **0,5167**         | **$0{,}5143 \pm 0{,}0079$** |
+
+\* valor de referência do `CLAUDE.md` para o protocolo da tese.
+
+O contraste entre semente 42 isolada (0,517) e média 5-semente (0,514)
+ilustra com precisão a terceira lição da seção 7: iterar com semente
+única superestima ganhos. A diferença de $0{,}003$ MCC, embora
+pequena, representa metade do gap restante para o alvo, e ilustra
+como decisões científicas baseadas em uma única semente podem produzir
+otimismo injustificado.
+
+Observação metodologicamente relevante: o desvio-padrão observado em
+v7+ ($\sigma = 0{,}008$) é aproximadamente 60% menor que o da linha
+base v7 ($\sigma \approx 0{,}020$). Isso indica que a combinação
+Tier A + Tier C não apenas eleva ligeiramente a média, mas também
+estabiliza o modelo entre inicializações distintas — uma propriedade
+desejável que pode ser argumentada na tese como evidência de que a
+regularização contrastiva atua sobre a geometria do espaço de features
+de forma robusta a perturbações de inicialização.
+
+O ganho médio sobre v7 fica em $+0{,}008$ MCC, modesto mas
+estatisticamente defensável devido à redução substancial da
+variância. O alvo $0{,}52$ permanece em aberto, motivando a
+exploração das direções catalogadas na seção subsequente.
 
 ---
 
@@ -291,7 +313,8 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier A não-tunado              | heads=16, head_dim=64, MLP, adapter 2× | 0,5115    | 0,4697   | −0,016  |
 | **Tier A tunado**              | acima + patience=15, lr_mult=2         | **0,5652**| **0,5004**| **+0,014** |
 | Tier B (sobre Tier A)          | + pool_num_heads=4                     | 0,5200    | 0,4560   | −0,044  |
-| **Tier C (sobre Tier A)**      | + contrastive_weight=0,3, cosine_feat  | **0,5880**| **0,5167**| **+0,031** |
+| Tier C (seed 42 isolada)       | + contrastive_weight=0,3, cosine_feat  | 0,5880    | 0,5167    | +0,031 (single)|
+| **Tier C (5-seed média)**      | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm 0{,}036$ | $\mathbf{0{,}514 \pm 0{,}008}$ | $\mathbf{+0{,}008}$ (mean) |
 
 ---
 
