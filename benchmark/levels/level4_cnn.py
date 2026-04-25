@@ -1373,9 +1373,29 @@ def _train_interaction_cnn(
         # SWA path: recompute BN running stats with averaged weights
         # (critical — without this the BN-CNN diverges from the new
         # averaged Conv2d weights and predictions become unreliable).
-        from torch.optim.swa_utils import update_bn
+        # torch.optim.swa_utils.update_bn assumes loader yields tensors
+        # or tuples; our train_loader yields dict batches. Custom impl
+        # below mirrors the official function's logic.
         tqdm.write("    SWA: recomputing BN running statistics over train_loader …")
-        update_bn(train_loader, swa_model, device=device)
+        _bn_momenta = {}
+        for _m in swa_model.modules():
+            if isinstance(_m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                _m.reset_running_stats()
+                _bn_momenta[_m] = _m.momentum
+                _m.momentum = None  # accumulate full statistics
+        if _bn_momenta:
+            swa_model.train()
+            _swa_dtype = next(swa_model.parameters()).dtype
+            with torch.no_grad():
+                for batch in train_loader:
+                    p = batch["protein_matrix"].to(device=device, dtype=_swa_dtype, non_blocking=True)
+                    l = batch["ligand_matrix"].to(device=device, dtype=_swa_dtype, non_blocking=True)
+                    pm = batch["protein_mask"].to(device, non_blocking=True)
+                    lm = batch["ligand_mask"].to(device, non_blocking=True)
+                    swa_model(p, l, pm, lm)
+            # Restore original momenta
+            for _m, _mom in _bn_momenta.items():
+                _m.momentum = _mom
         # Replace the model used for downstream Platt / threshold / test
         # with the SWA-averaged weights. Wrapper unwrap matches existing
         # convention.
