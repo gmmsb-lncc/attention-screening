@@ -24,6 +24,7 @@ referenciar este registro.
 | `v7_ban_F.yaml` | A + C + F + BAN (Xavier W_ban) | v8 | idem | symmetric | K=16 / W_ban full | val_mcc |
 | `v7_asymF.yaml` | A + C + F + asymmetric adapter (pre-norm + LoRA gates) | v7 | idem | asymmetric (prot 1×4, lig 2×12) | K=16 / d=64 | val_mcc + composite (env λ=0.5) |
 | `v7_plus_F_adapt.yaml` | A + C + F + §6.5 fixes (pre-norm + LoRA gates + zero-init self_attn) | v7 | idem | symmetric (512/1024, 4 heads) | K=16 / d=64 | val_F1 (THRESHOLD_METRIC=f1, matching DrugBAN/GraphBAN) |
+| `v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc (decoupled) | v7 | idem | symmetric | K=16 / d=64 | DESCARTADA (lição 16) — objective mismatch, AUROC regrediu |
 
 **Tier glossary** (também em `CLAUDE.md`):
 - A: capacidade (num_heads=16, head_dim=64, mlp_head, adapter dim 512/1024, patience=15, lr_mult=2.0)
@@ -54,7 +55,8 @@ referenciar este registro.
 | 13 | **v7+F (A+C + label smooth) 3-seed** | d01 | **3** | 42,123,456 | — | **0,5260 ± 0,0274** | 0,027 | 0,808 ± 0,017 | **+0,020** | **melhor candidato 3-seed** |
 | 14 | v7_ban_F (A+C+F + BAN Xavier) 3-seed | d01 | 3 | 42,123,456 | 0,599 ± 0,034 | 0,5028 ± 0,0462 | 0,046 | — | −0,003 | regrediu; W_ban Xavier viola identity-init |
 | 15 | v7_asymF (A+C+F + asym adapter + pre-norm) 3-seed | d01 | 3 | 42,123,456 | — | 0,4611 ± 0,0279 | 0,028 | 0,7951 | −0,045 | regrediu; pre-norm + LoRA + asym todos juntos sem ablação |
-| 16 | **v7_plus_F_adapt (A+C+F + §6.5 fixes + threshold F1) 3-seed** | d01 | **3** | 42,123,456 | — | **0,4929 ± 0,0160** | 0,016 | 0,8105 | **−0,013** | F1=0,7868; selection acoplado a F1 escolhe epoch subóptimo p/ MCC (lição 15) |
+| 16 | v7_plus_F_adapt (A+C+F + §6.5 fixes + THR=f1, SEL=f1) 3-seed | d01 | 3 | 42,123,456 | — | 0,4929 ± 0,0160 | 0,016 | 0,8105 | −0,013 | F1=0,7868; selection acoplado a F1 (matched) |
+| 17 | v7_plus_F_adapt_v2 (A+C+F + §6.5 + THR=f1, SEL=mcc) 3-seed | d01 | 3 | 42,123,456 | — | **0,4590 ± 0,0517** | **0,052** | 0,7778 | **−0,047** | DESCARTADO; AUROC+σ pioraram → lição 16: matched objective |
 
 ---
 
@@ -161,6 +163,44 @@ notes: |
   típico recall~0.85, precision~0.73).
 
   Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
+```
+
+### v7_plus_F_adapt_v2 (A+C+F + §6.5 + THR=f1, SEL=mcc) 3-seed em `diamante-01`
+
+```yaml
+config: configs/v7_plus_F_adapt_v2.yaml
+host: diamante-01
+corpus: non_human
+embedding: 8M
+seeds: [42, 123, 456]
+elapsed_seconds: 1346.1
+env:
+  BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC: f1
+  BENCHMARK_LEVEL4CNN_SELECTION_METRIC: mcc
+  BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS: 0.0
+results:
+  level4_cnn_mlp:
+    accuracy:  0.724442 ± 0.019654
+    mcc:       0.458957 ± 0.051650
+    f1:        0.766686 ± 0.033292
+    precision: 0.695760 ± 0.009765
+    recall:    0.858563 ± 0.093021
+    auc:       0.777797 ± 0.022950
+notes: |
+  REFUTAÇÃO da hipótese §6.7. AUROC caiu 0.811 → 0.778 (modelo
+  literalmente pior, não só threshold mismatch). σ MCC triplicou
+  (0.016 → 0.052). Lição 16 documentada em §6.8: critério de
+  selection deve casar com critério de threshold.
+
+  Mismatch: epoch escolhido por melhor val_MCC at MCC-opt threshold,
+  mas test eval aplica F1-opt threshold ao mesmo modelo →
+  modelo opera em ponto subótimo na superfície de decisão.
+
+  Variância alta (recall σ=0.093, precision σ=0.010) confirma
+  instabilidade do critério val_MCC para selection vs val_F1.
+
+  CONFIG DESCARTADA. Manter v7+F (matched MCC) e v7+F_adapt
+  (matched F1) como canônicas.
 ```
 
 ### v7_ban_F (A+C+F + BAN) 3-seed em `diamante-01`
