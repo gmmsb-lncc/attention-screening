@@ -392,6 +392,61 @@ ou se é a combinação que produz o efeito adverso. Os arquivos
 `configs/v7_plus_E.yaml` (Tier A+C+E) e `configs/v7_plus_F.yaml`
 (Tier A+C+F) foram criados para essa finalidade.
 
+## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
+
+Após o resultado regressivo de `v7-pro` em cinco sementes, a
+trajetória de melhorias incrementais por meio de regularizadores
+ortogonais aparenta ter atingido um teto local: os *knobs* de
+configuração disponíveis foram esgotados, ou a combinação dos que
+restam apresenta mais risco de saturação que de ganho aditivo. A
+distância restante até $\mathrm{MCC} \approx 0{,}60$, alvo
+ambicioso explicitamente colocado pelo orientador, é da ordem de
+$+0{,}085$ MCC sobre o atual `v7+` canônico — magnitude
+incompatível com qualquer combinação de regularizadores baratos.
+
+Diante desse impasse, a restrição de **preservar a identidade
+arquitetural exata do v7** foi formalmente relaxada. A justificativa
+é pragmática: a contribuição metodológica da tese — *semantic
+screening* a partir de notações lineares, sem estruturas 3D — não
+exige a preservação literal do conjunto exato de componentes
+implementados na primeira versão; exige apenas que o paradigma de
+*encoders* sequenciais (ESM e MoLFormer) com mecanismo de interação
+explícito seja mantido. Substituições, extensões ou ampliações de
+componentes específicos passam, portanto, a ser admissíveis
+desde que a tese descreva claramente cada decisão e seu efeito
+mensurado.
+
+Quatro direções de impacto significativamente maior que as
+discutidas até este ponto tornam-se imediatamente viáveis sob esse
+novo regime:
+
+| Direção | Tipo | $\Delta$MCC esperado | Já implementado? |
+|---------|------|---------------------:|:----------------|
+| Cabeçote BAN bilinear (`variant=v8`) | substituição arquitetural | $+0{,}015$ a $+0{,}030$ | sim, em `level4_cnn.py` |
+| LoRA nas duas camadas superiores dos PLMs | ampliação | $+0{,}020$ a $+0{,}040$ | não |
+| Aumento da escala de ESM ($8\text{M} \to 35\text{M}$) | substituição de *backbone* | $+0{,}020$ a $+0{,}050$ | não, requer cache |
+| *Distillation* auxiliar de ChemBERTa | aux loss | $+0{,}010$ a $+0{,}025$ | parcial (CKA pendente) |
+
+A nova frente experimental privilegiará BAN como ponto de partida
+(mais barato, código já presente), seguido de LoRA caso BAN não
+basta para fechar o *gap* e, em última análise, *scale-up* do
+*encoder* proteico se as duas anteriores resultarem insuficientes.
+A estratégia de empilhamento ortogonal validada no Tier A+C
+permanece aplicável: BAN, LoRA e *distillation* atuam em eixos
+diferentes (interação, *backbone*, regularização auxiliar) e
+podem em princípio compor-se aditivamente.
+
+A décima lição metodológica decorrente desta inflexão é registrada
+explicitamente: **o conjunto de restrições experimentais é parte
+do desenho do experimento e deve ser revisto periodicamente em
+função dos resultados acumulados**. Restrições adotadas no início
+do trabalho — nesse caso, a preservação literal da arquitetura
+v7 — podem se tornar contraproducentes quando os dados acumulados
+indicam que o teto sob essa restrição está abaixo do alvo. A
+disciplina de revisitar os limites do espaço experimental, ao
+invés de continuar otimizando dentro de um limite previamente
+adotado, é parte do método científico, não desvio dele.
+
 Nota importante decorrente desta etapa: o experimento de Tier E
 isolado nunca chegou a ser executado antes de adicioná-lo a $F$. A
 razão pragmática foi acelerar a iteração, mas a consequência é que,
