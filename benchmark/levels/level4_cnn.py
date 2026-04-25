@@ -254,11 +254,22 @@ class EmbeddingAdapter(nn.Module):
             self.self_attn = nn.MultiheadAttention(
                 embed_dim=dim, num_heads=4, dropout=dropout, batch_first=True,
             )
+            # Zero-init the output projection so attn_out = 0 at t=0 →
+            # x + α·attn_out = x → adapter starts as identity, consistent
+            # with the MLP block's zero-init principle (lesson 2 of
+            # licoes_aprendidas.md §7).
+            nn.init.zeros_(self.self_attn.out_proj.weight)
+            nn.init.zeros_(self.self_attn.out_proj.bias)
             self.attn_norm = nn.LayerNorm(dim)
+            # Learnable scalar gate (LoRA-style α). Zero-init → adapter
+            # starts at exact identity; gradient activates the attention
+            # contribution only when it improves the loss.
+            self.attn_scale = nn.Parameter(torch.zeros(1))
 
         # --- Stacked MLP bottleneck blocks ----------------------------
         self.mlp_blocks = nn.ModuleList()
         self.mlp_norms = nn.ModuleList()
+        self.mlp_scales = nn.ParameterList()
         for _ in range(num_layers):
             block = nn.Sequential(
                 nn.Linear(dim, bottleneck),
@@ -271,16 +282,24 @@ class EmbeddingAdapter(nn.Module):
             nn.init.zeros_(block[-1].bias)
             self.mlp_blocks.append(block)
             self.mlp_norms.append(nn.LayerNorm(dim))
+            # Learnable scalar gate per MLP block (LoRA-style). Initially
+            # zero, so x + α·block(x) = x at t=0 even if block weights
+            # were perturbed (defense-in-depth on top of zero-init).
+            self.mlp_scales.append(nn.Parameter(torch.zeros(1)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Self-attention: each residue sees its neighbours
+        # Self-attention: each residue sees its neighbours.
+        # attn_scale starts at 0 → branch contributes nothing at t=0;
+        # gradient activates it only when useful (LoRA-style gating).
         if self.use_self_attn:
             attn_out, _ = self.self_attn(x, x, x)
-            x = self.attn_norm(x + attn_out)
+            x = self.attn_norm(x + self.attn_scale * attn_out)
 
-        # Stacked MLP blocks with skip connections
-        for block, norm in zip(self.mlp_blocks, self.mlp_norms):
-            x = norm(x + block(x))
+        # Stacked MLP blocks with gated skip connections.
+        for block, norm, scale in zip(
+            self.mlp_blocks, self.mlp_norms, self.mlp_scales
+        ):
+            x = norm(x + scale * block(x))
         return x
 
 
