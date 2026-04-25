@@ -620,6 +620,79 @@ imediatamente anterior — com `val_loss` mais baixo e `val_mcc`
 ligeiramente menor — é frequentemente o candidato mais confiável
 para o conjunto de teste.
 
+## 6.7. Adoção do critério F1-óptimo de DrugBAN/GraphBAN — `v7_plus_F_adapt`
+
+Com o objetivo de produzir comparações mais homogêneas com os
+*baselines* DrugBAN e GraphBAN, configuramos uma variante
+`v7_plus_F_adapt` que combina três elementos: (i) a base `v7+F`
+(Tier A + C + F), atual melhor candidata multi-semente; (ii) as
+três correções estruturais do `EmbeddingAdapter` documentadas em
+$\S 6{.}5$ — *zero-init self-attn out_proj*, *gates LoRA-style* e
+arquitetura *pre-norm* — todas integradas ao código por padrão
+desde os *commits* `58805ca` e `abc4167`; e (iii) o critério
+de *threshold* F1-óptimo no conjunto de validação, equivalente ao
+critério nativo dos dois *baselines*. A simetria do *adapter* foi
+deliberadamente preservada (sem o item assimétrico do $\S 6{.}5$
+que regrediu em `v7_asymF`).
+
+O resultado *non-human* em três sementes foi
+$\mathrm{MCC}_{\text{test}} = 0{,}4929 \pm 0{,}0160$, com
+$\mathrm{F1}_{\text{test}} = 0{,}7868 \pm 0{,}0059$ e
+$\mathrm{AUROC}_{\text{test}} = 0{,}8105 \pm 0{,}0057$. A
+comparação com os *baselines* sob seus próprios critérios
+nativos é portanto:
+
+| Modelo | MCC test | F1 test | AUROC test |
+|---|---:|---:|---:|
+| DrugBAN | $0{,}5436$ | $0{,}7983$ | $0{,}8421$ |
+| GraphBAN | $0{,}5263$ | $0{,}7921$ | $0{,}8310$ |
+| **v7_plus_F_adapt** | $0{,}4929$ | $0{,}7868$ | $0{,}8105$ |
+| ConPLex | $0{,}4916$ | $0{,}7841$ | $0{,}8435$ |
+| v7+F (referência) | $0{,}5260$ | $0{,}7965$ | $0{,}8081$ |
+
+Sob o eixo F1, `v7_plus_F_adapt` é competitivo com os *baselines*
+($0{,}7868$ vs $0{,}7921$ de GraphBAN — diferença dentro do
+desvio-padrão); sob o eixo MCC, regrediu $-0{,}033$ vs `v7+F`. A
+explicação é estrutural: ao trocar `BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC`
+de `mcc` para `f1`, o efeito colateral foi que o critério de
+seleção de *checkpoint* — tecnicamente
+$\text{score} = \text{val\_metric} - \lambda \cdot \text{val\_loss}$,
+com `val_metric` lendo a mesma variável de ambiente — passou
+também a operar sobre F1. O modelo, durante o treinamento, passa a
+escolher a época que maximiza F1, não a que maximiza MCC. Como
+os dois critérios não são monotonamente equivalentes (F1 favorece
+*recall* alto a custo de *precision*), o *checkpoint* selecionado
+não é o ótimo no eixo MCC.
+
+A análise quantitativa por semente confirma o efeito: para a
+semente 42, $\text{recall} = 0{,}890$ e $\text{precision} = 0{,}687$
+(modelo prevê positivos demais — ótimo para F1, subótimo para MCC).
+Para `v7+F` (com critério MCC) os mesmos campos eram tipicamente
+$\text{recall} \approx 0{,}85$ e $\text{precision} \approx 0{,}73$.
+
+A décima quinta lição é registrada: **critérios de threshold
+e critérios de seleção de *checkpoint* devem ser configuráveis
+independentemente, porque a métrica que se deseja maximizar no
+*reporting* (alinhamento com *baselines*) não é necessariamente a
+mesma que se deseja maximizar na otimização do treinamento (sinal
+discriminativo do modelo)**. Em retrospectiva, a parametrização
+mais correta seria expor duas variáveis de ambiente distintas:
+`BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC` controlando apenas o
+*sweep* sobre o conjunto de validação para *threshold*, e um
+hipotético `BENCHMARK_LEVEL4CNN_SELECTION_METRIC` controlando o
+critério de seleção de *checkpoint* — admitindo combinações
+como `THRESHOLD=f1`, `SELECTION=mcc`, que produziria *threshold*
+comparável aos *baselines* mas preservaria a seleção de épocas
+ótimas para o sinal discriminativo MCC. A implementação atual
+acopla os dois critérios na mesma variável.
+
+A direção experimental imediata decorrente é portanto
+desacoplar essas duas decisões e re-executar `v7_plus_F_adapt`
+sob `THRESHOLD=f1`, `SELECTION=mcc`. Espera-se recuperar
+$\mathrm{MCC}_{\text{test}} \approx 0{,}52$ (compatível com `v7+F`)
+mantendo $\mathrm{F1}_{\text{test}} \approx 0{,}79$ (comparável
+aos *baselines*).
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
