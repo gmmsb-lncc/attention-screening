@@ -307,6 +307,56 @@ adequada ao nosso regime — *Greedy Model Soup* (Wortsman et al., ICML
 melhoram $\mathrm{val\_mcc}$, evitando contaminação por épocas
 prematuras. Esse caminho fica registrado como direção a explorar.
 
+## 6.2. Estratégia de empilhamento ortogonal — Tier E e Tier F
+
+Após a regressão do Tier D, adotou-se uma orientação experimental
+distinta: em vez de buscar uma única intervenção transformadora,
+empilhar múltiplos regularizadores **ortogonais** que atuem em eixos
+disjuntos do *pipeline*. A premissa é que regularizadores que não
+competem pelo mesmo espaço de gradiente tendem a contribuir
+aditivamente — propriedade observada empiricamente entre Tier A
+(escalonamento de capacidade, eixo arquitetural) e Tier C (perda
+contrastiva, eixo geométrico de *features*) e que nada impede de
+estender a outros eixos.
+
+Foram identificados quatro eixos disjuntos onde se pode aplicar
+regularização sem alterar a arquitetura de inferência:
+
+| Eixo                          | Tier  | Mecanismo |
+|-------------------------------|-------|-----------|
+| Capacidade arquitetural       | A     | escala de cabeças, dimensões, classificador |
+| Espaço de *features* poolado  | C     | perda contrastiva ConPLex-inspired |
+| Espaço de *inputs*            | E     | *Mixup* — combinação linear de pares de exemplos |
+| Espaço de *targets*           | F     | *label smoothing* — alvo com $1-\varepsilon$ ao invés de $1$ |
+
+A configuração resultante, denominada `v7-pro`, ativa simultaneamente
+$\mathrm{mixup\_alpha} = 0{,}3$ (sweet spot da literatura para
+classificação binária; Zhang et al., ICLR 2018) e $\mathrm{label\_smooth}
+= 0{,}05$ (Szegedy et al., Inception V3). Ambos os parâmetros já
+existiam no código, controlados por variáveis de ambiente; não houve
+desenvolvimento adicional. Esse é talvez o ponto mais relevante da
+estratégia: muitos componentes regularizadores estavam disponíveis há
+meses no código, mas permaneciam desativados por falta de validação
+empírica direcionada.
+
+A interação entre $E$ e $F$ exige cuidado interpretativo: ambos
+suavizam, respectivamente, a distribuição de entrada e a de alvo, o
+que sob certa luz são variantes do mesmo princípio. Em regimes onde
+um dos dois domina (saturação), o outro torna-se redundante. Em
+regimes onde atuam em fenômenos distintos do treinamento, somam-se.
+A literatura suporta a coexistência em tarefas de classificação;
+nosso experimento testará empiricamente se isso vale para o nosso
+*pipeline* específico.
+
+Nota importante decorrente desta etapa: o experimento de Tier E
+isolado nunca chegou a ser executado antes de adicioná-lo a $F$. A
+razão pragmática foi acelerar a iteração, mas a consequência é que,
+caso `v7-pro` apresente ganho significativo, será impossível atribuir
+o crédito apenas a $E$ ou apenas a $F$ sem ablações adicionais. A
+sexta lição metodológica (registrada na seção subsequente) trata
+justamente dessa tensão entre velocidade de iteração e capacidade de
+atribuição.
+
 ## 7. Síntese das observações
 
 A trajetória experimental conduzida até aqui ofereceu três lições de
@@ -375,6 +425,39 @@ $\mathrm{train\_loss}$ a zero em poucas épocas (memorização via
 v7-side, e que se previne por construção arquitetural
 (inicialização-identidade) antes que se manifeste no treino.
 
+A sexta lição, decorrente da estratégia de empilhamento adotada para
+`v7-pro`, é que **velocidade de iteração e capacidade de atribuição
+causal são objetivos parcialmente conflitantes**. Adicionar
+simultaneamente Mixup e *label smoothing* a uma configuração
+validada, sem testá-los isoladamente, acelera o ciclo experimental
+mas inviabiliza identificar qual dos dois — se algum — produziu o
+ganho observado. A regra prática que emerge: empilhamentos múltiplos
+são justificáveis quando os componentes individuais já têm validação
+prévia em domínios análogos publicados, e quando o objetivo imediato
+é máxima performance (não compreensão científica). Caso a
+configuração empilhada se torne candidata à publicação, ablações
+isoladas devem ser conduzidas posteriormente para atribuir
+contribuição a cada componente. Antes da publicação de qualquer
+resultado positivo de `v7-pro`, é portanto requisito metodológico
+desativar Mixup e *label smoothing* individualmente em duas
+execuções complementares, completando assim a tabela ablativa.
+
+A sétima lição, articulada após observação direta do *output* do
+*pipeline* `run_benchmark.sh`, é que **a leitura ingênua do *summary*
+de MCC pode confundir significado de fases experimentais
+distintas**. Os campos `phase: train` e `phase: test` no
+`benchmark_comparison.json` correspondem a duas execuções separadas
+do treinamento — a primeira com `fit = train` e `eval = val`, a
+segunda com `fit = val` e `eval = test`. São, portanto, modelos
+diferentes treinados em conjuntos diferentes, e a expressão "test MCC
+maior que train MCC" no contexto desse arquivo não significa
+generalização superior à memorização: significa apenas que o modelo
+treinado em validação avaliado em teste tem MCC superior ao modelo
+treinado em treino avaliado em validação. Essa distinção é crítica
+para evitar interpretações incorretas em comunicações posteriores e
+deve ser explicitamente esclarecida em qualquer apresentação dos
+resultados na tese.
+
 A tabela abaixo consolida o progresso observado até este ponto.
 
 | Etapa                          | Mudança                                | Train MCC | Test MCC | Δ vs v7 |
@@ -413,6 +496,28 @@ completa e operações cuDNN otimizadas — combina precisão numérica e
 velocidade aceitável, e é a recomendada para experimentos subsequentes
 nesta linha de pesquisa.
 
+Uma observação inesperada surgiu na transição entre os dois
+hospedeiros. A configuração `v7+ Tier A+C` — exatamente a mesma
+*config*, mesmas sementes, mesmo protocolo — produziu MCC teste de
+$0{,}5167$ em `diamante-02` (cuDNN desabilitado, núcleos `ATen`
+nativos) e $0{,}5256$ em `diamante-01` (cuDNN ativo). A diferença,
+$+0{,}009$ MCC entre os dois hospedeiros, é da mesma ordem de
+magnitude que o desvio-padrão entre sementes ($\sigma = 0{,}008$),
+e seu sinal é positivo: o caminho cuDNN-otimizado parece, em nossa
+arquitetura, produzir trajetórias de otimização ligeiramente
+superiores. A hipótese é que os algoritmos selecionados pelo
+*benchmark* interno do cuDNN (Winograd, FFT, GEMM otimizado)
+introduzem ruído numérico estatisticamente diferente daquele dos
+*kernels* `ATen` nativos, e esse ruído pode atuar como um
+regularizador implícito favorável. A conclusão prática é que
+**comparações quantitativas de MCC só são válidas dentro do mesmo
+hospedeiro**; reportar diferenças entre execuções em `diamante-01` e
+`diamante-02` mistura efeito experimental com efeito numérico.
+
+Para a tese, isso reforça a recomendação metodológica de fixar o
+hospedeiro experimental durante o ciclo de validação multi-semente
+da configuração final.
+
 ---
 
 ## 9. Considerações finais
@@ -428,16 +533,26 @@ prejudicar a rede se não respeitarem essa continuidade.
 
 O Tier C, executado com sucesso, posicionou a configuração de
 referência (Tier A tunado combinado com perda contrastiva auxiliar)
-em $\mathrm{MCC} = 0{,}5167$ na semente 42, a apenas $0{,}003$ do
-alvo $0{,}52$. A próxima etapa imperativa, antes de qualquer nova
-modificação arquitetural, é a confirmação multi-semente desse
-protótipo, reportando $\mathrm{MCC} \pm \sigma$ sobre as cinco
-sementes canônicas. Se a média multi-semente cruzar o limiar, a
-configuração `v7+` torna-se candidata natural à substituição do v7
-canônico, com atualização correspondente na tabela do capítulo 5
-da tese e nas referências do `CLAUDE.md`. Caso contrário, o
-diagnóstico apontará caminhos específicos a explorar dentre as
-direções discutidas na seção subsequente.
+em $\mathrm{MCC} = 0{,}5143 \pm 0{,}0079$ sobre cinco sementes em
+`diamante-02`, e $\mathrm{MCC} = 0{,}5256$ na semente 42 em
+`diamante-01`. Essa configuração consolida-se como o `v7+` canônico
+(salva em `configs/v7_plus.yaml`), enquanto a configuração que
+empilha Tier E (Mixup) e Tier F (*label smoothing*) sobre Tier A+C
+constitui a frente experimental imediata, denominada `v7-pro` (em
+`configs/v7_pro.yaml`).
+
+Duas frentes paralelas de validação restam pendentes. A primeira é
+verificar a transferibilidade dos *knobs* otimizados em
+*non\_human* para o corpus *human*, dez vezes maior; eventuais
+regressões nesse novo regime indicariam que parâmetros como
+`patience = 15` e `lr_mult = 2.0` são específicos do corpus pequeno
+e exigiriam re-tuning. A segunda é a avaliação multi-semente da
+configuração `v7-pro` em *non\_human*, comparando-a diretamente com
+a `v7+` canônica para quantificar o ganho aditivo dos Tiers $E$ e
+$F$. Caso `v7-pro` cruze o limiar $0{,}52$ na média de cinco
+sementes, ablações isoladas de Tier $E$ e Tier $F$ devem ser
+conduzidas posteriormente, conforme a sexta lição da seção 7,
+para atribuir contribuição a cada componente antes da publicação.
 
 ---
 
@@ -541,15 +656,18 @@ heurística de relação custo-benefício, considerando ganho esperado em
 MCC, custo de implementação, risco metodológico e fidelidade ao
 paradigma proposto.
 
-| Direção                                   | ΔMCC esperado | Custo impl | Risco | Identidade v7 |
-|-------------------------------------------|--------------:|:----------:|:-----:|:-------------:|
-| SWA / EMA dos pesos                       | $+0{,}005$ a $+0{,}02$ | baixo      | baixo | preservada |
-| *Mixup* sobre mapas de interação          | $+0{,}01$ a $+0{,}02$  | trivial    | médio | preservada |
-| *Deep supervision* em camada CNN          | $+0{,}005$ a $+0{,}015$| médio      | médio | preservada |
-| Esparsidade $L_1$ sobre atenção           | $+0{,}005$ a $+0{,}01$ | trivial    | baixo | preservada |
-| SMILES *test-time augmentation*           | $+0{,}005$ a $+0{,}015$| baixo      | baixo | preservada |
-| LoRA nas camadas superiores dos PLMs      | $+0{,}02$ a $+0{,}04$  | médio-alto | médio | parcial |
-| Aumento da escala de ESM (8M → 35M / 150M)| $+0{,}02$ a $+0{,}05$  | alto       | alto  | parcial |
+| Direção                                   | ΔMCC esperado | Custo impl | Risco | Identidade v7 | Status |
+|-------------------------------------------|--------------:|:----------:|:-----:|:-------------:|:-------|
+| SWA / EMA dos pesos                       | $+0{,}005$ a $+0{,}02$ | baixo      | baixo | preservada | testado, regrediu (Tier D) |
+| *Mixup* sobre mapas de interação          | $+0{,}01$ a $+0{,}02$  | trivial    | médio | preservada | **ativo (Tier E em `v7-pro`)** |
+| *Label smoothing* sobre o alvo            | $+0{,}005$ a $+0{,}015$| trivial    | baixo | preservada | **ativo (Tier F em `v7-pro`)** |
+| *Deep supervision* em camada CNN          | $+0{,}005$ a $+0{,}015$| médio      | médio | preservada | pendente |
+| Esparsidade $L_1$ sobre atenção           | $+0{,}005$ a $+0{,}01$ | trivial    | baixo | preservada | pendente |
+| SMILES *test-time augmentation*           | $+0{,}005$ a $+0{,}015$| baixo      | baixo | preservada | pendente |
+| *Greedy Model Soup* (variante de SWA)     | $+0{,}01$ a $+0{,}03$  | médio      | baixo | preservada | pendente |
+| Distillation auxiliar de ChemBERTa        | $+0{,}005$ a $+0{,}025$| médio      | médio | preservada | pendente CKA |
+| LoRA nas camadas superiores dos PLMs      | $+0{,}02$ a $+0{,}04$  | médio-alto | médio | parcial | pendente |
+| Aumento da escala de ESM (8M → 35M / 150M)| $+0{,}02$ a $+0{,}05$  | alto       | alto  | parcial | pendente |
 
 ---
 
@@ -579,3 +697,13 @@ Zhang *et al.*, "mixup: Beyond empirical risk minimization", *ICLR*
 (2018).
 
 Lee *et al.*, "Deeply-supervised nets", *AISTATS* (2015).
+
+Szegedy *et al.*, "Rethinking the Inception architecture for computer
+vision", *CVPR* (2016).
+
+Wortsman *et al.*, "Model soups: averaging weights of multiple
+fine-tuned models improves accuracy without increasing inference
+time", *ICML* (2022).
+
+Kornblith *et al.*, "Similarity of neural network representations
+revisited", *ICML* (2019).
