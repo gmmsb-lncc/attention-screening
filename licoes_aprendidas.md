@@ -693,6 +693,83 @@ $\mathrm{MCC}_{\text{test}} \approx 0{,}52$ (compatível com `v7+F`)
 mantendo $\mathrm{F1}_{\text{test}} \approx 0{,}79$ (comparável
 aos *baselines*).
 
+## 6.8. Refutação experimental da lição 15 — `v7_plus_F_adapt_v2`
+
+A hipótese articulada em $\S 6{.}7$ — que desacoplar
+`THRESHOLD_METRIC` de `SELECTION_METRIC` recuperaria o
+$\mathrm{MCC}_{\text{test}}$ do nível de `v7+F` (≈ 0,52)
+mantendo o $\mathrm{F1}_{\text{test}}$ alinhado aos *baselines*
+(≈ 0,79) — foi falsificada empiricamente. A configuração
+`v7_plus_F_adapt_v2` (THRESHOLD=f1, SELECTION=mcc) sobre o
+corpus *non-human* em três sementes produziu:
+
+| Variante | Test MCC | $\sigma_\text{MCC}$ | AUROC | F1 |
+|---|---:|---:|---:|---:|
+| `v7+F` (referência) | $0{,}5260$ | $0{,}027$ | $0{,}808$ | $0{,}797$ |
+| `v7+F_adapt` (THR=f1, SEL=f1) | $0{,}4929$ | $0{,}016$ | $0{,}811$ | $0{,}787$ |
+| `v7+F_adapt_v2` (THR=f1, SEL=mcc) | $0{,}4590$ | $0{,}052$ | $0{,}778$ | $0{,}767$ |
+
+Três sintomas convergem para o mesmo diagnóstico:
+
+A primeira observação é que **AUROC, métrica que independe do
+*threshold* e mede apenas a qualidade do *ranking*, regrediu**
+de $0{,}811$ para $0{,}778$, com a variância também triplicando
+($0{,}006 \to 0{,}023$). Como AUROC só depende dos *logits*
+do modelo, a regressão indica que o *checkpoint* selecionado é
+literalmente um modelo pior — não apenas um caso de *threshold*
+desalinhado.
+
+A segunda observação é que **a variância de
+$\mathrm{MCC}_{\text{test}}$ entre sementes triplicou**
+($0{,}016 \to 0{,}052$). Análise das curvas de treinamento
+revela que a superfície val_MCC vs época é mais *peaky* (oscila
+mais por época) que val_F1 vs época, porque MCC é uma função
+fortemente não-linear de TP/FP/FN/TN cuja derivada com relação
+ao *threshold* tem singularidades nas regiões de empate;
+F1, em contraste, varia de forma mais suave. Ao usar val_MCC
+para seleção, pequenas flutuações entre épocas trocam o
+*checkpoint* escolhido drasticamente entre sementes.
+
+A terceira observação é a mais importante metodologicamente: a
+configuração introduz **um descasamento de objetivos**. O
+*checkpoint* é selecionado por maximizar o val_MCC ao seu
+*threshold*-MCC-ótimo próprio, mas o teste é avaliado aplicando
+o *threshold*-F1-ótimo (calculado também sobre val) ao mesmo
+modelo. O ponto na superfície de decisão que produz MCC máximo
+no val não é necessariamente o mesmo ponto onde F1 é máximo;
+logo, o modelo selecionado opera num *threshold* subótimo para
+o critério aplicado.
+
+A décima sexta lição é registrada: **a métrica de seleção de
+*checkpoint* deve casar com a métrica de *threshold*
+*reporting*. Decoupling não é, em geral, uma melhoria — é a
+introdução de inconsistência objetivo entre a fase de
+treinamento e a fase de inferência**. A heurística operacional
+emergente é a tabela:
+
+| Reporting alvo | Configuração recomendada | Justificativa |
+|---|---|---|
+| MCC primário (canônico interno) | THR=mcc, SEL=mcc | matched, baixa $\sigma$ |
+| F1 (alinhamento *baselines*) | THR=f1, SEL=f1 | matched, baixa $\sigma$, F1 mais estável |
+| Calibração robusta | composite $\lambda > 0$, matched | filtra *threshold gaming* |
+
+Decorre desta lição que, para os propósitos da tese,
+duas configurações são canônicas:
+
+1. **`v7+F`** (THR=mcc, SEL=mcc) como configuração interna de
+   otimização e *reporting* primário sob o critério MCC;
+2. **`v7+F_adapt`** (THR=f1, SEL=f1) como configuração para
+   comparação justa com *baselines* DrugBAN/GraphBAN sob o
+   critério F1 nativo deles.
+
+A configuração `v7_plus_F_adapt_v2` é descartada e o *commit*
+`2fdf27f` permanece no histórico apenas como registro
+arqueológico do experimento refutado. A infraestrutura de
+*env vars* `BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC` e
+`BENCHMARK_LEVEL4CNN_SELECTION_METRIC` permanece útil — apenas
+sua composição (matched vs decoupled) é restrita à matched
+pelo princípio empírico desta seção.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
