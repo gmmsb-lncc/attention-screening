@@ -348,6 +348,23 @@ A literatura suporta a coexistência em tarefas de classificação;
 nosso experimento testará empiricamente se isso vale para o nosso
 *pipeline* específico.
 
+A primeira execução de `v7-pro` na semente 42 de `diamante-01`
+produziu $\mathrm{MCC}_\text{test} = 0{,}5320$, um ganho aparente de
+$+0{,}0064$ MCC sobre `v7+` na mesma semente e hospedeiro
+($0{,}5256$). Adicionalmente, o $\mathrm{MCC}_\text{val}$ saltou de
+$0{,}5153$ para $0{,}5870$, um aumento de $+0{,}072$ — sensivelmente
+maior que o ganho observado em teste. Essa assimetria é
+inconclusiva sob uma única semente: pode refletir uma genuína
+melhoria do modelo no espaço de validação que não se transfere
+plenamente para o teste por diferença de distribuição entre os dois
+*splits*, ou pode ser flutuação numérica associada à inicialização.
+O custo computacional permaneceu inalterado (treinamento em
+$4{,}82$ minutos, idêntico ao tempo de `v7+` na mesma máquina), o
+que confirma que Mixup e *label smoothing* não introduzem *overhead*
+relevante. A confirmação multi-semente em curso definirá se o ganho
+de $+0{,}006$ MCC observado na semente 42 representa sinal
+reprodutível.
+
 Nota importante decorrente desta etapa: o experimento de Tier E
 isolado nunca chegou a ser executado antes de adicioná-lo a $F$. A
 razão pragmática foi acelerar a iteração, mas a consequência é que,
@@ -469,6 +486,7 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier C (seed 42 isolada)       | + contrastive_weight=0,3, cosine_feat  | 0,5880    | 0,5167    | +0,031 (single)|
 | **Tier C (5-seed média)**      | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm 0{,}036$ | $\mathbf{0{,}514 \pm 0{,}008}$ | $\mathbf{+0{,}008}$ (mean) |
 | Tier D (sobre Tier A+C, seed 42) | SWA vanilla, swa_start=5            | 0,5088    | 0,4964    | $-0{,}021$ regrediu |
+| **Tier E+F empilhados (v7-pro, seed 42 d01)** | + mixup_alpha=0,3, label_smooth=0,05 | $0{,}5870$ | $\mathbf{0{,}5320}$ | $\mathbf{+0{,}046}$ (single, vs v7) |
 
 ---
 
