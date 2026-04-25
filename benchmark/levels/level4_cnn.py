@@ -295,18 +295,21 @@ class EmbeddingAdapter(nn.Module):
             self.mlp_scales.append(nn.Parameter(torch.zeros(1)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Self-attention: each residue sees its neighbours.
-        # attn_scale starts at 0 → branch contributes nothing at t=0;
-        # gradient activates it only when useful (LoRA-style gating).
+        # Pre-norm architecture (Xiong et al., 2020): LayerNorm applied
+        # BEFORE each sublayer rather than after the residual sum. With
+        # scale gates initialized at zero, output = x exactly at t=0
+        # (post-norm would still re-normalize x via attn_norm). Pre-norm
+        # also stabilizes deeper stacks when num_layers > 1.
         if self.use_self_attn:
-            attn_out, _ = self.self_attn(x, x, x)
-            x = self.attn_norm(x + self.attn_scale * attn_out)
+            x_n = self.attn_norm(x)
+            attn_out, _ = self.self_attn(x_n, x_n, x_n)
+            x = x + self.attn_scale * attn_out
 
-        # Stacked MLP blocks with gated skip connections.
+        # Stacked MLP blocks with gated pre-norm residual.
         for block, norm, scale in zip(
             self.mlp_blocks, self.mlp_norms, self.mlp_scales
         ):
-            x = norm(x + scale * block(x))
+            x = x + scale * block(norm(x))
         return x
 
 
@@ -1359,8 +1362,22 @@ def _train_interaction_cnn(
 
         thr, val_mcc = _best_mcc_threshold(targets.astype(int), probs)
 
-        # Early stopping on val_mcc (disabled in train-to-zero mode)
-        improved = val_mcc > best_score
+        # --- Composite selection criterion -----------------------------
+        # Pure val_mcc selection is vulnerable to threshold gaming: late
+        # in training the model can produce extreme logits that maximize
+        # MCC at a sharp threshold while degrading val_loss (calibration
+        # collapses). The composite penalizes loss increase to filter
+        # those epochs out:
+        #     score = val_mcc - λ · val_loss
+        # λ=0 recovers pure val_mcc behaviour. λ=0.5 is a balanced
+        # default — applied to the Epoch 77 vs 80 example from the
+        # diagnostic discussion, λ=0.5 selects 77 (lower loss) over 80
+        # (higher mcc but worse calibration).
+        _lambda_loss = float(os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS", "0.0"))
+        composite_score = float(val_mcc) - _lambda_loss * float(avg_val)
+
+        # Early stopping on composite score (disabled in train-to-zero mode)
+        improved = composite_score > best_score
         marker = " ★" if improved else ""
 
         if train_to_zero:
@@ -1379,7 +1396,7 @@ def _train_interaction_cnn(
         sys.stderr.flush()
 
         if improved:
-            best_score = val_mcc
+            best_score = composite_score
             # Save raw (unwrapped) state_dict for portability
             _raw_best = getattr(model, '_orig_mod', model)
             best_state = {k: v.cpu().clone() for k, v in _raw_best.state_dict().items()}
