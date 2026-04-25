@@ -361,9 +361,36 @@ plenamente para o teste por diferença de distribuição entre os dois
 O custo computacional permaneceu inalterado (treinamento em
 $4{,}82$ minutos, idêntico ao tempo de `v7+` na mesma máquina), o
 que confirma que Mixup e *label smoothing* não introduzem *overhead*
-relevante. A confirmação multi-semente em curso definirá se o ganho
-de $+0{,}006$ MCC observado na semente 42 representa sinal
-reprodutível.
+relevante.
+
+A subsequente avaliação multi-semente em *non\_human* (cinco
+sementes canônicas) refutou contundentemente o sinal preliminar.
+A média de $\mathrm{MCC}_\text{test}$ caiu para $0{,}4961 \pm
+0{,}0245$, **abaixo** da configuração `v7+` canônica
+($0{,}5143 \pm 0{,}0079$) por $-0{,}018$ MCC, e a variância entre
+sementes triplicou — de $\sigma = 0{,}008$ em `v7+` para
+$\sigma = 0{,}024$ em `v7-pro`. Esse resultado tem três
+implicações imediatas. Primeira, a semente 42 isolada superestimou o
+desempenho médio em $0{,}036$ MCC, equivalente a aproximadamente
+1,5 desvios-padrão da nova distribuição multi-semente: nova
+confirmação empírica da terceira lição da seção 7. Segunda, a
+combinação Tier E + Tier F **não é aditiva** no nosso *pipeline* —
+contrariamente à expectativa baseada em ortogonalidade dos eixos de
+regularização — e parece introduzir interferência destrutiva ou
+saturação. Terceira, o aumento substancial de $\sigma$ é
+sintomaticamente atribuível ao Mixup, mecanismo estocástico cuja
+amostragem aleatória de pares de exemplos depende fortemente da
+semente; *label smoothing*, por outro lado, é determinístico e não
+contribui diretamente para variância entre sementes.
+
+A configuração `v7-pro` é portanto descartada como candidata
+canônica. A configuração `v7+` (Tier A + C apenas) permanece como
+melhor configuração validada multi-semente em *non\_human*. As
+ablações isoladas — Tier E sem F, e Tier F sem E — passam a ser
+necessárias para identificar qual dos dois componentes é deletério
+ou se é a combinação que produz o efeito adverso. Os arquivos
+`configs/v7_plus_E.yaml` (Tier A+C+E) e `configs/v7_plus_F.yaml`
+(Tier A+C+F) foram criados para essa finalidade.
 
 Nota importante decorrente desta etapa: o experimento de Tier E
 isolado nunca chegou a ser executado antes de adicioná-lo a $F$. A
@@ -532,7 +559,8 @@ A tabela abaixo consolida o progresso observado até este ponto.
 | Tier C (seed 42 isolada)       | + contrastive_weight=0,3, cosine_feat  | 0,5880    | 0,5167    | +0,031 (single)|
 | **Tier C (5-seed média)**      | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm 0{,}036$ | $\mathbf{0{,}514 \pm 0{,}008}$ | $\mathbf{+0{,}008}$ (mean) |
 | Tier D (sobre Tier A+C, seed 42) | SWA vanilla, swa_start=5            | 0,5088    | 0,4964    | $-0{,}021$ regrediu |
-| **Tier E+F empilhados (v7-pro, seed 42 d01)** | + mixup_alpha=0,3, label_smooth=0,05 | $0{,}5870$ | $\mathbf{0{,}5320}$ | $\mathbf{+0{,}046}$ (single, vs v7) |
+| Tier E+F empilhados (v7-pro, seed 42 d01)     | + mixup_alpha=0,3, label_smooth=0,05 | $0{,}5870$ | $0{,}5320$ | $+0{,}046$ (single, vs v7) |
+| **Tier E+F empilhados (v7-pro, 5-seed d01)** | mesmo, $42, 123, 456, 789, 1024$       | $0{,}576 \pm \text{var}$ | $\mathbf{0{,}4961 \pm 0{,}0245}$ | $\mathbf{-0{,}018}$ (vs v7+ A+C 5-seed) |
 
 ---
 
