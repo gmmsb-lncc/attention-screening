@@ -798,43 +798,69 @@ class InteractionMapCNN(nn.Module):
 # Threshold sweep
 # ======================================================================
 
-def _best_mcc_threshold(
+def _best_threshold(
     y_true: np.ndarray,
     y_proba: np.ndarray,
+    metric: str = "mcc",
 ) -> tuple[float, float]:
-    """Two-pass threshold sweep that maximises MCC.
+    """Two-pass threshold sweep that maximises `metric` ∈ {"mcc","f1"}.
 
     Pass 1: coarse grid (100 points) over [0.01, 0.99]
     Pass 2: fine grid (100 points) in ±0.05 around the best
+
+    F1 mode mirrors DrugBAN/GraphBAN native criterion (val-F1-optimal).
     """
     if y_true.size == 0 or len(np.unique(y_true)) < 2:
         return 0.5, 0.0
 
-    # Pass 1 — coarse
+    metric = str(metric).lower()
+    if metric == "f1":
+        score_fn = lambda yt, yp: float(f1_score(yt, yp, zero_division=0))
+    else:
+        score_fn = lambda yt, yp: float(matthews_corrcoef(yt, yp))
+
     grid = np.linspace(0.01, 0.99, 100)
     anchors = np.unique(np.clip(y_proba, 0.01, 0.99))
     thresholds = np.unique(np.concatenate([grid, anchors]))
 
-    best_thr, best_mcc = 0.5, -1.0
+    best_thr, best_score = 0.5, -1.0
     for thr in thresholds:
         pred = (y_proba >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
+        s = score_fn(y_true, pred)
+        if s > best_score:
+            best_score = s
             best_thr = float(thr)
 
-    # Pass 2 — fine around best
     lo = max(0.01, best_thr - 0.05)
     hi = min(0.99, best_thr + 0.05)
     fine_grid = np.linspace(lo, hi, 100)
     for thr in fine_grid:
         pred = (y_proba >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
+        s = score_fn(y_true, pred)
+        if s > best_score:
+            best_score = s
             best_thr = float(thr)
 
-    return best_thr, best_mcc
+    return best_thr, best_score
+
+
+def _threshold_metric_env() -> str:
+    """Read BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC; default 'mcc'."""
+    return str(os.getenv("BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC", "mcc")).lower()
+
+
+def _best_mcc_threshold(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+) -> tuple[float, float]:
+    """Back-compat wrapper. Honours BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC.
+
+    Returns (threshold, score_in_chosen_metric). When metric=="f1", the
+    second element is val-F1 at that threshold; when metric=="mcc",
+    it is val-MCC. Callers that explicitly need MCC at the chosen
+    threshold should recompute it from the returned threshold.
+    """
+    return _best_threshold(y_true, y_proba, metric=_threshold_metric_env())
 
 
 # ======================================================================
