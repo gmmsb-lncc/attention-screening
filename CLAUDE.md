@@ -12,9 +12,10 @@ Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ �
 
 ## Active work (2026-04)
 
-1. **Rerun v7 benchmark with Platt-on-val** (PR #206). All thesis Chapter 5 MCC numbers regenerated. Source of truth: `configs/v7.yaml` (B=128, dropout=0.35, λ=0.04, patience=15, float64).
-2. **Cross-dataset evaluation matrix (3×3)** — train ∈ {H, NH, All} × test ∈ {H, NH, All}. Infra in `scripts/thesis_followups/cross_dataset_matrix/`. Reuses diagonal checkpoints, no retraining. Off-diagonal runs on diamante-02 via `run_cross_matrix.sh`.
-3. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§10, 14 methodological lessons documented). Current best validated multi-seed: `v7+` canonical (Tier A + C) at 0.5143 ± 0.0079 NH 5-seed. Best 3-seed candidate: `v7+F` (Tier A + C + label smoothing) at 0.5260 ± 0.0274. Current frontier: `v7_asymF` (asymmetric ligand-heavy adapter + pre-norm + LoRA gates), in execution on diamante-01.
+2. **Cross-dataset evaluation matrix (3×3)** — train ∈ {H, NH, All} × test ∈ {H, NH, All}. Infra in `scripts/thesis_followups/cross_dataset_matrix/`. Reuses diagonal checkpoints. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.209. Slides + analysis in `slides/cross_matrix/`.
+3. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
+4. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
 
 ## PR workflow
 
@@ -69,6 +70,32 @@ python3 run_from_config.py configs/v7.yaml --dataset {human|non_human|all} [--dr
 bash run_benchmark.sh                         # shell orchestrator
 ```
 
+## DT-Kinase optimization variants (2026-04)
+
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (14 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline.
+
+| Config | Tiers | Status (NH) | Notes |
+|---|---|---|---|
+| `configs/v7.yaml` | baseline | 0.486 (seed 42) / 0.506 (5-seed ref) | thesis reference |
+| `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | canonical validated |
+| `configs/v7_plus_F.yaml` | A + C + F | **0.5260 ± 0.0274** (3-seed) | best multi-seed candidate |
+| `configs/v7_asymF.yaml` | A + C + F + asymmetric adapter | in execution | ligand 2 layers/12 heads vs prot 1/4 |
+| `configs/v7_ban_F.yaml` | A + C + F + BAN (variant=v8) | regressed (0.503 ± 0.046) | W_ban Xavier-init violates identity-init |
+| `configs/v7_pro.yaml` | A + C + E + F | regressed (0.496 ± 0.025) | Mixup deletério |
+| `configs/v7_plus_E.yaml` | A + C + E (Mixup) | regressed (0.499 ± 0.025) | confirmed Mixup harmful |
+
+**Tier glossary**:
+- **A** (capacity): num_heads=16, head_dim=64, mlp_head=true, adapter prot=512/lig=1024, patience=15, lr_mult=2.0
+- **C** (contrastive aux): contrastive_weight=0.3, cosine_feat=true, ConPLex-inspired
+- **F** (label smoothing): label_smooth=0.05
+- **E** (Mixup): mixup_alpha=0.3 — REJECTED in our pipeline
+- **D** (SWA vanilla): swa_start=5 — REJECTED (regime mismatch with short Adam training)
+- **B** (multi-head pool=4): REJECTED (Xavier init violates identity-init)
+
+**Runner**: `scripts/v8/run_v7_yaml.sh` (default env=`env`, V7_CONFIG configurable).
+**Validation pipeline (NH→Human sequential 5-seed)**: `scripts/v8/run_v7_pro_validation.sh`.
+**Ablation E vs F (3-seed)**: `scripts/v8/run_ablation_E_F_3seeds.sh`.
+
 ## Baselines (equitable protocol)
 
 | Model | Dir | Encoders | Publication |
@@ -116,15 +143,20 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
 
 ## Key development notes
 
-- **Production config**: `configs/v7.yaml`. Override via env vars (`BENCHMARK_LEVEL4CNN_*`) or CLI flags only.
+- **Production config (thesis baseline)**: `configs/v7.yaml`. Best validated v7+ canonical: `configs/v7_plus.yaml`.
+- **Hosts**: `diamante-01` (cuDNN healthy, primary iteration host since 2026-04-24); `diamante-02` (cuDNN 9.x ABI mismatch with driver 12.4 — needs `BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=1`). MCC comparisons valid only within same host (cuDNN ON vs OFF gives ~+0.009 numerical drift).
+- **Numerical regime**: fp32 + AMP off + TF32 off (auto when no_amp=true + double=false). Mantissa preserved. `configs/v7.yaml` was double=true originally; current optimization track uses fp32 default for speed.
 - **Threshold selection** (all 4 models): MCC-optimal on val. Enforced for equitable comparison.
 - **Calibration**: Platt on val (default `BENCHMARK_LEVEL4CNN_PLATT=1`). Temperature on val opt-in (`_TEMPERATURE=1`).
+- **Composite checkpoint criterion** (new): `score = val_mcc - λ·val_loss` via env `BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS` (default 0 = pure val_mcc). λ=0.5 filters threshold-gamed late epochs.
+- **Asymmetric adapter** (new): per-side `_PROT`/`_LIG` env knobs (`_ADAPTER_LAYERS_LIG`, `_ADAPTER_ATTN_HEADS_LIG`, etc.) for ligand-heavy capacity in kinase domain.
 - **`MultiTaskLoss`**: vestigial, NOT used in v7.
 - **ESM**: `src/__init__.py` adds `llm/ESM/` to `sys.path`. Never `pip install esm`.
 - **Dataset `all`**: H + NH combined; 386 099 post-filter samples. Embeddings loaded from both `benchmark_{human,non_human}_v2` dirs.
 - **Seq limits**: protein MAX_SEQ_LEN=1024 (C-terminal truncation of long kinases, e.g. ULK1); ligand SMILES 512 tokens (rarely hit).
 - **Non-determinism**: cuDNN non-deterministic reductions ON by default. σ over seeds captures init + reduction noise. Strict determinism via `BENCHMARK_LEVEL4CNN_DETERMINISTIC=1` (~20–30 % slower).
 - **No k-fold**: fixed scaffold split + 5-seed variance estimation.
+- **Two-phase pipeline gotcha**: `benchmark_comparison.json` "phase: train" = fit train, eval val (val MCC reported); "phase: test" = fit val, eval test (test MCC reported). NOT same model — DIFFERENT fits. See licoes §7 lesson 7.
 
 ## Thesis follow-up scripts
 
