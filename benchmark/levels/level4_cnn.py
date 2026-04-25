@@ -245,14 +245,21 @@ class EmbeddingAdapter(nn.Module):
         dropout: float = 0.3,
         num_layers: int = 1,
         use_self_attn: bool = False,
+        num_heads: int = 4,
     ) -> None:
         super().__init__()
 
         # --- Optional self-attention (context-aware adaptation) --------
+        # num_heads is now tunable per-adapter (formerly hardcoded to 4).
+        # For ligand (D=768) values 8 or 12 give more useful per-head dim
+        # than the original 4 (which produced 192-d per head, too coarse
+        # for local feature attention).
         self.use_self_attn = use_self_attn
         if use_self_attn:
+            assert dim % num_heads == 0, (
+                f"adapter num_heads={num_heads} must divide dim={dim}")
             self.self_attn = nn.MultiheadAttention(
-                embed_dim=dim, num_heads=4, dropout=dropout, batch_first=True,
+                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True,
             )
             # Zero-init the output projection so attn_out = 0 at t=0 →
             # x + α·attn_out = x → adapter starts as identity, consistent
@@ -363,6 +370,16 @@ class InteractionMapCNN(nn.Module):
         contrastive_dim: int = 128,
         cosine_feat: bool = False,
         pool_num_heads: int = 1,
+        # Asymmetric adapter knobs. None → fall back to symmetric values
+        # (adapter_layers, num_heads=4) to preserve backward compatibility.
+        # Used to give the ligand branch more capacity than the protein
+        # branch, motivated by kinase-domain conservation: ATP-binding
+        # pockets are highly similar across kinases, so most discriminative
+        # signal lives on the ligand side.
+        adapter_layers_prot: int | None = None,
+        adapter_layers_lig: int | None = None,
+        adapter_attn_heads_prot: int = 4,
+        adapter_attn_heads_lig: int = 4,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -376,21 +393,26 @@ class InteractionMapCNN(nn.Module):
         self._z_lig: torch.Tensor | None = None
         self._cos_sim_feat: torch.Tensor | None = None
 
-        # --- Embedding adapters (optional) ----------------------------
+        # --- Embedding adapters (optional, asymmetric capacity) -------
+        # Resolve per-side overrides. None falls back to symmetric value.
+        _prot_layers = adapter_layers if adapter_layers_prot is None else adapter_layers_prot
+        _lig_layers  = adapter_layers if adapter_layers_lig  is None else adapter_layers_lig
         if use_adapter:
             self.prot_adapter = EmbeddingAdapter(
                 dim=protein_dim,
                 bottleneck=adapter_bottleneck_prot,
                 dropout=dropout,
-                num_layers=adapter_layers,
+                num_layers=_prot_layers,
                 use_self_attn=adapter_self_attn,
+                num_heads=adapter_attn_heads_prot,
             )
             self.lig_adapter = EmbeddingAdapter(
                 dim=ligand_dim,
                 bottleneck=adapter_bottleneck_lig,
                 dropout=dropout,
-                num_layers=adapter_layers,
+                num_layers=_lig_layers,
                 use_self_attn=adapter_self_attn,
+                num_heads=adapter_attn_heads_lig,
             )
 
         if variant in ("v7", "v7_gated"):
@@ -1005,6 +1027,10 @@ def _train_interaction_cnn(
     adapter_layers: int = 1,
     adapter_self_attn: bool = False,
     adapter_lr_mult: float = 1.0,
+    adapter_layers_prot: int | None = None,
+    adapter_layers_lig: int | None = None,
+    adapter_attn_heads_prot: int = 4,
+    adapter_attn_heads_lig: int = 4,
     label_smooth: float = 0.0,
     mixup_alpha: float = 0.0,
     contrastive_weight: float = 0.0,
@@ -1094,6 +1120,10 @@ def _train_interaction_cnn(
         adapter_bottleneck_lig=adapter_bottleneck_lig,
         adapter_layers=adapter_layers,
         adapter_self_attn=adapter_self_attn,
+        adapter_layers_prot=adapter_layers_prot,
+        adapter_layers_lig=adapter_layers_lig,
+        adapter_attn_heads_prot=adapter_attn_heads_prot,
+        adapter_attn_heads_lig=adapter_attn_heads_lig,
         contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
         cosine_feat=cosine_feat,
         pool_num_heads=pool_num_heads,
@@ -1620,6 +1650,16 @@ class Level4CNNRunner(BaseLevelRunner):
         adapter_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS", "1"))
         adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
         adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
+        # Asymmetric adapter capacity per side. Empty/missing → fall back
+        # to symmetric (adapter_layers, attn_heads=4). Motivation: ligand
+        # carries more discriminative info in kinase domain (conserved
+        # ATP-binding pocket).
+        _alp = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_PROT", "")
+        _all = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG", "")
+        adapter_layers_prot = int(_alp) if _alp else None
+        adapter_layers_lig = int(_all) if _all else None
+        adapter_attn_heads_prot = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_PROT", "4"))
+        adapter_attn_heads_lig = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG", "4"))
         pool_num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_POOL_HEADS", "1"))
         swa_start = int(os.getenv("BENCHMARK_LEVEL4CNN_SWA_START", "0"))
 
@@ -1675,6 +1715,10 @@ class Level4CNNRunner(BaseLevelRunner):
             adapter_layers=adapter_layers,
             adapter_self_attn=adapter_self_attn,
             adapter_lr_mult=adapter_lr_mult,
+            adapter_layers_prot=adapter_layers_prot,
+            adapter_layers_lig=adapter_layers_lig,
+            adapter_attn_heads_prot=adapter_attn_heads_prot,
+            adapter_attn_heads_lig=adapter_attn_heads_lig,
             label_smooth=label_smooth,
             mixup_alpha=mixup_alpha,
             contrastive_weight=contrastive_weight,

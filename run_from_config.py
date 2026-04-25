@@ -192,10 +192,15 @@ def build_env(cfg: dict) -> dict[str, str]:
     if adapter.get("enabled", False):
         env["BENCHMARK_LEVEL4CNN_ADAPTER"] = "1"
         _adapter_map = {
-            "layers":    "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS",
-            "lr_mult":   "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT",
-            "prot_dim":  "BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM",
-            "lig_dim":   "BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM",
+            "layers":          "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS",
+            "lr_mult":         "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT",
+            "prot_dim":        "BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM",
+            "lig_dim":         "BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM",
+            # Asymmetric adapter capacity (ligand can have more):
+            "layers_prot":     "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_PROT",
+            "layers_lig":      "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG",
+            "attn_heads_prot": "BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_PROT",
+            "attn_heads_lig":  "BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG",
         }
         for key, envvar in _adapter_map.items():
             if key in adapter:
