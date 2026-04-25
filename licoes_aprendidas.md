@@ -475,6 +475,52 @@ para evitar interpretações incorretas em comunicações posteriores e
 deve ser explicitamente esclarecida em qualquer apresentação dos
 resultados na tese.
 
+A oitava lição, decorrente do planejamento da etapa de *distillation*
+auxiliar de ChemBERTa, é que **diagnósticos baratos devem preceder
+implementações custosas sempre que é possível formulá-los**. A
+hipótese motivadora — de que MoLFormer e ChemBERTa codificam
+informações químicas complementares e que forçar seu alinhamento
+durante o treino transferiria conhecimento útil — é falsificável
+sem qualquer modificação do modelo: basta computar o *Linear Centered
+Kernel Alignment* (Kornblith et al., ICML 2019) entre as
+representações globais médias dos dois *encoders* sobre o mesmo
+conjunto de ligantes. Caso o CKA exceda $0{,}9$, os espaços são
+redundantes a ponto de a *distillation* não trazer ganho mensurável,
+e investir cento e cinquenta linhas de código para implementá-la
+torna-se desperdício de tempo experimental. O *script*
+`scripts/thesis_followups/chemberta_molformer_complementarity.py`
+implementa esse teste em aproximadamente cento e cinquenta linhas
+e roda em segundos. A regra prática que emerge: **antes de
+implementar qualquer mecanismo cujo benefício depende de uma
+hipótese sobre estrutura interna do dado ou da representação, buscar
+um teste empírico barato que falsifique essa hipótese**. No caso de
+*distillation*, mede-se o CKA antes de implementar o módulo de
+treino; no caso de *Mixup*, observa-se a distribuição do *loss* sob
+combinações lineares dos *inputs*; no caso de adaptação de domínio,
+verifica-se primeiro se a separabilidade entre domínios pelo
+classificador de *features* já é elevada antes de treinar o
+classificador adversarial.
+
+A nona lição, decorrente da estratégia atual de validação cruzada
+entre *non\_human* e *human*, é que **otimizações conduzidas em um
+único corpus podem ser corpus-específicas e não transferíveis**.
+Os parâmetros `patience = 15`, `lr_mult = 2{,}0`,
+`contrastive_weight = 0{,}3`, `mixup_alpha = 0{,}3` e
+`label_smooth = 0{,}05` foram todos ajustados sobre o corpus
+*non\_human* (com sete mil seiscentas amostras de treino), o menor
+e mais rápido a iterar. O regime de *human* (com aproximadamente
+sessenta e seis mil amostras) tem trajetória de *loss*, número de
+épocas até *early stop* e curvatura local da paisagem de *loss*
+substancialmente diferentes; *knobs* otimizados sob o regime menor
+não têm garantia de transferir. A *patience* especialmente é
+suspeita: quinze épocas em um corpus dez vezes menor representam
+muito mais varreduras pelo conjunto de treino do que em um corpus
+maior, possivelmente forçando convergência indevida. A regra
+operacional que emerge: **toda configuração otimizada exclusivamente
+em um corpus deve ser revalidada em cada corpus-alvo de aplicação;
+quando há regressão na transferência, os hiperparâmetros são
+suspeitos antes da arquitetura**.
+
 A tabela abaixo consolida o progresso observado até este ponto.
 
 | Etapa                          | Mudança                                | Train MCC | Test MCC | Δ vs v7 |
@@ -571,6 +617,21 @@ $F$. Caso `v7-pro` cruze o limiar $0{,}52$ na média de cinco
 sementes, ablações isoladas de Tier $E$ e Tier $F$ devem ser
 conduzidas posteriormente, conforme a sexta lição da seção 7,
 para atribuir contribuição a cada componente antes da publicação.
+
+Para reduzir o atrito operacional entre essas validações, foi
+introduzido o *script* `scripts/v8/run_v7_pro_validation.sh`, que
+encadeia sequencialmente o treinamento multi-semente nos dois
+corpora — primeiro *non\_human* (aproximadamente 25 minutos) e em
+seguida *human* (estimados 4 a 6 horas em `diamante-01`) — e
+imprime um sumário consolidado das duas execuções ao final. A
+existência de uma orquestração automatizada para a fase de
+validação é em si uma decisão metodológica: separa o esforço de
+configuração do esforço de execução, e permite que o ciclo
+`config → resultado multi-semente em ambos corpora` seja repetido
+sem intervenção manual a cada iteração futura. Tais artefatos —
+*scripts* declarativos que reproduzem a validação completa de uma
+configuração — devem acompanhar qualquer entrega final na tese,
+de modo que terceiros possam reproduzir os números reportados.
 
 ---
 
