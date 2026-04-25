@@ -23,6 +23,7 @@ referenciar este registro.
 | `v7_pro.yaml` | A + C + E + F | v7 | idem | symmetric | K=16 / d=64 | val_mcc |
 | `v7_ban_F.yaml` | A + C + F + BAN (Xavier W_ban) | v8 | idem | symmetric | K=16 / W_ban full | val_mcc |
 | `v7_asymF.yaml` | A + C + F + asymmetric adapter (pre-norm + LoRA gates) | v7 | idem | asymmetric (prot 1×4, lig 2×12) | K=16 / d=64 | val_mcc + composite (env λ=0.5) |
+| `v7_plus_F_adapt.yaml` | A + C + F + §6.5 fixes (pre-norm + LoRA gates + zero-init self_attn) | v7 | idem | symmetric (512/1024, 4 heads) | K=16 / d=64 | val_F1 (THRESHOLD_METRIC=f1, matching DrugBAN/GraphBAN) |
 
 **Tier glossary** (também em `CLAUDE.md`):
 - A: capacidade (num_heads=16, head_dim=64, mlp_head, adapter dim 512/1024, patience=15, lr_mult=2.0)
@@ -52,7 +53,8 @@ referenciar este registro.
 | 12 | v7+E (A+C + Mixup) 3-seed | d01 | 3 | 42,123,456 | — | 0,4988 ± 0,0254 | 0,025 | 0,802 ± 0,020 | −0,007 | Mixup deletério isolado |
 | 13 | **v7+F (A+C + label smooth) 3-seed** | d01 | **3** | 42,123,456 | — | **0,5260 ± 0,0274** | 0,027 | 0,808 ± 0,017 | **+0,020** | **melhor candidato 3-seed** |
 | 14 | v7_ban_F (A+C+F + BAN Xavier) 3-seed | d01 | 3 | 42,123,456 | 0,599 ± 0,034 | 0,5028 ± 0,0462 | 0,046 | — | −0,003 | regrediu; W_ban Xavier viola identity-init |
-| 15 | v7_asymF (A+C+F + asym adapter + pre-norm) 3-seed | d01 | 3 | 42,123,456 | em execução | em execução | — | — | — | inclui pre-norm + LoRA gates + composite criterion |
+| 15 | v7_asymF (A+C+F + asym adapter + pre-norm) 3-seed | d01 | 3 | 42,123,456 | — | 0,4611 ± 0,0279 | 0,028 | 0,7951 | −0,045 | regrediu; pre-norm + LoRA + asym todos juntos sem ablação |
+| 16 | **v7_plus_F_adapt (A+C+F + §6.5 fixes + threshold F1) 3-seed** | d01 | **3** | 42,123,456 | — | **0,4929 ± 0,0160** | 0,016 | 0,8105 | **−0,013** | F1=0,7868; selection acoplado a F1 escolhe epoch subóptimo p/ MCC (lição 15) |
 
 ---
 
@@ -117,6 +119,48 @@ results:
     precision: 0.724680 ± 0.015864
     recall:    0.884714 ± 0.022922
     auc:       0.808077 ± 0.016974
+```
+
+### v7_plus_F_adapt (A+C+F + §6.5 fixes + threshold F1) 3-seed em `diamante-01`
+
+```yaml
+config: configs/v7_plus_F_adapt.yaml
+host: diamante-01
+corpus: non_human
+embedding: 8M
+seeds: [42, 123, 456]
+elapsed_seconds: 1390.5
+env:
+  BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC: f1
+  BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS: 0.0
+results:
+  level4_cnn_mlp:
+    accuracy:  0.739522 ± 0.007977
+    mcc:       0.492850 ± 0.015989
+    f1:        0.786800 ± 0.005853
+    precision: 0.696615 ± 0.007428
+    recall:    0.903867 ± 0.007968
+    auc:       0.810485 ± 0.005741
+per_seed:
+  42:  test_mcc: 0.5106  test_f1: 0.7935  thr: 0.498
+  123: test_mcc: 0.4796  test_f1: 0.7824  thr: 0.529
+  456: test_mcc: 0.4877  test_f1: 0.7846  thr: ~0.50
+notes: |
+  EmbeddingAdapter §6.5 fixes (pre-norm + LoRA gates + zero-init
+  self_attn) hardcoded since 58805ca/abc4167. Adapter SIMÉTRICO
+  (sem assimetria do v7_asymF). Threshold = F1-óptimo val (matching
+  DrugBAN/GraphBAN native criterion).
+
+  Regressão MCC vs v7+F (-0.033) explicada por acoplamento
+  THRESHOLD↔SELECTION na mesma env var: ao trocar p/ F1, seleção
+  de checkpoint passou também a otimizar F1. Modelo escolhe
+  epoch com recall alto / precision baixo (ótimo p/ F1, subótimo
+  p/ MCC). Lição 15 documentada em licoes_aprendidas §6.7.
+
+  Recall=0.904 vs precision=0.697 confirma diagnóstico (vs v7+F
+  típico recall~0.85, precision~0.73).
+
+  Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
 ```
 
 ### v7_ban_F (A+C+F + BAN) 3-seed em `diamante-01`

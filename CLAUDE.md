@@ -94,14 +94,15 @@ bash run_benchmark.sh                         # shell orchestrator
 
 ## DT-Kinase optimization variants (2026-04)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (14 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline.
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (15 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline.
 
 | Config | Tiers | Status (NH) | Notes |
 |---|---|---|---|
 | `configs/v7.yaml` | baseline | 0.486 (seed 42) / 0.506 (5-seed ref) | thesis reference |
 | `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | canonical validated |
 | `configs/v7_plus_F.yaml` | A + C + F | **0.5260 ± 0.0274** (3-seed) | best multi-seed candidate |
-| `configs/v7_asymF.yaml` | A + C + F + asymmetric adapter | in execution | ligand 2 layers/12 heads vs prot 1/4 |
+| `configs/v7_asymF.yaml` | A + C + F + asymmetric adapter | regressed (0.461 ± 0.028) | pre-norm + LoRA + asym todos juntos sem ablação |
+| `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + threshold F1 | regressed MCC (0.493 ± 0.016) | F1=0.787 competitivo com baselines; selection acoplado a F1 (lição 15) |
 | `configs/v7_ban_F.yaml` | A + C + F + BAN (variant=v8) | regressed (0.503 ± 0.046) | W_ban Xavier-init violates identity-init |
 | `configs/v7_pro.yaml` | A + C + E + F | regressed (0.496 ± 0.025) | Mixup deletério |
 | `configs/v7_plus_E.yaml` | A + C + E (Mixup) | regressed (0.499 ± 0.025) | confirmed Mixup harmful |
