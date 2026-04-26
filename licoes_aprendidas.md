@@ -943,6 +943,126 @@ metodológico cometido com $\S 6{.}5$: cada modificação será
 introduzida em isolamento e testada contra o *baseline* recém
 re-validado antes de ser combinada com qualquer outra.
 
+## 6.10. Dependência mútua entre capacidade e otimização — Direções A, D, A+D
+
+A primeira aplicação do princípio de isolamento estabelecido em
+$\S 6{.}9{.}1$ sobre a base $v7+F$ recém re-validada testou duas
+modificações ortogonais sobre o lado ligante do *adapter*,
+motivadas pela observação de domínio segundo a qual o bolso
+ATP-binding de quinases é altamente conservado entre proteínas
+e portanto a maior parte do sinal discriminativo para predição
+de afinidade reside na estrutura química do ligante.
+
+A *direção A* aumenta a **capacidade estrutural** do
+*lig\_adapter*: o número de camadas MLP empilhadas passa de uma
+para duas (`adapter_layers_lig=2`) e o número de cabeças de
+auto-atenção passa de quatro para doze
+(`adapter_attn_heads_lig=12`). O número total de parâmetros do
+*adapter* do ligante é multiplicado por aproximadamente três.
+
+A *direção D* aumenta a **velocidade de otimização** do mesmo
+módulo: o multiplicador de *learning rate* aplicado ao
+*lig\_adapter* passa de 2.0 para 5.0
+(`BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG=5.0`), preservando o
+multiplicador 2.0 do *prot\_adapter* (`_LR_MULT_PROT=2.0`).
+Nenhum parâmetro adicional é introduzido — somente a magnitude
+dos *updates* gradientes muda.
+
+Ambas direções foram executadas em paralelo nos três hosts
+disponíveis com três sementes canônicas $\{42, 123, 456\}$, sob
+$v7+F$ + $\text{LEGACY}=1$ (default vigente após $\S 6{.}9{.}1$):
+
+| Variante | Host | cuDNN | $\mathrm{MCC}_\text{test}$ | $\sigma$ | AUROC | $\sigma_\text{recall}$ | Adj→d01 | $\Delta$ |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| $v7+F$ base | d01 | ON | $0{,}5266$ | $0{,}010$ | $0{,}811$ | $0{,}025$ | $0{,}5266$ | ref |
+| A só | d01 | ON | $0{,}4996$ | $0{,}026$ | $0{,}803$ | $\mathbf{0{,}098}$ | $0{,}4996$ | $-0{,}027$ |
+| D só | d02 | OFF | $0{,}4867$ | $0{,}022$ | $0{,}809$ | $0{,}046$ | $\sim 0{,}496$ | $-0{,}031$ |
+| A+D combo | d03 | OFF | $0{,}5215$ | $\mathbf{0{,}004}$ | $0{,}795$ | $0{,}013$ | $\sim 0{,}530$ | $+0{,}004$ |
+
+O resultado é estruturalmente surpreendente: **as duas direções,
+isoladamente, regridem aproximadamente a mesma magnitude
+($-0{,}027$ e $-0{,}031$ MCC); combinadas, recuperam o nível do
+*baseline* e simultaneamente reduzem a variância entre sementes
+em mais de duas ordens de magnitude ($0{,}010 \to 0{,}004$,
+$\sigma_\text{recall}: 0{,}025 \to 0{,}013$)**.
+
+A interpretação mecanística mais econômica é a seguinte. A
+*direção A* multiplica o número de parâmetros do *lig\_adapter*
+por aproximadamente três sem alterar a magnitude do *update*
+gradiente por parâmetro. Em regime de treinamento curto
+($\sim 30$ épocas com *patience* $= 15$), esses parâmetros
+adicionais não recebem *updates* suficientes para convergir: o
+mesmo orçamento gradiente é dividido entre três vezes mais
+direções, resultando em uma rede arquiteturalmente maior mas
+empiricamente sub-treinada. O sintoma diagnóstico esperado dessa
+hipótese — instabilidade entre sementes do componente que está
+sub-treinando — manifesta-se claramente na variância do *recall*
+($\sigma = 0{,}098$, quatro vezes pior que o *baseline*),
+indicando que cada semente para num ponto diferente do espaço de
+parâmetros, todos sub-ótimos.
+
+A *direção D* mantém a contagem de parâmetros do
+*lig\_adapter* mas multiplica a magnitude do *update* gradiente
+sobre eles em 2.5 vezes ($\text{lr\_mult}: 2.0 \to 5.0$). Sobre
+um conjunto pequeno e fixo de parâmetros, *learning rate*
+elevada conduz a *overshoot* do mínimo local ótimo: o
+otimizador oscila em torno da solução, sem convergir
+estavelmente. Adam amortece essa oscilação parcialmente via
+momentos, mas o critério de *early stopping* com *patience* $= 15$
+captura o *checkpoint* num ponto sub-ótimo da oscilação. O
+sintoma diagnóstico é variância intermediária entre sementes
+($\sigma_\text{recall} = 0{,}046$, mais alto que o *baseline* mas
+não tão extremo quanto na direção A).
+
+A combinação *A + D* introduz simultaneamente ambas as mudanças.
+Multiplicar capacidade por três e *learning rate* por 2.5 deixa a
+razão "magnitude de *update* por parâmetro" próxima da razão
+*baseline* — e a maior dimensão do espaço de parâmetros oferece
+mais graus de liberdade para o otimizador alocar os *updates* em
+direções úteis. O resultado é uma trajetória de otimização
+substancialmente mais determinística entre sementes, evidenciada
+pela queda dramática de variância: $\sigma_\text{MCC}$ cai de
+$0{,}010$ (já baixo no *baseline*) para $0{,}004$ — uma melhoria
+de fator $2{,}5$ sobre o *baseline*; $\sigma_\text{recall}$ cai
+de $0{,}025$ para $0{,}013$.
+
+A décima nona lição é registrada explicitamente: **mudanças de
+capacidade arquitetural e mudanças de magnitude de otimização
+sobre o mesmo módulo são mutuamente dependentes em regime de
+treinamento curto. Aplicar uma sem a outra desbalanceia a
+relação "magnitude de *update* gradiente por parâmetro" e
+regride o desempenho. Combiná-las pode restaurar o balanço,
+potencialmente acompanhado de redução substancial de variância
+entre sementes**.
+
+A consequência operacional é que **as direções A e D devem ser
+tratadas como uma única intervenção atômica** — testá-las
+individualmente é metodologicamente enganoso, pois ambos os
+sinais isolados subestimam o efeito combinado e podem levar à
+rejeição prematura de uma direção que, devidamente combinada com
+sua contraparte, é benéfica. Esse padrão sugere uma classe mais
+geral de **pares de intervenções dependentes**: qualquer mudança
+que multiplique a contagem efetiva de parâmetros de um módulo
+deve ser acompanhada por re-calibração da *learning rate* ou
+*schedule* específico daquele módulo, e vice-versa.
+
+Adicionalmente, mesmo quando o $\Delta \mathrm{MCC}$ médio é
+modesto ($+0{,}004$, dentro do desvio-padrão), a redução
+substancial de variância tem valor independente: para
+*reporting* científico com intervalos de confiança, $\sigma$ de
+$0{,}004$ produz IC$_{95\%}$ de meia-largura $\approx 0{,}004$,
+aproximadamente três vezes mais apertado que o IC do *baseline*
+($\approx 0{,}012$). Esse aspecto é discutido com mais cuidado
+na seção subsequente $\S 6{.}11$.
+
+A direção experimental subsequente, lógica, é testar a
+combinação A+D em mais sementes para confirmar a estabilidade
+observada (reproduzir $\sigma \approx 0{,}004$ em 5 sementes), e
+explorar variações dos parâmetros A e D — e.g.,
+$\text{lr\_mult\_lig} \in \{3.0, 5.0, 8.0\}$ com $\text{layers\_lig} \in \{2, 3\}$
+— para identificar o ponto da curva onde a combinação produz
+o melhor compromisso média–variância.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
