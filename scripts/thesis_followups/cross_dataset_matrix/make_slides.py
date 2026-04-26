@@ -42,17 +42,33 @@ MODEL_LABELS = {
 # matching the standard tikzpicture layouts in capitulo5/apendices.
 MODEL_ORDER = ["dtkinase", "conplex", "drugban", "graphban"]
 
-# Canonical color palette aligned with thesis preamble
-# (\definecolor in tese_lncc.tex):
-#   protcol = #2E86AB (azul proteína)  → DT-Kinase
-#   ligcol  = #E8630A (laranja ligante) → DrugBAN
-#   bancol  = #00897B (teal BAN)        → GraphBAN
-#   violet  = TikZ default purple       → ConPLex (matplotlib hex equivalent)
+# Canonical color palette EQUIVALENT to TikZ tikzpicture style used in
+# capitulo5/apendices (fill=color!N, draw=color!N+15). Each color blended
+# with white to match TikZ's `color!N` mixing convention:
+#
+#   TikZ token       | base hex (definecolor)  | matplotlib FILL (color!N white-blend)
+#   ---------------- | ----------------------- | -------------------------------------
+#   protcol!55  →    | #2E86AB                 | #8CBCD1   (DT-Kinase fill)
+#   violet!45   →    | #8F00FF (xcolor violet) | #CC8CFF   (ConPLex fill)
+#   ligcol!55   →    | #E8630A                 | #F3A978   (DrugBAN fill)
+#   bancol!45   →    | #00897B                 | #8CCAC3   (GraphBAN fill)
+#
+# Edge colors use the corresponding `!70`/`!65` (more saturated) value:
+#   protcol!70  →    | #2E86AB → #6CA8C0  (DT-Kinase edge)
+#   violet!65   →    | #8F00FF → #B559FF  (ConPLex edge)
+#   ligcol!70   →    | #E8630A → #EF8B49  (DrugBAN edge)
+#   bancol!65   →    | #00897B → #59B0A5  (GraphBAN edge)
 MODEL_COLORS = {
-    "dtkinase": "#2E86AB",
-    "conplex":  "#9467BD",   # violet equivalent (TikZ violet ≈ purple)
-    "drugban":  "#E8630A",
-    "graphban": "#00897B",
+    "dtkinase": "#8CBCD1",
+    "conplex":  "#CC8CFF",
+    "drugban":  "#F3A978",
+    "graphban": "#8CCAC3",
+}
+MODEL_EDGE_COLORS = {
+    "dtkinase": "#6CA8C0",
+    "conplex":  "#B559FF",
+    "drugban":  "#EF8B49",
+    "graphban": "#59B0A5",
 }
 
 MODEL_NOTES = {
@@ -208,20 +224,23 @@ def _bar(summaries: dict, key: str, title: str, out_path: Path,
     labels = [MODEL_LABELS.get(m, m) for m, _ in items]
     vals = [v for _, v in items]
     colors = [MODEL_COLORS.get(m, "#888888") for m, _ in items]
+    edge_colors = [MODEL_EDGE_COLORS.get(m, "#444444") for m, _ in items]
     fig, ax = plt.subplots(figsize=(7.0, 4.2))
-    bars = ax.bar(labels, vals, color=colors, edgecolor="black", linewidth=0.5)
+    # Match TikZ style: fill=color!N (blended), draw=color!N+15 (saturated).
+    bars = ax.bar(labels, vals, color=colors, edgecolor=edge_colors, linewidth=1.2)
 
     if key == "drop":
         # Negative bars (perda em transferência). Eixo Y fixado em
         # [-0.5, 0] para padrão visual consistente; labels DENTRO das
-        # barras (centralizados em branco bold) para evitar overflow.
+        # barras em texto preto bold (cores TikZ-blended são claras
+        # demais para texto branco — preto contrasta melhor).
         ax.set_ylabel("Δ MCC (off − diag)", fontsize=11)
         ax.set_ylim(-0.5, 0.0)
         for b, v in zip(bars, vals):
             label_y = v * 0.5
             ax.text(b.get_x() + b.get_width() / 2, label_y, f"{v:.3f}",
                     ha="center", va="center", fontsize=10,
-                    color="white", fontweight="bold")
+                    color="black", fontweight="bold")
     else:
         ax.set_ylabel("MCC", fontsize=11)
         ax.set_ylim(0.0, 1.0)
