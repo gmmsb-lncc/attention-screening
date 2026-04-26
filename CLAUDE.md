@@ -126,6 +126,10 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 | `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines F1** |
 | `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 (empate, single host) | claim σ=0.004 RETRATADO (grid d02 σ=0.037); lição 19 |
 | `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | regrediu (~0.508 ± 0.045) | §6.12 — capacidade extra sem LR matching, lição 19 reaplica |
+| `configs/v7_ban_res_lr.yaml` | A + C + F + BAN-residual + BAN_LR_MULT=5 | regrediu (0.511 ± 0.046, NH 2-seed d03) | §6.12.1 — LR-boost não recupera; gargalo é gate multiplicativo (α·W) |
+| `configs/v7_plus_F_adv.yaml` | A + C + F + CDAN adversarial DA (corpus=all) | em execução d02 | requer batches H+NH para sinal não-zero |
+| `configs/v7_plus_F_morgan.yaml` | A + C + F + Morgan FP topológico | regrediu (-0.085 MCC) | proxy GCN não recuperou DrugBAN signal — refutado d01 |
+| `configs/v7_plus_F_coral.yaml` | A + C + F + CORAL covariance match (corpus=all) | em execução d01 | mecanismo ortogonal a CDAN, sem head adversarial |
 | `configs/v7_rope.yaml` | A + C + F + 2D RoPE per-modality | regrediu (~0.506 adj, 0.497 ± 0.022 d02) | §6.14 — category error cross-modal, lição 22 |
 | `configs/v7_asymF.yaml` | A + C + F + asym adapter | regredido (0.461 ± 0.028) | confounded com §6.5; redundante após lição 19 |
 | `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | **DESCARTADO** (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
@@ -144,7 +148,10 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 - **§6.5 fixes** (pre-norm + LoRA gates + zero-init self-attn): ✗ REJEITADO (lição 17).
 - **Direção A** (asimetria estrutural lig adapter): `_ADAPTER_LAYERS_LIG=2`, `_ADAPTER_ATTN_HEADS_LIG=12`. Atomicamente acoplado a Direção D (lição 19).
 - **Direção D** (asimetria LR adapter): `_ADAPTER_LR_MULT_LIG=5.0`, `_ADAPTER_LR_MULT_PROT=2.0`. Atomicamente acoplado a Direção A (lição 19).
-- **BAN-residual** (lição 12 reformulada): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1`. ⏳ pendente.
+- **BAN-residual** (lição 12 reformulada): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1`. ✗ REJEITADO em todas as parametrizações (vanilla §6.12 e LR-boosted §6.12.1).
+- **CDAN adversarial DA**: `BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA=0.1`, requer `CORPUS=all`. ⏳ d02.
+- **CORAL DA** (covariance match, sem GRL): `BENCHMARK_LEVEL4CNN_CORAL_LAMBDA=0.1`, requer `CORPUS=all`. ⏳ d01.
+- **Morgan FP** (proxy GCN): `BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR=...`. ✗ REJEITADO (-0.085 MCC).
 
 **Runners disponíveis** (todos em `scripts/v8/`):
 
