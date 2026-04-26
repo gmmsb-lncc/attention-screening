@@ -129,6 +129,52 @@ class ContrastiveLoss(nn.Module):
 # ======================================================================
 
 
+class _GradientReversalFn(torch.autograd.Function):
+    """Gradient Reversal Layer (Ganin & Lempitsky, ICML 2015).
+
+    Forward: identity. Backward: multiplies gradient by -lambd.
+    Used to flip gradient sign on the domain branch so the encoder
+    learns to PRODUCE features that confuse the domain classifier
+    (i.e., domain-invariant features).
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, lambd: float) -> torch.Tensor:
+        ctx.lambd = float(lambd)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return -ctx.lambd * grad_output, None
+
+
+class DomainAdversarialHead(nn.Module):
+    """Small MLP that predicts domain (corpus) from pooled features.
+
+    The encoder side passes through a Gradient Reversal Layer, so
+    optimising the domain CE loss makes the encoder learn features
+    that are INDISTINGUISHABLE between corpora — encouraging
+    cross-corpus transferability (CDAN-style, Long et al. 2018).
+
+    Designed to be plugged onto the HierPool output (~64-d vector)
+    of InteractionMapCNN. Predicts one of {human, non_human, all}
+    by default (3 classes).
+    """
+
+    def __init__(self, in_dim: int, n_domains: int = 3, hidden: int = 32, dropout: float = 0.2):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, n_domains),
+        )
+
+    def forward(self, x: torch.Tensor, lambd: float) -> torch.Tensor:
+        x_rev = _GradientReversalFn.apply(x, lambd)
+        return self.head(x_rev)
+
+
 class _AxisAttentionPool(nn.Module):
     """Learnable-query attention pool along seq dimension.
 
@@ -434,6 +480,13 @@ class InteractionMapCNN(nn.Module):
         # not identity-init (rotates from t=0); marginal positional inductive
         # bias for the CNN that processes M_k. head_dim must be even.
         use_rope: bool = False,
+        # Morgan fingerprint topological auxiliary feature (DrugBAN/GraphBAN
+        # GCN proxy). When morgan_n_bits > 0, model expects a `morgan_fp`
+        # tensor of shape [B, n_bits] in forward() and projects it to a
+        # `morgan_proj_dim`-d vector that is CONCATENATED to the HierPool
+        # output before the classifier head.
+        morgan_n_bits: int = 0,
+        morgan_proj_dim: int = 32,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -448,9 +501,18 @@ class InteractionMapCNN(nn.Module):
         self.use_adapter = use_adapter
         self.contrastive_dim = contrastive_dim
         self.cosine_feat = cosine_feat
+        self.morgan_n_bits = int(morgan_n_bits) if morgan_n_bits else 0
+        self.morgan_proj_dim = int(morgan_proj_dim) if morgan_proj_dim else 0
+        if self.morgan_n_bits > 0 and self.morgan_proj_dim > 0:
+            self.morgan_proj = nn.Sequential(
+                nn.Linear(self.morgan_n_bits, self.morgan_proj_dim),
+                nn.GELU(),
+                nn.LayerNorm(self.morgan_proj_dim),
+            )
         self._z_prot: torch.Tensor | None = None
         self._z_lig: torch.Tensor | None = None
         self._cos_sim_feat: torch.Tensor | None = None
+        self._morgan_feat: torch.Tensor | None = None
 
         # --- Embedding adapters (optional, asymmetric capacity) -------
         # Resolve per-side overrides. None falls back to symmetric value.
@@ -620,7 +682,9 @@ class InteractionMapCNN(nn.Module):
             )
             self.pool = _HierarchicalPool(cnn_channels, num_heads=pool_num_heads)
             self.dropout = nn.Dropout(dropout)
-            clf_in = cnn_channels + (1 if cosine_feat else 0)
+            clf_in = cnn_channels + (1 if cosine_feat else 0) + (
+                self.morgan_proj_dim if (self.morgan_n_bits > 0 and self.morgan_proj_dim > 0) else 0
+            )
             if mlp_head:
                 self.classifier = nn.Sequential(
                     nn.Linear(clf_in, cnn_channels * 2),
@@ -881,6 +945,18 @@ class InteractionMapCNN(nn.Module):
         if self.cosine_feat and self._cos_sim_feat is not None:
             pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
 
+        # Concatenate Morgan FP topological feature (DrugBAN/GraphBAN
+        # GCN proxy). Self._morgan_feat is set externally via the train
+        # loop before forward() when morgan_fp is in the batch dict.
+        if self.morgan_n_bits > 0 and self._morgan_feat is not None:
+            morgan_proj = self.morgan_proj(self._morgan_feat)  # [B, morgan_proj_dim]
+            pooled = torch.cat([pooled, morgan_proj], dim=-1)
+
+        # Stash pooled vector so external loops (e.g., adversarial DA)
+        # can hook into the pre-classifier representation without a
+        # second forward pass.
+        self._last_pooled = pooled
+
         logits = self.classifier(pooled)  # [B, 1]
 
         return logits
@@ -1005,6 +1081,7 @@ def _platt_calibrate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
@@ -1059,6 +1136,7 @@ def _temperature_calibrate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
@@ -1144,6 +1222,21 @@ def _save_training_checkpoint(
     os.replace(tmp_path, path)
     tqdm.write(f"    Checkpoint saved at epoch {epoch}: {path}")
 
+def _set_aux_features(model: nn.Module, batch: dict, device, dtype) -> None:
+    """Stash auxiliary per-batch features onto the model BEFORE forward.
+
+    InteractionMapCNN.forward() does NOT take aux features as args; it
+    reads `self._morgan_feat` (and similar future hooks) just before the
+    classifier head. This helper extracts those features from `batch`,
+    moves to device, and assigns to the model. Should be called once
+    per batch in train/val/eval loops if Morgan FP injection is enabled.
+    """
+    _orig = getattr(model, "_orig_mod", model)
+    if "morgan_fp" in batch and getattr(_orig, "morgan_n_bits", 0) > 0:
+        _orig._morgan_feat = batch["morgan_fp"].to(
+            device=device, dtype=dtype, non_blocking=True)
+
+
 def _train_interaction_cnn(
     *,
     train_loader: DataLoader,
@@ -1184,6 +1277,8 @@ def _train_interaction_cnn(
     swa_start: int = 0,
     use_ban_residual: bool = False,
     use_rope: bool = False,
+    morgan_n_bits: int = 0,
+    morgan_proj_dim: int = 32,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -1271,7 +1366,26 @@ def _train_interaction_cnn(
         pool_num_heads=pool_num_heads,
         use_ban_residual=use_ban_residual,
         use_rope=use_rope,
+        morgan_n_bits=morgan_n_bits,
+        morgan_proj_dim=morgan_proj_dim,
     ).to(device=device, dtype=dtype)
+
+    # Optional adversarial domain head (CDAN-style). Only constructed when
+    # BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA > 0. Attaches to the pooled
+    # feature vector (HierPool output, dim=cnn_channels[+1 if cosine_feat]).
+    adversarial_lambda = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA", "0.0"))
+    n_domains = int(os.getenv("BENCHMARK_LEVEL4CNN_ADVERSARIAL_N_DOMAINS", "2"))
+    pool_out_dim = cnn_channels + (1 if cosine_feat else 0)
+    adversarial_head = None
+    if adversarial_lambda > 0:
+        adversarial_head = DomainAdversarialHead(
+            in_dim=pool_out_dim, n_domains=n_domains,
+        ).to(device=device, dtype=dtype)
+        tqdm.write(
+            f"    Adversarial DA: λ_max={adversarial_lambda}, n_domains={n_domains}, "
+            f"pool_dim={pool_out_dim} (linear ramp first half of training)"
+        )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -1321,49 +1435,69 @@ def _train_interaction_cnn(
     lr_mult_lig = float(os.getenv(
         "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG", str(adapter_lr_mult)))
 
-    if use_adapter and (lr_mult_prot != 1.0 or lr_mult_lig != 1.0):
-        if lr_mult_prot == lr_mult_lig:
-            adapter_params = (
-                list(model.prot_adapter.parameters())
-                + list(model.lig_adapter.parameters())
-            )
-            adapter_ids = {id(p) for p in adapter_params}
-            other_params = [
-                p for p in model.parameters()
-                if id(p) not in adapter_ids and p.requires_grad
-            ]
-            optimizer = torch.optim.AdamW([
-                {"params": adapter_params, "lr": lr * lr_mult_prot},
-                {"params": other_params,   "lr": lr},
-            ], weight_decay=weight_decay,
-               fused=(device.type == 'cuda' and not use_double))
-            tqdm.write(
-                f"    Differential LR (symmetric): adapter={lr * lr_mult_prot:.2e}, "
-                f"other={lr:.2e} (mult={lr_mult_prot}x)"
-            )
-        else:
-            prot_params = list(model.prot_adapter.parameters())
-            lig_params = list(model.lig_adapter.parameters())
-            adapter_ids = {id(p) for p in prot_params + lig_params}
-            other_params = [
-                p for p in model.parameters()
-                if id(p) not in adapter_ids and p.requires_grad
-            ]
-            optimizer = torch.optim.AdamW([
-                {"params": prot_params,  "lr": lr * lr_mult_prot},
-                {"params": lig_params,   "lr": lr * lr_mult_lig},
-                {"params": other_params, "lr": lr},
-            ], weight_decay=weight_decay,
-               fused=(device.type == 'cuda' and not use_double))
-            tqdm.write(
-                f"    Differential LR (asymmetric): "
-                f"prot_adapter={lr * lr_mult_prot:.2e} ({lr_mult_prot}x), "
-                f"lig_adapter={lr * lr_mult_lig:.2e} ({lr_mult_lig}x), "
-                f"other={lr:.2e}"
-            )
-    else:
+    # Optional dedicated LR multiplier for BAN-residual params (W_k + α_k):
+    # complements Lição 19 (capacity↔LR atomicidade) for BAN-residual case.
+    ban_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_BAN_LR_MULT", "1.0"))
+
+    use_per_side = use_adapter and (lr_mult_prot != 1.0 or lr_mult_lig != 1.0)
+    use_ban_lr   = use_ban_residual and ban_lr_mult != 1.0
+
+    if use_per_side or use_ban_lr:
+        param_groups = []
+        claimed_ids = set()
+
+        # Per-side adapter param groups (Direção D).
+        if use_per_side:
+            if lr_mult_prot == lr_mult_lig:
+                adapter_params = (
+                    list(model.prot_adapter.parameters())
+                    + list(model.lig_adapter.parameters())
+                )
+                claimed_ids.update(id(p) for p in adapter_params)
+                param_groups.append({"params": adapter_params, "lr": lr * lr_mult_prot})
+            else:
+                prot_params = list(model.prot_adapter.parameters())
+                lig_params = list(model.lig_adapter.parameters())
+                claimed_ids.update(id(p) for p in prot_params + lig_params)
+                param_groups.append({"params": prot_params, "lr": lr * lr_mult_prot})
+                param_groups.append({"params": lig_params,  "lr": lr * lr_mult_lig})
+
+        # BAN-residual params (W_k bilinear matrices + α_k scalar gates).
+        if use_ban_lr:
+            ban_params = list(model.ban_alphas.parameters()) + list(model.ban_weights.parameters())
+            ban_params = [p for p in ban_params if id(p) not in claimed_ids]
+            claimed_ids.update(id(p) for p in ban_params)
+            param_groups.append({"params": ban_params, "lr": lr * ban_lr_mult})
+
+        # Everything else (including adversarial_head if present).
+        other_params = [
+            p for p in model.parameters()
+            if id(p) not in claimed_ids and p.requires_grad
+        ]
+        if adversarial_head is not None:
+            other_params += list(adversarial_head.parameters())
+        param_groups.append({"params": other_params, "lr": lr})
+
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr, weight_decay=weight_decay,
+            param_groups, weight_decay=weight_decay,
+            fused=(device.type == 'cuda' and not use_double),
+        )
+        msg = ["    Differential LR:"]
+        if use_per_side:
+            if lr_mult_prot == lr_mult_lig:
+                msg.append(f"adapter={lr * lr_mult_prot:.2e} ({lr_mult_prot}x)")
+            else:
+                msg.append(f"prot={lr*lr_mult_prot:.2e}({lr_mult_prot}x), lig={lr*lr_mult_lig:.2e}({lr_mult_lig}x)")
+        if use_ban_lr:
+            msg.append(f"ban={lr*ban_lr_mult:.2e}({ban_lr_mult}x)")
+        msg.append(f"other={lr:.2e}")
+        tqdm.write(", ".join(msg))
+    else:
+        all_params = list(model.parameters())
+        if adversarial_head is not None:
+            all_params += list(adversarial_head.parameters())
+        optimizer = torch.optim.AdamW(
+            all_params, lr=lr, weight_decay=weight_decay,
             fused=(device.type == 'cuda' and not use_double),
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -1483,6 +1617,7 @@ def _train_interaction_cnn(
                 y = y * (1 - label_smooth) + label_smooth * 0.5
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                _set_aux_features(model, batch, device, dtype)
                 logits = model(p, l, pm, lm)
                 loss = criterion(logits, y)
 
@@ -1493,6 +1628,25 @@ def _train_interaction_cnn(
                         _orig._z_prot, _orig._z_lig, y,
                     )
                     loss = loss + contrastive_weight * c_loss
+
+                # Adversarial domain alignment (CDAN-style, Ganin 2015):
+                # only active when adversarial_lambda > 0 AND batch has
+                # both H+NH samples (joint training on `all` corpus).
+                if (adversarial_head is not None and adversarial_lambda > 0
+                        and "domain" in batch):
+                    domain = batch["domain"].to(device)
+                    valid_dom = domain >= 0
+                    if valid_dom.any():
+                        # λ schedule: linearly ramp from 0 to lambda_max
+                        # over the first half of training to avoid early
+                        # gradient noise dominating the classification.
+                        progress = min(1.0, epoch / max(epochs * 0.5, 1.0))
+                        lambd = adversarial_lambda * progress
+                        pooled = _orig._last_pooled
+                        domain_logits = adversarial_head(pooled[valid_dom], lambd)
+                        adv_loss = F.cross_entropy(
+                            domain_logits, domain[valid_dom])
+                        loss = loss + lambd * adv_loss
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
@@ -1522,6 +1676,7 @@ def _train_interaction_cnn(
                 y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                    _set_aux_features(model, batch, device, dtype)
                     logits = model(p, l, pm, lm)
                     val_loss += criterion(logits, y).item()
 
@@ -1897,6 +2052,14 @@ class Level4CNNRunner(BaseLevelRunner):
         use_ban_residual = os.getenv("BENCHMARK_LEVEL4CNN_BAN_RESIDUAL", "0") == "1"
         # 2D RoPE (per-modality 1D RoPE applied before cross dot product).
         use_rope = os.getenv("BENCHMARK_LEVEL4CNN_USE_ROPE", "0") == "1"
+        # Morgan FP topological feature (DrugBAN/GraphBAN GCN proxy).
+        # Activate via BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR (cache path).
+        # n_bits + proj_dim resolved here from env so model gets right dims.
+        morgan_n_bits = (
+            int(os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_BITS", "1024"))
+            if os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR") else 0
+        )
+        morgan_proj_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_PROJ", "32"))
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1939,6 +2102,8 @@ class Level4CNNRunner(BaseLevelRunner):
             checkpoint_every=checkpoint_every,
             use_ban_residual=use_ban_residual,
             use_rope=use_rope,
+            morgan_n_bits=morgan_n_bits,
+            morgan_proj_dim=morgan_proj_dim,
         )
 
         # Unwrap torch.compile wrapper (if any) to access nn.Module API
