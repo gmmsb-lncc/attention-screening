@@ -281,6 +281,13 @@ def _resolve_matrix_dirs(
 
     For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
     because naming conventions vary across machines and datasets.
+
+    Optional env overrides (PREPENDED to search list, fallback to defaults):
+      BENCHMARK_LEVEL4CNN_PROTEIN_CACHE_OVERRIDE
+      BENCHMARK_LEVEL4CNN_LIGAND_CACHE_OVERRIDE
+    Use these to point at LoRA-fine-tuned embedding caches without losing
+    the ability to fall back on canonical caches if a specific molecule
+    is missing.
     """
     if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
@@ -296,6 +303,13 @@ def _resolve_matrix_dirs(
         build = Path(bp) / embedding_name / "build"
         ligand_dirs.append(build / "ligand_matrices")
         ligand_dirs.append(build / "molformer_matrix")
+
+    prot_override = os.getenv("BENCHMARK_LEVEL4CNN_PROTEIN_CACHE_OVERRIDE")
+    lig_override = os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_CACHE_OVERRIDE")
+    if prot_override:
+        protein_dirs = [Path(prot_override)] + protein_dirs
+    if lig_override:
+        ligand_dirs = [Path(lig_override)] + ligand_dirs
     return protein_dirs, ligand_dirs
 
 
