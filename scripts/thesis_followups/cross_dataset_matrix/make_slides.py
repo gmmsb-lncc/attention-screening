@@ -143,19 +143,33 @@ def _compute_summaries(data: dict) -> dict:
 def _bar(summaries: dict, key: str, title: str, out_path: Path,
          invert_sort: bool = False) -> None:
     items = [(m, s[key]) for m, s in summaries.items()]
+    # For "drop": flip sign to plot as negative (perda em transferência).
+    if key == "drop":
+        items = [(m, -v) for m, v in items]
     items.sort(key=lambda x: x[1], reverse=not invert_sort)
     labels = [MODEL_LABELS.get(m, m) for m, _ in items]
     vals = [v for _, v in items]
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"][:len(items)]
     fig, ax = plt.subplots(figsize=(6.0, 3.6))
     bars = ax.bar(labels, vals, color=colors)
-    ax.set_ylabel("MCC" if key != "drop" else "Δ MCC (diag − off)", fontsize=10)
+
+    # Per-key axis configuration:
+    #   off_mean / diag_mean: MCC values bounded to [0, 1] for readability
+    #   drop: plotted as negative (perda em transferência), ylim from min to 0
+    if key == "drop":
+        ax.set_ylabel("Δ MCC (off − diag)", fontsize=10)
+        ax.set_ylim(min(vals) - 0.05, 0.0)
+    else:
+        ax.set_ylabel("MCC", fontsize=10)
+        ax.set_ylim(0.0, 1.0)
     ax.set_title(title, fontsize=12)
-    ax.set_ylim(min(0.0, min(vals) - 0.05), max(vals) + 0.08)
     ax.axhline(0.0, color="black", linewidth=0.5)
     for b, v in zip(bars, vals):
-        ax.text(b.get_x() + b.get_width() / 2, v + 0.005, f"{v:.3f}",
-                ha="center", va="bottom", fontsize=9)
+        # Annotation position: above bar for positive, below for negative
+        offset = 0.005 if v >= 0 else -0.005
+        va = "bottom" if v >= 0 else "top"
+        ax.text(b.get_x() + b.get_width() / 2, v + offset, f"{v:.3f}",
+                ha="center", va=va, fontsize=9)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
