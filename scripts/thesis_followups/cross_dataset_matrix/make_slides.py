@@ -112,6 +112,33 @@ def _heatmap(model: str, trains: dict, out_path: Path) -> None:
     plt.close(fig)
 
 
+def _merge_diag(off_data: dict, diag_data: dict) -> dict:
+    """Merge two cross_matrix.json sources (one with diagonals, one with
+    off-diagonals). Missing aggregates from the primary are filled from the
+    secondary. Used when summary/cross_matrix.json has only off-diagonal cells
+    and a separate summary_diag_only/cross_matrix.json holds the diagonals.
+    """
+    merged = {}
+    for model in set(off_data) | set(diag_data):
+        if model.startswith("_"):
+            continue
+        merged[model] = {}
+        a = off_data.get(model, {}) if isinstance(off_data.get(model, {}), dict) else {}
+        b = diag_data.get(model, {}) if isinstance(diag_data.get(model, {}), dict) else {}
+        for tr in set(a) | set(b):
+            merged[model][tr] = {}
+            for te in set(a.get(tr, {})) | set(b.get(tr, {})):
+                ca = a.get(tr, {}).get(te, {})
+                cb = b.get(tr, {}).get(te, {})
+                if isinstance(ca, dict) and ca.get("aggregate"):
+                    merged[model][tr][te] = ca
+                elif isinstance(cb, dict) and cb.get("aggregate"):
+                    merged[model][tr][te] = cb
+                else:
+                    merged[model][tr][te] = ca or cb
+    return merged
+
+
 def _compute_summaries(data: dict) -> dict:
     out = {}
     for model, trains in data.items():
@@ -509,6 +536,10 @@ def _compile(tex_path: Path) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--json", default="results/cross_matrix/summary/cross_matrix.json")
+    ap.add_argument("--diag-json", default=None,
+                    help="Optional secondary JSON containing diagonal cells "
+                         "(e.g. results/cross_matrix/summary_diag_only/cross_matrix.json). "
+                         "Merged into the primary --json before computing summaries.")
     ap.add_argument("--out-dir", default="slides/cross_matrix")
     ap.add_argument("--compile", action="store_true")
     args = ap.parse_args()
@@ -519,6 +550,17 @@ def main() -> int:
         return 2
     with jp.open() as f:
         data = json.load(f)
+
+    # Optional auto-merge with diagonal source if present and primary lacks them.
+    if args.diag_json:
+        diag_path = Path(args.diag_json)
+        if not diag_path.exists():
+            print(f"[fatal] --diag-json {diag_path} not found.", file=sys.stderr)
+            return 2
+        with diag_path.open() as f:
+            diag_data = json.load(f)
+        data = _merge_diag(data, diag_data)
+        print(f"[info] merged diagonal data from {diag_path}")
 
     out_dir = Path(args.out_dir)
     fig_dir = out_dir / "figures"
