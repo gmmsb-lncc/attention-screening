@@ -60,6 +60,9 @@ referenciar este registro.
 | 18 | v7+F + λ=0.5 composite (matched mcc/mcc) 3-seed | **d02** | 3 | 42,123,456 | — | **0,4606 ± 0,0518** | **0,052** | 0,7988 | **−0,056** (cross-host adj.) | suspeita §6.5 prejudicial em treino curto → lição 17 |
 | 19 | **v7+F + ADAPTER_LEGACY=1 (isolation A)** 3-seed | **d01** | 3 | 42,123,456 | — | **0,5266 ± 0,0103** | **0,010** | 0,8105 | **+0,000** vs v7+F histórico | **HIPÓTESE 17 CONFIRMADA** — reproduz canônico exato |
 | 20 | v7+F + ADAPTER_LEGACY=0 (isolation B, §6.5 ON) 3-seed | d02 | 3 | 42,123,456 | — | 0,4652 ± 0,0563 | 0,056 | 0,7780 | −0,053 vs A (cross-host adj) | §6.5 culpado: ΔAUROC=−0.033, σ×5.6 |
+| 21 | v7+F + Direção A só (lig 2L/12h, LEGACY default) 3-seed | d01 | 3 | 42,123,456 | — | 0,4996 ± 0,0258 | 0,026 | 0,8025 | −0,027 | params extras no lig sem LR matching → undertrained, σ_recall=0.098 |
+| 22 | v7+F + Direção D só (lig_lr=5x, LEGACY default) 3-seed | d02 | 3 | 42,123,456 | — | 0,4867 ± 0,0222 | 0,022 | ~0,496 (adj) | −0,031 | LR alta sem capacidade extra → overshoot/oscila |
+| 23 | **v7+F + Direção A+D combo (lig 2L/12h + lr=5x) 3-seed** | d03 | 3 | 42,123,456 | — | **0,5215 ± 0,0041** | **0,004** | **~0,530 (adj)** | **+0,004** | **lição 19: A e D são mutuamente dependentes; combo restaura balanço + σ excelente** |
 
 ---
 
@@ -166,6 +169,82 @@ notes: |
   típico recall~0.85, precision~0.73).
 
   Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
+```
+
+### Direções A, D, A+D — assimetria capacity vs LR (lição 19) — 3-seed paralelo
+
+```yaml
+A_solo:
+  config: configs/v7_plus_F.yaml + env asym
+  host: diamante-01
+  cudnn: ON (LEGACY=1 default)
+  env:
+    BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG: 2
+    BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG: 12
+  results:
+    accuracy:  0.747356 ± 0.012055
+    mcc:       0.499644 ± 0.025786   # -0.027 vs base 0.5266
+    f1:        0.775158 ± 0.029286
+    precision: 0.735913 ± 0.031972
+    recall:    0.826519 ± 0.097614   # σ EXTREMO 0.098
+    auc:       0.802528 ± 0.007902
+  diagnosis: |
+    Capacidade extra no lig adapter (3× params) sem LR matching
+    → params under-trained → σ_recall 0.098 = 4× baseline.
+
+D_solo:
+  config: configs/v7_plus_F.yaml + env LR asym
+  host: diamante-02
+  cudnn: OFF (LEGACY=1 default)
+  env:
+    BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT: 2.0
+    BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG: 5.0
+  results:
+    accuracy:  0.744027 ± 0.010581
+    mcc:       0.486687 ± 0.022158   # cross-host adj: ~0.496, -0.031 vs base
+    f1:        0.771166 ± 0.016997
+    precision: 0.734591 ± 0.010081
+    recall:    0.812891 ± 0.045617
+    auc:       0.809263 ± 0.010351
+  diagnosis: |
+    LR 2.5× sem capacidade extra → overshoot/oscila no espaço pequeno
+    de params do lig adapter base → σ_recall 0.046 (1.8× baseline).
+
+AD_combo:
+  config: configs/v7_plus_F.yaml + ambos envs
+  host: diamante-03
+  cudnn: OFF (LEGACY=1 default)
+  env:
+    BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG: 2
+    BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG: 12
+    BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT: 2.0
+    BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG: 5.0
+  results:
+    accuracy:  0.758715 ± 0.002224   # σ_acc 5× baseline
+    mcc:       0.521457 ± 0.004070   # cross-host adj: ~0.530, +0.004 vs base
+    f1:        0.793829 ± 0.002257   # σ_F1 2× baseline
+    precision: 0.727475 ± 0.006263
+    recall:    0.873665 ± 0.012566   # σ_recall 0.013 = 2× baseline
+    auc:       0.795413 ± 0.002543
+  diagnosis: |
+    A+D restaura razão "magnitude update por param" próxima do baseline.
+    Capacidade extra absorve LR maior → trajetória determinística.
+    σ_MCC 2.5× MELHOR que baseline (0.004 vs 0.010).
+    Δ MCC marginal mas redução de variância é o sinal forte.
+
+lesson_19: |
+  Capacidade arquitetural e magnitude de otimização sobre o mesmo
+  módulo são MUTUAMENTE DEPENDENTES em treino curto (~30 epochs).
+  Aplicar uma sem a outra desbalanceia gradiente-per-param e regride.
+  Combinar restaura balanço, possivelmente com bonus de σ.
+
+  Implicação: testar A e D individualmente é metodologicamente
+  enganoso. Devem ser tratados como uma única intervenção atômica.
+
+next_step: |
+  Validar A+D em 5-seed (reproduzir σ=0.004) + grid sweep
+  lr_mult_lig ∈ {3, 5, 8} × layers_lig ∈ {2, 3} para encontrar
+  ponto ótimo da curva média-variância.
 ```
 
 ### Isolation §6.5 — runs A (LEGACY=1) e B (LEGACY=0) — 3-seed paralelo
