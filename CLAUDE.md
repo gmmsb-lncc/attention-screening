@@ -94,7 +94,7 @@ bash run_benchmark.sh                         # shell orchestrator
 
 ## DT-Kinase optimization variants (2026-04)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (19 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes harm v7+F by −0.053 MCC. **Default flipped**: `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` is now the default. v7+F = 0.5266 ± 0.010 on d01. **NEW (§6.10, lição 19)**: capacity (Direção A) and LR (Direção D) on same module are mutually dependent — combo A+D = 0.530 (adj) ± **0.004** (2.5× variance reduction vs base); A or D alone regress (-0.027/-0.031).
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (20 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes harm v7+F by −0.053 MCC. **Default flipped**: `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` is now the default. v7+F = 0.5266 ± 0.010 on d01. **NEW (§6.10, lição 19)**: capacity (Direção A) and LR (Direção D) on same module are mutually dependent — combo A+D = 0.530 (adj) ± **0.004** (2.5× variance reduction vs base); A or D alone regress (-0.027/-0.031). **REFUTED (§6.11, lição 20)**: LoRA-MLM-offline on MoLFormer top-2 layers regresses by −0.025 MCC, AUROC −0.010 (encoder literally worse). MLM objective misaligned with downstream task; abandon offline approach, pivot to LoRA-end-to-end if pursued.
 
 | Config | Tiers | Status (NH) | Notes |
 |---|---|---|---|
