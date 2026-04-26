@@ -54,8 +54,14 @@ class LoRALinear(nn.Module):
         self.scaling = alpha / rank
         in_f = base.in_features
         out_f = base.out_features
-        self.lora_A = nn.Parameter(torch.empty(rank, in_f))
-        self.lora_B = nn.Parameter(torch.zeros(out_f, rank))
+        # Inherit device + dtype from base layer so attach_lora works AFTER
+        # model.to(device) — otherwise A/B land on CPU and forward errors.
+        device = base.weight.device
+        dtype = base.weight.dtype
+        self.lora_A = nn.Parameter(
+            torch.empty(rank, in_f, device=device, dtype=dtype))
+        self.lora_B = nn.Parameter(
+            torch.zeros(out_f, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -242,6 +248,8 @@ def main():
         rank=args.rank,
         alpha=args.alpha,
     )
+    # Belt-and-suspenders: ensure any newly-created parameters land on device.
+    model.to(device)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_total = sum(p.numel() for p in model.parameters())
     print(f"[lora-ft] wrapped {n_wrapped} Linear modules with LoRA(rank={args.rank}, α={args.alpha})")
