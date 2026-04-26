@@ -154,14 +154,11 @@ def _bar(summaries: dict, key: str, title: str, out_path: Path,
     bars = ax.bar(labels, vals, color=colors, edgecolor="black", linewidth=0.5)
 
     if key == "drop":
-        # Negative bars (perda em transferência). ylim com 20% padding
-        # abaixo de vmin + 10% acima de zero para acomodar anotações.
-        # Texto fica DENTRO da barra (centralizado) em branco para
-        # contraste com a cor da barra. Eixo Y assim sempre mostra
-        # consistência visual independente dos valores absolutos.
+        # Negative bars (perda em transferência). Eixo Y fixado em
+        # [-0.5, 0] para padrão visual consistente; labels DENTRO das
+        # barras (centralizados em branco bold) para evitar overflow.
         ax.set_ylabel("Δ MCC (off − diag)", fontsize=11)
-        vmin = min(vals)
-        ax.set_ylim(vmin * 1.20, abs(vmin) * 0.10)
+        ax.set_ylim(-0.5, 0.0)
         for b, v in zip(bars, vals):
             label_y = v * 0.5
             ax.text(b.get_x() + b.get_width() / 2, label_y, f"{v:.3f}",
