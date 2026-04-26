@@ -873,6 +873,76 @@ direção exploratória — sem ele, todas as comparações
 subsequentes contra $v7+F = 0{,}5260$ são confundidas pela
 mudança não-intencional na semântica do *adapter*.
 
+### 6.9.1. Confirmação empírica — isolamento §6.5 executado
+
+A *flag* `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY` foi implementada
+no *commit* `d17e53f` e o experimento de isolamento foi
+executado em paralelo nos dois hosts disponíveis. As três
+sementes canônicas $\{42, 123, 456\}$ foram aplicadas a cada
+configuração:
+
+| Run | Host | cuDNN | LEGACY | $\mathrm{MCC}_\text{test}$ | $\sigma$ | AUROC | F1 |
+|---|---|---|---|---:|---:|---:|---:|
+| A | `diamante-01` | ON | **1** | $0{,}5266$ | $0{,}010$ | $0{,}811$ | $0{,}797$ |
+| B | `diamante-02` | OFF | $0$ | $0{,}4652$ | $0{,}056$ | $0{,}778$ | $0{,}769$ |
+
+A configuração A — $v7+F$ com o *adapter* revertido ao
+comportamento pré-$\S 6{.}5$ — **reproduziu exatamente o valor
+canônico histórico** $v7+F = 0{,}5260 \pm 0{,}027$ (na verdade
+com $\sigma$ ainda menor, $0{,}010$). A configuração B — $v7+F$
+com $\S 6{.}5$ ativo, sem nenhuma outra modificação — produziu
+o mesmo padrão regressivo observado em $\S 6{.}9$ ($\sim 0{,}46$,
+$\sigma$ alta). Aplicando o ajuste *cross-host* documentado
+($+0{,}009$ MCC para `diamante-02` $\to$ `diamante-01`), o valor
+de B em `diamante-01` projetado seria $\approx 0{,}474$.
+
+A diferença atribuível a $\S 6{.}5$ é, portanto:
+
+- $\Delta \mathrm{MCC} = -0{,}053$ (B$_\text{adj}$ $-$ A)
+- $\Delta \mathrm{AUROC} = -0{,}033$ (modelo *literalmente*
+  pior, não apenas *threshold* mal alinhado)
+- $\sigma_\text{MCC}$ $\times 5{,}6$ ($0{,}010 \to 0{,}056$)
+- $\Delta \mathrm{F1} = -0{,}028$
+- precisão $-0{,}023$, *recall* $-0{,}031$
+
+A magnitude é grande o suficiente para tornar a hipótese 17
+empiricamente sustentada com confiança alta. As três correções
+de $\S 6{.}5$, ao garantirem identidade exata em $t = 0$,
+impedem que o *adapter* contribua de forma útil dentro do
+orçamento de épocas disponível na pipeline atual ($\sim 30$–$50$
+épocas com *patience* $= 15$).
+
+A décima oitava lição metodológica é registrada implicitamente:
+**hipóteses sobre o efeito acumulado de mudanças "individualmente
+defensivas" devem ser validadas empiricamente antes de se
+incorporarem ao código de produção como *default*.** As três
+mudanças de $\S 6{.}5$ — todas justificáveis em primeiros
+princípios e cada uma motivada por um diagnóstico específico —
+foram introduzidas como *default* hardcoded (commits `58805ca`
+e `abc4167`) sem que sua composição fosse testada contra a
+referência canônica. O custo dessa decisão foi quatro
+experimentos subsequentes (`v7_asymF`, `v7+F_adapt`,
+`v7+F_adapt_v2`, `v7+F+\lambda=0{,}5`) cujos resultados
+regressivos foram inicialmente atribuídos a outras causas e
+que precisaram ser revisitados sob essa nova interpretação.
+
+A consequência operacional imediata é a inversão do *default*:
+$\S 6{.}5$ passa a ser *opt-in* (`LEGACY=0` deve ser explicitado
+quando se deseja usá-lo) e a *flag* `LEGACY=1` torna-se
+implícita em qualquer execução que não especifique o contrário.
+Essa inversão preserva o *commit* `d17e53f` como o ponto em que
+a mudança de regime aconteceu — código histórico continua
+reprodutível por meio de `git checkout` no commit anterior, e
+toda execução nova passa a herdar o *adapter* canônico de $v7+F$.
+
+A trajetória de otimização retoma, portanto, com $v7+F$
+empiricamente confiável em $0{,}5266 \pm 0{,}010$ no host
+`diamante-01`. A direção experimental subsequente ($\S 6{.}10$)
+contempla três famílias de modificações que evitam o erro
+metodológico cometido com $\S 6{.}5$: cada modificação será
+introduzida em isolamento e testada contra o *baseline* recém
+re-validado antes de ser combinada com qualquer outra.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a
