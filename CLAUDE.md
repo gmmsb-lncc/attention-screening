@@ -157,15 +157,20 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 
 | Script | Propósito |
 |---|---|
-| `run_v7_yaml.sh` | runner genérico, lê `V7_CONFIG`, `CORPUS`, `SEEDS` env |
+| `run_v7_yaml.sh` | runner genérico, lê `V7_CONFIG` (default `configs/v7_plus_F.yaml` desde commit `4831032`), `CORPUS`, `SEEDS` env |
 | `run_v7_plus_F_adapt.sh` | v7+F + §6.5 + matched F1 (THR=SEL=f1) |
 | `run_v7_plus_F_adapt_v2.sh` | v7+F + §6.5 + THR=f1 SEL=mcc — **DESCARTADO** |
 | `run_v7_ban_res.sh` | v7+F + BAN-residual α-gate (lição 12 reformulada) |
 | `run_AD_grid_d02.sh` | grid 6 cells: lr_mult_lig {3,5,8} × layers_lig {2,3} |
 | `run_v7_lora_d03.sh` | LoRA-MLM offline pipeline (3 stages) — **REFUTADO** |
+| `run_v7_morgan_d01.sh` | v7+F + Morgan FP topológico — **REFUTADO** (-0.085 MCC) |
+| `run_v7_adv_d02.sh` | v7+F + CDAN adversarial DA (corpus=all) — ⏳ d02 em execução |
+| `run_v7_banres_lr_d03.sh` | v7+F + BAN-residual + BAN_LR_MULT=5 — **REFUTADO** Lição 23 |
+| `run_v7_coral_d01.sh` | v7+F + CORAL covariance match (corpus=all) — ⏳ d01 em execução |
 | `aggregate_AD_grid.py` | aggregator multi-corpus do grid sweep |
 | `lora_finetune_molformer.py` | LoRA MLM trainer (standalone) |
 | `recache_molformer_lora.py` | inference + cache embeddings via LoRA delta |
+| `precompute_ligand_morgan.py` | precompute Morgan FP por chembl_id (RDKit) |
 | `run_v7_pro_validation.sh` | validação NH→Human sequencial 5-seed |
 | `run_ablation_E_F_3seeds.sh` | ablation E vs F isolada |
 
@@ -231,7 +236,10 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
   - Decoupling testado e refutado (lição 16/`v7+F_adapt_v2`).
 - **Per-side adapter LR multipliers** (lição 19): `BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT` e `_LR_MULT_LIG`. Default herda `adapter_lr_mult` do yaml. Direção D = `_LR_MULT_LIG=5.0` (acoplado a Direção A).
 - **Per-side adapter capacity** (Direção A, lição 19): `_ADAPTER_LAYERS_LIG`, `_ADAPTER_ATTN_HEADS_LIG`, idem `_PROT`. Default herda yaml.
-- **BAN-residual** (lição 12 reformulada, pendente): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1` ativa caminho residual gateado por α=0 (identity-init).
+- **BAN-residual** (lição 12 reformulada, REFUTADO §6.12 + §6.12.1): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1` ativa caminho residual gateado por α=0. `BENCHMARK_LEVEL4CNN_BAN_LR_MULT` (default 1.0) aplica LR-boost dedicado em W_k+α_k.
+- **CDAN adversarial DA** (em validação d02): `BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA` (default 0.0) ativa DomainAdversarialHead com Gradient Reversal. `_ADVERSARIAL_N_DOMAINS` (default 2). Requer `CORPUS=all` para batches mistos.
+- **CORAL DA** (em validação d01): `BENCHMARK_LEVEL4CNN_CORAL_LAMBDA` (default 0.0) ativa loss `||Cov(f_dom0)-Cov(f_dom1)||²_F` sobre pooled features. Sem head adversarial, sem GRL. Requer `CORPUS=all`.
+- **Morgan FP auxiliary** (REFUTADO -0.085 MCC): `BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR=<path>` aciona projeção `_MORGAN_BITS` (default 1024) → `_MORGAN_PROJ` (default 32) concatenada ao pooled vector.
 - **Composite checkpoint criterion** (lição 14): `score = val_mcc - λ·val_loss` via `_SELECTION_LAMBDA_LOSS` (default 0 = pure val_mcc).
 - **Numerical regime**: fp32 + AMP off + TF32 off (auto quando `no_amp=true + double=false`).
 - **Calibração**: Platt on val (default `_PLATT=1`). Temperature opt-in (`_TEMPERATURE=1`).
