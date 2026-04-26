@@ -1063,6 +1063,116 @@ $\text{lr\_mult\_lig} \in \{3.0, 5.0, 8.0\}$ com $\text{layers\_lig} \in \{2, 3\
 — para identificar o ponto da curva onde a combinação produz
 o melhor compromisso média–variância.
 
+## 6.11. LoRA-MLM offline em MoLFormer — refutação (lição 20)
+
+A primeira aplicação concreta da direção pendente listada em
+$\S 6{.}3$ — LoRA (Hu et al. 2022) sobre as duas camadas
+superiores de MoLFormer-XL-both-10pct, com adaptação por
+*continued MLM pretraining* num conjunto de SMILES do *train*
+*split* — foi executada em `diamante-03` em 26-04-2026 com a
+seguinte configuração: rank $r = 8$, $\alpha = 16$, top-2
+camadas do *encoder*, módulos alvo
+$\{Q, K, V, O\}$ por camada, 10 épocas de MLM com taxa de
+mascaramento $0{,}15$, *batch size* $64$, *learning rate*
+$5 \times 10^{-4}$, otimizador AdamW com *cosine schedule* e
+*warmup* $6\%$. O resultado foi $\mathrm{MCC}_\text{test} = 0{,}4933
+\pm 0{,}0321$, AUROC $= 0{,}8011$, F1 $= 0{,}7860$. Ajustando pelo
+*drift* *cross-host* documentado ($+0{,}009$ MCC para
+`diamante-02`/`diamante-03` $\to$ `diamante-01`), o valor
+projetado em `diamante-01` é $\approx 0{,}502$. Comparado ao
+*baseline* $v7+F$ ($0{,}5266 \pm 0{,}010$), o resultado é uma
+regressão de $-0{,}025$ MCC, $-0{,}010$ AUROC e $\sigma$
+três vezes pior.
+
+A regressão é interpretada como falsificação da hipótese
+implícita em $\S 6{.}3$ (LoRA $+0{,}020$ a $+0{,}040$ MCC
+esperado). Quatro fatores plausíveis convergem para o resultado:
+
+A primeira observação é que **o MoLFormer está já efetivamente
+saturado no objetivo MLM**. O *encoder* foi pré-treinado em
+$1{,}1$ bilhão de SMILES, sob um regime de MLM longo e
+diversificado. O *corpus* de *train* do nosso *benchmark*
+contém apenas $5\,276$ SMILES únicos — cinco ordens de
+magnitude menor. Continuar o objetivo MLM nesse conjunto pequeno
+não introduz sinal pré-treinante adicional não-redundante; é
+muito provável que conduza a *overfit* específico ao conjunto
+particular de 5\,276 moléculas.
+
+A segunda observação, mais central, é que **o objetivo MLM não
+está alinhado com a tarefa discriminativa *downstream***. MLM
+otimiza a probabilidade de prever um *token* mascarado dado o
+restante; a tarefa *downstream* otimiza a separação de pares
+ativos vs inativos via *cross-attention* protein-ligand. As duas
+*loss surfaces* não são monotonamente relacionadas — em
+particular, *features* que ajudam a reconstruir SMILES podem
+ou não ajudar a discriminar bioatividade, e a regressão sugere
+que, sob o conjunto pequeno e redundante de FT, o LoRA *delta*
+desloca as representações em direção dominante de "memorizar
+este conjunto" ao invés de "extrair *features* discriminativas
+generalizáveis". A queda observada em AUROC ($-0{,}010$),
+*métrica que independe do *threshold***, é evidência empírica
+direta de que **a qualidade de *ranking* do modelo regrediu** —
+não é apenas calibração ou *threshold*.
+
+A terceira observação é metodológica: o LoRA, ao preservar
+exatamente os pesos pré-treinados como caminho aditivo
+(*delta* $W' = W + (\alpha/r) BA$), é frequentemente apresentado
+como uma estratégia "segura" de adaptação, sob o argumento de que
+sempre é possível recuperar os pesos originais zerando *B*. Mas
+essa garantia é sobre os pesos do *encoder*, não sobre o uso do
+*encoder* dentro da *pipeline*. Em nossa pipeline, os
+*embeddings* são pré-computados e cacheados, e o *checkpoint*
+LoRA-FT-ed produz um cache diferente do *baseline*. O *adapter*
+e a CNN *downstream* são treinados sobre esse cache; a
+generalização do classificador depende criticamente da
+qualidade do cache. Se o cache está pior — como aqui — a
+"segurança" do LoRA em nível de *encoder* é irrelevante para o
+*downstream*.
+
+A quarta observação aponta para a direção corretiva: **um
+objetivo alinhado à tarefa *downstream* deveria substituir o
+MLM**. Três alternativas concretas são imediatamente viáveis:
+
+1. **LoRA end-to-end** sobre a *loss* da pipeline DT-Kinase:
+   LoRA *params* treinados pela BCE+focal+contrastive
+   *downstream*, simultaneamente com adapter e classificador.
+   Implica carregar MoLFormer dentro da pipeline (não mais um
+   cache de *embeddings*); o custo é aproximadamente $5 \times$
+   o tempo atual de treino. Risco baixo: o gradiente vem
+   diretamente do objetivo correto.
+
+2. **LoRA + multi-task de propriedades químicas**: usar
+   ChemBERTa-2-MTR style alvos (LogP, TPSA, peso molecular,
+   contagem de ligações rotacionáveis), todos computáveis offline
+   via RDKit, como objetivo aux para FT do LoRA. Sem *labels* da
+   tarefa principal — sem *leakage* — mas com pressão por
+   representações *chemistry-aware*. Provavelmente menos
+   discriminativo que (1) mas computacionalmente mais barato.
+
+3. **LoRA + contrastive em pares positivos do *train***: usar
+   pares com $\text{label} = 1$ como pares positivos de um
+   *contrastive loss* unimodal sobre as representações ligante.
+   Aprende discriminação direta ao nível do *encoder*. Risco de
+   *leakage* se os pares positivos forem de *test*; sob *train*
+   apenas, é seguro.
+
+A vigésima lição é registrada: **adaptação de domínio via LoRA
+em *backbone* pré-treinado requer objetivo alinhado à tarefa
+*downstream*. *Continued pretraining* com o objetivo original
+(MLM, em nosso caso) sobre *corpus* pequeno NÃO transfere
+benefícios para a tarefa discriminativa, e pode ativamente
+prejudicá-la se o *corpus* induzir *overfit* específico**. O
+resultado refuta a *naive expectation* de que LoRA é
+universalmente benéfica como mecanismo de domain adaptation; o
+*encoder* não pode ser melhorado para uma tarefa específica sem
+sinal de treinamento da tarefa específica.
+
+A direção experimental imediata é portanto **abandonar a
+abordagem LoRA-MLM-offline-then-cache** e re-implementar a
+adaptação como **LoRA-end-to-end-no-pipeline**, treinada com a
+*loss* DT-Kinase. O custo computacional é aproximadamente
+$5 \times$ o atual, mas o gradiente é correto.
+
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
 Após o resultado regressivo de `v7-pro` em cinco sementes, a

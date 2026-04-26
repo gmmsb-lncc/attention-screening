@@ -63,6 +63,7 @@ referenciar este registro.
 | 21 | v7+F + Direção A só (lig 2L/12h, LEGACY default) 3-seed | d01 | 3 | 42,123,456 | — | 0,4996 ± 0,0258 | 0,026 | 0,8025 | −0,027 | params extras no lig sem LR matching → undertrained, σ_recall=0.098 |
 | 22 | v7+F + Direção D só (lig_lr=5x, LEGACY default) 3-seed | d02 | 3 | 42,123,456 | — | 0,4867 ± 0,0222 | 0,022 | ~0,496 (adj) | −0,031 | LR alta sem capacidade extra → overshoot/oscila |
 | 23 | **v7+F + Direção A+D combo (lig 2L/12h + lr=5x) 3-seed** | d03 | 3 | 42,123,456 | — | **0,5215 ± 0,0041** | **0,004** | **~0,530 (adj)** | **+0,004** | **lição 19: A e D são mutuamente dependentes; combo restaura balanço + σ excelente** |
+| 24 | v7+F + LoRA-MLM offline (rank=8, top-2L, 10 ep MLM) 3-seed | d03 | 3 | 42,123,456 | — | 0,4933 ± 0,0321 | 0,032 | ~0,502 (adj) | −0,025 | **REFUTADO lição 20**: MLM não-alinhado a downstream + corpus 5276 SMILES = overfit; AUROC −0,010 confirma piora real do encoder |
 
 ---
 
@@ -169,6 +170,58 @@ notes: |
   típico recall~0.85, precision~0.73).
 
   Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
+```
+
+### v7+F + LoRA-MLM offline — refutação direção §6.3 (lição 20) — 3-seed em `diamante-03`
+
+```yaml
+config: configs/v7_plus_F.yaml + LoRA cache override
+host: diamante-03
+cudnn: OFF (default LEGACY=1)
+pipeline:
+  stage1_lora_ft:
+    target: MoLFormer-XL-both-10pct top-2 layers Q/K/V/O
+    rank: 8
+    alpha: 16
+    objective: MLM (mask_prob=0.15)
+    train_smiles: 5276 unique
+    epochs: 10
+    batch_size: 64
+    lr: 5e-4
+    schedule: cosine + 6% warmup
+    precision: bf16
+    trainable_params: 98_304 / 46_879_488 (0.21%)
+  stage2_recache:
+    smiles_recached: 5276 (train+val+test unique)
+    cache_dir: results/lora/molformer_cache_v1/non_human/
+  stage3_benchmark:
+    config: configs/v7_plus_F.yaml (LEGACY default)
+    seeds: [42, 123, 456]
+    elapsed_seconds: 1761.7
+results:
+  level4_cnn_mlp:
+    accuracy:  0.741285 ± 0.016705
+    mcc:       0.493264 ± 0.032107   # cross-host adj: ~0.502
+    f1:        0.785989 ± 0.011449
+    precision: 0.702070 ± 0.017913
+    recall:    0.893186 ± 0.019308
+    auc:       0.801062 ± 0.008345   # -0.010 vs base, RANKING piorou
+diagnosis: |
+  Refuta hipótese §6.3 (LoRA esperava +0.020 a +0.040). Quatro causas
+  convergentes (lição 20):
+  1. MoLFormer já saturado em MLM (1.1B SMILES pretraining).
+  2. Objetivo MLM ≠ tarefa discriminativa downstream.
+  3. AUROC -0.010 confirma encoder literalmente pior, não threshold.
+  4. Corpus pequeno (5276) → LoRA delta absorve overfit.
+
+  Cache LoRA-FT-ed produz embeddings worse que pretrained baseline
+  → adapter+CNN downstream herda degradação.
+
+next_step: |
+  ABANDONAR abordagem LoRA-MLM-offline-then-cache.
+  Re-implementar LoRA end-to-end com loss DT-Kinase (BCE+focal+contrast).
+  Custo: ~5× tempo treino atual (carregar PLM dentro pipeline).
+  Alternativas: LoRA + multi-task RDKit properties; LoRA + contrastive.
 ```
 
 ### Direções A, D, A+D — assimetria capacity vs LR (lição 19) — 3-seed paralelo
