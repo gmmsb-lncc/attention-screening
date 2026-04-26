@@ -38,6 +38,23 @@ MODEL_LABELS = {
     "conplex":  "ConPLex",
 }
 
+# Canonical model order (preserved across all bar charts in the thesis)
+# matching the standard tikzpicture layouts in capitulo5/apendices.
+MODEL_ORDER = ["dtkinase", "conplex", "drugban", "graphban"]
+
+# Canonical color palette aligned with thesis preamble
+# (\definecolor in tese_lncc.tex):
+#   protcol = #2E86AB (azul proteína)  → DT-Kinase
+#   ligcol  = #E8630A (laranja ligante) → DrugBAN
+#   bancol  = #00897B (teal BAN)        → GraphBAN
+#   violet  = TikZ default purple       → ConPLex (matplotlib hex equivalent)
+MODEL_COLORS = {
+    "dtkinase": "#2E86AB",
+    "conplex":  "#9467BD",   # violet equivalent (TikZ violet ≈ purple)
+    "drugban":  "#E8630A",
+    "graphban": "#00897B",
+}
+
 MODEL_NOTES = {
     "dtkinase": (
         "ESM-2 (8M) + MoLFormer \\emph{frozen}; 2D cross-attention map "
@@ -169,14 +186,28 @@ def _compute_summaries(data: dict) -> dict:
 
 def _bar(summaries: dict, key: str, title: str, out_path: Path,
          invert_sort: bool = False) -> None:
-    items = [(m, s[key]) for m, s in summaries.items()]
+    """Render a bar chart of `summaries[key]` per model.
+
+    Always uses the canonical MODEL_ORDER (DT-Kinase, ConPLex, DrugBAN,
+    GraphBAN) and MODEL_COLORS to keep visual consistency across every
+    figure in the thesis. The `invert_sort` parameter is now ignored ---
+    canonical order is enforced regardless of metric direction.
+    """
+    # Canonical ordering: iterate MODEL_ORDER, picking up any model present
+    # in summaries (others are skipped). Models in summaries but not in
+    # MODEL_ORDER are appended at the end (defensive fallback).
+    ordered = [m for m in MODEL_ORDER if m in summaries]
+    extras = [m for m in summaries if m not in MODEL_ORDER and not m.startswith("_")]
+    models = ordered + extras
+
+    items = [(m, summaries[m][key]) for m in models]
     # For "drop": flip sign to plot as negative (perda em transferência).
     if key == "drop":
         items = [(m, -v) for m, v in items]
-    items.sort(key=lambda x: x[1], reverse=not invert_sort)
+
     labels = [MODEL_LABELS.get(m, m) for m, _ in items]
     vals = [v for _, v in items]
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"][:len(items)]
+    colors = [MODEL_COLORS.get(m, "#888888") for m, _ in items]
     fig, ax = plt.subplots(figsize=(7.0, 4.2))
     bars = ax.bar(labels, vals, color=colors, edgecolor="black", linewidth=0.5)
 
