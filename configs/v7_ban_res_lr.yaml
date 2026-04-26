@@ -1,0 +1,64 @@
+# ============================================================================
+# DT-Kinase v7+F + BAN-residual α-gate + BAN_LR_MULT (d03 — 2-seed NH)
+# ============================================================================
+# Aplica Lição 19 (atomicidade capacidade↔LR) ao BAN-residual:
+# combina capacidade extra (W_k matrices, 3.93M params) com LR boost
+# dedicado para os parâmetros W_k/α_k.
+#
+# v7_ban_res testado isoladamente regrediu (Lição 19 reaplica:
+# 3.93M params extras sub-treinados sem LR matching). Esta variante
+# adiciona o LR boost específico para W_k → spera-se que seguindo o
+# princípio atômico recupere ou supere o baseline.
+#
+# Env (set pelo runner):
+#   BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1
+#   BENCHMARK_LEVEL4CNN_BAN_LR_MULT=5.0
+# ============================================================================
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_banres_lr_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64
+  channels: 64
+  batch_size: 128
+  dropout: 0.35
+  weight_decay: 0.04
+  double: false
+  no_amp: true
+  deterministic: false
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+  calibration:
+    platt: true
+    temperature: false
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+  checkpoint_every: 10
+
+rigor: { enforce: true, require_train_selection: true, strict_level_completeness: true }
+gate:  { target_test_mcc: 0.55, max_test_mcc_std: 0.08 }
+suppress_warnings: true

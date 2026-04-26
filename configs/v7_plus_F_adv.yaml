@@ -1,0 +1,66 @@
+# ============================================================================
+# DT-Kinase v7+F + Adversarial Domain Loss (d02 — 2-seed All)
+# ============================================================================
+# Adiciona DomainAdversarialHead com Gradient Reversal Layer (Ganin 2015)
+# sobre o pooled vector da HierPool. Loss adversarial = cross-entropy sobre
+# domain labels (0=human, 1=non_human extraídos da coluna dataset_source).
+#
+# Loss total = focal + λ_class·contrast + λ_adv·domain_ce
+# λ_adv ramps linear de 0 → ADVERSARIAL_LAMBDA na primeira metade do treino.
+#
+# IMPORTANTE: corpus DEVE ser `all` para haver mistura H+NH em cada batch.
+# Treinar em apenas H ou apenas NH zera o sinal adversarial (todos labels iguais).
+#
+# Env (set pelo runner):
+#   BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA=0.1
+#   BENCHMARK_LEVEL4CNN_ADVERSARIAL_N_DOMAINS=2
+#   CORPUS=all
+# ============================================================================
+dataset: all
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_plusF_adv_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64
+  channels: 64
+  batch_size: 128
+  dropout: 0.35
+  weight_decay: 0.04
+  double: false
+  no_amp: true
+  deterministic: false
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+  calibration:
+    platt: true
+    temperature: false
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+  checkpoint_every: 10
+
+rigor: { enforce: true, require_train_selection: true, strict_level_completeness: true }
+gate:  { target_test_mcc: 0.55, max_test_mcc_std: 0.08 }
+suppress_warnings: true

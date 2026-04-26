@@ -1,0 +1,65 @@
+# ============================================================================
+# DT-Kinase v7+F + Morgan FP topological auxiliary feature (d01 — 2-seed NH)
+# ============================================================================
+# Concatena Morgan fingerprint (RDKit, radius=2, 1024-bit) projetado a
+# `morgan_proj_dim` ao pooled vector ANTES do classifier head. Serve
+# como GCN proxy para inductive bias topológica do ligante.
+#
+# Pre-requisito: precompute via
+#   python3 scripts/v8/precompute_ligand_morgan.py \
+#       --splits-dir scaffolds_splits/output \
+#       --out-dir results/morgan_fp
+#
+# Env (set pelo runner):
+#   BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR=results/morgan_fp
+#   BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_BITS=1024
+#   BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_PROJ=32
+# ============================================================================
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_plusF_morgan_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64
+  channels: 64
+  batch_size: 128
+  dropout: 0.35
+  weight_decay: 0.04
+  double: false
+  no_amp: true
+  deterministic: false
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+  calibration:
+    platt: true
+    temperature: false
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+  checkpoint_every: 10
+
+rigor: { enforce: true, require_train_selection: true, strict_level_completeness: true }
+gate:  { target_test_mcc: 0.55, max_test_mcc_std: 0.08 }
+suppress_warnings: true
