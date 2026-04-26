@@ -24,7 +24,10 @@ LAYERS_LIST="${LAYERS_LIST:-2 3}"
 ATTN_HEADS_LIG="${ATTN_HEADS_LIG:-12}"
 LR_MULT_PROT="${LR_MULT_PROT:-2.0}"
 
-GRID_ROOT="results/grid_AD"
+# Output root is namespaced by corpus so the grid for human, non_human, all
+# can run on different hosts (or sequentially on the same host) without
+# collision. Override via GRID_ROOT env if needed.
+GRID_ROOT="${GRID_ROOT:-results/grid_AD_${CORPUS}}"
 mkdir -p "${GRID_ROOT}"
 
 LOG_FILE="${GRID_ROOT}/grid_AD_$(date +%Y%m%d_%H%M).log"
