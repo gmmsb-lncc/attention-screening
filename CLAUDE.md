@@ -11,7 +11,7 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `licoes_aprendidas.md` | optimization track narrative + **22 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `licoes_aprendidas.md` | optimization track narrative + **23 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
 | `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
@@ -32,9 +32,9 @@ Scientific thesis: *semantic screening* — predicting bioactivity from 1D linea
 
 Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
-## Active work (2026-04, 22 lessons; PLATEAU empírico atingido sobre v7+F)
+## Active work (2026-04, 23 lessons; PLATEAU empírico atingido sobre v7+F)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **22 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **14 modificações incrementais testadas sobre v7+F, nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal (offset i−j sem semântica entre prot/lig).
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **23 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15 modificações incrementais testadas sobre v7+F, nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal (offset i−j sem semântica entre prot/lig). **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo α·W com α(0)=0 zera ∇W; LR-boost não recupera (distinto de Lição 19).
    - **Canônico MCC primário** — `v7+F` (Tier A + C + F) sob `ADAPTER_LEGACY=1` (default desde commit `de2ef0e`): **0.5266 ± 0.010** NH 3-seed em d01 cuDNN ON. Re-validado pelo experimento de isolamento §6.9.1 (lição 17).
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
