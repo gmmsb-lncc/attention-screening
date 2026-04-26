@@ -1,0 +1,91 @@
+# ============================================================================
+# DT-Kinase v7-rope — Tier A + C + F + 2D RoPE per-modality
+# ============================================================================
+# Aplicação de Rotary Positional Embedding (Su et al. 2021, RoFormer)
+# 1D por modalidade ANTES do produto interno cross-modal:
+#
+#   p_proj = ph(p_feat)                         # [B, sp, head_dim=64]
+#   l_proj = lh(l_feat)                         # [B, sl, head_dim=64]
+#   p_rope = rope(p_proj)                       # rotação por posição
+#   l_rope = rope(l_proj)
+#   M_k = (p_rope) · (l_rope)^T / sqrt(head_dim)
+#
+# Efeito: M_k[i,j] passa a codificar OFFSET RELATIVO entre posição i
+# (proteína) e posição j (ligante), introduzindo viés posicional na
+# atenção que a CNN downstream pode explorar.
+#
+# Custo: ZERO parâmetros adicionais (RoPE é determinístico).
+# Trade-off: NÃO é identity-init (rotaciona desde t=0). Diferente de
+# §6.5 (que falhou por TROPA cascade-zero), aqui não há gates a abrir;
+# RoPE é uma transformação fixa. Risco de regressão: leve, mas testar.
+#
+# Stack: v7+F LEGACY default + RoPE via env USE_ROPE=1.
+#
+# Usage:
+#   bash scripts/v8/run_v7_rope.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_rope_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64               # MUST be even for RoPE (64 OK)
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  double: false
+  no_amp: true
+  deterministic: false
+
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1                # SIMÉTRICO
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+
+  calibration:
+    platt: true
+    temperature: false
+
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.55
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true
