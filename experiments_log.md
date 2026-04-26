@@ -58,6 +58,8 @@ referenciar este registro.
 | 16 | v7_plus_F_adapt (A+C+F + §6.5 fixes + THR=f1, SEL=f1) 3-seed | d01 | 3 | 42,123,456 | — | 0,4929 ± 0,0160 | 0,016 | 0,8105 | −0,013 | F1=0,7868; selection acoplado a F1 (matched) |
 | 17 | v7_plus_F_adapt_v2 (A+C+F + §6.5 + THR=f1, SEL=mcc) 3-seed | d01 | 3 | 42,123,456 | — | **0,4590 ± 0,0517** | **0,052** | 0,7778 | **−0,047** | DESCARTADO; AUROC+σ pioraram → lição 16: matched objective |
 | 18 | v7+F + λ=0.5 composite (matched mcc/mcc) 3-seed | **d02** | 3 | 42,123,456 | — | **0,4606 ± 0,0518** | **0,052** | 0,7988 | **−0,056** (cross-host adj.) | suspeita §6.5 prejudicial em treino curto → lição 17 |
+| 19 | **v7+F + ADAPTER_LEGACY=1 (isolation A)** 3-seed | **d01** | 3 | 42,123,456 | — | **0,5266 ± 0,0103** | **0,010** | 0,8105 | **+0,000** vs v7+F histórico | **HIPÓTESE 17 CONFIRMADA** — reproduz canônico exato |
+| 20 | v7+F + ADAPTER_LEGACY=0 (isolation B, §6.5 ON) 3-seed | d02 | 3 | 42,123,456 | — | 0,4652 ± 0,0563 | 0,056 | 0,7780 | −0,053 vs A (cross-host adj) | §6.5 culpado: ΔAUROC=−0.033, σ×5.6 |
 
 ---
 
@@ -164,6 +166,55 @@ notes: |
   típico recall~0.85, precision~0.73).
 
   Próxima iteração: desacoplar via SELECTION_METRIC=mcc separado.
+```
+
+### Isolation §6.5 — runs A (LEGACY=1) e B (LEGACY=0) — 3-seed paralelo
+
+```yaml
+run_A:
+  config: configs/v7_plus_F.yaml
+  host: diamante-01
+  cudnn: ON
+  env: { BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY: 1 }
+  seeds: [42, 123, 456]
+  elapsed_seconds: 1581.0
+  results:
+    accuracy:  0.760086 ± 0.006030
+    mcc:       0.526604 ± 0.010304   # reproduz histórico v7+F=0.5260
+    f1:        0.796503 ± 0.005120
+    precision: 0.725728 ± 0.013009
+    recall:    0.883241 ± 0.025446
+    auc:       0.810529 ± 0.016751
+
+run_B:
+  config: configs/v7_plus_F.yaml
+  host: diamante-02
+  cudnn: OFF
+  env: { (defaults — LEGACY=0, §6.5 ativo) }
+  seeds: [42, 123, 456]
+  elapsed_seconds: 1463.5
+  results:
+    accuracy:  0.728946 ± 0.023253
+    mcc:       0.465198 ± 0.056343   # cross-host adj p/ d01: ~0.474
+    f1:        0.768451 ± 0.034411
+    precision: 0.702148 ± 0.005081
+    recall:    0.852302 ± 0.086840
+    auc:       0.778032 ± 0.022755
+
+delta_attribution_to_§6.5:
+  ΔMCC:    -0.053  (B_adjusted vs A)
+  ΔAUROC:  -0.033  # modelo literalmente pior, não threshold
+  σ_MCC:   ×5.6    (0.010 → 0.056)
+  ΔF1:     -0.028
+  Δprecision: -0.023
+  Δrecall:    -0.031
+
+decision: |
+  Hipótese 17 confirmada. §6.5 (pre-norm + LoRA gates +
+  zero-init self_attn) prejudica capacidade efetiva do adapter
+  no regime de treino curto (~30-50 epochs com patience=15).
+  §6.5 deve virar opt-in, default = LEGACY (lição 18).
+  v7+F volta a ser canonicamente 0.5266 com código novo.
 ```
 
 ### v7+F + λ=0.5 composite criterion (matched mcc/mcc) 3-seed em `diamante-02`
