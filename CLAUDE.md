@@ -11,7 +11,7 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `licoes_aprendidas.md` | optimization track narrative + **21 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `licoes_aprendidas.md` | optimization track narrative + **22 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
 | `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
@@ -32,9 +32,9 @@ Scientific thesis: *semantic screening* — predicting bioactivity from 1D linea
 
 Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
-## Active work (2026-04, 21 lessons; PLATEAU empírico atingido sobre v7+F)
+## Active work (2026-04, 22 lessons; PLATEAU empírico atingido sobre v7+F)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§13, **21 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: 13 modificações incrementais testadas sobre v7+F, **nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado.
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **22 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **14 modificações incrementais testadas sobre v7+F, nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal (offset i−j sem semântica entre prot/lig).
    - **Canônico MCC primário** — `v7+F` (Tier A + C + F) sob `ADAPTER_LEGACY=1` (default desde commit `de2ef0e`): **0.5266 ± 0.010** NH 3-seed em d01 cuDNN ON. Re-validado pelo experimento de isolamento §6.9.1 (lição 17).
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
@@ -115,7 +115,8 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 - **NEW (§6.10, lição 19)**: capacity (Direção A) e LR (Direção D) sobre o mesmo módulo são **mutuamente dependentes**. A+D combo = empate técnico ~0.530. Devem ser tratadas como intervenção atômica. **Claim de redução de variância (σ=0.004) RETRATADO** após grid d02 produzir σ=0.037 mesma config — foi acidente single-host.
 - **REFUTED (§6.11, lição 20)**: LoRA-MLM-offline em MoLFormer top-2 layers regrediu −0.025 MCC, AUROC −0.010. MLM ≠ tarefa downstream + corpus pequeno (5276 SMILES) → encoder literalmente pior. Pivotar para LoRA-end-to-end se houver retomada.
 - **REFUTED (§6.12)**: BAN-residual (`v7_ban_res`, lição 12 reformulada com α-gate identity-init) regrediu −0.010 a −0.018 MCC, σ ×4.5. Identity-init OK mas Lição 19 reaplica: 3.93M params extras sem LR matching = sub-treinado. Direção corretiva: BAN_LR_MULT dedicado (não testado).
-- **PLATEAU (§6.13, lição 21)**: 13 modificações incrementais sobre v7+F testadas, **nenhuma supera baseline reproducivelmente**. Espaço incremental empiricamente esgotado. Próximas direções devem ser não-incrementais: encoder maior, treino prolongado, LoRA end-to-end.
+- **REFUTED (§6.14, lição 22)**: 2D RoPE per-modality (`v7_rope`) regrediu −0.020 MCC, AUROC quase igual (−0.002). Cross-modal *category error*: termo (i−j) de RoPE assume comparabilidade entre posições; em M_k[prot_pos, lig_pos] os eixos são entidades distintas em escalas diferentes — sinal posicional injetado é espúrio. Heurística: NÃO usar RoPE 1D direto em ambos eixos cross-modais.
+- **PLATEAU (§6.13, lição 21)**: **14 modificações incrementais** sobre v7+F testadas, **nenhuma supera baseline reproducivelmente**. Espaço incremental empiricamente esgotado. Próximas direções devem ser não-incrementais: encoder maior, treino prolongado, LoRA end-to-end.
 
 | Config | Tiers / Variante | Status (NH) | Notas |
 |---|---|---|---|
@@ -125,6 +126,7 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 | `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines F1** |
 | `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 (empate, single host) | claim σ=0.004 RETRATADO (grid d02 σ=0.037); lição 19 |
 | `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | regrediu (~0.508 ± 0.045) | §6.12 — capacidade extra sem LR matching, lição 19 reaplica |
+| `configs/v7_rope.yaml` | A + C + F + 2D RoPE per-modality | regrediu (~0.506 adj, 0.497 ± 0.022 d02) | §6.14 — category error cross-modal, lição 22 |
 | `configs/v7_asymF.yaml` | A + C + F + asym adapter | regredido (0.461 ± 0.028) | confounded com §6.5; redundante após lição 19 |
 | `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | **DESCARTADO** (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
 | `configs/v7_ban_F.yaml` | A + C + F + BAN puro (variant=v8) | regredido (0.503 ± 0.046) | W_ban Xavier viola identity-init; lição 12 |

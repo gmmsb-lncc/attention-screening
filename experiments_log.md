@@ -67,6 +67,7 @@ referenciar este registro.
 | 25 | A+D grid sweep cell (3,2) 3-seed | d02 | 3 | 42,123,456 | — | 0,4796 ± 0,0056 | 0,006 | ~0,489 (adj) | −0,038 | menor σ do grid mas pior MCC |
 | 26 | A+D grid sweep cell (8,3) 3-seed | d02 | 3 | 42,123,456 | — | **0,4064 ± 0,1494** | **0,149** | ~0,415 (adj) | −0,112 | falha catastrófica — lr alto + capacidade alta = divergência |
 | 27 | **v7_ban_res (BAN-residual α-gate) 3-seed** | ? | 3 | 42,123,456 | — | **0,5081 ± 0,0449** | 0,045 | ~0,517 (adj se cuDNN OFF) | −0,010 a −0,018 | **REGREDIU** — capacidade extra W_k sem LR matching (Lição 19 reaplica) |
+| 28 | **v7_rope (2D RoPE per-modality) 3-seed** | d02 | 3 | 42,123,456 | — | **0,4971 ± 0,0220** | 0,022 | **~0,506 (adj)** | **−0,020** | **REGREDIU — Lição 22**: RoPE em cross-modal map é category error (offset i−j sem semântica entre prot/lig) |
 | 24 | v7+F + LoRA-MLM offline (rank=8, top-2L, 10 ep MLM) 3-seed | d03 | 3 | 42,123,456 | — | 0,4933 ± 0,0321 | 0,032 | ~0,502 (adj) | −0,025 | **REFUTADO lição 20**: MLM não-alinhado a downstream + corpus 5276 SMILES = overfit; AUROC −0,010 confirma piora real do encoder |
 
 ---
@@ -351,6 +352,60 @@ decision: |
   no regime de treino curto (~30-50 epochs com patience=15).
   §6.5 deve virar opt-in, default = LEGACY (lição 18).
   v7+F volta a ser canonicamente 0.5266 com código novo.
+```
+
+### v7_rope (2D RoPE per-modality) 3-seed em `diamante-02`
+
+```yaml
+config: configs/v7_rope.yaml
+host: diamante-02
+cudnn: OFF (DISABLE_CUDNN=1)
+corpus: non_human
+seeds: [42, 123, 456]
+elapsed_seconds: 1047.2  # ~17 min, +5% sobre v7+F base
+env:
+  BENCHMARK_LEVEL4CNN_USE_ROPE: 1
+arch_changes:
+  formula: M_k = (rope(P W_p^k))_i · (rope(L W_l^k))_j / sqrt(d_h)
+  trainable_params_added: 0  (RoPE é determinístico)
+  identity_init_at_t0: NÃO (rotaciona desde t=0)
+results:
+  level4_cnn_mlp:
+    accuracy:  0.749314 ± 0.010450
+    mcc:       0.497130 ± 0.021970   # cross-host adj cuDNN OFF→ON: ~0.506
+    f1:        0.778315 ± 0.011457
+    precision: 0.734393 ± 0.006314
+    recall:    0.827993 ± 0.021549
+    auc:       0.809231 ± 0.008930   # AUROC quase IDÊNTICO a base (0.811)
+diagnosis: |
+  REGREDIU −0.020 MCC vs v7+F base. AUROC essencialmente preservada
+  (Δ = −0.002) → ranking similar mas threshold/calibração quebraram.
+
+  CATEGORY ERROR cross-modal: RoPE codifica offset relativo (i-j)
+  via rotação. M_k[prot_pos, lig_pos] tem dois eixos de entidades
+  moleculares distintas em escalas diferentes — i (resíduo proteico)
+  e j (token SMILES BPE) NÃO são comparáveis. Termo (i-j) injeta
+  estrutura posicional espúria que CNN tenta acomodar em prejuízo
+  do sinal real.
+
+  CNN sem RoPE funciona bem porque convolução local é coordenada-
+  livre (translation invariant), não assume comparabilidade entre
+  posições prot e lig.
+lesson_22: |
+  Positional encoding 1D intra-modal (RoPE) NÃO transfere para
+  interaction maps cross-modais onde os dois eixos correspondem
+  a entidades em escalas diferentes. Termo (i-j) assume
+  comparabilidade semântica que não existe no nosso caso.
+
+  Heurística operacional:
+  - NÃO aplicar RoPE direto em ambos eixos cross-modais
+  - Alternativas válidas (não testadas): positional encoding
+    independente por eixo (sem dot product), bias B[i,j]
+    aprendido separado de M_k, ou manter CNN local sem PE
+  - Axial attention seria correto: q,k separados por axis
+plateau_status: |
+  14ª modificação incremental sobre v7+F testada, 14ª regressão.
+  Lição 21 (plateau) ainda mais robustamente confirmada.
 ```
 
 ### v7_ban_res (BAN-residual α-gate identity-init) 3-seed

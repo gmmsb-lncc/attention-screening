@@ -1232,10 +1232,93 @@ Lição 19, BAN-residual deveria ser combinado com um *boost* de
 parametrização atômica, o *trade-off* "magnitude de *update* por
 parâmetro" estaria preservado.
 
+## 6.14. RoPE em mapa cross-modal (`v7_rope`) — *category error* posicional (lição 22)
+
+A configuração `v7_rope` aplica **Rotary Positional Embedding**
+(Su et al., 2021, RoFormer) per-modality às projeções de cada
+*head* antes do produto interno cross-modal:
+
+$$M_k[i,j] = (\text{rope}(P W_p^k))_i \cdot (\text{rope}(L W_l^k))_j / \sqrt{d_h}.$$
+
+A construção de RoPE garante que o produto interno de dois
+vetores rotacionados em posições $i$ e $j$ codifique o offset
+relativo $(i - j)$:
+$$\text{rope}(q)_i \cdot \text{rope}(k)_j = \sum_{m} \cos((i-j)\theta_m) \cdot q_m k_m + \dots$$
+
+Resultado em três sementes, *non-human*, `diamante-02`:
+
+$$\mathrm{MCC}_\text{test} = 0{,}4971 \pm 0{,}0220, \quad
+  \mathrm{AUROC} = 0{,}8092, \quad
+  \mathrm{F1} = 0{,}7783.$$
+
+Cross-host adjusted ($+0{,}009$): $\sim 0{,}506$ em `diamante-01`.
+Comparado ao *baseline* `v7+F` ($0{,}5266 \pm 0{,}010$), a
+regressão é de $-0{,}020$ MCC. AUROC essencialmente preservada
+($0{,}809$ vs $0{,}811$ base).
+
+A interpretação mecanística é diagnóstica e revela uma classe
+nova de erro arquitetural. RoPE foi originalmente desenvolvido
+para *self-attention* **intra-sequência**, em que ambas as
+posições $i$ e $j$ pertencem à mesma modalidade --- mesmo
+*token space*, mesma escala, mesma ordenação. O termo $(i - j)$
+no produto interno rotacionado é interpretável como *deslocamento
+relativo* dentro daquela sequência, e a propriedade de
+invariância translacional do dot-product torna o sinal útil.
+
+No nosso $M_k[\text{prot\_pos}, \text{lig\_pos}]$, contudo, os
+dois eixos correspondem a entidades **moleculares
+distintas** em escalas radicalmente diferentes:
+$i \in [0, sp]$ é posição na proteína (sequência de
+$\sim 600$ aminoácidos, escala biológica), e $j \in [0, sl]$ é
+posição no ligante (sequência de $\sim 50$ tokens BPE de SMILES,
+escala química). O termo $(i - j)$ não tem semântica
+biológica nem química --- "resíduo proteico 100 vs token
+ligante 30 = offset 70" não corresponde a nenhuma propriedade
+natural do par. Aplicar RoPE em ambos os eixos e tomar produto
+interno injeta uma estrutura posicional **espúria** em $M_k$,
+que a CNN downstream tenta aprender a despeito de.
+
+A vigésima segunda lição é registrada explicitamente:
+**positional encoding projetado para sequências intra-modais
+(1D RoPE em Transformers) NÃO transfere para mapas de interação
+cross-modais onde os dois eixos correspondem a entidades
+moleculares diferentes em escalas distintas. O termo de offset
+relativo $(i - j)$ no produto interno de RoPE assume
+comparabilidade semântica entre as posições $i$ e $j$; em
+mapas cross-modais essa comparabilidade não existe e o sinal
+injetado é espúrio**.
+
+A heurística operacional decorrente: para *interaction maps*
+cross-modais, **não usar** RoPE 1D direto em ambos os eixos. As
+alternativas teoricamente válidas, todas pendentes de teste
+empírico, são:
+
+1. *Positional encoding* **independente por eixo** sem dot product
+   entre os eixos (e.g., concat de canais sinusoidais 2D às
+   *features* de entrada da CNN, sem rotacionar Q e K).
+2. *Bias* posicional aprendido $B[i,j] \in \mathbb{R}^{sp \times sl}$
+   separado de $M_k$, somado após a interação ($M_k + \alpha \cdot B$
+   com $\alpha = 0$ init para preservar identity-init).
+3. Manter a abordagem atual (CNN local-only, sem positional
+   encoding explícito), considerando que as convoluções já têm
+   *positional sense* implícito via *receptive field* + *padding*,
+   e a *HierPool* aprende quais posições importam globalmente.
+4. Se a substituição da CNN por uma arquitetura *attention-based*
+   for explorada no futuro, usar **axial attention** com queries
+   e keys separadas por eixo --- evitando o produto interno
+   cross-modal entre vetores rotacionados independentemente.
+
+A lição corrobora a Lição 21: o espaço de modificações
+arquiteturais incrementais sobre v7+F está empiricamente
+esgotado; e estende-a com uma observação adicional: **mesmo
+modificações sem parâmetros adicionais (como RoPE) podem
+regredir se introduzirem bias estrutural não-alinhado à
+semântica do problema**.
+
 ## 6.13. *Plateau* empírico de v7+F --- esgotamento do espaço incremental (lição 21)
 
 A trajetória de otimização incremental sobre v7+F atravessou,
-até este ponto da pesquisa, treze direções distintas:
+até este ponto da pesquisa, **catorze** direções distintas:
 
 | # | Direção | $\Delta \mathrm{MCC}$ | Status | Ref |
 |---|---|---:|---|---|
@@ -1252,8 +1335,9 @@ até este ponto da pesquisa, treze direções distintas:
 | 11 | Critério composto $\lambda = 0{,}5$ | $-0{,}056$ | regrediu | lição 14 |
 | 12 | LoRA-MLM offline (MoLFormer top-2) | $-0{,}025$ | refutado | lição 20 |
 | 13 | BAN-residual ($\alpha$-gate, `v7_ban_res`) | $-0{,}010$ a $-0{,}018$ | regrediu | $\S 6{.}12$ |
+| 14 | 2D RoPE per-modality (`v7_rope`) | $-0{,}020$ | regrediu --- *category error* cross-modal | lição 22, $\S 6{.}14$ |
 
-Das treze modificações listadas, **nenhuma supera o *baseline*
+Das catorze modificações listadas, **nenhuma supera o *baseline***
 `v7+F LEGACY` de $0{,}5266 \pm 0{,}010$ de forma reproducível**.
 A modificação que mais se aproximou (A+D combo) atingiu empate
 técnico ($\sim 0{,}530$) num único *host* e o suposto benefício
