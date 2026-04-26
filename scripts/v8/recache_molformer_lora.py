@@ -47,6 +47,7 @@ def load_model_with_lora(lora_dir: Path, device: torch.device):
         rank=meta["rank"],
         alpha=meta["alpha"],
     )
+    model.to(device)
     state = torch.load(lora_dir / "lora_state.pt", map_location=device)
     own = dict(model.named_parameters())
     loaded = 0
