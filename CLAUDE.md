@@ -11,7 +11,7 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `licoes_aprendidas.md` | optimization track narrative + **20 methodological lessons** + §9 operational snapshot + §10 future directions | when planning next experiment or interpreting a result |
+| `licoes_aprendidas.md` | optimization track narrative + **21 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
 | `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
@@ -32,17 +32,20 @@ Scientific thesis: *semantic screening* — predicting bioactivity from 1D linea
 
 Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
-## Active work (2026-04, 20 lessons; canonical revalidated under LEGACY adapter)
+## Active work (2026-04, 21 lessons; PLATEAU empírico atingido sobre v7+F)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§11, **20 methodological lessons** documented). State actual:
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§13, **21 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: 13 modificações incrementais testadas sobre v7+F, **nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado.
    - **Canônico MCC primário** — `v7+F` (Tier A + C + F) sob `ADAPTER_LEGACY=1` (default desde commit `de2ef0e`): **0.5266 ± 0.010** NH 3-seed em d01 cuDNN ON. Re-validado pelo experimento de isolamento §6.9.1 (lição 17).
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
-   - **Best variance candidate** — `v7+F + Direção A+D` (lig 2L/12h + lr_mult_lig=5x): ~0.530 ± **0.004** (cross-host adj para d01) — MCC empate, σ 2.5× melhor que base. Lição 19 (capacidade ↔ otimização mutuamente dependentes).
-   - **Em execução / pendente** — Grid sweep A+D (d02 NH, opcionalmente H+All); BAN-residual (`v7_ban_res`, lição 12 reformulada com α-gate identity-init, pendente).
-   - **Refutados (descartados)** — Tier B (Xavier head_proj), D vanilla (SWA), E (Mixup), §6.5 fixes (zero-cascade), v7_asymF (3 mudanças simultâneas), v7+F_adapt_v2 (lição 16 decoupled), v7_ban_F (Xavier W_ban substitutivo), LoRA-MLM offline (lição 20 objetivo desalinhado).
+   - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
+   - **BAN-residual `v7_ban_res`** — REGREDIU −0.010 a −0.018 MCC, σ=0.045 (lição 19 reaplica: 3.93M params extras sem LR matching). §6.12.
+   - **Refutados/empates (13 direções)** — Tier B, D vanilla SWA, E Mixup, §6.5 fixes, v7_asymF, v7_adapt_v2 (decoupled), v7_ban_F (Xavier W_ban), LoRA-MLM offline, λ=0.5 composite, A só, D só, BAN-residual, A+D combo.
+   - **Direções restantes (não-incrementais, §6.13)** — encoder maior (ESM-35M/150M), treino prolongado (centenas epochs), LoRA end-to-end, multi-task RDKit properties, BAN-residual + LR boost atomicamente.
+   - **Recomendação operacional**: pausar incrementos arquiteturais, fechar tese sobre canônico v7+F LEGACY = 0.5266 ± 0.010 + comparação F1 via v7+F_adapt.
 2. **Cross-dataset evaluation matrix (3×3)** — completo. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.209. **Documentação completa migrada para `~/PhD/cross_matrix/`** (figures + Beamer source + Anexo A da tese).
-3. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
-4. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
+3. **Interpretabilidade DT-Kinase** — `scripts/inference/explain.py` POC implementado: extrai per-residue + per-ligand-token attention via forward hooks (M_k pre-CNN + HierPool weights). Diferenciador metodológico vs ConPLex (sem atenção); paridade com DrugBAN/GraphBAN BAN attn mas com 3 níveis interpretáveis (raw + per-head + HierPool).
+4. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
+5. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
 
 ## PR workflow
 
@@ -109,9 +112,10 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 
 **Status flags resumidos**:
 - **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes (pre-norm + LoRA gates + zero-init self-attn) **prejudicam** v7+F por −0.053 MCC, AUROC −0.033, σ ×5.6. Default flipped (commit `de2ef0e`): `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` é o default; v7+F reproduz 0.5266 ± 0.010 em d01.
-- **NEW (§6.10, lição 19)**: capacity (Direção A) e LR (Direção D) sobre o mesmo módulo são **mutuamente dependentes**. A+D combo = ~0.530 (adj.) ± **0.004** (σ 2.5× melhor que base); A só ou D só regridem (−0.027/−0.031). Devem ser tratadas como intervenção atômica.
+- **NEW (§6.10, lição 19)**: capacity (Direção A) e LR (Direção D) sobre o mesmo módulo são **mutuamente dependentes**. A+D combo = empate técnico ~0.530. Devem ser tratadas como intervenção atômica. **Claim de redução de variância (σ=0.004) RETRATADO** após grid d02 produzir σ=0.037 mesma config — foi acidente single-host.
 - **REFUTED (§6.11, lição 20)**: LoRA-MLM-offline em MoLFormer top-2 layers regrediu −0.025 MCC, AUROC −0.010. MLM ≠ tarefa downstream + corpus pequeno (5276 SMILES) → encoder literalmente pior. Pivotar para LoRA-end-to-end se houver retomada.
-- **PENDING**: `v7_ban_res` (lição 12 reformulada — BAN-residual com α-gate identity-init); grid sweep A+D em H/All; LoRA end-to-end (não implementado).
+- **REFUTED (§6.12)**: BAN-residual (`v7_ban_res`, lição 12 reformulada com α-gate identity-init) regrediu −0.010 a −0.018 MCC, σ ×4.5. Identity-init OK mas Lição 19 reaplica: 3.93M params extras sem LR matching = sub-treinado. Direção corretiva: BAN_LR_MULT dedicado (não testado).
+- **PLATEAU (§6.13, lição 21)**: 13 modificações incrementais sobre v7+F testadas, **nenhuma supera baseline reproducivelmente**. Espaço incremental empiricamente esgotado. Próximas direções devem ser não-incrementais: encoder maior, treino prolongado, LoRA end-to-end.
 
 | Config | Tiers / Variante | Status (NH) | Notas |
 |---|---|---|---|
@@ -119,8 +123,8 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 | `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | validado multi-seed |
 | `configs/v7_plus_F.yaml` | A + C + F | **0.5266 ± 0.010** (3-seed, LEGACY default) | **CANÔNICO MCC primário — re-validado §6.9.1** |
 | `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines F1** |
-| `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 ± **0.004** (cross-host adj) | **best-σ candidato** — lição 19 |
-| `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | **PENDENTE** | Lição 12 reformulada; sanity OK; aguarda 3-seed |
+| `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 (empate, single host) | claim σ=0.004 RETRATADO (grid d02 σ=0.037); lição 19 |
+| `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | regrediu (~0.508 ± 0.045) | §6.12 — capacidade extra sem LR matching, lição 19 reaplica |
 | `configs/v7_asymF.yaml` | A + C + F + asym adapter | regredido (0.461 ± 0.028) | confounded com §6.5; redundante após lição 19 |
 | `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | **DESCARTADO** (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
 | `configs/v7_ban_F.yaml` | A + C + F + BAN puro (variant=v8) | regredido (0.503 ± 0.046) | W_ban Xavier viola identity-init; lição 12 |

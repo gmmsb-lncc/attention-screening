@@ -62,7 +62,11 @@ referenciar este registro.
 | 20 | v7+F + ADAPTER_LEGACY=0 (isolation B, §6.5 ON) 3-seed | d02 | 3 | 42,123,456 | — | 0,4652 ± 0,0563 | 0,056 | 0,7780 | −0,053 vs A (cross-host adj) | §6.5 culpado: ΔAUROC=−0.033, σ×5.6 |
 | 21 | v7+F + Direção A só (lig 2L/12h, LEGACY default) 3-seed | d01 | 3 | 42,123,456 | — | 0,4996 ± 0,0258 | 0,026 | 0,8025 | −0,027 | params extras no lig sem LR matching → undertrained, σ_recall=0.098 |
 | 22 | v7+F + Direção D só (lig_lr=5x, LEGACY default) 3-seed | d02 | 3 | 42,123,456 | — | 0,4867 ± 0,0222 | 0,022 | ~0,496 (adj) | −0,031 | LR alta sem capacidade extra → overshoot/oscila |
-| 23 | **v7+F + Direção A+D combo (lig 2L/12h + lr=5x) 3-seed** | d03 | 3 | 42,123,456 | — | **0,5215 ± 0,0041** | **0,004** | **~0,530 (adj)** | **+0,004** | **lição 19: A e D são mutuamente dependentes; combo restaura balanço + σ excelente** |
+| 23 | **v7+F + Direção A+D combo (lig 2L/12h + lr=5x) 3-seed** | d03 | 3 | 42,123,456 | — | **0,5215 ± 0,0041** | **0,004** | **~0,530 (adj)** | **+0,004** | empate; claim σ=0.004 **RETRATADO** após grid d02 mostrar σ=0.037 mesma config |
+| 24 | A+D grid sweep cell (5,2) 3-seed | d02 | 3 | 42,123,456 | — | 0,5144 ± 0,0369 | 0,037 | ~0,523 (adj) | −0,003 | grid mostra σ alto (não 0.004 d03) |
+| 25 | A+D grid sweep cell (3,2) 3-seed | d02 | 3 | 42,123,456 | — | 0,4796 ± 0,0056 | 0,006 | ~0,489 (adj) | −0,038 | menor σ do grid mas pior MCC |
+| 26 | A+D grid sweep cell (8,3) 3-seed | d02 | 3 | 42,123,456 | — | **0,4064 ± 0,1494** | **0,149** | ~0,415 (adj) | −0,112 | falha catastrófica — lr alto + capacidade alta = divergência |
+| 27 | **v7_ban_res (BAN-residual α-gate) 3-seed** | ? | 3 | 42,123,456 | — | **0,5081 ± 0,0449** | 0,045 | ~0,517 (adj se cuDNN OFF) | −0,010 a −0,018 | **REGREDIU** — capacidade extra W_k sem LR matching (Lição 19 reaplica) |
 | 24 | v7+F + LoRA-MLM offline (rank=8, top-2L, 10 ep MLM) 3-seed | d03 | 3 | 42,123,456 | — | 0,4933 ± 0,0321 | 0,032 | ~0,502 (adj) | −0,025 | **REFUTADO lição 20**: MLM não-alinhado a downstream + corpus 5276 SMILES = overfit; AUROC −0,010 confirma piora real do encoder |
 
 ---
@@ -347,6 +351,81 @@ decision: |
   no regime de treino curto (~30-50 epochs com patience=15).
   §6.5 deve virar opt-in, default = LEGACY (lição 18).
   v7+F volta a ser canonicamente 0.5266 com código novo.
+```
+
+### v7_ban_res (BAN-residual α-gate identity-init) 3-seed
+
+```yaml
+config: configs/v7_ban_res.yaml
+host: ? (cuDNN status indeterminado, elapsed 1511s sugere cuDNN OFF)
+corpus: non_human
+embedding: 8M
+seeds: [42, 123, 456]
+elapsed_seconds: 1511.0
+env:
+  BENCHMARK_LEVEL4CNN_BAN_RESIDUAL: 1
+arch_changes:
+  caminho_extra: M_k = M_k_dot + α_k · (P W_k L^T)
+  alphas_init: zero (ParameterList of 16 scalars)
+  W_k_init: Xavier uniform com escala (d_p · d_l)^-0.25
+  trainable_extra: 3.93M (16 W_k matrices [320 × 768])
+results:
+  level4_cnn_mlp:
+    accuracy:  0.752252 ± 0.019996
+    mcc:       0.508133 ± 0.044878   # cross-host adj cuDNN OFF→ON: ~0.517
+    f1:        0.786284 ± 0.023056
+    precision: 0.725595 ± 0.012760
+    recall:    0.859300 ± 0.051996   # σ alto = sub-treinado
+    auc:       0.803388 ± 0.009551
+diagnosis: |
+  REGREDIU vs v7+F base (0.5266). Padrão Lição 19 reaplica:
+  capacidade extra (3.93M params W_k) sem LR matching dedicado →
+  params sub-treinados em ~30 epochs.
+
+  Identity-init em t=0 confirmado (sanity test diff 0.0000e+00).
+  Anti-cascade verificado (∂L/∂α ≠ 0 porque W_k Xavier não-zero).
+  Mecanismo correto, mas treino curto não permite ativação útil.
+
+  Sintoma diagnóstico: σ_recall = 0.052 (vs 0.025 base) → seeds
+  discordam = sinal de undertraining.
+
+next_step: |
+  Implementar BENCHMARK_LEVEL4CNN_BAN_LR_MULT (3-5x) para que
+  W_k receba updates compatíveis com sua quantidade de params.
+  Aplicação direta princípio Lição 19 atomicamente: capacidade
+  extra + LR boost juntos.
+```
+
+### A+D Grid Sweep (6 cells, lr_mult_lig × layers_lig) 3-seed em `diamante-02`
+
+```yaml
+config: configs/v7_plus_F.yaml + per-cell envs
+host: diamante-02
+cudnn: OFF (DISABLE_CUDNN=1)
+corpus: non_human
+fixed_envs:
+  BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG: 12
+  BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT: 2.0
+seeds: [42, 123, 456]
+results_per_cell:
+  # ordenado por MCC desc
+  lr5_L2: { mcc: 0.5144 ± 0.0369, auc: 0.7906, f1: 0.7914 }
+  lr5_L3: { mcc: 0.5068 ± 0.0310, auc: 0.7983, f1: 0.7869 }
+  lr3_L3: { mcc: 0.5019 ± 0.0215, auc: 0.7987, f1: 0.7792 }
+  lr8_L2: { mcc: 0.5014 ± 0.0125, auc: 0.8057, f1: 0.7862 }
+  lr3_L2: { mcc: 0.4796 ± 0.0056, auc: 0.7884, f1: 0.7706 }
+  lr8_L3: { mcc: 0.4064 ± 0.1494, auc: 0.7418, f1: 0.6514 }   # divergiu
+key_findings:
+  - Nenhum cell bate v7+F base (0.5266) cross-host adjusted.
+  - Best cell (5,2) raw 0.5144 → adj d01 0.5234 → empate, não ganho.
+  - σ ALTO em quase todas células (>0.02) — variabilidade significativa.
+  - lr_mult_lig=8 + layers_lig=3 = falha catastrófica (σ=0.149).
+  - Pareto front difuso (5 de 6 cells na frente) — sem ponto dominante.
+retraction: |
+  Resultado d03 anterior (lr=5, L=2 single replication: 0.5215 ± 0.0041)
+  NÃO REPLICA em d02. Mesma config produziu σ=0.037, nove vezes maior.
+  Conclusão: σ=0.004 d03 foi acidente fortuito, não propriedade
+  reproducível. Claim variância da Lição 19 RETRATADO.
 ```
 
 ### v7+F + λ=0.5 composite criterion (matched mcc/mcc) 3-seed em `diamante-02`
