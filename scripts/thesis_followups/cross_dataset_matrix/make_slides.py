@@ -231,16 +231,14 @@ def _bar(summaries: dict, key: str, title: str, out_path: Path,
 
     if key == "drop":
         # Negative bars (perda em transferência). Eixo Y fixado em
-        # [-0.5, 0] para padrão visual consistente; labels DENTRO das
-        # barras em texto preto bold (cores TikZ-blended são claras
-        # demais para texto branco — preto contrasta melhor).
+        # [-0.5, 0] para padrão visual consistente; labels FORA das
+        # barras (logo abaixo do bar bottom), seguindo mesmo padrão
+        # das outras figuras (bar_diag, bar_offdiag).
         ax.set_ylabel("Δ MCC (off − diag)", fontsize=11)
         ax.set_ylim(-0.5, 0.0)
         for b, v in zip(bars, vals):
-            label_y = v * 0.5
-            ax.text(b.get_x() + b.get_width() / 2, label_y, f"{v:.3f}",
-                    ha="center", va="center", fontsize=10,
-                    color="black", fontweight="bold")
+            ax.text(b.get_x() + b.get_width() / 2, v - 0.015, f"{v:.3f}",
+                    ha="center", va="top", fontsize=10)
     else:
         ax.set_ylabel("MCC", fontsize=11)
         ax.set_ylim(0.0, 1.0)
