@@ -11,7 +11,7 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `licoes_aprendidas.md` | optimization track narrative + 14 methodological lessons + §9 operational snapshot + §10 future directions | when planning next experiment or interpreting a result |
+| `licoes_aprendidas.md` | optimization track narrative + **20 methodological lessons** + §9 operational snapshot + §10 future directions | when planning next experiment or interpreting a result |
 | `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
@@ -32,10 +32,15 @@ Scientific thesis: *semantic screening* — predicting bioactivity from 1D linea
 
 Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
-## Active work (2026-04)
+## Active work (2026-04, 20 lessons; canonical revalidated under LEGACY adapter)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§10, 14 methodological lessons documented). Current best validated multi-seed: `v7+` canonical (Tier A + C) at 0.5143 ± 0.0079 NH 5-seed. Best 3-seed candidate: `v7+F` (Tier A + C + label smoothing) at 0.5260 ± 0.0274. Current frontier: `v7_asymF` (asymmetric ligand-heavy adapter + pre-norm + LoRA gates), in execution on diamante-01.
-2. **Cross-dataset evaluation matrix (3×3)** — train ∈ {H, NH, All} × test ∈ {H, NH, All}. Infra in `scripts/thesis_followups/cross_dataset_matrix/`. Reuses diagonal checkpoints. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.209. Slides + analysis in `slides/cross_matrix/`.
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§11, **20 methodological lessons** documented). State actual:
+   - **Canônico MCC primário** — `v7+F` (Tier A + C + F) sob `ADAPTER_LEGACY=1` (default desde commit `de2ef0e`): **0.5266 ± 0.010** NH 3-seed em d01 cuDNN ON. Re-validado pelo experimento de isolamento §6.9.1 (lição 17).
+   - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
+   - **Best variance candidate** — `v7+F + Direção A+D` (lig 2L/12h + lr_mult_lig=5x): ~0.530 ± **0.004** (cross-host adj para d01) — MCC empate, σ 2.5× melhor que base. Lição 19 (capacidade ↔ otimização mutuamente dependentes).
+   - **Em execução / pendente** — Grid sweep A+D (d02 NH, opcionalmente H+All); BAN-residual (`v7_ban_res`, lição 12 reformulada com α-gate identity-init, pendente).
+   - **Refutados (descartados)** — Tier B (Xavier head_proj), D vanilla (SWA), E (Mixup), §6.5 fixes (zero-cascade), v7_asymF (3 mudanças simultâneas), v7+F_adapt_v2 (lição 16 decoupled), v7_ban_F (Xavier W_ban substitutivo), LoRA-MLM offline (lição 20 objetivo desalinhado).
+2. **Cross-dataset evaluation matrix (3×3)** — completo. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.209. **Documentação completa migrada para `~/PhD/cross_matrix/`** (figures + Beamer source + Anexo A da tese).
 3. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
 4. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
 
@@ -46,6 +51,12 @@ Open PRs against `cross_attention_lite`, not `main`. `main` = stable releases; `
 ## Thesis repository link
 
 Sibling repo `/Users/sulfierry/PhD` (LaTeX). Defines "semantic screening", scaffold-split protocol, multi-seed protocol (5 seeds), MCC-optimal threshold, standardized model order (DT-Kinase, ConPLex, DrugBAN, GraphBAN). Any metric/architecture/protocol change here requires update under `~/PhD/tex/`.
+
+Recently added (2026-04-26):
+- `~/PhD/tex/anexoA.tex` — Anexo A: Matriz Cross-Dataset 3×3 (heatmaps + análise).
+- `~/PhD/tex/apendiceF.tex` — Apêndice F: 20 lições metodológicas com rigor acadêmico.
+- `~/PhD/cross_matrix/` — Beamer source + figures + alternate versions (migrado de `slides/`).
+- `~/PhD/figures/{heatmap_*,bar_*}.pdf` — figuras cross-matrix referenciadas pelo Anexo A.
 
 ## Environment setup
 
@@ -92,33 +103,58 @@ python3 run_from_config.py configs/v7.yaml --dataset {human|non_human|all} [--dr
 bash run_benchmark.sh                         # shell orchestrator
 ```
 
-## DT-Kinase optimization variants (2026-04)
+## DT-Kinase optimization variants (2026-04, snapshot)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (20 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes harm v7+F by −0.053 MCC. **Default flipped**: `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` is now the default. v7+F = 0.5266 ± 0.010 on d01. **NEW (§6.10, lição 19)**: capacity (Direção A) and LR (Direção D) on same module are mutually dependent — combo A+D = 0.530 (adj) ± **0.004** (2.5× variance reduction vs base); A or D alone regress (-0.027/-0.031). **REFUTED (§6.11, lição 20)**: LoRA-MLM-offline on MoLFormer top-2 layers regresses by −0.025 MCC, AUROC −0.010 (encoder literally worse). MLM objective misaligned with downstream task; abandon offline approach, pivot to LoRA-end-to-end if pursued.
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (20 methodological lessons across §4-§11).
 
-| Config | Tiers | Status (NH) | Notes |
+**Status flags resumidos**:
+- **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes (pre-norm + LoRA gates + zero-init self-attn) **prejudicam** v7+F por −0.053 MCC, AUROC −0.033, σ ×5.6. Default flipped (commit `de2ef0e`): `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` é o default; v7+F reproduz 0.5266 ± 0.010 em d01.
+- **NEW (§6.10, lição 19)**: capacity (Direção A) e LR (Direção D) sobre o mesmo módulo são **mutuamente dependentes**. A+D combo = ~0.530 (adj.) ± **0.004** (σ 2.5× melhor que base); A só ou D só regridem (−0.027/−0.031). Devem ser tratadas como intervenção atômica.
+- **REFUTED (§6.11, lição 20)**: LoRA-MLM-offline em MoLFormer top-2 layers regrediu −0.025 MCC, AUROC −0.010. MLM ≠ tarefa downstream + corpus pequeno (5276 SMILES) → encoder literalmente pior. Pivotar para LoRA-end-to-end se houver retomada.
+- **PENDING**: `v7_ban_res` (lição 12 reformulada — BAN-residual com α-gate identity-init); grid sweep A+D em H/All; LoRA end-to-end (não implementado).
+
+| Config | Tiers / Variante | Status (NH) | Notas |
 |---|---|---|---|
 | `configs/v7.yaml` | baseline | 0.486 (seed 42) / 0.506 (5-seed ref) | thesis reference |
-| `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | canonical validated |
-| `configs/v7_plus_F.yaml` | A + C + F | **0.5266 ± 0.010** (3-seed, LEGACY default) | **canônico MCC primário — re-validado §6.9.1** |
-| `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines (F1)** |
-| `configs/v7_asymF.yaml` | A + C + F + asymmetric adapter | regressed (0.461 ± 0.028) | pre-norm + LoRA + asym todos juntos sem ablação |
-| `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | DESCARTADA (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
-| `configs/v7_ban_F.yaml` | A + C + F + BAN (variant=v8) | regressed (0.503 ± 0.046) | W_ban Xavier-init violates identity-init |
-| `configs/v7_pro.yaml` | A + C + E + F | regressed (0.496 ± 0.025) | Mixup deletério |
-| `configs/v7_plus_E.yaml` | A + C + E (Mixup) | regressed (0.499 ± 0.025) | confirmed Mixup harmful |
+| `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | validado multi-seed |
+| `configs/v7_plus_F.yaml` | A + C + F | **0.5266 ± 0.010** (3-seed, LEGACY default) | **CANÔNICO MCC primário — re-validado §6.9.1** |
+| `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines F1** |
+| `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 ± **0.004** (cross-host adj) | **best-σ candidato** — lição 19 |
+| `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | **PENDENTE** | Lição 12 reformulada; sanity OK; aguarda 3-seed |
+| `configs/v7_asymF.yaml` | A + C + F + asym adapter | regredido (0.461 ± 0.028) | confounded com §6.5; redundante após lição 19 |
+| `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | **DESCARTADO** (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
+| `configs/v7_ban_F.yaml` | A + C + F + BAN puro (variant=v8) | regredido (0.503 ± 0.046) | W_ban Xavier viola identity-init; lição 12 |
+| `configs/v7_pro.yaml` | A + C + E + F | regredido (0.496 ± 0.025) | Mixup deletério |
+| `configs/v7_plus_E.yaml` | A + C + E (Mixup) | regredido (0.499 ± 0.025) | confirmed Mixup harmful |
+| `results/lora/molformer_*` | A + C + F + LoRA-MLM cache | **REFUTADO** (~0.502 adj) | lição 20 |
 
-**Tier glossary**:
-- **A** (capacity): num_heads=16, head_dim=64, mlp_head=true, adapter prot=512/lig=1024, patience=15, lr_mult=2.0
-- **C** (contrastive aux): contrastive_weight=0.3, cosine_feat=true, ConPLex-inspired
-- **F** (label smoothing): label_smooth=0.05
-- **E** (Mixup): mixup_alpha=0.3 — REJECTED in our pipeline
-- **D** (SWA vanilla): swa_start=5 — REJECTED (regime mismatch with short Adam training)
-- **B** (multi-head pool=4): REJECTED (Xavier init violates identity-init)
+**Tier glossary** (sigla → mecanismo):
+- **A** (capacidade adapter): `num_heads=16`, `head_dim=64`, `mlp_head=true`, adapter `prot=512/lig=1024`, `patience=15`, `lr_mult=2.0`. ✓ aceito.
+- **C** (contrastive aux): `contrastive_weight=0.3`, `cosine_feat=true`. ✓ aceito.
+- **F** (label smoothing): `label_smooth=0.05`. ✓ aceito.
+- **E** (Mixup): `mixup_alpha=0.3`. ✗ REJEITADO (lição 11).
+- **B** (multi-head pool=4): Xavier `head_proj`. ✗ REJEITADO (lição 2).
+- **SWA vanilla** (`swa_start=5`): ✗ REJEITADO (lição 4).
+- **§6.5 fixes** (pre-norm + LoRA gates + zero-init self-attn): ✗ REJEITADO (lição 17).
+- **Direção A** (asimetria estrutural lig adapter): `_ADAPTER_LAYERS_LIG=2`, `_ADAPTER_ATTN_HEADS_LIG=12`. Atomicamente acoplado a Direção D (lição 19).
+- **Direção D** (asimetria LR adapter): `_ADAPTER_LR_MULT_LIG=5.0`, `_ADAPTER_LR_MULT_PROT=2.0`. Atomicamente acoplado a Direção A (lição 19).
+- **BAN-residual** (lição 12 reformulada): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1`. ⏳ pendente.
 
-**Runner**: `scripts/v8/run_v7_yaml.sh` (default env=`env`, V7_CONFIG configurable).
-**Validation pipeline (NH→Human sequential 5-seed)**: `scripts/v8/run_v7_pro_validation.sh`.
-**Ablation E vs F (3-seed)**: `scripts/v8/run_ablation_E_F_3seeds.sh`.
+**Runners disponíveis** (todos em `scripts/v8/`):
+
+| Script | Propósito |
+|---|---|
+| `run_v7_yaml.sh` | runner genérico, lê `V7_CONFIG`, `CORPUS`, `SEEDS` env |
+| `run_v7_plus_F_adapt.sh` | v7+F + §6.5 + matched F1 (THR=SEL=f1) |
+| `run_v7_plus_F_adapt_v2.sh` | v7+F + §6.5 + THR=f1 SEL=mcc — **DESCARTADO** |
+| `run_v7_ban_res.sh` | v7+F + BAN-residual α-gate (lição 12 reformulada) |
+| `run_AD_grid_d02.sh` | grid 6 cells: lr_mult_lig {3,5,8} × layers_lig {2,3} |
+| `run_v7_lora_d03.sh` | LoRA-MLM offline pipeline (3 stages) — **REFUTADO** |
+| `aggregate_AD_grid.py` | aggregator multi-corpus do grid sweep |
+| `lora_finetune_molformer.py` | LoRA MLM trainer (standalone) |
+| `recache_molformer_lora.py` | inference + cache embeddings via LoRA delta |
+| `run_v7_pro_validation.sh` | validação NH→Human sequencial 5-seed |
+| `run_ablation_E_F_3seeds.sh` | ablation E vs F isolada |
 
 ## Baselines (equitable protocol)
 
@@ -142,6 +178,8 @@ Shared protocol: identical scaffold splits, seeds `[42, 123, 456, 789, 1024]`, M
 **Pre-computed embeddings**: `./results/protein_model_benchmark_{human|non_human}_v2/{embed}/build/{protein_matrices,ligand_matrices,molformer_matrix}/`. Run once, reused across all seeds/epochs.
 
 ## Cross-dataset matrix infra
+
+Documentação principal (figures, slides, anexo da tese) está em **`~/PhD/cross_matrix/`** + `~/PhD/tex/anexoA.tex`. Scripts de execução permanecem aqui.
 
 Directory: `scripts/thesis_followups/cross_dataset_matrix/`
 
@@ -167,20 +205,32 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
 
 ## Key development notes
 
-- **Production config (thesis baseline)**: `configs/v7.yaml`. Best validated v7+ canonical: `configs/v7_plus.yaml`.
-- **Hosts**: `diamante-01` (cuDNN healthy, primary iteration host since 2026-04-24); `diamante-02` (cuDNN 9.x ABI mismatch with driver 12.4 — needs `BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=1`). MCC comparisons valid only within same host (cuDNN ON vs OFF gives ~+0.009 numerical drift).
-- **Numerical regime**: fp32 + AMP off + TF32 off (auto when no_amp=true + double=false). Mantissa preserved. `configs/v7.yaml` was double=true originally; current optimization track uses fp32 default for speed.
-- **Threshold selection** (all 4 models): MCC-optimal on val. Enforced for equitable comparison.
-- **Calibration**: Platt on val (default `BENCHMARK_LEVEL4CNN_PLATT=1`). Temperature on val opt-in (`_TEMPERATURE=1`).
-- **Composite checkpoint criterion** (new): `score = val_mcc - λ·val_loss` via env `BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS` (default 0 = pure val_mcc). λ=0.5 filters threshold-gamed late epochs.
-- **Asymmetric adapter** (new): per-side `_PROT`/`_LIG` env knobs (`_ADAPTER_LAYERS_LIG`, `_ADAPTER_ATTN_HEADS_LIG`, etc.) for ligand-heavy capacity in kinase domain.
+- **Production config (thesis baseline)**: `configs/v7.yaml`. Best validated multi-seed: `configs/v7_plus_F.yaml` LEGACY default (0.5266 ± 0.010).
+- **Hosts atuais (3 paralelos)**:
+  - `diamante-01` (cuDNN HEALTHY): host primário, MCC reference. Default `BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=0`.
+  - `diamante-02` (cuDNN 9.x ABI mismatch driver 12.4): precisa `_DISABLE_CUDNN=1`. Cross-host drift +0.009 MCC vs d01.
+  - `diamante-03` (RTX 4090, cuDNN 9.10.2 disponível MAS runner default desabilita): cuDNN OFF na prática. Drift similar a d02. Fastest GPU.
+  - **Comparações MCC válidas só dentro do mesmo host**. Para inter-host, ajustar drift +0.009 (d02/d03→d01).
+- **Adapter LEGACY default** (lição 17): `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` é o default. Toda execução de `v7+F` herda adapter histórico (post-norm + Xavier self-attn + zero-init só na última Linear MLP). Setar `=0` opt-in para §6.5 fixes (regressivos).
+- **Threshold + Selection metric** (env, matched obrigatório por lição 16):
+  - `BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC` ∈ {`mcc`, `f1`}. Default `mcc`.
+  - `BENCHMARK_LEVEL4CNN_SELECTION_METRIC` ∈ {`mcc`, `f1`}. Default herda THRESHOLD_METRIC.
+  - Decoupling testado e refutado (lição 16/`v7+F_adapt_v2`).
+- **Per-side adapter LR multipliers** (lição 19): `BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT` e `_LR_MULT_LIG`. Default herda `adapter_lr_mult` do yaml. Direção D = `_LR_MULT_LIG=5.0` (acoplado a Direção A).
+- **Per-side adapter capacity** (Direção A, lição 19): `_ADAPTER_LAYERS_LIG`, `_ADAPTER_ATTN_HEADS_LIG`, idem `_PROT`. Default herda yaml.
+- **BAN-residual** (lição 12 reformulada, pendente): `BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1` ativa caminho residual gateado por α=0 (identity-init).
+- **Composite checkpoint criterion** (lição 14): `score = val_mcc - λ·val_loss` via `_SELECTION_LAMBDA_LOSS` (default 0 = pure val_mcc).
+- **Numerical regime**: fp32 + AMP off + TF32 off (auto quando `no_amp=true + double=false`).
+- **Calibração**: Platt on val (default `_PLATT=1`). Temperature opt-in (`_TEMPERATURE=1`).
+- **Threshold selection** (4 modelos comparados): MCC-optimal on val (canônico DT-Kinase) ou F1-optimal val (DrugBAN/GraphBAN nativo). Para comparação justa, DT-Kinase usa F1 via `v7+F_adapt`.
 - **`MultiTaskLoss`**: vestigial, NOT used in v7.
 - **ESM**: `src/__init__.py` adds `llm/ESM/` to `sys.path`. Never `pip install esm`.
 - **Dataset `all`**: H + NH combined; 386 099 post-filter samples. Embeddings loaded from both `benchmark_{human,non_human}_v2` dirs.
 - **Seq limits**: protein MAX_SEQ_LEN=1024 (C-terminal truncation of long kinases, e.g. ULK1); ligand SMILES 512 tokens (rarely hit).
 - **Non-determinism**: cuDNN non-deterministic reductions ON by default. σ over seeds captures init + reduction noise. Strict determinism via `BENCHMARK_LEVEL4CNN_DETERMINISTIC=1` (~20–30 % slower).
-- **No k-fold**: fixed scaffold split + 5-seed variance estimation.
-- **Two-phase pipeline gotcha**: `benchmark_comparison.json` "phase: train" = fit train, eval val (val MCC reported); "phase: test" = fit val, eval test (test MCC reported). NOT same model — DIFFERENT fits. See licoes §7 lesson 7.
+- **No k-fold**: fixed scaffold split + 5-seed variance estimation (3-seed para iteração rápida; 5-seed para canônico final).
+- **Two-phase pipeline gotcha** (lição 7): `benchmark_comparison.json` "phase: train" e "phase: test" são modelos DIFERENTES. Para `level4_cnn` o train se faz sempre sobre `train_loader`; o `mode` apenas controla se `test_loader` é construído + se reporta val ou test.
+- **LoRA cache override** (refutado mas infra existe): `BENCHMARK_LEVEL4CNN_PROTEIN_CACHE_OVERRIDE` e `_LIGAND_CACHE_OVERRIDE` redirecionam dataloaders para caches alternativos (LoRA-FT-ed). Lição 20 mostra que MLM offline não ajuda; reservado para LoRA end-to-end futuro.
 
 ## Thesis follow-up scripts
 
