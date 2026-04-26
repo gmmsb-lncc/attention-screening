@@ -94,13 +94,13 @@ bash run_benchmark.sh                         # shell orchestrator
 
 ## DT-Kinase optimization variants (2026-04)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (18 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes harm v7+F by −0.053 MCC. Use `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` to revert (v7+F reproduces 0.5266 ± 0.010 with legacy adapter on d01).
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (18 methodological lessons across §4-§10). Configs evolve while v7.yaml remains thesis baseline. **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes harm v7+F by −0.053 MCC. **Default flipped** (commit after `a0e570a`): `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` is now the default. v7+F runs reproduce canonical 0.5266 ± 0.010 on d01. To opt back into §6.5 set `LEGACY=0` explicitly.
 
 | Config | Tiers | Status (NH) | Notes |
 |---|---|---|---|
 | `configs/v7.yaml` | baseline | 0.486 (seed 42) / 0.506 (5-seed ref) | thesis reference |
 | `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | canonical validated |
-| `configs/v7_plus_F.yaml` | A + C + F | **0.5260 ± 0.0274** (3-seed) | **canônico MCC primário** |
+| `configs/v7_plus_F.yaml` | A + C + F | **0.5266 ± 0.010** (3-seed, LEGACY default) | **canônico MCC primário — re-validado §6.9.1** |
 | `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines (F1)** |
 | `configs/v7_asymF.yaml` | A + C + F + asymmetric adapter | regressed (0.461 ± 0.028) | pre-norm + LoRA + asym todos juntos sem ablação |
 | `configs/v7_plus_F_adapt_v2.yaml` | A + C + F + §6.5 + THR=f1, SEL=mcc | DESCARTADA (0.459 ± 0.052) | lição 16: matched objective; AUROC regrediu |
