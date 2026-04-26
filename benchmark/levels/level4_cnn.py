@@ -321,6 +321,35 @@ class EmbeddingAdapter(nn.Module):
         return x
 
 
+def apply_rope_1d(x: torch.Tensor) -> torch.Tensor:
+    """Apply 1D Rotary Positional Embedding to the last dim of x [B, L, D].
+
+    Standard RoPE (Su et al. 2021, RoFormer): for each position p ∈ [0, L),
+    rotate consecutive pair (x[2i], x[2i+1]) by angle p · θ_i where
+    θ_i = 10000^(-2i/D). After rotation, the dot product q·k between two
+    positions encodes only their relative offset, injecting positional
+    structure without learnable parameters.
+
+    Used per-modality (protein and ligand independently) before the
+    cross-modal dot product M_k = P_proj_k · L_proj_k^T, which becomes
+    aware of each position's location along its own sequence axis.
+    head_dim must be even.
+    """
+    B, L, D = x.shape
+    half = D // 2
+    inv_freq = 1.0 / (10000.0 ** (
+        torch.arange(0, half, dtype=torch.float32, device=x.device) / half
+    ))
+    pos = torch.arange(L, dtype=torch.float32, device=x.device)
+    freqs = torch.outer(pos, inv_freq)                # [L, half]
+    cos = freqs.cos().to(x.dtype)
+    sin = freqs.sin().to(x.dtype)
+    x_first, x_second = x[..., :half], x[..., half:]
+    rotated_first = x_first * cos - x_second * sin
+    rotated_second = x_first * sin + x_second * cos
+    return torch.cat([rotated_first, rotated_second], dim=-1)
+
+
 class InteractionMapCNN(nn.Module):
     """2D CNN on protein–ligand interaction maps.
 
@@ -398,6 +427,13 @@ class InteractionMapCNN(nn.Module):
         # Avoids the §6.5 zero-cascade trap because gradient ∂L/∂α
         # depends on (P W_k Lᵀ) which is non-zero at t=0 (W_k Xavier).
         use_ban_residual: bool = False,
+        # 2D RoPE (Su et al. 2021): applies 1D Rotary Positional Embedding
+        # per-modality (protein and ligand independently) to the head
+        # projections before the cross-modal dot product. Injects relative
+        # position structure into M_k without learnable parameters. NOTE:
+        # not identity-init (rotates from t=0); marginal positional inductive
+        # bias for the CNN that processes M_k. head_dim must be even.
+        use_rope: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
@@ -405,6 +441,10 @@ class InteractionMapCNN(nn.Module):
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
         self.use_ban_residual = use_ban_residual and variant in ("v7", "v7_gated")
+        self.use_rope = use_rope and variant in ("v7", "v7_gated")
+        if self.use_rope:
+            assert head_dim % 2 == 0, (
+                f"use_rope=True requires even head_dim, got {head_dim}")
         self.use_adapter = use_adapter
         self.contrastive_dim = contrastive_dim
         self.cosine_feat = cosine_feat
@@ -793,6 +833,13 @@ class InteractionMapCNN(nn.Module):
             for k, (ph, lh) in enumerate(zip(self.prot_heads, self.lig_heads)):
                 p = ph(p_feat)
                 l = lh(l_feat)
+                if self.use_rope:
+                    # 1D RoPE per modality before the cross dot product:
+                    # M_k[i,j] = (rope(P)_i) · (rope(L)_j) carries relative
+                    # position info along each axis. Cosine_sim, if enabled,
+                    # is applied AFTER rotation (rotation preserves norm).
+                    p = apply_rope_1d(p)
+                    l = apply_rope_1d(l)
                 if self.cosine_sim:
                     p = F.normalize(p, dim=-1)
                     l = F.normalize(l, dim=-1)
@@ -1136,6 +1183,7 @@ def _train_interaction_cnn(
     checkpoint_every: int = 50,
     swa_start: int = 0,
     use_ban_residual: bool = False,
+    use_rope: bool = False,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -1222,6 +1270,7 @@ def _train_interaction_cnn(
         cosine_feat=cosine_feat,
         pool_num_heads=pool_num_heads,
         use_ban_residual=use_ban_residual,
+        use_rope=use_rope,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1846,6 +1895,8 @@ class Level4CNNRunner(BaseLevelRunner):
         contrastive_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM", "128"))
         # Lição 12 reformulação: BAN-residual com α-gate aprendível.
         use_ban_residual = os.getenv("BENCHMARK_LEVEL4CNN_BAN_RESIDUAL", "0") == "1"
+        # 2D RoPE (per-modality 1D RoPE applied before cross dot product).
+        use_rope = os.getenv("BENCHMARK_LEVEL4CNN_USE_ROPE", "0") == "1"
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1887,6 +1938,7 @@ class Level4CNNRunner(BaseLevelRunner):
             checkpoint_dir=output_dir,
             checkpoint_every=checkpoint_every,
             use_ban_residual=use_ban_residual,
+            use_rope=use_rope,
         )
 
         # Unwrap torch.compile wrapper (if any) to access nn.Module API
