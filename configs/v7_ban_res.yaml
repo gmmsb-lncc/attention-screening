@@ -1,0 +1,90 @@
+# ============================================================================
+# DT-Kinase v7-ban-res — Tier A + C + F + BAN-residual com α-gate aprendível
+# ============================================================================
+# Implementa lição 12 reformulada (licoes_aprendidas §6.4) e abre direção
+# inicialmente refutada por v7_ban_F (Xavier W_ban viola identity-init).
+#
+# Arquitetura:
+#   M_k = (P W_p^k)(L W_l^k)^T / sqrt(head_dim)         (caminho v7 dot-product)
+#       + α_k · (P W_k L^T)                             (caminho BAN, α_k=0 init)
+#
+# Em t=0: α_k = 0 → modelo IDÊNTICO ao v7+F (sanity test confirmado).
+# Gradiente ∂L/∂α_k = (P·W_k·L^T) · ∂L/∂out ≠ 0 porque W_k Xavier.
+# α_k move primeiro; W_k começa a treinar quando α_k > 0 (LoRA-style).
+#
+# Custo: +3.93M params (16 heads × 320 × 768 = 3.93M para W_k matrices).
+# Trainable total: 6.07M → 10.0M.
+#
+# Stack: v7+F LEGACY default + BAN-residual via env BAN_RESIDUAL=1.
+#
+# Usage:
+#   SEEDS="42 123 456" V7_CONFIG=configs/v7_ban_res.yaml CORPUS=non_human \
+#     BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1 \
+#     bash scripts/v8/run_v7_yaml.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_banres_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7              # v7 dot-product heads + BAN residual via env
+  num_heads: 16            # Tier A
+  head_dim: 64             # Tier A
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  double: false
+  no_amp: true
+  deterministic: false
+
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1                # SIMÉTRICO (sem assimetria A — independente)
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+    # NB: §6.5 fixes opt-in (default LEGACY=1) → adapter histórico ativo.
+
+  calibration:
+    platt: true
+    temperature: false
+
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.55
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true

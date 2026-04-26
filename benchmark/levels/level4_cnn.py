@@ -391,12 +391,20 @@ class InteractionMapCNN(nn.Module):
         adapter_layers_lig: int | None = None,
         adapter_attn_heads_prot: int = 4,
         adapter_attn_heads_lig: int = 4,
+        # BAN-residual (lição 12 reformulação): adds, on top of v7's K
+        # dot-product heads, a residual term M_k += α_k · P W_k Lᵀ with
+        # α_k init zero and W_k Xavier. At t=0 the model is identical to
+        # v7 (gate=0); gradient activates the bilinear term where useful.
+        # Avoids the §6.5 zero-cascade trap because gradient ∂L/∂α
+        # depends on (P W_k Lᵀ) which is non-zero at t=0 (W_k Xavier).
+        use_ban_residual: bool = False,
     ) -> None:
         super().__init__()
         self.variant = variant
         self.num_heads = num_heads
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
+        self.use_ban_residual = use_ban_residual and variant in ("v7", "v7_gated")
         self.use_adapter = use_adapter
         self.contrastive_dim = contrastive_dim
         self.cosine_feat = cosine_feat
@@ -452,6 +460,26 @@ class InteractionMapCNN(nn.Module):
             self.lig_heads = nn.ModuleList([
                 nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
             ])
+            # BAN-residual heads (lição 12 reformulação). One scalar gate
+            # α_k per head (init zero) + one bilinear matrix W_k per head
+            # (Xavier). Gradient flows from the start because P W_k Lᵀ ≠ 0
+            # at t=0; α_k absorbs the contribution magnitude as training
+            # progresses.
+            if self.use_ban_residual:
+                self.ban_alphas = nn.ParameterList([
+                    nn.Parameter(torch.zeros(1)) for _ in range(num_heads)
+                ])
+                self.ban_weights = nn.ParameterList([
+                    nn.Parameter(torch.empty(protein_dim, ligand_dim))
+                    for _ in range(num_heads)
+                ])
+                # Xavier-uniform on each W_k for non-zero gradient on α_k.
+                # Scale down by sqrt(ligand_dim) so the residual is in the
+                # same numerical range as the dot-product term (which is
+                # divided by sqrt(head_dim)).
+                _ban_scale = (protein_dim * ligand_dim) ** -0.25
+                for w in self.ban_weights:
+                    nn.init.xavier_uniform_(w, gain=_ban_scale)
         elif variant == "v8":
             # Full Bilinear Attention: W_k[prot_dim, lig_dim] per head.
             # score(i,j) = protein[i] @ W_k @ ligand[j]
@@ -762,13 +790,22 @@ class InteractionMapCNN(nn.Module):
             l_feat = ligand_matrix * self.lig_gate(ligand_matrix) if self.variant == "v7_gated" else ligand_matrix
 
             maps: list[torch.Tensor] = []
-            for ph, lh in zip(self.prot_heads, self.lig_heads):
+            for k, (ph, lh) in enumerate(zip(self.prot_heads, self.lig_heads)):
                 p = ph(p_feat)
                 l = lh(l_feat)
                 if self.cosine_sim:
                     p = F.normalize(p, dim=-1)
                     l = F.normalize(l, dim=-1)
                 m = torch.bmm(p, l.transpose(1, 2)) * self.scale
+                if self.use_ban_residual:
+                    # BAN residual: M_k += α_k · P_feat W_k L_featᵀ
+                    # Compute via einsum to avoid intermediate (B, sp, lig_dim).
+                    # Final shape matches dot-product map: [B, sp, sl].
+                    m_ban = torch.einsum(
+                        'bip,pq,bjq->bij',
+                        p_feat, self.ban_weights[k], l_feat,
+                    )
+                    m = m + self.ban_alphas[k] * m_ban
                 maps.append(m)
             interaction = torch.stack(maps, dim=1)
 
@@ -1098,6 +1135,7 @@ def _train_interaction_cnn(
     checkpoint_dir: str | None = None,
     checkpoint_every: int = 50,
     swa_start: int = 0,
+    use_ban_residual: bool = False,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -1183,6 +1221,7 @@ def _train_interaction_cnn(
         contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
         cosine_feat=cosine_feat,
         pool_num_heads=pool_num_heads,
+        use_ban_residual=use_ban_residual,
     ).to(device=device, dtype=dtype)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1805,6 +1844,8 @@ class Level4CNNRunner(BaseLevelRunner):
         contrastive_weight = float(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_WEIGHT", "0.0"))
         cosine_feat = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_FEAT", "0") == "1"
         contrastive_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM", "128"))
+        # Lição 12 reformulação: BAN-residual com α-gate aprendível.
+        use_ban_residual = os.getenv("BENCHMARK_LEVEL4CNN_BAN_RESIDUAL", "0") == "1"
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1845,6 +1886,7 @@ class Level4CNNRunner(BaseLevelRunner):
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
             checkpoint_every=checkpoint_every,
+            use_ban_residual=use_ban_residual,
         )
 
         # Unwrap torch.compile wrapper (if any) to access nn.Module API
