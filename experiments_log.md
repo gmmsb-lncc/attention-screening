@@ -69,6 +69,7 @@ referenciar este registro.
 | 27 | **v7_ban_res (BAN-residual α-gate) 3-seed** | ? | 3 | 42,123,456 | — | **0,5081 ± 0,0449** | 0,045 | ~0,517 (adj se cuDNN OFF) | −0,010 a −0,018 | **REGREDIU** — capacidade extra W_k sem LR matching (Lição 19 reaplica) |
 | 28 | **v7_rope (2D RoPE per-modality) 3-seed** | d02 | 3 | 42,123,456 | — | **0,4971 ± 0,0220** | 0,022 | **~0,506 (adj)** | **−0,020** | **REGREDIU — Lição 22**: RoPE em cross-modal map é category error (offset i−j sem semântica entre prot/lig) |
 | 24 | v7+F + LoRA-MLM offline (rank=8, top-2L, 10 ep MLM) 3-seed | d03 | 3 | 42,123,456 | — | 0,4933 ± 0,0321 | 0,032 | ~0,502 (adj) | −0,025 | **REFUTADO lição 20**: MLM não-alinhado a downstream + corpus 5276 SMILES = overfit; AUROC −0,010 confirma piora real do encoder |
+| 29 | **v7_ban_res_lr (BAN-residual + BAN_LR_MULT=5) 2-seed** | d03 | 2 | 42,123 | — | **0,5108 ± 0,0459** | 0,046 | 0,8081 ± 0,0037 | **−0,016** | **REFUTA correção §6.12**: LR-boost dedicado em $W_k$ não recupera; gargalo é acoplamento multiplicativo $\alpha_k \cdot W_k L^\top$ (gate zero $\Rightarrow$ grad zero), não magnitude de update. F1=0,7912 ± 0,0159; elapsed=1312s |
 
 ---
 
@@ -449,6 +450,56 @@ next_step: |
   W_k receba updates compatíveis com sua quantidade de params.
   Aplicação direta princípio Lição 19 atomicamente: capacidade
   extra + LR boost juntos.
+```
+
+### v7_ban_res_lr (BAN-residual + BAN_LR_MULT=5) 2-seed em `diamante-03`
+
+```yaml
+config: configs/v7_ban_res_lr.yaml
+host: diamante-03  (cuDNN ON; results/benchmark_banres_lr_non_human_8M)
+corpus: non_human
+embedding: 8M
+seeds: [42, 123]
+elapsed_seconds: 1312.3
+env:
+  BENCHMARK_LEVEL4CNN_BAN_RESIDUAL: 1
+  BENCHMARK_LEVEL4CNN_BAN_LR_MULT:  5.0
+arch_changes:
+  param_group_dedicado: W_k + α_k receberam lr * 5.0
+  baseline_share: caminho dot-product + adapter inalterados
+results:
+  level4_cnn_mlp:
+    accuracy:  0.75235  ± 0.024512
+    mcc:       0.51081  ± 0.045921   # vs BAN-res sem boost: +0.003 (ruído)
+    f1:        0.791156 ± 0.015928
+    precision: 0.718074 ± 0.027784
+    recall:    0.881215 ± 0.002344
+    auc:       0.808115 ± 0.003707
+diagnosis: |
+  REFUTA a hipótese corretiva proposta em §6.12. LR-boost
+  dedicado (×5) NÃO recuperou a regressão de BAN-residual.
+  Δ MCC vs BAN-res vanilla = +0.003 (indistinguível de ruído σ).
+  Δ MCC vs v7+F baseline   = -0.016 (regressão preservada).
+  σ_test continua inflado ~4.5× vs baseline.
+
+  Diagnóstico mecanístico atualizado: gargalo NÃO é magnitude
+  de update. É acoplamento multiplicativo do gate:
+    ∂L/∂W_k = α_k · (P L^T) · ∂L/∂out
+  Com α_k(t=0)=0, gradiente de W_k é estritamente zero na
+  primeira iteração. Mesmo com LR×5 em W_k, sem sinal não
+  há aprendizado. O sinal só emerge quando α_k se afasta de
+  zero, mas α_k depende de W_k L^T já útil — circular.
+
+  LR-boost local resolve sub-treinamento por capacidade
+  (Lição 19 original com adapter), NÃO resolve sub-treinamento
+  por acoplamento multiplicativo (BAN-residual; também §6.5).
+
+next_step: |
+  BAN-residual está empiricamente refutado em todas as
+  parametrizações testadas. Para reabrir: warm-up assimétrico
+  com α_k(t=0) ≠ 0 pequeno (e.g. 0.01) ou schedule dedicado
+  desacoplando crescimento de α_k do crescimento de W_k.
+  Não é prioridade no plateau atual (Lição 21).
 ```
 
 ### A+D Grid Sweep (6 cells, lr_mult_lig × layers_lig) 3-seed em `diamante-02`

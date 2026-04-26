@@ -129,6 +129,40 @@ class ContrastiveLoss(nn.Module):
 # ======================================================================
 
 
+def coral_loss(features: torch.Tensor, domains: torch.Tensor) -> torch.Tensor:
+    """Correlation Alignment Loss (CORAL, Sun & Saenko 2016).
+
+    Aligns second-order statistics (covariance matrices) of pooled
+    features across domains, encouraging domain-invariant feature
+    distributions WITHOUT requiring an adversarial discriminator.
+
+    Loss = (1/4d²) · ||Cov(features_dom0) - Cov(features_dom1)||²_F
+
+    Robust degenerate case: if either domain has < 2 samples in batch,
+    returns zero (covariance undefined). For our use case this only
+    happens with extremely small batches; with batch_size=128 over
+    'all' corpus, both H and NH always present.
+    """
+    valid = domains >= 0
+    if not valid.any():
+        return torch.zeros((), device=features.device, dtype=features.dtype)
+    f = features[valid]
+    d = domains[valid]
+    f0 = f[d == 0]
+    f1 = f[d == 1]
+    if f0.size(0) < 2 or f1.size(0) < 2:
+        return torch.zeros((), device=features.device, dtype=features.dtype)
+    # Center features per domain.
+    f0c = f0 - f0.mean(dim=0, keepdim=True)
+    f1c = f1 - f1.mean(dim=0, keepdim=True)
+    # Empirical covariance: (n-1) normalised.
+    cov0 = (f0c.t() @ f0c) / max(f0.size(0) - 1, 1)
+    cov1 = (f1c.t() @ f1c) / max(f1.size(0) - 1, 1)
+    diff = cov0 - cov1
+    dim = features.size(-1)
+    return (diff ** 2).sum() / (4 * dim * dim)
+
+
 class _GradientReversalFn(torch.autograd.Function):
     """Gradient Reversal Layer (Ganin & Lempitsky, ICML 2015).
 
@@ -1387,6 +1421,17 @@ def _train_interaction_cnn(
             f"pool_dim={pool_out_dim} (linear ramp first half of training)"
         )
 
+    # CORAL (Sun & Saenko 2016) — second-order moment alignment.
+    # No extra head, no GRL, no λ schedule. Direct loss on pooled features.
+    # Requires mixed-domain batches (corpus=all). Orthogonal to CDAN: uses
+    # covariance match instead of adversarial discrimination.
+    coral_lambda = float(os.getenv("BENCHMARK_LEVEL4CNN_CORAL_LAMBDA", "0.0"))
+    if coral_lambda > 0:
+        tqdm.write(
+            f"    CORAL DA: λ={coral_lambda}, pool_dim={pool_out_dim} "
+            f"(requires corpus=all for mixed-domain batches)"
+        )
+
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     _cross_layers = int(os.getenv('BENCHMARK_LEVEL4CNN_CROSS_LAYERS', '2'))
@@ -1647,6 +1692,15 @@ def _train_interaction_cnn(
                         adv_loss = F.cross_entropy(
                             domain_logits, domain[valid_dom])
                         loss = loss + lambd * adv_loss
+
+                # CORAL alignment: covariance match across domains on pooled
+                # features. Requires mixed-domain batch (corpus=all). No GRL,
+                # no λ schedule — direct second-order regularizer.
+                if coral_lambda > 0 and "domain" in batch:
+                    domain = batch["domain"].to(device)
+                    pooled = _orig._last_pooled
+                    c_loss_coral = coral_loss(pooled, domain)
+                    loss = loss + coral_lambda * c_loss_coral
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()

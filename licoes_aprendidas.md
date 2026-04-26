@@ -1232,6 +1232,51 @@ Lição 19, BAN-residual deveria ser combinado com um *boost* de
 parametrização atômica, o *trade-off* "magnitude de *update* por
 parâmetro" estaria preservado.
 
+### 6.12.1. Refutação da direção corretiva — `v7_ban_res_lr` (BAN_LR_MULT=5)
+
+Hipótese da $\S 6{.}12$ testada na configuração
+`v7_ban_res_lr` em `diamante-03`, duas sementes (`42`, `123`),
+corpus *non-human*. *Setup*: BAN-residual ativo
+(`BENCHMARK_LEVEL4CNN_BAN_RESIDUAL=1`) + grupo de parâmetros
+dedicado para $W_k + \alpha_k$ com `BAN_LR_MULT=5.0`. Tempo
+*wall-clock*: $1312$\,s (~$22$\,min).
+
+Resultado:
+
+$$\mathrm{MCC}_\text{test} = 0{,}5108 \pm 0{,}0459, \quad
+  \mathrm{AUROC} = 0{,}8081 \pm 0{,}0037, \quad
+  \mathrm{F1} = 0{,}7912 \pm 0{,}0159.$$
+
+Comparado ao BAN-residual sem *boost* ($0{,}5081 \pm 0{,}0449$,
+$\S 6{.}12$): $\Delta \text{MCC} = +0{,}003$, indistinguível do
+ruído $\sigma$. O *boost* de *learning rate* dedicado **não
+recuperou** a regressão. Comparado ao *baseline* `v7+F`
+($0{,}5266 \pm 0{,}010$): $-0{,}016$ MCC, $\sigma$ permanece
+inflada por fator $\sim 4{,}5$.
+
+Interpretação. A Lição 19 (capacidade↔LR atomicidade) é
+condição necessária mas insuficiente. No caso BAN-residual o
+*gargalo* não é magnitude de *update* mas **regime de gradiente
+do gate $\alpha_k$**: como $\alpha_k(t=0) = 0$, o gradiente
+$\partial \mathcal{L}/\partial W_k = \alpha_k \cdot (\cdots)
+= 0$ na primeira passagem; o ramo BAN só recebe sinal depois
+que $\alpha_k$ se afasta de zero, mas $\alpha_k$ por sua vez
+depende do sinal acumulado em $W_k L^\top$. Há um
+**acoplamento multiplicativo** que nem LR-boost local resolve
+sem pré-aquecimento separado de $\alpha_k$. Refuta de forma
+empírica a direção corretiva proposta na $\S 6{.}12$;
+BAN-residual passa a estar tipicamente refutado em todas as
+parametrizações testadas (vanilla e LR-boosted).
+
+**Lição operacional adicional.** Quando a regressão de uma
+configuração vem de **acoplamento multiplicativo** entre
+parâmetros novos (e.g. $\alpha \cdot W$, BAN-residual; gate
+$\sigma(g) \cdot$ LoRA, $\S 6{.}5$), correções via LR-boost
+isoladas falham porque o gradiente de uma das partes é
+identicamente zero quando a outra é zero. A fix correta
+exigiria *warm-up* assimétrico (e.g. $\alpha_k$ inicializado
+não-zero pequeno, ou *schedule* dedicado).
+
 ## 6.14. RoPE em mapa cross-modal (`v7_rope`) — *category error* posicional (lição 22)
 
 A configuração `v7_rope` aplica **Rotary Positional Embedding**

@@ -1,0 +1,68 @@
+# ============================================================================
+# DT-Kinase v7+F + CORAL Domain Alignment (d01 — 2-seed All)
+# ============================================================================
+# CORAL (Sun & Saenko, ECCV 2016) — alinha estatísticas de segunda ordem
+# (matriz de covariância) das pooled features entre dominios H e NH.
+#
+# Loss = (1/4d²) · ||Cov(f_human) - Cov(f_non_human)||²_F
+#
+# Diferente do CDAN (d02): SEM head adversarial, SEM Gradient Reversal,
+# SEM λ schedule. Loss direto sobre pooled features (HierPool output).
+# Mecanismo ortogonal — testa se alinhamento de momentos basta para
+# domain transfer sem custo adversarial.
+#
+# IMPORTANTE: corpus DEVE ser `all` para haver mistura H+NH em cada batch.
+# Em batches de domínio único, CORAL retorna 0 (covariância indefinida).
+#
+# Env (set pelo runner):
+#   BENCHMARK_LEVEL4CNN_CORAL_LAMBDA=0.1
+#   CORPUS=all
+# ============================================================================
+dataset: all
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_plusF_coral_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64
+  channels: 64
+  batch_size: 128
+  dropout: 0.35
+  weight_decay: 0.04
+  double: false
+  no_amp: true
+  deterministic: false
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+  calibration:
+    platt: true
+    temperature: false
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+  checkpoint_every: 10
+
+rigor: { enforce: true, require_train_selection: true, strict_level_completeness: true }
+gate:  { target_test_mcc: 0.55, max_test_mcc_std: 0.08 }
+suppress_warnings: true
