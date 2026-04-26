@@ -150,45 +150,37 @@ def _bar(summaries: dict, key: str, title: str, out_path: Path,
     labels = [MODEL_LABELS.get(m, m) for m, _ in items]
     vals = [v for _, v in items]
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"][:len(items)]
-    fig, ax = plt.subplots(figsize=(6.0, 3.8))
-    bars = ax.bar(labels, vals, color=colors)
+    fig, ax = plt.subplots(figsize=(7.0, 4.2))
+    bars = ax.bar(labels, vals, color=colors, edgecolor="black", linewidth=0.5)
 
-    # Per-key axis configuration:
-    #   off_mean / diag_mean: MCC values bounded to [0, 1] for readability
-    #   drop: plotted as negative (perda em transferência); use a SAFE
-    #         margin both at the bottom (so text labels fit) and at the
-    #         top (so the zero line stays inside the visible region).
     if key == "drop":
-        ax.set_ylabel("Δ MCC (off − diag)", fontsize=10)
+        # Negative bars (perda em transferência). ylim com 20% padding
+        # abaixo de vmin + 10% acima de zero para acomodar anotações.
+        # Texto fica DENTRO da barra (centralizado) em branco para
+        # contraste com a cor da barra. Eixo Y assim sempre mostra
+        # consistência visual independente dos valores absolutos.
+        ax.set_ylabel("Δ MCC (off − diag)", fontsize=11)
         vmin = min(vals)
-        # Bottom margin = 25% of |vmin| (room for annotations underneath).
-        # Top margin = 5% of |vmin| (small breathing space above zero).
-        bottom_pad = 0.25 * abs(vmin) if vmin != 0 else 0.05
-        top_pad = 0.05 * abs(vmin) if vmin != 0 else 0.05
-        ax.set_ylim(vmin - bottom_pad, top_pad)
+        ax.set_ylim(vmin * 1.20, abs(vmin) * 0.10)
+        for b, v in zip(bars, vals):
+            label_y = v * 0.5
+            ax.text(b.get_x() + b.get_width() / 2, label_y, f"{v:.3f}",
+                    ha="center", va="center", fontsize=10,
+                    color="white", fontweight="bold")
     else:
-        ax.set_ylabel("MCC", fontsize=10)
+        ax.set_ylabel("MCC", fontsize=11)
         ax.set_ylim(0.0, 1.0)
+        for b, v in zip(bars, vals):
+            ax.text(b.get_x() + b.get_width() / 2, v + 0.015, f"{v:.3f}",
+                    ha="center", va="bottom", fontsize=10)
+
     ax.set_title(title, fontsize=12)
-    ax.axhline(0.0, color="black", linewidth=0.5)
-    # Annotation: place INSIDE the bar (white/dark contrast handled visually).
-    # For negative bars: text just above the bar top (which is at 0 line - |v|).
-    # Simpler robust strategy: text near the BAR'S ENDPOINT, on the OPPOSITE
-    # side of zero (so it's inside the plot area, not in the margin).
-    span = max(vals) - min(vals) if vals else 1.0
-    margin = 0.02 * span if span > 0 else 0.01
-    for b, v in zip(bars, vals):
-        if v >= 0:
-            y_pos = v + margin
-            va = "bottom"
-        else:
-            # Place text just BELOW the bar bottom (more negative direction).
-            y_pos = v - margin
-            va = "top"
-        ax.text(b.get_x() + b.get_width() / 2, y_pos, f"{v:.3f}",
-                ha="center", va=va, fontsize=9)
-    # Avoid tight_layout warnings by setting margins explicitly.
-    fig.subplots_adjust(left=0.13, right=0.97, top=0.90, bottom=0.13)
+    ax.axhline(0.0, color="black", linewidth=0.8)
+    ax.tick_params(axis="x", labelsize=10)
+    ax.tick_params(axis="y", labelsize=9)
+    ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
+    ax.set_axisbelow(True)
+    fig.subplots_adjust(left=0.13, right=0.97, top=0.88, bottom=0.13)
     fig.savefig(out_path, bbox_inches="tight", pad_inches=0.1)
     plt.close(fig)
 
