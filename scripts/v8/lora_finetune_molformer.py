@@ -160,23 +160,25 @@ def mlm_mask(
     tokenizer,
     mask_prob: float = 0.15,
 ):
-    """Apply BERT-style MLM masking. Returns (masked_ids, labels)."""
+    """Apply BERT-style MLM masking. Returns (masked_ids, labels). Device-safe."""
+    device = input_ids.device
     labels = input_ids.clone()
-    rand = torch.rand_like(input_ids, dtype=torch.float)
-    special_ids = set(tokenizer.all_special_ids)
+    rand = torch.rand(input_ids.shape, device=device)
+    special_ids = list(tokenizer.all_special_ids)
     special_mask = torch.zeros_like(input_ids, dtype=torch.bool)
     for sid in special_ids:
         special_mask |= input_ids == sid
     mask = (rand < mask_prob) & ~special_mask & (attention_mask == 1)
     labels[~mask] = -100
     masked = input_ids.clone()
-    rand2 = torch.rand_like(input_ids, dtype=torch.float)
+    rand2 = torch.rand(input_ids.shape, device=device)
     replace_mask = mask & (rand2 < 0.8)
     random_mask = mask & (rand2 >= 0.8) & (rand2 < 0.9)
     if tokenizer.mask_token_id is not None:
         masked[replace_mask] = tokenizer.mask_token_id
     rand_tok = torch.randint(
-        low=5, high=tokenizer.vocab_size, size=input_ids.shape, dtype=input_ids.dtype,
+        low=5, high=tokenizer.vocab_size, size=input_ids.shape,
+        dtype=input_ids.dtype, device=device,
     )
     masked[random_mask] = rand_tok[random_mask]
     return masked, labels
@@ -199,13 +201,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target-modules", default="attention.self.query,attention.self.key,attention.self.value,attention.output.dense",
                    help="Comma-separated dot-paths within each layer.")
     p.add_argument("--epochs", type=int, default=10)
-    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--max-length", type=int, default=202)
     p.add_argument("--mask-prob", type=float, default=0.15)
     p.add_argument("--weight-decay", type=float, default=0.0)
     p.add_argument("--warmup-ratio", type=float, default=0.06)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--num-workers", type=int, default=8,
+                   help="DataLoader workers — set to ~min(CPU_count, 8).")
+    p.add_argument("--prefetch-factor", type=int, default=4)
+    p.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16",
+                   help="bf16 native on RTX 4090/Ampere+; fp16 needs GradScaler.")
     return p.parse_args()
 
 
@@ -249,10 +256,16 @@ def main():
     print(f"[lora-ft] train SMILES (unique): {len(train_smiles)}")
 
     train_ds = SMILESMLMDataset(train_smiles, tokenizer, args.max_length)
-    train_loader = DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=2, pin_memory=True, drop_last=True,
+    loader_kwargs = dict(
+        batch_size=args.batch_size, shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        drop_last=True,
+        persistent_workers=(args.num_workers > 0),
     )
+    if args.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = args.prefetch_factor
+    train_loader = DataLoader(train_ds, **loader_kwargs)
 
     optim = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -268,7 +281,26 @@ def main():
         return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda)
-    scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+
+    # Precision setup: bf16 native on RTX 4090 (no GradScaler needed),
+    # fp16 needs GradScaler to avoid underflow in backward.
+    use_cuda = device.type == "cuda"
+    if args.precision == "bf16" and use_cuda:
+        amp_dtype = torch.bfloat16
+        scaler = None
+        print("[lora-ft] precision: bf16 (native, no GradScaler)")
+    elif args.precision == "fp16" and use_cuda:
+        amp_dtype = torch.float16
+        scaler = torch.amp.GradScaler("cuda")
+        print("[lora-ft] precision: fp16 (GradScaler enabled)")
+    else:
+        amp_dtype = torch.float32
+        scaler = None
+        print(f"[lora-ft] precision: fp32 (cuda={use_cuda})")
+
+    # cuDNN tuning for stable input shapes (max_length fixed).
+    if use_cuda:
+        torch.backends.cudnn.benchmark = True
 
     model.train()
     global_step = 0
@@ -279,13 +311,12 @@ def main():
             input_ids = batch["input_ids"].to(device, non_blocking=True)
             attn = batch["attention_mask"].to(device, non_blocking=True)
             masked, labels = mlm_mask(input_ids, attn, tokenizer, args.mask_prob)
-            labels = labels.to(device, non_blocking=True)
             optim.zero_grad(set_to_none=True)
-            ctx = (
-                torch.amp.autocast("cuda", dtype=torch.float16)
-                if scaler is not None else torch.amp.autocast("cpu", enabled=False)
-            )
-            with ctx:
+            if use_cuda and amp_dtype != torch.float32:
+                with torch.amp.autocast("cuda", dtype=amp_dtype):
+                    out = model(input_ids=masked, attention_mask=attn, labels=labels)
+                    loss = out.loss
+            else:
                 out = model(input_ids=masked, attention_mask=attn, labels=labels)
                 loss = out.loss
             if scaler is not None:
@@ -299,7 +330,7 @@ def main():
             global_step += 1
             running += float(loss.item())
             count += 1
-            bar.set_postfix({"loss": f"{running/max(count,1):.4f}"})
+            bar.set_postfix({"loss": f"{running/max(count,1):.4f}", "step": global_step})
         print(f"[lora-ft] epoch {epoch+1}: avg_loss={running/max(count,1):.4f}")
 
     state = collect_lora_state(model)

@@ -32,9 +32,23 @@ LORA_RANK="${LORA_RANK:-8}"
 LORA_ALPHA="${LORA_ALPHA:-16}"
 LORA_TOP_LAYERS="${LORA_TOP_LAYERS:-2}"
 LORA_EPOCHS="${LORA_EPOCHS:-10}"
-LORA_BATCH="${LORA_BATCH:-32}"
+LORA_BATCH="${LORA_BATCH:-64}"
 LORA_LR="${LORA_LR:-5e-4}"
+LORA_NUM_WORKERS="${LORA_NUM_WORKERS:-8}"
+LORA_PRECISION="${LORA_PRECISION:-bf16}"
+RECACHE_BATCH="${RECACHE_BATCH:-128}"
 SEEDS="${SEEDS:-42 123 456}"
+
+# CPU threading limits — keep BLAS off the main GPU pipeline.
+N_CPU="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${N_CPU}}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${N_CPU}}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-${N_CPU}}"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
+# Disable TF oneDNN warnings + memory growth tweaks.
+export TF_ENABLE_ONEDNN_OPTS=0
+export TF_CPP_MIN_LOG_LEVEL=2
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 LORA_DIR="results/lora/molformer_${CORPUS}_${LORA_TAG}"
 CACHE_DIR="results/lora/molformer_cache_${LORA_TAG}/${CORPUS}"
@@ -89,7 +103,9 @@ else
         --top-layers "${LORA_TOP_LAYERS}" \
         --epochs "${LORA_EPOCHS}" \
         --batch-size "${LORA_BATCH}" \
-        --lr "${LORA_LR}"
+        --lr "${LORA_LR}" \
+        --num-workers "${LORA_NUM_WORKERS}" \
+        --precision "${LORA_PRECISION}"
 fi
 
 # ---------- Stage 2: re-cache per-token embeddings ---------------------
@@ -102,6 +118,8 @@ else
         --splits-dir "${SPLITS_DIR}" \
         --corpus "${CORPUS}" \
         --out-dir "${CACHE_DIR}" \
+        --batch-size "${RECACHE_BATCH}" \
+        --precision "${LORA_PRECISION}" \
         --skip-existing
 fi
 

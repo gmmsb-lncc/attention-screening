@@ -77,17 +77,28 @@ def collect_unique_smiles(splits_dir: Path, corpus: str) -> dict[str, str]:
 
 
 @torch.inference_mode()
-def encode_one(model, tokenizer, smiles: str, max_length: int, device) -> np.ndarray:
+def encode_batch(
+    model, tokenizer, smiles_list: list[str], max_length: int, device,
+    amp_dtype=torch.bfloat16, use_cuda: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Encode a batch. Returns (per_token_hidden, attention_mask).
+
+    Per-token hidden trimmed to true sequence length per item later.
+    Output dtype: float32 to preserve numerics in cache files.
+    """
     enc = tokenizer(
-        smiles, max_length=max_length, truncation=True,
-        padding=False, return_tensors="pt",
+        smiles_list, max_length=max_length, truncation=True,
+        padding=True, return_tensors="pt",
     )
-    input_ids = enc["input_ids"].to(device)
-    attn = enc["attention_mask"].to(device)
-    out = model(input_ids=input_ids, attention_mask=attn)
-    # MoLFormer returns (last_hidden_state, ...) — take per-token states.
+    input_ids = enc["input_ids"].to(device, non_blocking=True)
+    attn = enc["attention_mask"].to(device, non_blocking=True)
+    if use_cuda and amp_dtype != torch.float32:
+        with torch.amp.autocast("cuda", dtype=amp_dtype):
+            out = model(input_ids=input_ids, attention_mask=attn)
+    else:
+        out = model(input_ids=input_ids, attention_mask=attn)
     h = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
-    return h.squeeze(0).float().cpu().numpy()
+    return h.float().cpu().numpy(), attn.cpu().numpy()
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,6 +108,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--corpus", required=True, choices=["human", "non_human", "all"])
     p.add_argument("--out-dir", required=True, type=Path)
     p.add_argument("--max-length", type=int, default=202)
+    p.add_argument("--batch-size", type=int, default=64,
+                   help="GPU batch size for inference. RTX 4090 24GB handles 64 easily.")
+    p.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     p.add_argument("--skip-existing", action="store_true")
     return p.parse_args()
 
@@ -105,24 +119,49 @@ def main():
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_cuda = device.type == "cuda"
+    if use_cuda:
+        torch.backends.cudnn.benchmark = True
+        amp_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
+                     "fp32": torch.float32}[args.precision]
+        print(f"[recache] device={device}, precision={args.precision}")
+    else:
+        amp_dtype = torch.float32
+        print(f"[recache] device=CPU (precision forced to fp32)")
     model, tokenizer, meta = load_model_with_lora(args.lora_dir, device)
 
     smiles_map = collect_unique_smiles(args.splits_dir, args.corpus)
     print(f"[recache] unique molecules: {len(smiles_map)}")
 
-    n_skip, n_done, n_err = 0, 0, 0
-    for cid, sm in tqdm(smiles_map.items(), desc="encoding"):
-        out_path = args.out_dir / f"{cid}_matrix.npy"
-        if args.skip_existing and out_path.exists():
-            n_skip += 1
-            continue
+    items = list(smiles_map.items())
+    if args.skip_existing:
+        before = len(items)
+        items = [(cid, sm) for cid, sm in items
+                 if not (args.out_dir / f"{cid}_matrix.npy").exists()]
+        print(f"[recache] skipping {before - len(items)} already cached")
+    n_skip = len(smiles_map) - len(items)
+
+    n_done, n_err = 0, 0
+    bar = tqdm(range(0, len(items), args.batch_size), desc="encoding (batched)")
+    for start in bar:
+        chunk = items[start:start + args.batch_size]
+        cids = [cid for cid, _ in chunk]
+        smis = [sm for _, sm in chunk]
         try:
-            h = encode_one(model, tokenizer, sm, args.max_length, device)
-            np.save(out_path, h.astype(np.float32))
-            n_done += 1
+            hidden, attn = encode_batch(
+                model, tokenizer, smis, args.max_length, device,
+                amp_dtype=amp_dtype, use_cuda=use_cuda,
+            )
+            for i, cid in enumerate(cids):
+                # Trim to true seq length per item (drop pad rows)
+                seq_len = int(attn[i].sum())
+                mat = hidden[i, :seq_len, :].astype(np.float32)
+                np.save(args.out_dir / f"{cid}_matrix.npy", mat)
+                n_done += 1
         except Exception as e:
-            print(f"[recache] FAIL {cid}: {e}")
-            n_err += 1
+            print(f"[recache] FAIL batch starting {cids[0]}: {e}")
+            n_err += len(chunk)
+        bar.set_postfix({"done": n_done, "fail": n_err})
 
     print(f"[recache] done: {n_done} written, {n_skip} skipped, {n_err} failed")
     summary = {
