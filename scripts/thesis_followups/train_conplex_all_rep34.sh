@@ -33,7 +33,7 @@ DEVICE="${CUDA_DEVICE:-0}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 CONPLEX_ENV="${CONPLEX_ENV:-conplex}"
-CONFIG_FILE="${CONFIG_FILE:-configs/default_config.yaml}"
+CONFIG_FILE="${CONFIG_FILE:-configs/kinase_config.yaml}"
 MODEL_SAVE_DIR="${MODEL_SAVE_DIR:-best_models}"
 
 # Reps a treinar: 3 (seed=789) e 4 (seed=1024)
@@ -58,8 +58,43 @@ if [ ! -d "dataset/kinase_all" ]; then
     echo "[fatal] dataset/kinase_all não encontrado"; exit 1
 fi
 if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "[warn] ${CONFIG_FILE} não encontrado — usando default do train_DTI.py"
-    CONFIG_FILE=""
+    echo "[info] ${CONFIG_FILE} não encontrado — gerando inline (mesmo conteúdo de run_conplex_full_pipeline.sh)"
+    mkdir -p configs
+    cat > "${CONFIG_FILE}" << 'YAML'
+task: davis
+contrastive_split: within
+
+drug_featurizer: MorganFeaturizer
+target_featurizer: ProtBertFeaturizer
+model_architecture: SimpleCoembedding
+latent_dimension: 1024
+latent_distance: "Cosine"
+
+batch_size: 32
+contrastive_batch_size: 256
+shuffle: True
+num_workers: 0
+
+epochs: 50
+every_n_val: 1
+lr: 1e-4
+lr_t0: 10
+contrastive: False
+clr: 1e-5
+clr_t0: 10
+margin_fn: 'tanh_decay'
+margin_max: 0.25
+margin_t0: 10
+
+replicate: 0
+device: 0
+verbosity: 3
+
+wandb_save: False
+log_file: ./logs/training.log
+model_save_dir: ./best_models
+YAML
+    echo "[info] ${CONFIG_FILE} gerado"
 fi
 
 # Activate env
