@@ -23,9 +23,12 @@ CORPUS="${CORPUS:-non_human}"
 # with V8ENV=v8env or other conda env as needed.
 V8ENV="${V8ENV:-env}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
-# Config path — default v7.yaml (dot-product heads). Override with:
-#   V7_CONFIG=configs/v7_ban.yaml   # BAN (bilinear attention) variant
-V7_CONFIG="${V7_CONFIG:-configs/v7.yaml}"
+# Config path — default v7_plus_F.yaml (CANÔNICO MCC primário, LEGACY adapter,
+# 0.5266 ± 0.010 NH 3-seed em diamante-01). Override pra outras variantes:
+#   V7_CONFIG=configs/v7.yaml         # baseline original (referência tese)
+#   V7_CONFIG=configs/v7_ban.yaml     # BAN (bilinear attention) variant
+#   V7_CONFIG=configs/v7_plus.yaml    # A+C apenas (sem F)
+V7_CONFIG="${V7_CONFIG:-configs/v7_plus_F.yaml}"
 # Single seed default for fast iteration. Expand to "42 123 456 789 1024"
 # for full thesis multi-seed protocol once config is validated.
 export SEEDS="${SEEDS:-42}"
