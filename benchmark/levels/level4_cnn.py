@@ -249,11 +249,13 @@ class EmbeddingAdapter(nn.Module):
     ) -> None:
         super().__init__()
 
-        # Legacy flag (lição 17 §6.9 isolation): when True, reverts the
-        # three §6.5 changes simultaneously (zero-init self_attn out_proj,
-        # LoRA scalar gates, pre-norm) back to the pre-58805ca/abc4167
-        # behaviour that produced v7+F=0.5260 ± 0.027.
-        self._legacy = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY", "0") == "1"
+        # Legacy flag inverted to default ON after lição 17 §6.9.1 isolation
+        # confirmed §6.5 (pre-norm + LoRA gates + zero-init self_attn) regresses
+        # v7+F by -0.053 MCC in short-training regime. Setting LEGACY=0 opts in
+        # to §6.5 fixes (use only with longer training / additional stochastic
+        # regularisation that breaks the zero-cascade trap).
+        # Default ("1") reproduces v7+F = 0.5266 ± 0.010 on diamante-01.
+        self._legacy = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY", "1") == "1"
 
         # --- Optional self-attention (context-aware adaptation) --------
         self.use_self_attn = use_self_attn
