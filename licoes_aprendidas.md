@@ -1268,14 +1268,40 @@ empírica a direção corretiva proposta na $\S 6{.}12$;
 BAN-residual passa a estar tipicamente refutado em todas as
 parametrizações testadas (vanilla e LR-boosted).
 
-**Lição operacional adicional.** Quando a regressão de uma
-configuração vem de **acoplamento multiplicativo** entre
+**Lição operacional adicional (Lição 23).** Quando a regressão
+de uma configuração vem de **acoplamento multiplicativo** entre
 parâmetros novos (e.g. $\alpha \cdot W$, BAN-residual; gate
 $\sigma(g) \cdot$ LoRA, $\S 6{.}5$), correções via LR-boost
 isoladas falham porque o gradiente de uma das partes é
 identicamente zero quando a outra é zero. A fix correta
 exigiria *warm-up* assimétrico (e.g. $\alpha_k$ inicializado
 não-zero pequeno, ou *schedule* dedicado).
+
+**Lição 23 enunciada formalmente: identity-init é necessária
+mas insuficiente quando há acoplamento multiplicativo entre
+parâmetros novos. O critério mais forte é *gradient-init*:
+$\nabla \mathcal{L}|_{t=0}$ deve ser estritamente não-zero
+para todo parâmetro novo. Quando $\text{output} = \alpha \cdot
+f(W, \dots)$ com $\alpha(0) = 0$, então $\partial \mathcal{L}
+/\partial W = 0$ identicamente em $t = 0$ e nenhuma magnitude
+de *learning rate* recupera o sinal. A distinção entre
+*sub-treinamento por capacidade* (Lição 19, resolúvel por
+LR-boost) e *sub-treinamento por acoplamento multiplicativo*
+(Lição 23, NÃO resolúvel por LR-boost) define duas classes
+de falha mecanisticamente distintas que demandam soluções
+distintas: capacidade pede mais *update*, acoplamento pede
+*warm-up* assimétrico.**
+
+A heurística operacional decorrente: antes de implementar
+qualquer variante envolvendo gate ou produto entre parâmetros
+novos, computar simbolicamente $\nabla \mathcal{L}$ em $t = 0$
+e verificar que cada termo é não-zero. Se algum tensor novo
+tem norma de gradiente exatamente zero na primeira iteração,
+o treino não vai arrancar para esse tensor mesmo sob *learning
+rate* arbitrariamente alto, e a variante deve ser ou descartada
+ou re-projetada com inicialização não-zero pequena (e.g.
+$\alpha_k(0) \approx 10^{-2}$) que preserve o comportamento
+quase-identidade sem zerar o gradiente.
 
 ## 6.14. RoPE em mapa cross-modal (`v7_rope`) — *category error* posicional (lição 22)
 
@@ -1363,7 +1389,7 @@ semântica do problema**.
 ## 6.13. *Plateau* empírico de v7+F --- esgotamento do espaço incremental (lição 21)
 
 A trajetória de otimização incremental sobre v7+F atravessou,
-até este ponto da pesquisa, **catorze** direções distintas:
+até este ponto da pesquisa, **quinze** direções distintas:
 
 | # | Direção | $\Delta \mathrm{MCC}$ | Status | Ref |
 |---|---|---:|---|---|
@@ -1381,8 +1407,9 @@ até este ponto da pesquisa, **catorze** direções distintas:
 | 12 | LoRA-MLM offline (MoLFormer top-2) | $-0{,}025$ | refutado | lição 20 |
 | 13 | BAN-residual ($\alpha$-gate, `v7_ban_res`) | $-0{,}010$ a $-0{,}018$ | regrediu | $\S 6{.}12$ |
 | 14 | 2D RoPE per-modality (`v7_rope`) | $-0{,}020$ | regrediu --- *category error* cross-modal | lição 22, $\S 6{.}14$ |
+| 15 | BAN-residual + `BAN_LR_MULT=5` (`v7_ban_res_lr`) | $-0{,}016$ | regrediu --- *acoplamento multiplicativo* $\alpha \cdot W$, LR-boost insuficiente | lição 23, $\S 6{.}12{.}1$ |
 
-Das catorze modificações listadas, **nenhuma supera o *baseline***
+Das quinze modificações listadas, **nenhuma supera o *baseline***
 `v7+F LEGACY` de $0{,}5266 \pm 0{,}010$ de forma reproducível**.
 A modificação que mais se aproximou (A+D combo) atingiu empate
 técnico ($\sim 0{,}530$) num único *host* e o suposto benefício
