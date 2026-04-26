@@ -1873,6 +1873,7 @@ def _evaluate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
