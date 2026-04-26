@@ -1046,14 +1046,24 @@ que multiplique a contagem efetiva de parâmetros de um módulo
 deve ser acompanhada por re-calibração da *learning rate* ou
 *schedule* específico daquele módulo, e vice-versa.
 
-Adicionalmente, mesmo quando o $\Delta \mathrm{MCC}$ médio é
-modesto ($+0{,}004$, dentro do desvio-padrão), a redução
-substancial de variância tem valor independente: para
-*reporting* científico com intervalos de confiança, $\sigma$ de
-$0{,}004$ produz IC$_{95\%}$ de meia-largura $\approx 0{,}004$,
-aproximadamente três vezes mais apertado que o IC do *baseline*
-($\approx 0{,}012$). Esse aspecto é discutido com mais cuidado
-na seção subsequente $\S 6{.}11$.
+\paragraph{Retração subsequente da claim de variância.} A
+afirmação inicial de que A+D produzia redução substancial de
+variância entre sementes ($\sigma_\text{MCC}: 0{,}010 \to 0{,}004$,
+fator $\sim 2{,}5$) baseou-se numa única execução em
+\texttt{diamante-03} com três sementes. Re-execução do mesmo
+ponto $(\text{lr\_mult\_lig}, \text{layers\_lig}) = (5{,}0, 2)$
+em \texttt{diamante-02} (mesmo $cuDNN \text{OFF}$) durante o
+\textit{grid sweep} produziu $\sigma_\text{MCC} = 0{,}037$ ---
+nove vezes maior que o valor de \texttt{diamante-03}, e da mesma
+ordem do desvio típico observado nas demais variantes. A
+conclusão necessária é que o $\sigma = 0{,}004$ em
+\texttt{diamante-03} foi um \textbf{evento fortuito}, não uma
+propriedade reproducível da configuração. A parte da Lição 19
+referente a "redução substancial de variância" é, portanto,
+\textbf{retratada}; permanece válida apenas a observação central
+sobre a dependência mútua entre capacidade e otimização, e o
+fato de que A+D combinadas produzem MCC compatível com o
+\textit{baseline} (empate em $\sim 0{,}52$, não ganho).
 
 A direção experimental subsequente, lógica, é testar a
 combinação A+D em mais sementes para confirmar a estabilidade
@@ -1172,6 +1182,129 @@ abordagem LoRA-MLM-offline-then-cache** e re-implementar a
 adaptação como **LoRA-end-to-end-no-pipeline**, treinada com a
 *loss* DT-Kinase. O custo computacional é aproximadamente
 $5 \times$ o atual, mas o gradiente é correto.
+
+## 6.12. BAN-residual com $\alpha$-gate identity-init (`v7_ban_res`) — refutação
+
+A configuração `v7_ban_res` reformula o caminho BAN como termo
+**residual gateado** sobre o cabeçote *dot-product* canônico do
+v7, ao invés de o substituir como em `v7_ban_F` (lição 12). A
+composição do mapa de interação por *head* é
+
+$$M_k = \frac{(P W_p^k)(L W_l^k)^\top}{\sqrt{d_h}}
+      + \alpha_k \cdot (P W_k L^\top),$$
+
+com $\alpha_k$ inicializado em zero e $W_k$ Xavier (escalado por
+$(d_p \cdot d_l)^{-1/4}$). Em $t=0$ o *gate* zera a contribuição
+BAN; modelo idêntico ao v7+F (*sanity test* confirmou diferença
+máxima exata $0$). $\partial \mathcal{L}/\partial \alpha_k =
+(P W_k L^\top) \cdot \partial \mathcal{L}/\partial \text{out}
+\neq 0$ porque $W_k$ Xavier é não-zero --- evita a cascata zero
+do $\S 6{.}5$ (lição 17). Custo: $+3{,}93$M parâmetros treináveis
+($16$ heads $\times 320 \times 768$).
+
+Resultado em três sementes, corpus *non-human*:
+
+$$\mathrm{MCC}_\text{test} = 0{,}5081 \pm 0{,}0449, \quad
+  \mathrm{AUROC} = 0{,}8034 \pm 0{,}0096, \quad
+  \mathrm{F1} = 0{,}7863.$$
+
+Cross-host adjusted ($+0{,}009$ se executado com cuDNN OFF), o
+valor projetado em `diamante-01` é $\sim 0{,}517$. Comparado ao
+*baseline* `v7+F` ($0{,}5266 \pm 0{,}010$), a regressão é de
+$-0{,}010$ a $-0{,}018$ MCC, $-0{,}008$ AUROC e $\sigma$ ampliado
+por fator $4{,}5$ ($0{,}010 \to 0{,}045$). A configuração
+regrediu, embora preservando *identity-init* em $t=0$.
+
+A interpretação mecanística reaplica a Lição 19 num contexto
+diferente: **BAN-residual adicionou $+3{,}93$M parâmetros ($W_k$
+matrices) sem re-calibração da *learning rate***. Os parâmetros
+adicionais estão sub-treinados no orçamento de $\sim 30$ épocas;
+o resultado é uma rede com mais capacidade arquitetural mas sinal
+efetivo similar ou pior. O sintoma diagnóstico de
+sub-treinamento --- variância elevada entre sementes ---,
+observado em $\sigma_\text{recall} = 0{,}052$ (vs $0{,}025$ do
+*baseline*), confirma a hipótese.
+
+**Direção corretiva proposta (não testada).** Paralela à
+Lição 19, BAN-residual deveria ser combinado com um *boost* de
+*learning rate* dedicado para os parâmetros $W_k$:
+`BENCHMARK_LEVEL4CNN_BAN_LR_MULT` $\in \{3, 5\}$. Sob essa
+parametrização atômica, o *trade-off* "magnitude de *update* por
+parâmetro" estaria preservado.
+
+## 6.13. *Plateau* empírico de v7+F --- esgotamento do espaço incremental (lição 21)
+
+A trajetória de otimização incremental sobre v7+F atravessou,
+até este ponto da pesquisa, treze direções distintas:
+
+| # | Direção | $\Delta \mathrm{MCC}$ | Status | Ref |
+|---|---|---:|---|---|
+| 1 | Tier B (multi-head pool, Xavier head\_proj) | $-0{,}030$ | regrediu | lição 2 |
+| 2 | Tier D (SWA vanilla) | $-0{,}021$ | regrediu | lição 4 |
+| 3 | Tier E (Mixup) | $-0{,}015$ | regrediu | lição 11 |
+| 4 | $\S 6{.}5$ fixes (pre-norm + LoRA gates + zero-init self-attn) | $-0{,}053$ | regrediu | lição 17 |
+| 5 | `v7_asymF` (asym structural lig) | $-0{,}045$ | confounded | $\S 6{.}5$ |
+| 6 | `v7+F_adapt` (matched F1) | $-0{,}013$ | canônico p/ comparação F1 | lição 16 |
+| 7 | `v7+F_adapt_v2` (decoupled THR/SEL) | $-0{,}047$ | descartado | lição 16 |
+| 8 | Direção A (capacidade lig adapter) | $-0{,}027$ | regrediu isolado | lição 19 |
+| 9 | Direção D (LR boost lig adapter) | $-0{,}031$ | regrediu isolado | lição 19 |
+| 10 | A+D combo | $\sim +0{,}004$ | empate; claim $\sigma$ retratado | lição 19 |
+| 11 | Critério composto $\lambda = 0{,}5$ | $-0{,}056$ | regrediu | lição 14 |
+| 12 | LoRA-MLM offline (MoLFormer top-2) | $-0{,}025$ | refutado | lição 20 |
+| 13 | BAN-residual ($\alpha$-gate, `v7_ban_res`) | $-0{,}010$ a $-0{,}018$ | regrediu | $\S 6{.}12$ |
+
+Das treze modificações listadas, **nenhuma supera o *baseline*
+`v7+F LEGACY` de $0{,}5266 \pm 0{,}010$ de forma reproducível**.
+A modificação que mais se aproximou (A+D combo) atingiu empate
+técnico ($\sim 0{,}530$) num único *host* e o suposto benefício
+de variância foi retratado após o *grid sweep*.
+
+A vigésima primeira lição é registrada explicitamente: **o
+espaço de modificações arquiteturais incrementais sobre v7+F sob
+o orçamento de treino atual (~30 épocas com *patience* = 15)
+está empiricamente esgotado**. As direções restantes que mantêm
+potencial de ganho mensurável operam fora desse espaço
+incremental e exigem mudanças fundamentais:
+
+1. **Encoder maior** (ESM-2 35M ou 150M em vez de 8M;
+   MoLFormer-XL se disponível). Ataca o gargalo *upstream* que o
+   *adapter* não consegue compensar. Custo: re-cache de
+   *embeddings* (~3h).
+2. **Treino mais longo** (centenas de épocas com *schedule*
+   apropriado --- cosseno + reinicialização, ou cíclico tipo
+   SGDR). Permitiria que parâmetros de BAN-residual ou A+D
+   efetivamente convergissem. Custo: 5-10× tempo de treino.
+3. **LoRA *end-to-end*** (gradient da *loss* downstream fluindo
+   para os PLMs, não MLM offline). Direção alinhada à tarefa,
+   sem o erro cometido em $\S 6{.}11$. Custo: re-arquitetura
+   para carregar PLMs dentro da pipeline (~5× tempo de treino).
+4. **Multi-task supervision** (RDKit *properties* --- LogP, TPSA,
+   peso molecular --- como objetivos auxiliares no *ligand
+   adapter*). Pressão por representações *chemistry-aware* sem
+   violar restrições de *labels* downstream.
+5. **BAN-residual + Direção D'** (BAN LR mult). Combinação
+   atômica de capacidade extra ($W_k$) com LR dedicado ---
+   aplicação direta do princípio de Lição 19. Único candidato
+   ainda não-saturado dentro do espaço incremental, requer ~30
+   min adicional para validar.
+
+Operacionalmente, a recomendação é **pausar o ciclo de
+incrementos arquiteturais** e priorizar (i) o fechamento da tese
+sobre a base canônica empiricamente robusta (`v7+F LEGACY` =
+$0{,}5266 \pm 0{,}010$ no *host* `diamante-01`; comparação com
+*baselines* usando `v7+F_adapt` sob critério F1 nativo), e (ii)
+caso o alvo $\mathrm{MCC} \geq 0{,}55$ continue sendo
+perseguido, partir diretamente para os caminhos não incrementais
+(encoder maior ou treino prolongado), aceitando o custo
+computacional associado.
+
+A hipótese de fundo é que o atual *plateau* reflete um
+**limite informacional** do par (encoder ESM-8M, MoLFormer) e do
+orçamento de treino, **não um limite arquitetural do
+classificador downstream**. Os $\sim 0{,}53$ MCC observados
+correspondem ao máximo extraível dessa combinação específica de
+representação e orçamento; transcendê-los exige relaxar uma
+dessas duas restrições.
 
 ## 6.3. Inflexão estratégica — relaxamento da restrição de identidade
 
