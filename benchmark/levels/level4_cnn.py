@@ -1222,25 +1222,57 @@ def _train_interaction_cnn(
 
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
-    if use_adapter and adapter_lr_mult != 1.0:
-        # Differential LR: adapters learn faster since they start from zero
-        adapter_params = (
-            list(model.prot_adapter.parameters())
-            + list(model.lig_adapter.parameters())
-        )
-        adapter_ids = {id(p) for p in adapter_params}
-        other_params = [
-            p for p in model.parameters()
-            if id(p) not in adapter_ids and p.requires_grad
-        ]
-        optimizer = torch.optim.AdamW([
-            {"params": adapter_params, "lr": lr * adapter_lr_mult},
-            {"params": other_params,   "lr": lr},
-        ], weight_decay=weight_decay, fused=(device.type == 'cuda' and not use_double))
-        tqdm.write(
-            f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
-            f"other={lr:.2e} (mult={adapter_lr_mult}x)"
-        )
+    # Per-side adapter LR multipliers (Direção D — ligand-heavy optimisation
+    # bias). Defaults inherit adapter_lr_mult; override individually via
+    # BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_{PROT,LIG}. Hypothesis (kinase
+    # ATP-pocket conserved → ligand carries most discriminative signal):
+    # giving lig_adapter a higher LR than prot_adapter accelerates the
+    # side that needs more capacity.
+    lr_mult_prot = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT", str(adapter_lr_mult)))
+    lr_mult_lig = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG", str(adapter_lr_mult)))
+
+    if use_adapter and (lr_mult_prot != 1.0 or lr_mult_lig != 1.0):
+        if lr_mult_prot == lr_mult_lig:
+            adapter_params = (
+                list(model.prot_adapter.parameters())
+                + list(model.lig_adapter.parameters())
+            )
+            adapter_ids = {id(p) for p in adapter_params}
+            other_params = [
+                p for p in model.parameters()
+                if id(p) not in adapter_ids and p.requires_grad
+            ]
+            optimizer = torch.optim.AdamW([
+                {"params": adapter_params, "lr": lr * lr_mult_prot},
+                {"params": other_params,   "lr": lr},
+            ], weight_decay=weight_decay,
+               fused=(device.type == 'cuda' and not use_double))
+            tqdm.write(
+                f"    Differential LR (symmetric): adapter={lr * lr_mult_prot:.2e}, "
+                f"other={lr:.2e} (mult={lr_mult_prot}x)"
+            )
+        else:
+            prot_params = list(model.prot_adapter.parameters())
+            lig_params = list(model.lig_adapter.parameters())
+            adapter_ids = {id(p) for p in prot_params + lig_params}
+            other_params = [
+                p for p in model.parameters()
+                if id(p) not in adapter_ids and p.requires_grad
+            ]
+            optimizer = torch.optim.AdamW([
+                {"params": prot_params,  "lr": lr * lr_mult_prot},
+                {"params": lig_params,   "lr": lr * lr_mult_lig},
+                {"params": other_params, "lr": lr},
+            ], weight_decay=weight_decay,
+               fused=(device.type == 'cuda' and not use_double))
+            tqdm.write(
+                f"    Differential LR (asymmetric): "
+                f"prot_adapter={lr * lr_mult_prot:.2e} ({lr_mult_prot}x), "
+                f"lig_adapter={lr * lr_mult_lig:.2e} ({lr_mult_lig}x), "
+                f"other={lr:.2e}"
+            )
     else:
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay,
