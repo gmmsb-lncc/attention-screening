@@ -185,6 +185,41 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `doc
 
 Shared protocol: identical scaffold splits, seeds `[42, 123, 456, 789, 1024]`, MCC-optimal threshold on val, MCC primary metric (AUROC/AUPRC/F1 secondary). `raw_predictions.npz` for baselines has keys `val_y_{true,prob}, test_y_{true,prob}`.
 
+## Committee model artifacts
+
+Canonical inference subset committed to the repo. Only **seed 42** (rep 0 for ConPLex) is versioned per corpus — the other four ensemble members stay local and can be regenerated from configs. The 4 inference scripts under `scripts/inference/models/{dtkinase,drugban,graphban,conplex}_score.py` resolve these paths automatically per `--corpus {human,non_human,all}`.
+
+For each artifact pair: `.pt`/`.pth` = bare PyTorch `state_dict` (load with `torch.load(..., weights_only=True)`); the sidecar `.json` = `{platt_a, platt_b, threshold, corpus, n_val, source_run}` (Platt scaling + MCC-optimal threshold derived on the val split). Missing sidecar → score script falls back to `threshold=0.5` with a warning.
+
+```
+DT-Kinase L4 CNN (committee primary; seed 42 of {42,123,456,789,1024}):
+  human:     results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/{level4_cnn_model.pt, level4_cnn_calibration.json}
+  non_human: results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/...   (sufixo _v3 não-óbvio)
+  all:       results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/...               (data 13_04, aninhado em results/all/)
+
+DrugBAN:
+  human:     DrugBAN/results/human/seed_42/best_model_epoch_49.pth
+  non_human: DrugBAN/results/non_human/seed_42/best_model_epoch_29.pth
+  all:       DrugBAN/results/all/seed_42/best_model_epoch_89.pth
+  cal:       DrugBAN/results_universal/results_universal/{corpus}/seed_42/drugban_calibration.json
+             (NÃO é typo — duplo `results_universal/results_universal/` é o layout real)
+
+GraphBAN:
+  human:     GraphBAN/results/human/seed_42/best_model_epoch_48.pth
+  non_human: GraphBAN/results/non_human/seed_42/best_model_epoch_47.pth
+  all:       GraphBAN/results/all/seed_42/best_model_epoch_42.pth
+  cal:       GraphBAN/results_universal/{corpus}/seed_42/graphban_calibration.json
+
+ConPLex (seed 42 mapped to rep 0; full mapping {42:0, 123:1, 456:2, 789:3, 1024:4}):
+  human:     ConPLex/best_models/trained_human_rep0/trained_human_rep0_best_model.pt
+  non_human: ConPLex/best_models/trained_non_human_rep0/trained_non_human_rep0_best_model.pt
+  all:       ConPLex/best_models/trained_all_rep0/trained_all_rep0_best_model.pt
+  cal:       ConPLex/results_universal/{corpus}/seed_42/conplex_calibration.json
+             Pendência: rep1..rep4 .pt files exist on disk but their calibration sidecars (results_universal/{corpus}_rep{1..4}/) are absent. Not relevant for canonical inference (rep 0 only); regenerate via scripts/inference/build_calibration.py if a 5-rep ensemble run is ever needed.
+```
+
+`.gitignore` strategy: each blanket rule (`results/`, `*.pt`, `*.pth`, `*.json`, `best_models/`) is overridden via parent-directory dance + leaf-specific re-inclusion. **Don't widen the negation patterns** without re-checking collateral with `git status -uall` — the seed_42 restriction in the cal-json globs is intentional (keeps reps 1-4 local).
+
 ## Data layout
 
 **Inputs** (gitignored, ~415 MB): `tests/datasets/kinase_{human,non_human,all}_compounds.tsv`.
