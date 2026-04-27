@@ -4,7 +4,7 @@
 Auto-detects input type and runs the appropriate inference pipeline:
 
   # Inline strings (no file required)
-  python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"      → SMILES vs human kinome
+  python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"      → SMILES vs kinome
   python kinase_profiling.py "MGNNHGTYLG..."              → AA sequence vs ligand library
 
   # Files
@@ -14,6 +14,14 @@ Auto-detects input type and runs the appropriate inference pipeline:
                                                              column is SMILES vs sequence)
   python kinase_profiling.py pairs.tsv                    → idem (TSV)
   python kinase_profiling.py pairs.txt                    → idem (auto-sniff delimiter)
+
+Default behavior (no --organism flag):
+  For SMILES and .smi inputs, the script runs TWO sequential passes —
+  human first, then non_human — and writes the outputs into separate
+  per-organism subdirectories. Each pass uses the matched
+  --ckpt-corpus (human → human ckpt; non_human → non_human ckpt).
+  Pass an explicit --organism {human,non_human,all} to override and
+  run a single pass against that target.
 
 Detection rules:
   1. If input is a path to an existing file:
@@ -30,13 +38,15 @@ column with the highest fraction of parseable SMILES is the ligand,
 the other text-heavy column is the sequence.
 
 Output directory:
-  results/inference/<run_id>/
+  results/inference/<run_id>/                     (single pass)
+  results/inference/<run_id>/{human,non_human}/   (default dual pass)
 where <run_id> = kinase_profiling_<timestamp>_<input_hash>
 
 Usage examples:
-  python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
-  python kinase_profiling.py "MATGEFSLIARYFDRVKSARLDVE..."
-  python kinase_profiling.py my_protein.fa --organism human --top-k 20
+  python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"        # H + NH (default)
+  python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
+  python kinase_profiling.py "MATGEFSLIARYFDRVKSARLDVE..."  # vs ligand library
+  python kinase_profiling.py my_protein.fa --top-k 20
   python kinase_profiling.py imatinib.smi --models dtkinase,drugban
   python kinase_profiling.py pairs.csv --out custom/path
 """
@@ -492,6 +502,30 @@ def run_batch_file(path: Path, payload: dict, args: argparse.Namespace) -> Path:
 # Output annotation (organism + kinase name when input was SMILES vs kinome)
 # ======================================================================
 
+def _flatten_pass_outputs(pass_dir: Path, base_dir: Path, prefix: str,
+                          consensus_in: Path) -> Path:
+    """Move pass_dir/* into base_dir with `<prefix>_<name>` and remove pass_dir.
+
+    Used in multi-pass (default) mode so the user sees one flat output dir
+    with `human_consensus.csv`, `non_human_consensus.csv`, etc., instead
+    of nested per-organism subdirectories.
+
+    Returns the new path of the consensus.csv after the rename so the
+    caller can keep tracking it for the annotation step.
+    """
+    new_consensus = base_dir / f"{prefix}_{consensus_in.name}"
+    for child in list(pass_dir.iterdir()):
+        target = base_dir / f"{prefix}_{child.name}"
+        if target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        shutil.move(str(child), str(target))
+    pass_dir.rmdir()
+    return new_consensus
+
+
 def annotate_consensus(consensus: Path, kind: str) -> None:
     """Best-effort metadata join from scaffolds_splits/output/universal_test.tsv."""
     if not consensus.exists():
@@ -523,10 +557,16 @@ def main() -> None:
     )
     ap.add_argument("input",
                     help="SMILES string OR path to FASTA/CSV/TSV/TXT")
-    ap.add_argument("--organism", choices=["human", "non_human", "all"], default="human",
-                    help="kinome subset for SMILES-only mode (default: human)")
-    ap.add_argument("--ckpt-corpus", choices=["human", "non_human", "all"], default="all",
-                    help="training corpus for the model checkpoints (default: all)")
+    ap.add_argument("--organism", choices=["human", "non_human", "all"], default=None,
+                    help="kinome subset for SMILES-only mode. "
+                         "When omitted, runs human FIRST then non_human "
+                         "(two sequential passes, separate output subdirs); "
+                         "explicit value runs that organism only.")
+    ap.add_argument("--ckpt-corpus", choices=["human", "non_human", "all"], default=None,
+                    help="training corpus for the model checkpoints. "
+                         "When omitted, matches --organism (human→human ckpt, "
+                         "non_human→non_human ckpt); explicit value overrides "
+                         "and uses that ckpt regardless of organism.")
     ap.add_argument("--out", type=Path, default=None,
                     help="output dir (default: results/inference/kinase_profiling_<TS>)")
     ap.add_argument("--top-k", type=int, default=20)
@@ -560,16 +600,34 @@ def main() -> None:
 
     kind, payload = detect_input(args.input)
 
+    # Modes affected by --organism: SMILES_STRING and SMI_FILE (kinome
+    # screen). SEQUENCE_STRING and FASTA_FILE expand against the ligand
+    # library (organism-independent). BATCH_FILE has explicit pairs.
+    organism_dependent = kind in (InputType.SMILES_STRING, InputType.SMI_FILE)
+
+    # Default behavior when no --organism given:
+    #   - organism-dependent modes → run BOTH human and non_human sequentially,
+    #     each with its matched ckpt-corpus, into separate output subdirs.
+    #   - other modes → not affected; pick a sane default for ckpt-corpus
+    #     and produce a single run.
+    if organism_dependent and args.organism is None:
+        passes = [("human", "human"), ("non_human", "non_human")]
+    elif args.organism is not None:
+        ckpt = args.ckpt_corpus or args.organism
+        passes = [(args.organism, ckpt)]
+    else:
+        # Non-organism-dependent mode + no organism → one run with default
+        # ckpt-corpus = human (the operational baseline of the thesis).
+        passes = [(None, args.ckpt_corpus or "human")]
+
     print(f"\n[detect] input type = {kind}")
     if kind == InputType.SMILES_STRING:
         print(f"[detect] canonical SMILES = {payload['smiles']}")
-        print(f"[detect] will expand against {args.organism} kinome reference")
     elif kind == InputType.SEQUENCE_STRING:
         print(f"[detect] inline AA sequence (len={len(payload['sequence'])})")
         print(f"[detect] will expand against ligand library")
     elif kind == InputType.SMI_FILE:
         print(f"[detect] SMILES file: {len(payload['smiles_list'])} valid ligand(s)")
-        print(f"[detect] will expand each ligand against {args.organism} kinome")
     elif kind == InputType.FASTA_FILE:
         print(f"[detect] FASTA records = {payload['n_records']}")
         if payload['n_records'] == 1:
@@ -584,41 +642,79 @@ def main() -> None:
         print(f"[detect] sequence column = {payload['seq_col']!r} (idx {payload['seq_idx']})")
         print(f"[detect] delimiter = {payload['delimiter']!r}")
 
+    multi_pass = organism_dependent and len(passes) > 1
+    if multi_pass:
+        print(f"[detect] no --organism given → running {len(passes)} "
+              f"sequential passes ({', '.join(o for o, _ in passes)}); "
+              f"outputs prefixed with <organism>_ in the same dir.")
+
     # ----------------------------------------------------------
-    # Step 2: dispatch
+    # Step 2: dispatch (one pass per (organism, ckpt-corpus) tuple)
     # ----------------------------------------------------------
-    print()
-    if kind == InputType.SMILES_STRING:
-        consensus = run_smiles_string(payload["smiles"], args)
-    elif kind == InputType.SEQUENCE_STRING:
-        consensus = run_sequence_string(payload["sequence"], args)
-    elif kind == InputType.SMI_FILE:
-        consensus = run_smi_file(payload["smiles_list"], payload["path"], args)
-    elif kind == InputType.FASTA_FILE:
-        consensus = run_fasta_file(payload["path"], args)
-    elif kind == InputType.BATCH_FILE:
-        consensus = run_batch_file(payload["path"], payload, args)
-    else:
-        raise SystemExit(f"unhandled input type: {kind}")
+    base_out = args.out
+    consensus_paths = []
+    for organism, ckpt_corpus in passes:
+        # Each pass runs in a temp subdir; on completion files are flattened
+        # into base_out with `<organism>_` prefix so the user sees one dir
+        # with paired human_/non_human_ files instead of nested subdirs.
+        if multi_pass:
+            pass_out = base_out / f".{organism}_pass"
+            pass_out.mkdir(parents=True, exist_ok=True)
+            print(f"\n{'=' * 70}\n PASS — organism={organism} · ckpt-corpus={ckpt_corpus}"
+                  f"\n{'=' * 70}")
+        else:
+            pass_out = base_out
+
+        args.out = pass_out
+        args.organism    = organism if organism is not None else "human"
+        args.ckpt_corpus = ckpt_corpus
+
+        print()
+        if kind == InputType.SMILES_STRING:
+            consensus = run_smiles_string(payload["smiles"], args)
+        elif kind == InputType.SEQUENCE_STRING:
+            consensus = run_sequence_string(payload["sequence"], args)
+        elif kind == InputType.SMI_FILE:
+            consensus = run_smi_file(payload["smiles_list"], payload["path"], args)
+        elif kind == InputType.FASTA_FILE:
+            consensus = run_fasta_file(payload["path"], args)
+        elif kind == InputType.BATCH_FILE:
+            consensus = run_batch_file(payload["path"], payload, args)
+        else:
+            raise SystemExit(f"unhandled input type: {kind}")
+
+        # Flatten subdir → base_out with prefix (multi-pass only)
+        if multi_pass and not args.dry_run:
+            consensus = _flatten_pass_outputs(pass_out, base_out, organism, consensus)
+
+        consensus_paths.append((organism or "single", consensus))
+
+    # Restore base_out for the trailing report
+    args.out = base_out
 
     if args.dry_run:
         return
 
     # ----------------------------------------------------------
-    # Step 3: annotate + report
+    # Step 3: annotate + report (one annotation per pass)
     # ----------------------------------------------------------
-    annotate_consensus(consensus, kind)
+    for _, consensus in consensus_paths:
+        annotate_consensus(consensus, kind)
 
     print()
     print("=" * 70)
     print(" DONE")
     print("=" * 70)
     print(f"output dir: {args.out}")
-    if consensus.exists():
-        print(f"consensus : {consensus.relative_to(REPO) if consensus.is_relative_to(REPO) else consensus}")
-        annotated = consensus.with_name(consensus.stem + ".annotated.csv")
-        if annotated.exists():
-            print(f"annotated : {annotated.relative_to(REPO) if annotated.is_relative_to(REPO) else annotated}")
+    for label, consensus in consensus_paths:
+        if consensus.exists():
+            tag = f"[{label}] " if label != "single" else ""
+            rel = consensus.relative_to(REPO) if consensus.is_relative_to(REPO) else consensus
+            print(f"{tag}consensus : {rel}")
+            annotated = consensus.with_name(consensus.stem + ".annotated.csv")
+            if annotated.exists():
+                rel_a = annotated.relative_to(REPO) if annotated.is_relative_to(REPO) else annotated
+                print(f"{tag}annotated : {rel_a}")
 
 
 if __name__ == "__main__":
