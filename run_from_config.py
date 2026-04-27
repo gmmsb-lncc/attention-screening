@@ -136,7 +136,15 @@ def build_env(cfg: dict) -> dict[str, str]:
     env["EMBEDDING"] = str(cfg.get("embedding", "8M"))
     env["LEVELS_CSV"] = str(cfg.get("levels", "4cnn"))
     env["EPOCHS"] = str(cfg.get("epochs", 500))
-    env["MODEL_SELECTION_METRIC"] = str(cfg.get("model_selection_metric", "mcc"))
+    _selection_metric = str(cfg.get("model_selection_metric", "mcc")).lower()
+    env["MODEL_SELECTION_METRIC"] = _selection_metric
+    # Propagate to the level4 threshold knob; SELECTION_METRIC is left
+    # unset so level4_cnn._selection_metric_env() falls back to whatever
+    # THRESHOLD_METRIC ends up being at runtime — preserves matched
+    # objective (lição 16 §6.8) even under partial external overrides.
+    # External env overrides take precedence over the YAML default.
+    if "BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC" not in os.environ:
+        env["BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC"] = _selection_metric
     env["OUTPUT_ROOT"] = str(cfg.get("output_root", "results/benchmark"))
 
     # --- Warnings ---

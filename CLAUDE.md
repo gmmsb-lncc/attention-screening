@@ -34,14 +34,14 @@ Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ �
 
 ## Active work (2026-04, 23 lessons; PLATEAU empírico atingido sobre v7+F)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **23 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15 modificações incrementais testadas sobre v7+F, nenhuma supera o baseline reproducivelmente**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal (offset i−j sem semântica entre prot/lig). **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo α·W com α(0)=0 zera ∇W; LR-boost não recupera (distinto de Lição 19).
-   - **Canônico MCC primário** — `v7+F` (Tier A + C + F) sob `ADAPTER_LEGACY=1` (default desde commit `de2ef0e`): **0.5266 ± 0.010** NH 3-seed em d01 cuDNN ON. Re-validado pelo experimento de isolamento §6.9.1 (lição 17).
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **24 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
+   - **Canônico MCC primário (final, pós-Lição 24)** — `configs/v7.yaml` vanilla v7: **0.506 ± 0.006** NH 5-seed (cap 5 da tese). Ckpt operacional p/ matriz cross-dataset + comitê inferência + ranking final. v7+F LEGACY ré-classificado como tentativa que falhou validação 5-seed.
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
    - **BAN-residual `v7_ban_res`** — REGREDIU −0.010 a −0.018 MCC, σ=0.045 (lição 19 reaplica: 3.93M params extras sem LR matching). §6.12.
    - **Refutados/empates (13 direções)** — Tier B, D vanilla SWA, E Mixup, §6.5 fixes, v7_asymF, v7_adapt_v2 (decoupled), v7_ban_F (Xavier W_ban), LoRA-MLM offline, λ=0.5 composite, A só, D só, BAN-residual, A+D combo.
    - **Direções restantes (não-incrementais, §6.13)** — encoder maior (ESM-35M/150M), treino prolongado (centenas epochs), LoRA end-to-end, multi-task RDKit properties, BAN-residual + LR boost atomicamente.
-   - **Recomendação operacional**: pausar incrementos arquiteturais, fechar tese sobre canônico v7+F LEGACY = 0.5266 ± 0.010 + comparação F1 via v7+F_adapt.
+   - **Recomendação operacional**: tese fecha sobre vanilla v7 (0.506 ± 0.006 NH 5-seed) como ckpt canônico + v7+F_adapt como comparação F1. v7+F LEGACY tratado como caso de Lição 24 (tentativa promissora 3-seed que falha validação 5-seed; protocolo cinco-sementes é necessário p/ canonização).
 2. **Cross-dataset evaluation matrix (3×3)** — completo. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.209. **Documentação completa migrada para `~/PhD/cross_matrix/`** (figures + Beamer source + Anexo A da tese).
 3. **Interpretabilidade DT-Kinase** — `scripts/inference/explain.py` POC implementado: extrai per-residue + per-ligand-token attention via forward hooks (M_k pre-CNN + HierPool weights). Diferenciador metodológico vs ConPLex (sem atenção); paridade com DrugBAN/GraphBAN BAN attn mas com 3 níveis interpretáveis (raw + per-head + HierPool).
 4. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
@@ -122,7 +122,7 @@ Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `lic
 |---|---|---|---|
 | `configs/v7.yaml` | baseline | 0.486 (seed 42) / 0.506 (5-seed ref) | thesis reference |
 | `configs/v7_plus.yaml` | A + C | **0.5143 ± 0.0079** (5-seed) | validado multi-seed |
-| `configs/v7_plus_F.yaml` | A + C + F | **0.5266 ± 0.010** (3-seed, LEGACY default) | **CANÔNICO MCC primário — re-validado §6.9.1** |
+| `configs/v7_plus_F.yaml` | A + C + F | 3-seed: 0.5266 ± 0.010; **5-seed: 0.4923 ± 0.025** (LEGACY default) | **REFUTADO em 5-seed (Lição 24)** — empate vs vanilla v7 |
 | `configs/v7_plus_F_adapt.yaml` | A + C + F + §6.5 + matched F1 | 0.4929 ± 0.016 / F1=0.787 | **canônico p/ comparação baselines F1** |
 | `v7+F + A+D combo` (env-only, sem yaml) | A + C + F + lig 2L/12h + lig_lr=5x | ~0.530 (empate, single host) | claim σ=0.004 RETRATADO (grid d02 σ=0.037); lição 19 |
 | `configs/v7_ban_res.yaml` | A + C + F + BAN-residual α-gate | regrediu (~0.508 ± 0.045) | §6.12 — capacidade extra sem LR matching, lição 19 reaplica |
@@ -223,7 +223,7 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
 
 ## Key development notes
 
-- **Production config (thesis baseline)**: `configs/v7.yaml`. Best validated multi-seed: `configs/v7_plus_F.yaml` LEGACY default (0.5266 ± 0.010).
+- **Production config (thesis baseline + canonical, post-Lição 24)**: `configs/v7.yaml` vanilla v7, **0.506 ± 0.006** NH 5-seed. v7+F LEGACY refutado em 5-seed (0.4923 ± 0.025), retido apenas no histórico do Apêndice F.
 - **Hosts atuais (3 paralelos)**:
   - `diamante-01` (cuDNN HEALTHY): host primário, MCC reference. Default `BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=0`.
   - `diamante-02` (cuDNN 9.x ABI mismatch driver 12.4): precisa `_DISABLE_CUDNN=1`. Cross-host drift +0.009 MCC vs d01.
