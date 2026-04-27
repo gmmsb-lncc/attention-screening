@@ -40,7 +40,7 @@ level4_cnn:
   deterministic: false # reproducible (20-30% slower)
 
   # Training
-  patience: 5
+  patience: 15
   focal: true # Focal Loss (gamma=2.0)
   focal_gamma: 2.0
 
