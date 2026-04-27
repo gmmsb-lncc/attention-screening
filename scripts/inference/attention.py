@@ -433,7 +433,7 @@ def plot_ligand_2d(att: dict, pair_id: str, out_dir: Path,
     top = _topk_indices(atom_attn, min(5, n_atoms))
     highlight_atoms = [int(i) for i in top]
 
-    # Render with rdMolDraw2D
+    # Render mol via rdMolDraw2D (cairo PNG)
     drawer = rdMolDraw2D.MolDraw2DCairo(900, 700)
     opts = drawer.drawOptions()
     opts.padding = 0.10
@@ -446,9 +446,50 @@ def plot_ligand_2d(att: dict, pair_id: str, out_dir: Path,
     )
     drawer.FinishDrawing()
     png_bytes = drawer.GetDrawingText()
+
+    # Compose final PNG: molecule + colorbar legend on the side
+    import io
+    from PIL import Image
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+
+    mol_img = Image.open(io.BytesIO(png_bytes))
+    fig = plt.figure(figsize=(11.0, 7.5))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 0.045], wspace=0.02)
+    ax_mol = fig.add_subplot(gs[0, 0])
+    ax_mol.imshow(mol_img)
+    ax_mol.axis("off")
+
+    # Title + caption
+    a_min = float(atom_attn.min())
+    a_max = float(atom_attn.max())
+    n_top = len(top)
+    ax_mol.set_title(
+        f"Ligand 2D · atoms colored by attention "
+        f"(top {n_top} highlighted)\n"
+        f"raw range: [{a_min:.4g}, {a_max:.4g}]   ·   colorbar normalized 0–1",
+        fontsize=11,
+    )
+
+    # Colorbar built from the SAME truncated colormap used on atoms
+    # (cairo render maps atom_attn_norm ∈ [0,1] → cmap(0.15 + 0.7·v))
+    from matplotlib.colors import LinearSegmentedColormap
+    sample = np.linspace(0.15, 0.85, 256)
+    truncated = LinearSegmentedColormap.from_list(
+        "inferno_truncated",
+        [cmap(s) for s in sample],
+    )
+    cax = fig.add_subplot(gs[0, 1])
+    norm = Normalize(vmin=0.0, vmax=1.0)
+    sm = ScalarMappable(norm=norm, cmap=truncated)
+    sm.set_array([])
+    cb = fig.colorbar(sm, cax=cax, orientation="vertical")
+    cb.set_label("per-atom attention (norm. 0–1)", fontsize=10)
+    cb.ax.tick_params(labelsize=8)
+
     out_path = out_dir / f"{pair_id}_ligand_2d.png"
-    with open(out_path, "wb") as fh:
-        fh.write(png_bytes)
+    fig.savefig(out_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
     return out_path
 
 
@@ -584,7 +625,7 @@ def plot_consensus_heatmap(att: dict, pair_id: str, out_dir: Path,
                             sequence: str | None = None,
                             smiles_tokens: list[str] | None = None,
                             top_residues: int = 10,
-                            top_tokens: int = 8) -> None:
+                            top_tokens: int = 10) -> None:
     """Render attention overview AND a focused 'hotspot' map for the pair.
 
     Produces three companion files inside ``out_dir``:
@@ -686,80 +727,131 @@ def plot_consensus_heatmap(att: dict, pair_id: str, out_dir: Path,
         plt.close(fig)
 
     # ------------------------------------------------------------------
-    # FILE 2 + 3: 4-panel overview (PNG + PDF)
+    # FILE 2: 4-panel overview (PNG)
     # ------------------------------------------------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    # Wider figure + extra wspace so each bar plot has room on its right
+    # for the top-10 highlighted-values list outside the data area.
+    fig, axes = plt.subplots(2, 2, figsize=(16.5, 10.5))
+    plt.subplots_adjust(wspace=0.55, hspace=0.40)
     fig.suptitle(f"DT-Kinase attention overview — {pair_id}  "
                  f"(logit = {att['logit']:+.2f})", fontsize=12, weight="bold")
 
     if Mk_mean is not None:
         ax = axes[0, 0]
-        im = ax.imshow(Mk_mean, aspect="auto", cmap="inferno")
-        ax.set_title("M̄: mean attention map (residue × ligand token)",
-                     fontsize=10)
+        # Row-centered map exposes per-token deviation from each residue's
+        # mean — without this, residue-dominant signal (rows nearly uniform)
+        # collapses the visible structure to horizontal stripes.
+        row_mean = Mk_mean.mean(axis=1, keepdims=True)
+        Mk_centered = Mk_mean - row_mean
+        v = float(np.abs(Mk_centered).max()) + 1e-12
+        im = ax.imshow(
+            Mk_centered, aspect="auto", cmap="RdBu_r",
+            vmin=-v, vmax=+v, interpolation="nearest",
+        )
+        ax.set_title(
+            "M̄ row-centered: per-residue deviation across ligand tokens\n"
+            f"(raw range Mk: [{float(Mk_mean.min()):+.3f}, {float(Mk_mean.max()):+.3f}])",
+            fontsize=9,
+        )
         ax.set_xlabel("ligand token")
-        ax.set_ylabel("protein residue")
-        plt.colorbar(im, ax=ax, fraction=0.04)
+        ax.set_ylabel("protein residue (N → C)")
+        cb = plt.colorbar(im, ax=ax, fraction=0.04)
+        cb.set_label("M̄ − row-mean", fontsize=8)
+        cb.ax.tick_params(labelsize=7)
+
+    def _normalized_bar(ax, signal, top_k_idx, labels, value_label,
+                        title, xlabel, list_title):
+        """Bar plot with signal min-max normalized to [0, 1].
+
+        Top-K bars are highlighted in orange; their identifiers + values
+        are listed in a right-margin text block (outside the data area)
+        so they never collide with bar tops, which solves the overlap
+        seen when many top hits cluster in a narrow X range.
+        """
+        signal = np.asarray(signal, dtype=float)
+        raw_min = float(signal.min())
+        raw_max = float(signal.max())
+        denom = max(raw_max - raw_min, 1e-12)
+        norm = (signal - raw_min) / denom
+        n = len(norm)
+
+        bars = ax.bar(range(n), norm, color="#2E86AB",
+                      edgecolor="none", width=1.0)
+        for i in top_k_idx:
+            bars[int(i)].set_color("#E8630A")
+        ax.set_xlim(-0.5, n - 0.5)
+        ax.set_ylim(0, 1.05)
+        ax.set_title(
+            f"{title}\nraw range: [{raw_min:.4g}, {raw_max:.4g}]",
+            fontsize=9,
+        )
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("attention weight (norm. 0–1)")
+
+        # Right-side label list — opposite the y-axis label
+        ax.text(
+            1.04, 1.00, list_title,
+            transform=ax.transAxes, va="top", fontsize=8.5,
+            fontweight="bold", color="#A04500",
+        )
+        line_step = 0.085
+        for k, idx in enumerate(top_k_idx):
+            idx = int(idx)
+            if labels is not None and idx < len(labels):
+                line = f"{value_label(idx)}·{labels[idx]} = {norm[idx]:.2f}"
+            else:
+                line = f"{value_label(idx)} = {norm[idx]:.2f}"
+            ax.text(
+                1.04, 0.93 - k * line_step, line,
+                transform=ax.transAxes, va="top", fontsize=7.8,
+                color="#A04500", family="monospace",
+            )
 
     if prot_signal is not None:
-        ax = axes[0, 1]
-        n = len(prot_signal)
-        bars = ax.bar(range(n), prot_signal, color="#2E86AB",
-                      edgecolor="none", width=1.0)
-        # Highlight top-K residues in orange + annotate value
         top_res = _topk_indices(prot_signal, top_residues)
-        for i in top_res:
-            bars[int(i)].set_color("#E8630A")
-        if sequence is not None:
-            seq = sequence[:n]
-            for r in top_res[:5]:
-                lbl = seq[int(r)] if int(r) < len(seq) else "?"
-                ax.annotate(f"{int(r)+1}·{lbl}",
-                            xy=(int(r), prot_signal[int(r)]),
-                            xytext=(0, 5), textcoords="offset points",
-                            ha="center", fontsize=8, color="#A04500",
-                            weight="bold")
-        ax.set_title(f"Protein attention per residue  "
-                     f"(top {top_residues} highlighted)", fontsize=10)
-        ax.set_xlabel("residue position (N → C)")
-        ax.set_ylabel("attention weight")
-        ax.set_xlim(-0.5, n - 0.5)
+        seq_letters = sequence[:len(prot_signal)] if sequence is not None else None
+        _normalized_bar(
+            axes[0, 1], prot_signal, top_res,
+            labels=seq_letters,
+            value_label=lambda r: f"{r + 1}",
+            title=f"Protein attention per residue  (top {top_residues} highlighted)",
+            xlabel="residue position (N → C)",
+            list_title=f"Top-{top_residues} residues",
+        )
 
     if lig_signal is not None:
-        ax = axes[1, 0]
-        n = len(lig_signal)
-        bars = ax.bar(range(n), lig_signal, color="#2E86AB",
-                      edgecolor="none", width=1.0)
         top_tok = _topk_indices(lig_signal, top_tokens)
-        for i in top_tok:
-            bars[int(i)].set_color("#E8630A")
-        if smiles_tokens is not None:
-            for r in top_tok[:5]:
-                lbl = smiles_tokens[int(r)] if int(r) < len(smiles_tokens) else "?"
-                ax.annotate(f"{int(r)}·{lbl}",
-                            xy=(int(r), lig_signal[int(r)]),
-                            xytext=(0, 5), textcoords="offset points",
-                            ha="center", fontsize=8, color="#A04500",
-                            weight="bold")
-        ax.set_title(f"Ligand attention per token  "
-                     f"(top {top_tokens} highlighted)", fontsize=10)
-        ax.set_xlabel("ligand token position")
-        ax.set_ylabel("attention weight")
-        ax.set_xlim(-0.5, n - 0.5)
+        _normalized_bar(
+            axes[1, 0], lig_signal, top_tok,
+            labels=None,
+            value_label=lambda r: f"{r}",
+            title=f"Ligand attention per token  (top {top_tokens} highlighted)",
+            xlabel="ligand token position",
+            list_title=f"Top-{top_tokens} tokens",
+        )
 
     if per_head is not None:
         ax = axes[1, 1]
-        bars = ax.bar(range(len(per_head)), per_head, color="#1B813E",
+        ph = np.asarray(per_head, dtype=float)
+        ph_max = float(ph.max())
+        # Normalize by max only (preserve relative magnitudes — head with
+        # lowest intensity stays visible instead of collapsing to zero)
+        ph_norm = ph / max(ph_max, 1e-12)
+        bars = ax.bar(range(len(ph_norm)), ph_norm, color="#1B813E",
                       edgecolor="white", linewidth=0.5)
-        ax.set_title("Per-head intensity (|M_k|.mean across heads)",
-                     fontsize=10)
+        for k, v in enumerate(ph_norm):
+            ax.text(k, v + 0.02, f"{v:.2f}",
+                    ha="center", fontsize=7.5, color="#0a3a1a")
+        ax.set_title(
+            f"Per-head intensity (|M_k|.mean across heads)\n"
+            f"raw range: [{float(ph.min()):.3g}, {ph_max:.3g}]",
+            fontsize=9,
+        )
         ax.set_xlabel("interaction-map head index k")
-        ax.set_ylabel("|M_k| mean")
+        ax.set_ylabel("|M_k| mean (norm. by max)")
+        ax.set_ylim(0, 1.15)
 
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
     fig.savefig(out_dir / f"{pair_id}_attention.png", dpi=180,
-                bbox_inches="tight", facecolor="white")
-    fig.savefig(out_dir / f"{pair_id}_attention.pdf",
                 bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
@@ -769,29 +861,55 @@ def plot_consensus_heatmap(att: dict, pair_id: str, out_dir: Path,
 # ======================================================================
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Extract DT-Kinase attention for top consensus hits.")
-    ap.add_argument("--consensus", type=Path, required=True)
+    ap = argparse.ArgumentParser(description="Extract DT-Kinase attention for top hits.")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--consensus", type=Path,
+                     help="committee consensus.csv (multi-model mode); "
+                          "selects rows by --tier and --top-k.")
+    src.add_argument("--scores",    type=Path,
+                     help="single-model scores csv (cols: uniprot, chembl_id, "
+                          "prob, [pred, threshold]); ranks by prob descending.")
     ap.add_argument("--pairs",     type=Path, required=True)
     ap.add_argument("--out-dir",   type=Path, required=True)
     ap.add_argument("--top-k",     type=int, default=20)
     ap.add_argument("--tier",      type=str, default="STRONG,LIKELY",
-                    help="comma-separated subset of {STRONG,LIKELY,UNCERTAIN,UNLIKELY}")
+                    help="(--consensus only) comma-separated subset of "
+                         "{STRONG,LIKELY,UNCERTAIN,UNLIKELY}")
+    ap.add_argument("--min-prob",  type=float, default=None,
+                    help="(--scores only) minimum probability to keep "
+                         "(default: keep top-k regardless of prob).")
     ap.add_argument("--corpus",    choices=["human", "non_human", "all"], default="all")
     ap.add_argument("--ckpt",      type=Path, default=None)
     ap.add_argument("--config",    type=Path, default=CANONICAL_CONFIG)
     ap.add_argument("--no-plot",   action="store_true")
     args = ap.parse_args()
 
-    consensus = pd.read_csv(args.consensus)
-    pairs     = pd.read_csv(args.pairs, sep="\t")
+    pairs = pd.read_csv(args.pairs, sep="\t")
 
-    tiers_keep = {t.strip().upper() for t in args.tier.split(",") if t.strip()}
-    sel = consensus[consensus["tier"].isin(tiers_keep)].head(args.top_k)
-    if len(sel) == 0:
-        print("no rows in selected tiers; nothing to do", file=sys.stderr)
-        return
-    print(f"  extracting attention for {len(sel)} pairs (tiers={tiers_keep})",
-          file=sys.stderr)
+    if args.consensus is not None:
+        consensus = pd.read_csv(args.consensus)
+        tiers_keep = {t.strip().upper() for t in args.tier.split(",") if t.strip()}
+        sel = consensus[consensus["tier"].isin(tiers_keep)].head(args.top_k)
+        if len(sel) == 0:
+            print("no rows in selected tiers; nothing to do", file=sys.stderr)
+            return
+        print(f"  extracting attention for {len(sel)} pairs (tiers={tiers_keep})",
+              file=sys.stderr)
+    else:
+        scores = pd.read_csv(args.scores)
+        if "prob" not in scores.columns:
+            sys.exit("--scores csv must have a 'prob' column")
+        sel = scores.sort_values("prob", ascending=False)
+        if args.min_prob is not None:
+            sel = sel[sel["prob"] >= args.min_prob]
+        sel = sel.head(args.top_k).copy()
+        if len(sel) == 0:
+            print("no rows passed --min-prob filter; nothing to do",
+                  file=sys.stderr)
+            return
+        print(f"  extracting attention for {len(sel)} pairs "
+              f"(top-{args.top_k} by prob, single-model mode)",
+              file=sys.stderr)
 
     # Join consensus with pairs to recover sequences/SMILES
     # Cast keys to str on both sides to avoid type mismatch from CSV sniffing.
