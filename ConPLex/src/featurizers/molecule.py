@@ -1,11 +1,27 @@
 import os
 import pickle
-import dgl
 import math
 import torch
 import pysmiles
 import deepchem as dc
 import numpy as np
+
+# DGL is used only by GraphDataset-based featurizers (not needed by
+# ProtBERT + Morgan inference used in eval_conplex_v2). Wrap imports so
+# environments without a working DGL build (e.g., torch nightly without
+# matching DGL C++ libs) can still import this module.
+try:
+    import dgl  # noqa: F401
+    from dgl.dataloading import GraphDataLoader
+    from dgl.nn import GraphConv, GATConv, SAGEConv, SGConv, TAGConv
+    from dgl.nn.pytorch.glob import SumPooling
+    _DGL_AVAILABLE = True
+except Exception:  # pragma: no cover
+    dgl = None
+    GraphDataLoader = None
+    GraphConv = GATConv = SAGEConv = SGConv = TAGConv = None
+    SumPooling = None
+    _DGL_AVAILABLE = False
 
 from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem
@@ -14,16 +30,24 @@ from pathlib import Path
 from .base import Featurizer
 from ..utils import get_logger, canonicalize
 
-from mol2vec.features import (
-    mol2alt_sentence,
-    mol2sentence,
-    MolSentence,
-    sentences2vec,
-)
-from gensim.models import word2vec
-from dgl.dataloading import GraphDataLoader
-from dgl.nn import GraphConv, GATConv, SAGEConv, SGConv, TAGConv
-from dgl.nn.pytorch.glob import SumPooling
+# mol2vec/gensim are only needed by Mol2VecFeaturizer, not by the
+# ProtBERT + Morgan inference path used in eval_conplex_v2. Wrap in
+# try/except so broken dependency chains (e.g., RDKit PandasTools
+# with pandas 2.2+) do not block module import.
+try:
+    from mol2vec.features import (
+        mol2alt_sentence,
+        mol2sentence,
+        MolSentence,
+        sentences2vec,
+    )
+    from gensim.models import word2vec
+    _MOL2VEC_AVAILABLE = True
+except Exception:  # pragma: no cover
+    mol2alt_sentence = mol2sentence = MolSentence = sentences2vec = None
+    word2vec = None
+    _MOL2VEC_AVAILABLE = False
+
 from torch.nn import ModuleList
 from torch.nn.functional import one_hot
 
@@ -192,7 +216,7 @@ class GNN(torch.nn.Module):
         return graph_embedding
 
 
-class GraphDataset(dgl.data.DGLDataset):
+class GraphDataset(dgl.data.DGLDataset if _DGL_AVAILABLE else object):
     def __init__(self, path_to_model, smiles_list, gpu):
         self.path = path_to_model
         self.smiles_list = smiles_list

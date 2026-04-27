@@ -1,0 +1,83 @@
+# ============================================================================
+# DT-Kinase v7-plus_F_adapt_v2 — decoupled threshold/selection (lição 15)
+# ============================================================================
+# Idêntico a v7_plus_F_adapt.yaml, salvo critério de seleção de checkpoint:
+#
+#   THRESHOLD_METRIC = f1   (igual baselines DrugBAN/GraphBAN)
+#   SELECTION_METRIC = mcc  (preserva sinal discriminativo do DT-Kinase)
+#
+# Aplica lição 15 de licoes_aprendidas.md §6.7. v7_plus_F_adapt acoplava
+# selection a threshold (ambos via mesma env var) → otimizou epoch p/ F1
+# em vez de MCC → MCC test 0.4929 (-0.033 vs v7+F).
+#
+# Hipótese: separação recupera MCC ~0.52 (v7+F level) preservando
+# F1 ~0.79 (comparável a baselines).
+#
+# Usage (diamante-01):
+#   bash scripts/v8/run_v7_plus_F_adapt_v2.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_plusF_adapt_v2_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7
+  num_heads: 16
+  head_dim: 64
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  double: false
+  no_amp: true
+  deterministic: false
+
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1                # SIMÉTRICO
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512
+    lig_dim: 1024
+
+  calibration:
+    platt: true
+    temperature: false
+
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+
+  mlp_head: true
+  pool_num_heads: 1
+  swa_start: 0
+  label_smooth: 0.05
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.55
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true

@@ -1,0 +1,109 @@
+# =============================================================================
+# Unified "baseline" requirements — pip/venv install for the 4-model committee
+# =============================================================================
+#
+# Mirror of scripts/inference/setup_baseline_env.sh but for users who prefer
+# Python venv over conda. Hosts dependencies for DT-Kinase, DrugBAN, GraphBAN
+# and ConPLex inference in a single environment.
+#
+# CRITICAL — DO NOT INSTALL THIS FILE WITH `pip install -r` ALONE.
+# PyTorch and DGL must be installed FIRST from their dedicated index URLs;
+# otherwise pip pulls CPU-only PyTorch from PyPI (breaks torchvision::nms)
+# or fails to find DGL wheels (HTTP 403).
+#
+# Recommended install (Linux + CUDA 12.1):
+#
+#     python -m venv env_baseline
+#     source env_baseline/bin/activate
+#     pip install --upgrade pip wheel setuptools
+#
+#     # 1. PyTorch (must come first, dedicated CUDA index URL)
+#     pip install torch==2.4.1 torchvision torchaudio \
+#         --index-url https://download.pytorch.org/whl/cu121
+#
+#     # 2. DGL (must come second, dedicated dgl-team URL; fall back to CPU
+#     #    wheel from PyPI on macOS / no-CUDA hosts)
+#     pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu121/repo.html  # CUDA
+#     #   OR
+#     pip install dgl                                                          # CPU
+#
+#     # 3. Everything else (this file)
+#     pip install -r requirements-baseline.txt
+#
+#     # 4. Patch DGL graphbolt __init__ (ABI workaround if CUDA wheel mismatch)
+#     python -c "import dgl, os, pathlib; \
+#         p = pathlib.Path(os.path.dirname(dgl.__file__))/'graphbolt/__init__.py'; \
+#         p.exists() and p.write_text('# disabled — ABI mismatch')"
+#
+# CPU-only fallback (macOS, debug, CI):
+#     pip install torch torchvision torchaudio          # standard PyPI build
+#     pip install dgl                                    # standard CPU wheel
+#     pip install -r requirements-baseline.txt
+#
+# After install, verify:
+#     python -c "import torch, dgl, transformers, rdkit, esm; print('OK')"
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Scientific base
+# -----------------------------------------------------------------------------
+numpy<2
+pandas
+scikit-learn
+scipy
+matplotlib
+networkx
+h5py
+pyyaml
+tqdm
+yacs
+
+# -----------------------------------------------------------------------------
+# Cheminformatics
+# -----------------------------------------------------------------------------
+rdkit
+
+# -----------------------------------------------------------------------------
+# DGL ecosystem (DGL itself MUST be installed manually before this file —
+# see header instructions). dgllife and torch-geometric are pip-installable
+# without dedicated index URLs.
+# -----------------------------------------------------------------------------
+dgllife
+torch-geometric
+
+# -----------------------------------------------------------------------------
+# HuggingFace stack — pinned to MoLFormer-compatible version range
+# (transformers >= 4.40 removed transformers.onnx, breaking MoLFormer
+# custom configuration_molformer.py). 4.39.3 is the last working version.
+# -----------------------------------------------------------------------------
+transformers==4.39.3
+tokenizers<0.20
+huggingface_hub
+accelerate
+sentencepiece
+
+# -----------------------------------------------------------------------------
+# Protein modelling
+# -----------------------------------------------------------------------------
+# fair-esm provides ESM-1b for GraphBAN; DT-Kinase prefers local llm/ESM clone.
+fair-esm
+biopython
+
+# -----------------------------------------------------------------------------
+# ConPLex extras
+# -----------------------------------------------------------------------------
+pytorch-lightning
+torchmetrics
+omegaconf
+pytdc
+
+# dscript provides the ProtBert wrapper used by ConPLex featurizers.
+# Its pinned old TF/sklearn extras would conflict with the rest of this
+# environment, so install with --no-deps separately:
+#     pip install --no-deps dscript
+
+# -----------------------------------------------------------------------------
+# Dev tooling (testing, optional but recommended)
+# -----------------------------------------------------------------------------
+pytest

@@ -136,7 +136,15 @@ def build_env(cfg: dict) -> dict[str, str]:
     env["EMBEDDING"] = str(cfg.get("embedding", "8M"))
     env["LEVELS_CSV"] = str(cfg.get("levels", "4cnn"))
     env["EPOCHS"] = str(cfg.get("epochs", 500))
-    env["MODEL_SELECTION_METRIC"] = str(cfg.get("model_selection_metric", "mcc"))
+    _selection_metric = str(cfg.get("model_selection_metric", "mcc")).lower()
+    env["MODEL_SELECTION_METRIC"] = _selection_metric
+    # Propagate to the level4 threshold knob; SELECTION_METRIC is left
+    # unset so level4_cnn._selection_metric_env() falls back to whatever
+    # THRESHOLD_METRIC ends up being at runtime — preserves matched
+    # objective (lição 16 §6.8) even under partial external overrides.
+    # External env overrides take precedence over the YAML default.
+    if "BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC" not in os.environ:
+        env["BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC"] = _selection_metric
     env["OUTPUT_ROOT"] = str(cfg.get("output_root", "results/benchmark"))
 
     # --- Warnings ---
@@ -162,6 +170,8 @@ def build_env(cfg: dict) -> dict[str, str]:
         "contrastive_dim":    "BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM",
         "label_smooth":  "BENCHMARK_LEVEL4CNN_LABEL_SMOOTH",
         "mixup_alpha":   "BENCHMARK_LEVEL4CNN_MIXUP_ALPHA",
+        "pool_num_heads": "BENCHMARK_LEVEL4CNN_POOL_HEADS",
+        "swa_start":      "BENCHMARK_LEVEL4CNN_SWA_START",
         "train_to_zero_thr":  "BENCHMARK_LEVEL4CNN_TRAIN_TO_ZERO_THR",
         "checkpoint_every":   "BENCHMARK_LEVEL4CNN_CHECKPOINT_EVERY",
     }
@@ -190,10 +200,15 @@ def build_env(cfg: dict) -> dict[str, str]:
     if adapter.get("enabled", False):
         env["BENCHMARK_LEVEL4CNN_ADAPTER"] = "1"
         _adapter_map = {
-            "layers":    "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS",
-            "lr_mult":   "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT",
-            "prot_dim":  "BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM",
-            "lig_dim":   "BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM",
+            "layers":          "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS",
+            "lr_mult":         "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT",
+            "prot_dim":        "BENCHMARK_LEVEL4CNN_ADAPTER_PROT_DIM",
+            "lig_dim":         "BENCHMARK_LEVEL4CNN_ADAPTER_LIG_DIM",
+            # Asymmetric adapter capacity (ligand can have more):
+            "layers_prot":     "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_PROT",
+            "layers_lig":      "BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG",
+            "attn_heads_prot": "BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_PROT",
+            "attn_heads_lig":  "BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG",
         }
         for key, envvar in _adapter_map.items():
             if key in adapter:
