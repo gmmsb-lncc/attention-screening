@@ -134,52 +134,196 @@ def extract_pair(
 # Plot
 # ======================================================================
 
-def plot_consensus_heatmap(att: dict, pair_id: str, out_path: Path) -> None:
-    """Render a 2x2 PDF: M_k mean heatmap + per-residue + per-token + per-head."""
+def _topk_indices(arr: np.ndarray, k: int = 10) -> np.ndarray:
+    """Return indices of the top-k values in arr, sorted by descending value."""
+    if arr is None or len(arr) == 0:
+        return np.array([], dtype=int)
+    k = min(k, len(arr))
+    idx = np.argpartition(arr, -k)[-k:]
+    return idx[np.argsort(-arr[idx])]
+
+
+def plot_consensus_heatmap(att: dict, pair_id: str, out_dir: Path,
+                            sequence: str | None = None,
+                            smiles_tokens: list[str] | None = None,
+                            top_residues: int = 10,
+                            top_tokens: int = 8) -> None:
+    """Render attention overview AND a focused 'hotspot' map for the pair.
+
+    Produces three companion files inside ``out_dir``:
+
+      - <pair_id>_attention.png         (high-DPI overview, 4 panels)
+      - <pair_id>_attention.pdf         (vector overview for thesis/paper)
+      - <pair_id>_hotspots.png          (single-panel focused heatmap with
+                                         top residue + token annotations)
+
+    The focused hotspot panel uses an inferno colormap (high contrast,
+    perceptually uniform) and overlays:
+      - row labels with the AA letter at the top-K most attended positions
+      - column labels with the SMILES token at the top-K most attended cols
+      - white tick marks at those positions
+
+    so that the user can immediately read off which protein region and
+    which ligand substructure the model focused on.
+    """
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib import colors as mcolors
     except ImportError:
         print(f"  matplotlib unavailable; skipping plot for {pair_id}",
               file=sys.stderr)
         return
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-    fig.suptitle(f"DT-Kinase attention: {pair_id} (logit={att['logit']:+.2f})")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    Mk_mean       = att.get("Mk_mean")            # [sp, sl]
+    prot_imp      = att.get("prot_imp")           # [sp]
+    lig_imp       = att.get("lig_imp")            # [sl]
+    per_head      = att.get("per_head")           # [K]
+    hp_prot       = att.get("hierpool_prot")      # [sp]
+    hp_lig        = att.get("hierpool_lig")       # [sl]
 
-    if "Mk_mean" in att:
+    # Pick the strongest residue/token signal: prefer HierPool weights when
+    # available (these are explicitly the model's attention output), else
+    # fall back to Mk_mean per-axis sums.
+    prot_signal = hp_prot if hp_prot is not None else prot_imp
+    lig_signal  = hp_lig  if hp_lig  is not None else lig_imp
+
+    # ------------------------------------------------------------------
+    # FILE 1: focused hotspot heatmap
+    # ------------------------------------------------------------------
+    if Mk_mean is not None:
+        sp, sl = Mk_mean.shape
+        fig, ax = plt.subplots(figsize=(max(8, sl * 0.18),
+                                        max(6, sp * 0.04 + 2)))
+        # Use inferno: dark = low attention, bright = high attention.
+        im = ax.imshow(Mk_mean, aspect="auto", cmap="inferno",
+                       interpolation="nearest")
+        ax.set_title(f"DT-Kinase attention hotspot — {pair_id}\n"
+                     f"(logit = {att['logit']:+.2f}; mean over {Mk_mean.shape[0]}×{Mk_mean.shape[1]} cells)",
+                     fontsize=11)
+        ax.set_xlabel("ligand SMILES token  →")
+        ax.set_ylabel("protein residue (N → C)")
+        cbar = plt.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+        cbar.set_label("attention intensity (M̄ over 16 heads)", fontsize=9)
+
+        # Annotate top-K residues + tokens
+        top_res = _topk_indices(prot_signal, top_residues) if prot_signal is not None else []
+        top_tok = _topk_indices(lig_signal,  top_tokens)   if lig_signal  is not None else []
+
+        # Sparse y-tick labels with AA letter at top residues
+        if len(top_res) and sequence is not None:
+            seq = sequence[:sp]
+            yticks_idx = sorted(int(i) for i in top_res)
+            yticks_lbl = [f"{i+1}·{seq[i]}" if i < len(seq) else str(i+1)
+                          for i in yticks_idx]
+            ax.set_yticks(yticks_idx)
+            ax.set_yticklabels(yticks_lbl, fontsize=8)
+        elif sp > 40:
+            step = max(1, sp // 25)
+            ax.set_yticks(range(0, sp, step))
+            ax.set_yticklabels(range(1, sp + 1, step), fontsize=7)
+
+        if len(top_tok) and smiles_tokens is not None:
+            xticks_idx = sorted(int(i) for i in top_tok)
+            xticks_lbl = [f"{i}·{smiles_tokens[i]}" if i < len(smiles_tokens) else str(i)
+                          for i in xticks_idx]
+            ax.set_xticks(xticks_idx)
+            ax.set_xticklabels(xticks_lbl, fontsize=8, rotation=45, ha="right")
+        elif sl > 30:
+            step = max(1, sl // 20)
+            ax.set_xticks(range(0, sl, step))
+            ax.set_xticklabels(range(0, sl, step), fontsize=7)
+
+        # White overlay rectangles around top-3 residue × top-3 token cells
+        for r in top_res[:3]:
+            for t in top_tok[:3]:
+                ax.add_patch(plt.Rectangle((t - 0.5, r - 0.5), 1, 1,
+                                           linewidth=1.5, edgecolor="white",
+                                           facecolor="none"))
+
+        fig.tight_layout()
+        fig.savefig(out_dir / f"{pair_id}_hotspots.png", dpi=180,
+                    bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # FILE 2 + 3: 4-panel overview (PNG + PDF)
+    # ------------------------------------------------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    fig.suptitle(f"DT-Kinase attention overview — {pair_id}  "
+                 f"(logit = {att['logit']:+.2f})", fontsize=12, weight="bold")
+
+    if Mk_mean is not None:
         ax = axes[0, 0]
-        im = ax.imshow(att["Mk_mean"], aspect="auto", cmap="viridis")
-        ax.set_title("M̄ = mean over 16 heads")
+        im = ax.imshow(Mk_mean, aspect="auto", cmap="inferno")
+        ax.set_title("M̄: mean attention map (residue × ligand token)",
+                     fontsize=10)
         ax.set_xlabel("ligand token")
         ax.set_ylabel("protein residue")
-        plt.colorbar(im, ax=ax)
+        plt.colorbar(im, ax=ax, fraction=0.04)
 
-    if "hierpool_prot" in att:
+    if prot_signal is not None:
         ax = axes[0, 1]
-        ax.bar(range(len(att["hierpool_prot"])), att["hierpool_prot"])
-        ax.set_title("HierPool protein weights (stage 2)")
-        ax.set_xlabel("residue index")
+        n = len(prot_signal)
+        bars = ax.bar(range(n), prot_signal, color="#2E86AB",
+                      edgecolor="none", width=1.0)
+        # Highlight top-K residues in orange + annotate value
+        top_res = _topk_indices(prot_signal, top_residues)
+        for i in top_res:
+            bars[int(i)].set_color("#E8630A")
+        if sequence is not None:
+            seq = sequence[:n]
+            for r in top_res[:5]:
+                lbl = seq[int(r)] if int(r) < len(seq) else "?"
+                ax.annotate(f"{int(r)+1}·{lbl}",
+                            xy=(int(r), prot_signal[int(r)]),
+                            xytext=(0, 5), textcoords="offset points",
+                            ha="center", fontsize=8, color="#A04500",
+                            weight="bold")
+        ax.set_title(f"Protein attention per residue  "
+                     f"(top {top_residues} highlighted)", fontsize=10)
+        ax.set_xlabel("residue position (N → C)")
         ax.set_ylabel("attention weight")
+        ax.set_xlim(-0.5, n - 0.5)
 
-    if "hierpool_lig" in att:
+    if lig_signal is not None:
         ax = axes[1, 0]
-        ax.bar(range(len(att["hierpool_lig"])), att["hierpool_lig"])
-        ax.set_title("HierPool ligand weights (stage 1, mean over prot pos)")
-        ax.set_xlabel("ligand token")
+        n = len(lig_signal)
+        bars = ax.bar(range(n), lig_signal, color="#2E86AB",
+                      edgecolor="none", width=1.0)
+        top_tok = _topk_indices(lig_signal, top_tokens)
+        for i in top_tok:
+            bars[int(i)].set_color("#E8630A")
+        if smiles_tokens is not None:
+            for r in top_tok[:5]:
+                lbl = smiles_tokens[int(r)] if int(r) < len(smiles_tokens) else "?"
+                ax.annotate(f"{int(r)}·{lbl}",
+                            xy=(int(r), lig_signal[int(r)]),
+                            xytext=(0, 5), textcoords="offset points",
+                            ha="center", fontsize=8, color="#A04500",
+                            weight="bold")
+        ax.set_title(f"Ligand attention per token  "
+                     f"(top {top_tokens} highlighted)", fontsize=10)
+        ax.set_xlabel("ligand token position")
         ax.set_ylabel("attention weight")
+        ax.set_xlim(-0.5, n - 0.5)
 
-    if "per_head" in att:
+    if per_head is not None:
         ax = axes[1, 1]
-        ax.bar(range(len(att["per_head"])), att["per_head"])
-        ax.set_title("Per-head intensity (|M_k|.mean)")
-        ax.set_xlabel("head k")
-        ax.set_ylabel("|M_k|")
+        bars = ax.bar(range(len(per_head)), per_head, color="#1B813E",
+                      edgecolor="white", linewidth=0.5)
+        ax.set_title("Per-head intensity (|M_k|.mean across heads)",
+                     fontsize=10)
+        ax.set_xlabel("interaction-map head index k")
+        ax.set_ylabel("|M_k| mean")
 
-    fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(out_dir / f"{pair_id}_attention.png", dpi=180,
+                bbox_inches="tight", facecolor="white")
+    fig.savefig(out_dir / f"{pair_id}_attention.pdf",
+                bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
@@ -275,7 +419,15 @@ def main() -> None:
                 lig_weights=att.get("hierpool_lig"),
             )
         if not args.no_plot:
-            plot_consensus_heatmap(att, pair_id, sub / "consensus_heatmap.pdf")
+            # Pass sequence + SMILES tokens so the plot annotates top
+            # residues with their AA letter and top tokens with the SMILES
+            # character at that position.
+            seq = str(row.get("sequence", "")) or None
+            smi = str(row.get("smiles", ""))
+            smiles_tokens = list(smi) if smi else None
+            plot_consensus_heatmap(att, pair_id, sub,
+                                   sequence=seq,
+                                   smiles_tokens=smiles_tokens)
         print(f"  {pair_id}: logit={att['logit']:+.3f}", file=sys.stderr)
 
 
