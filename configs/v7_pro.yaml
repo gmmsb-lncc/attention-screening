@@ -1,0 +1,129 @@
+# ============================================================================
+# DT-Kinase v7-pro — Tier A + C (validated) + E (Mixup) + F (label smoothing)
+# ============================================================================
+# Scales v7's capacity bottlenecks WITHOUT changing the architecture family:
+# cross-attention 2D dot-product heads + 4-layer 2D CNN + HierPool are
+# preserved. Only knobs adjusted.
+#
+# Changes vs configs/v7.yaml:
+#   num_heads   :  8 → 16     (more interaction views for CNN to process)
+#   head_dim    : 32 → 64     (reduce projection bottleneck, still dot-product)
+#   mlp_head    : false → true (Linear(64,1) → MLP(64,128,1))
+#   adapter.prot_dim :  256 → 512    (double adapter capacity)
+#   adapter.lig_dim  :  512 → 1024
+#
+# Parameter impact (estimated):
+#   Heads: 16 × (320 × 64 + 768 × 64) = ~1.1M (vs v7: 278K)
+#   Adapter: ~2.5x larger
+#   Total trainable: ~4.1M → ~8-10M (still frozen backbones)
+#
+# Memory: larger adapter + more heads → interaction tensor (B, 16, L_p, L_l)
+# CNN first layer: Conv2d(16, 32) instead of Conv2d(8, 32) — transparent.
+# Batch size 128 should fit on 24 GB (v7-side needed 16 due to per-token
+# injection doubling seq len; here seq len unchanged).
+#
+# Usage (diamante-01 with cuDNN):
+#   BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=0 V7_CONFIG=configs/v7_plus.yaml \
+#       CORPUS=non_human SEEDS="42" bash scripts/v8/run_v7_yaml.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_pro_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7              # same v7 dot-product heads, NOT v8 BAN
+  num_heads: 16            # ↑ from 8
+  head_dim: 64             # ↑ from 32 (reduces projection bottleneck)
+  channels: 64             # unchanged
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # fp32 + TF32 off (real fp32 quality, no mantissa truncation).
+  # cuDNN ON via env override on diamante-01.
+  double: false
+  no_amp: true
+  deterministic: false
+
+  # Larger model (~8-10M params vs v7's 4.1M) needs more epochs to
+  # converge. v7's patience=5 caused premature early stop in first run
+  # → train MCC 0.5115 (below v7's 0.5208). Raising to 15.
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    # lr_mult reduced 5.0 → 2.0 because adapter is 2× larger. Same 5.0
+    # rate on doubled params made optimization overshoot → train MCC
+    # 0.5115 (below v7). 2.0 keeps differential advantage but gentler.
+    lr_mult: 2.0
+    prot_dim: 512          # ↑ from 256
+    lig_dim: 1024          # ↑ from 512
+
+  calibration:
+    platt: true
+    temperature: false
+
+  # Tier C: contrastive aux loss (ConPLex-inspired regularizer).
+  # Pooled prot+lig features get projected to 128-d unit sphere.
+  # Aux loss = InfoNCE pulling positive pairs (label=1) close, pushing
+  # negatives apart. Weight 0.3 = 30% of total loss. Acts as feature
+  # regularizer without changing primary task. Should help generalization.
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true        # add cosine_sim(prot, lig) as scalar feature to classifier
+  cosine_sim: false        # do NOT replace dot-product with cosine inside heads
+
+  mlp_head: true           # ↑ Linear(64,1) → MLP(64, hidden, 1)
+
+  # Tier B reverted. pool_num_heads=4 caused regression 0.500 → 0.456
+  # (head_proj Xavier init disrupted v7's single-query identity at t=0).
+  # Could fix with zero-init head_proj or mean aggregation; deferring.
+  pool_num_heads: 1
+
+  # Tier D: Stochastic Weight Averaging (Izmailov et al., UAI 2018).
+  # First experiment with swa_start=5 REGRESSED test MCC (-0.021):
+  # vanilla SWA assumes long training with diverse SGD trajectory in
+  # the convergence region. Our short training (~12 epochs) doesn't
+  # produce that trajectory, so averaging across the active learning
+  # phase pulled weights backward. Disabled. Future option: replace
+  # with Greedy Model Soup (Wortsman 2022) which only includes
+  # checkpoints that improve val_MCC.
+  swa_start: 0
+
+  # Tier F: Label smoothing. Soft target distribution prevents
+  # overconfident logits, regularizes classifier independently of
+  # focal loss (which adjusts loss weight by confidence; smoothing
+  # adjusts target). Standard ε=0.05 (Szegedy et al., Inception V3).
+  label_smooth: 0.05
+
+  # Tier E: Mixup. Pairs of training samples blended via Beta(α, α);
+  # classifier learns interpolated labels. Acts on input space,
+  # orthogonal to Tier A (capacity) and Tier C (feature regularizer).
+  # α=0.3 is the binary classification sweet spot (Zhang ICLR 2018).
+  mixup_alpha: 0.3
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.55     # aspirational; v7 baseline ≈ 0.486 seed 42 NH
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true

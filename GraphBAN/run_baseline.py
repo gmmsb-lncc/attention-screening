@@ -12,7 +12,7 @@ This script wraps GraphBAN's training pipeline to:
 Methodology alignment with DT-Kinase:
 - Same scaffold splits (Bemis-Murcko 80/10/10)
 - Same 5 canonical seeds {42, 123, 456, 789, 1024}
-- Threshold calibrated on validation set (MCC-optimal), applied to test
+- Threshold calibrated on validation set (F1-optimal, GraphBAN native criterion), applied to test
 - Model selection: GraphBAN uses val AUROC (its published criterion)
   DT-Kinase uses val MCC — each uses its own published protocol
 
@@ -432,9 +432,9 @@ def _patch_trainer_for_mcc_logging(
             y_true, y_prob = _collect_predictions(
                 trainer_obj.model, val_gen, device, n_class,
             )
-            _, val_mcc = optimize_threshold_on_validation(y_true, y_prob, metric="mcc")
-            # also compute train MCC at val-optimal threshold for overfitting signal
-            print(f"  → Val MCC={val_mcc:.4f}")
+            _, val_f1 = optimize_threshold_on_validation(y_true, y_prob, metric="f1")
+            # F1 reported to mirror GraphBAN's native threshold criterion
+            print(f"  → Val F1={val_f1:.4f}")
         except Exception:
             pass  # never crash training over logging
         return result
@@ -584,11 +584,12 @@ def train_single_seed(
         trainer.best_model, val_generator, device, n_class,
     )
 
-    # Step 2: Optimize threshold on validation maximizing MCC (no test leakage)
-    val_threshold, val_best_mcc = optimize_threshold_on_validation(
-        val_y_true, val_y_prob, metric="mcc",
+    # Step 2: Optimize threshold on validation maximizing F1 (GraphBAN native criterion,
+    # preserved per thesis design; partition moved from test to val to eliminate leakage)
+    val_threshold, val_best_f1 = optimize_threshold_on_validation(
+        val_y_true, val_y_prob, metric="f1",
     )
-    print(f"  Val-optimized threshold={val_threshold:.4f} (val MCC={val_best_mcc:.4f})")
+    print(f"  Val-optimized threshold={val_threshold:.4f} (val F1={val_best_f1:.4f})")
 
     # Step 3: Collect predictions on TRAIN set with best model (for overfit diagnosis)
     # Use DTIDataset (5-tuple) not DTIDataset2 (6-tuple with teacher) so that
@@ -902,8 +903,8 @@ def main() -> None:
         "seeds": args.seeds,
         "methodology": {
             "model_selection": "validation AUROC (GraphBAN published criterion)",
-            "threshold_optimization": "validation MCC-optimal (no test leakage)",
-            "threshold_metric": "mcc",
+            "threshold_optimization": "validation F1-optimal (GraphBAN native criterion, no test leakage)",
+            "threshold_metric": "f1",
             "fair_split_fix": (
                 "GraphBAN's original inductive mode uses test set as validation "
                 "(val_generator = test_dataset). This wrapper corrects that by "

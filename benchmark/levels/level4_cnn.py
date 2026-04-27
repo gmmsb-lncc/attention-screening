@@ -129,6 +129,86 @@ class ContrastiveLoss(nn.Module):
 # ======================================================================
 
 
+def coral_loss(features: torch.Tensor, domains: torch.Tensor) -> torch.Tensor:
+    """Correlation Alignment Loss (CORAL, Sun & Saenko 2016).
+
+    Aligns second-order statistics (covariance matrices) of pooled
+    features across domains, encouraging domain-invariant feature
+    distributions WITHOUT requiring an adversarial discriminator.
+
+    Loss = (1/4d²) · ||Cov(features_dom0) - Cov(features_dom1)||²_F
+
+    Robust degenerate case: if either domain has < 2 samples in batch,
+    returns zero (covariance undefined). For our use case this only
+    happens with extremely small batches; with batch_size=128 over
+    'all' corpus, both H and NH always present.
+    """
+    valid = domains >= 0
+    if not valid.any():
+        return torch.zeros((), device=features.device, dtype=features.dtype)
+    f = features[valid]
+    d = domains[valid]
+    f0 = f[d == 0]
+    f1 = f[d == 1]
+    if f0.size(0) < 2 or f1.size(0) < 2:
+        return torch.zeros((), device=features.device, dtype=features.dtype)
+    # Center features per domain.
+    f0c = f0 - f0.mean(dim=0, keepdim=True)
+    f1c = f1 - f1.mean(dim=0, keepdim=True)
+    # Empirical covariance: (n-1) normalised.
+    cov0 = (f0c.t() @ f0c) / max(f0.size(0) - 1, 1)
+    cov1 = (f1c.t() @ f1c) / max(f1.size(0) - 1, 1)
+    diff = cov0 - cov1
+    dim = features.size(-1)
+    return (diff ** 2).sum() / (4 * dim * dim)
+
+
+class _GradientReversalFn(torch.autograd.Function):
+    """Gradient Reversal Layer (Ganin & Lempitsky, ICML 2015).
+
+    Forward: identity. Backward: multiplies gradient by -lambd.
+    Used to flip gradient sign on the domain branch so the encoder
+    learns to PRODUCE features that confuse the domain classifier
+    (i.e., domain-invariant features).
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, lambd: float) -> torch.Tensor:
+        ctx.lambd = float(lambd)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return -ctx.lambd * grad_output, None
+
+
+class DomainAdversarialHead(nn.Module):
+    """Small MLP that predicts domain (corpus) from pooled features.
+
+    The encoder side passes through a Gradient Reversal Layer, so
+    optimising the domain CE loss makes the encoder learn features
+    that are INDISTINGUISHABLE between corpora — encouraging
+    cross-corpus transferability (CDAN-style, Long et al. 2018).
+
+    Designed to be plugged onto the HierPool output (~64-d vector)
+    of InteractionMapCNN. Predicts one of {human, non_human, all}
+    by default (3 classes).
+    """
+
+    def __init__(self, in_dim: int, n_domains: int = 3, hidden: int = 32, dropout: float = 0.2):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, n_domains),
+        )
+
+    def forward(self, x: torch.Tensor, lambd: float) -> torch.Tensor:
+        x_rev = _GradientReversalFn.apply(x, lambd)
+        return self.head(x_rev)
+
+
 class _AxisAttentionPool(nn.Module):
     """Learnable-query attention pool along seq dimension.
 
@@ -139,23 +219,40 @@ class _AxisAttentionPool(nn.Module):
     Mask convention: ``True = padding`` (will be ignored).
     """
 
-    def __init__(self, dim: int) -> None:
+    def __init__(self, dim: int, num_heads: int = 1) -> None:
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
+        self.num_heads = num_heads
+        # Multi-head learnable queries. Each head learns to attend to a
+        # different aspect of the input sequence (e.g. one head focuses on
+        # high-affinity residues, another on aromatic substructures, etc.).
+        # Single-head reduces to original v7 behaviour.
+        self.queries = nn.Parameter(torch.randn(1, num_heads, dim) * 0.02)
         self.scale = dim ** -0.5
         self.norm = nn.LayerNorm(dim)
+        # When multi-head, concat outputs (H × D) and project back to D.
+        # Identity in single-head mode keeps backward compatibility.
+        if num_heads > 1:
+            self.head_proj = nn.Linear(num_heads * dim, dim)
+        else:
+            self.head_proj = nn.Identity()
 
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
         """Pool [B, L, D] → [B, D]."""
-        q = self.query.expand(x.size(0), -1, -1)          # [B, 1, D]
-        scores = torch.bmm(q, x.transpose(1, 2)) * self.scale  # [B, 1, L]
+        B = x.size(0)
+        q = self.queries.expand(B, -1, -1)                # [B, H, D]
+        scores = torch.bmm(q, x.transpose(1, 2)) * self.scale  # [B, H, L]
 
         if pad_mask is not None:
             scores = scores.masked_fill(pad_mask.unsqueeze(1), float("-inf"))
 
-        attn = torch.softmax(scores, dim=-1)                # [B, 1, L]
-        pooled = torch.bmm(attn, x)                         # [B, 1, D]
-        return self.norm(pooled.squeeze(1))                  # [B, D]
+        attn = torch.softmax(scores, dim=-1)                # [B, H, L]
+        pooled = torch.bmm(attn, x)                         # [B, H, D]
+        if self.num_heads > 1:
+            pooled = pooled.reshape(B, -1)                   # [B, H*D]
+            pooled = self.head_proj(pooled)                  # [B, D]
+        else:
+            pooled = pooled.squeeze(1)                       # [B, D]
+        return self.norm(pooled)                              # [B, D]
 
 
 class _HierarchicalPool(nn.Module):
@@ -170,10 +267,10 @@ class _HierarchicalPool(nn.Module):
       (2) which protein residues matter overall
     """
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, num_heads: int = 1) -> None:
         super().__init__()
-        self.lig_pool = _AxisAttentionPool(channels)
-        self.prot_pool = _AxisAttentionPool(channels)
+        self.lig_pool = _AxisAttentionPool(channels, num_heads=num_heads)
+        self.prot_pool = _AxisAttentionPool(channels, num_heads=num_heads)
 
     def forward(
         self,
@@ -228,20 +325,41 @@ class EmbeddingAdapter(nn.Module):
         dropout: float = 0.3,
         num_layers: int = 1,
         use_self_attn: bool = False,
+        num_heads: int = 4,
     ) -> None:
         super().__init__()
+
+        # Legacy flag inverted to default ON after lição 17 §6.9.1 isolation
+        # confirmed §6.5 (pre-norm + LoRA gates + zero-init self_attn) regresses
+        # v7+F by -0.053 MCC in short-training regime. Setting LEGACY=0 opts in
+        # to §6.5 fixes (use only with longer training / additional stochastic
+        # regularisation that breaks the zero-cascade trap).
+        # Default ("1") reproduces v7+F = 0.5266 ± 0.010 on diamante-01.
+        self._legacy = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY", "1") == "1"
 
         # --- Optional self-attention (context-aware adaptation) --------
         self.use_self_attn = use_self_attn
         if use_self_attn:
+            assert dim % num_heads == 0, (
+                f"adapter num_heads={num_heads} must divide dim={dim}")
             self.self_attn = nn.MultiheadAttention(
-                embed_dim=dim, num_heads=4, dropout=dropout, batch_first=True,
+                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True,
             )
+            if not self._legacy:
+                # §6.5: zero-init out_proj so attn_out = 0 at t=0
+                nn.init.zeros_(self.self_attn.out_proj.weight)
+                nn.init.zeros_(self.self_attn.out_proj.bias)
+            # else: leave PyTorch default (Xavier-uniform) — pre-§6.5
             self.attn_norm = nn.LayerNorm(dim)
+            if not self._legacy:
+                # §6.5: LoRA-style scalar gate, init zero
+                self.attn_scale = nn.Parameter(torch.zeros(1))
 
         # --- Stacked MLP bottleneck blocks ----------------------------
         self.mlp_blocks = nn.ModuleList()
         self.mlp_norms = nn.ModuleList()
+        if not self._legacy:
+            self.mlp_scales = nn.ParameterList()
         for _ in range(num_layers):
             block = nn.Sequential(
                 nn.Linear(dim, bottleneck),
@@ -249,22 +367,67 @@ class EmbeddingAdapter(nn.Module):
                 nn.Dropout(dropout),
                 nn.Linear(bottleneck, dim),
             )
-            # Zero-init output layer → starts as identity
+            # Zero-init output layer → starts as identity (kept in BOTH
+            # regimes — predates §6.5, lesson 2)
             nn.init.zeros_(block[-1].weight)
             nn.init.zeros_(block[-1].bias)
             self.mlp_blocks.append(block)
             self.mlp_norms.append(nn.LayerNorm(dim))
+            if not self._legacy:
+                # §6.5: per-block LoRA scalar gate, init zero
+                self.mlp_scales.append(nn.Parameter(torch.zeros(1)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Self-attention: each residue sees its neighbours
-        if self.use_self_attn:
-            attn_out, _ = self.self_attn(x, x, x)
-            x = self.attn_norm(x + attn_out)
+        if self._legacy:
+            # Pre-§6.5: post-norm residual without scalar gates.
+            #   self-attn:  x = LayerNorm(x + attn_out)
+            #   MLP block:  x = LayerNorm(x + block(x))
+            if self.use_self_attn:
+                attn_out, _ = self.self_attn(x, x, x)
+                x = self.attn_norm(x + attn_out)
+            for block, norm in zip(self.mlp_blocks, self.mlp_norms):
+                x = norm(x + block(x))
+            return x
 
-        # Stacked MLP blocks with skip connections
-        for block, norm in zip(self.mlp_blocks, self.mlp_norms):
-            x = norm(x + block(x))
+        # §6.5: pre-norm with LoRA scalar gates (Xiong et al., 2020).
+        if self.use_self_attn:
+            x_n = self.attn_norm(x)
+            attn_out, _ = self.self_attn(x_n, x_n, x_n)
+            x = x + self.attn_scale * attn_out
+        for block, norm, scale in zip(
+            self.mlp_blocks, self.mlp_norms, self.mlp_scales
+        ):
+            x = x + scale * block(norm(x))
         return x
+
+
+def apply_rope_1d(x: torch.Tensor) -> torch.Tensor:
+    """Apply 1D Rotary Positional Embedding to the last dim of x [B, L, D].
+
+    Standard RoPE (Su et al. 2021, RoFormer): for each position p ∈ [0, L),
+    rotate consecutive pair (x[2i], x[2i+1]) by angle p · θ_i where
+    θ_i = 10000^(-2i/D). After rotation, the dot product q·k between two
+    positions encodes only their relative offset, injecting positional
+    structure without learnable parameters.
+
+    Used per-modality (protein and ligand independently) before the
+    cross-modal dot product M_k = P_proj_k · L_proj_k^T, which becomes
+    aware of each position's location along its own sequence axis.
+    head_dim must be even.
+    """
+    B, L, D = x.shape
+    half = D // 2
+    inv_freq = 1.0 / (10000.0 ** (
+        torch.arange(0, half, dtype=torch.float32, device=x.device) / half
+    ))
+    pos = torch.arange(L, dtype=torch.float32, device=x.device)
+    freqs = torch.outer(pos, inv_freq)                # [L, half]
+    cos = freqs.cos().to(x.dtype)
+    sin = freqs.sin().to(x.dtype)
+    x_first, x_second = x[..., :half], x[..., half:]
+    rotated_first = x_first * cos - x_second * sin
+    rotated_second = x_first * sin + x_second * cos
+    return torch.cat([rotated_first, rotated_second], dim=-1)
 
 
 class InteractionMapCNN(nn.Module):
@@ -326,34 +489,85 @@ class InteractionMapCNN(nn.Module):
         adapter_self_attn: bool = False,
         contrastive_dim: int = 128,
         cosine_feat: bool = False,
+        pool_num_heads: int = 1,
+        # Asymmetric adapter knobs. None → fall back to symmetric values
+        # (adapter_layers, num_heads=4) to preserve backward compatibility.
+        # Used to give the ligand branch more capacity than the protein
+        # branch, motivated by kinase-domain conservation: ATP-binding
+        # pockets are highly similar across kinases, so most discriminative
+        # signal lives on the ligand side.
+        adapter_layers_prot: int | None = None,
+        adapter_layers_lig: int | None = None,
+        adapter_attn_heads_prot: int = 4,
+        adapter_attn_heads_lig: int = 4,
+        # BAN-residual (lição 12 reformulação): adds, on top of v7's K
+        # dot-product heads, a residual term M_k += α_k · P W_k Lᵀ with
+        # α_k init zero and W_k Xavier. At t=0 the model is identical to
+        # v7 (gate=0); gradient activates the bilinear term where useful.
+        # Avoids the §6.5 zero-cascade trap because gradient ∂L/∂α
+        # depends on (P W_k Lᵀ) which is non-zero at t=0 (W_k Xavier).
+        use_ban_residual: bool = False,
+        # 2D RoPE (Su et al. 2021): applies 1D Rotary Positional Embedding
+        # per-modality (protein and ligand independently) to the head
+        # projections before the cross-modal dot product. Injects relative
+        # position structure into M_k without learnable parameters. NOTE:
+        # not identity-init (rotates from t=0); marginal positional inductive
+        # bias for the CNN that processes M_k. head_dim must be even.
+        use_rope: bool = False,
+        # Morgan fingerprint topological auxiliary feature (DrugBAN/GraphBAN
+        # GCN proxy). When morgan_n_bits > 0, model expects a `morgan_fp`
+        # tensor of shape [B, n_bits] in forward() and projects it to a
+        # `morgan_proj_dim`-d vector that is CONCATENATED to the HierPool
+        # output before the classifier head.
+        morgan_n_bits: int = 0,
+        morgan_proj_dim: int = 32,
     ) -> None:
         super().__init__()
         self.variant = variant
         self.num_heads = num_heads
         self.mlp_head = mlp_head
         self.cosine_sim = cosine_sim
+        self.use_ban_residual = use_ban_residual and variant in ("v7", "v7_gated")
+        self.use_rope = use_rope and variant in ("v7", "v7_gated")
+        if self.use_rope:
+            assert head_dim % 2 == 0, (
+                f"use_rope=True requires even head_dim, got {head_dim}")
         self.use_adapter = use_adapter
         self.contrastive_dim = contrastive_dim
         self.cosine_feat = cosine_feat
+        self.morgan_n_bits = int(morgan_n_bits) if morgan_n_bits else 0
+        self.morgan_proj_dim = int(morgan_proj_dim) if morgan_proj_dim else 0
+        if self.morgan_n_bits > 0 and self.morgan_proj_dim > 0:
+            self.morgan_proj = nn.Sequential(
+                nn.Linear(self.morgan_n_bits, self.morgan_proj_dim),
+                nn.GELU(),
+                nn.LayerNorm(self.morgan_proj_dim),
+            )
         self._z_prot: torch.Tensor | None = None
         self._z_lig: torch.Tensor | None = None
         self._cos_sim_feat: torch.Tensor | None = None
+        self._morgan_feat: torch.Tensor | None = None
 
-        # --- Embedding adapters (optional) ----------------------------
+        # --- Embedding adapters (optional, asymmetric capacity) -------
+        # Resolve per-side overrides. None falls back to symmetric value.
+        _prot_layers = adapter_layers if adapter_layers_prot is None else adapter_layers_prot
+        _lig_layers  = adapter_layers if adapter_layers_lig  is None else adapter_layers_lig
         if use_adapter:
             self.prot_adapter = EmbeddingAdapter(
                 dim=protein_dim,
                 bottleneck=adapter_bottleneck_prot,
                 dropout=dropout,
-                num_layers=adapter_layers,
+                num_layers=_prot_layers,
                 use_self_attn=adapter_self_attn,
+                num_heads=adapter_attn_heads_prot,
             )
             self.lig_adapter = EmbeddingAdapter(
                 dim=ligand_dim,
                 bottleneck=adapter_bottleneck_lig,
                 dropout=dropout,
-                num_layers=adapter_layers,
+                num_layers=_lig_layers,
                 use_self_attn=adapter_self_attn,
+                num_heads=adapter_attn_heads_lig,
             )
 
         if variant in ("v7", "v7_gated"):
@@ -382,6 +596,26 @@ class InteractionMapCNN(nn.Module):
             self.lig_heads = nn.ModuleList([
                 nn.Linear(ligand_dim, head_dim) for _ in range(num_heads)
             ])
+            # BAN-residual heads (lição 12 reformulação). One scalar gate
+            # α_k per head (init zero) + one bilinear matrix W_k per head
+            # (Xavier). Gradient flows from the start because P W_k Lᵀ ≠ 0
+            # at t=0; α_k absorbs the contribution magnitude as training
+            # progresses.
+            if self.use_ban_residual:
+                self.ban_alphas = nn.ParameterList([
+                    nn.Parameter(torch.zeros(1)) for _ in range(num_heads)
+                ])
+                self.ban_weights = nn.ParameterList([
+                    nn.Parameter(torch.empty(protein_dim, ligand_dim))
+                    for _ in range(num_heads)
+                ])
+                # Xavier-uniform on each W_k for non-zero gradient on α_k.
+                # Scale down by sqrt(ligand_dim) so the residual is in the
+                # same numerical range as the dot-product term (which is
+                # divided by sqrt(head_dim)).
+                _ban_scale = (protein_dim * ligand_dim) ** -0.25
+                for w in self.ban_weights:
+                    nn.init.xavier_uniform_(w, gain=_ban_scale)
         elif variant == "v8":
             # Full Bilinear Attention: W_k[prot_dim, lig_dim] per head.
             # score(i,j) = protein[i] @ W_k @ ligand[j]
@@ -480,9 +714,11 @@ class InteractionMapCNN(nn.Module):
                 nn.BatchNorm2d(cnn_channels),
                 nn.GELU(),
             )
-            self.pool = _HierarchicalPool(cnn_channels)
+            self.pool = _HierarchicalPool(cnn_channels, num_heads=pool_num_heads)
             self.dropout = nn.Dropout(dropout)
-            clf_in = cnn_channels + (1 if cosine_feat else 0)
+            clf_in = cnn_channels + (1 if cosine_feat else 0) + (
+                self.morgan_proj_dim if (self.morgan_n_bits > 0 and self.morgan_proj_dim > 0) else 0
+            )
             if mlp_head:
                 self.classifier = nn.Sequential(
                     nn.Linear(clf_in, cnn_channels * 2),
@@ -692,13 +928,29 @@ class InteractionMapCNN(nn.Module):
             l_feat = ligand_matrix * self.lig_gate(ligand_matrix) if self.variant == "v7_gated" else ligand_matrix
 
             maps: list[torch.Tensor] = []
-            for ph, lh in zip(self.prot_heads, self.lig_heads):
+            for k, (ph, lh) in enumerate(zip(self.prot_heads, self.lig_heads)):
                 p = ph(p_feat)
                 l = lh(l_feat)
+                if self.use_rope:
+                    # 1D RoPE per modality before the cross dot product:
+                    # M_k[i,j] = (rope(P)_i) · (rope(L)_j) carries relative
+                    # position info along each axis. Cosine_sim, if enabled,
+                    # is applied AFTER rotation (rotation preserves norm).
+                    p = apply_rope_1d(p)
+                    l = apply_rope_1d(l)
                 if self.cosine_sim:
                     p = F.normalize(p, dim=-1)
                     l = F.normalize(l, dim=-1)
                 m = torch.bmm(p, l.transpose(1, 2)) * self.scale
+                if self.use_ban_residual:
+                    # BAN residual: M_k += α_k · P_feat W_k L_featᵀ
+                    # Compute via einsum to avoid intermediate (B, sp, lig_dim).
+                    # Final shape matches dot-product map: [B, sp, sl].
+                    m_ban = torch.einsum(
+                        'bip,pq,bjq->bij',
+                        p_feat, self.ban_weights[k], l_feat,
+                    )
+                    m = m + self.ban_alphas[k] * m_ban
                 maps.append(m)
             interaction = torch.stack(maps, dim=1)
 
@@ -727,6 +979,18 @@ class InteractionMapCNN(nn.Module):
         if self.cosine_feat and self._cos_sim_feat is not None:
             pooled = torch.cat([pooled, self._cos_sim_feat], dim=-1)
 
+        # Concatenate Morgan FP topological feature (DrugBAN/GraphBAN
+        # GCN proxy). Self._morgan_feat is set externally via the train
+        # loop before forward() when morgan_fp is in the batch dict.
+        if self.morgan_n_bits > 0 and self._morgan_feat is not None:
+            morgan_proj = self.morgan_proj(self._morgan_feat)  # [B, morgan_proj_dim]
+            pooled = torch.cat([pooled, morgan_proj], dim=-1)
+
+        # Stash pooled vector so external loops (e.g., adversarial DA)
+        # can hook into the pre-classifier representation without a
+        # second forward pass.
+        self._last_pooled = pooled
+
         logits = self.classifier(pooled)  # [B, 1]
 
         return logits
@@ -736,43 +1000,92 @@ class InteractionMapCNN(nn.Module):
 # Threshold sweep
 # ======================================================================
 
-def _best_mcc_threshold(
+def _best_threshold(
     y_true: np.ndarray,
     y_proba: np.ndarray,
+    metric: str = "mcc",
 ) -> tuple[float, float]:
-    """Two-pass threshold sweep that maximises MCC.
+    """Two-pass threshold sweep that maximises `metric` ∈ {"mcc","f1"}.
 
-    Pass 1: coarse grid (100 points) over [0.01, 0.99]
-    Pass 2: fine grid (100 points) in ±0.05 around the best
+    Pass 1: 100-point linear grid over [0.01, 0.99] UNIONED with
+            probability anchors np.unique(np.clip(y_proba, 0.01, 0.99)).
+            Anchors densify the sweep where the predicted-probability
+            mass actually lives, avoiding aliasing of nearby probas
+            into the same bin.
+    Pass 2: 100-point fine grid in ±0.05 around the best.
+
+    F1 mode mirrors DrugBAN/GraphBAN native criterion (val-F1-optimal).
     """
     if y_true.size == 0 or len(np.unique(y_true)) < 2:
         return 0.5, 0.0
 
-    # Pass 1 — coarse
+    metric = str(metric).lower()
+    if metric == "f1":
+        score_fn = lambda yt, yp: float(f1_score(yt, yp, zero_division=0))
+    else:
+        score_fn = lambda yt, yp: float(matthews_corrcoef(yt, yp))
+
     grid = np.linspace(0.01, 0.99, 100)
     anchors = np.unique(np.clip(y_proba, 0.01, 0.99))
     thresholds = np.unique(np.concatenate([grid, anchors]))
 
-    best_thr, best_mcc = 0.5, -1.0
+    best_thr, best_score = 0.5, -1.0
     for thr in thresholds:
         pred = (y_proba >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
+        s = score_fn(y_true, pred)
+        if s > best_score:
+            best_score = s
             best_thr = float(thr)
 
-    # Pass 2 — fine around best
     lo = max(0.01, best_thr - 0.05)
     hi = min(0.99, best_thr + 0.05)
     fine_grid = np.linspace(lo, hi, 100)
     for thr in fine_grid:
         pred = (y_proba >= thr).astype(int)
-        mcc = float(matthews_corrcoef(y_true, pred))
-        if mcc > best_mcc:
-            best_mcc = mcc
+        s = score_fn(y_true, pred)
+        if s > best_score:
+            best_score = s
             best_thr = float(thr)
 
-    return best_thr, best_mcc
+    return best_thr, best_score
+
+
+def _threshold_metric_env() -> str:
+    """Read BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC; default 'mcc'.
+
+    Controls which metric the val-set threshold sweep maximises. The
+    chosen threshold is then applied to the test set for reporting.
+    """
+    return str(os.getenv("BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC", "mcc")).lower()
+
+
+def _selection_metric_env() -> str:
+    """Read BENCHMARK_LEVEL4CNN_SELECTION_METRIC; defaults to threshold metric.
+
+    Controls which metric the checkpoint-selection composite score
+    maximises during training. Decouples model selection from the
+    reporting threshold (lesson 15 in docs/01-methodology/licoes_aprendidas.md §6.7).
+    Typical use: THRESHOLD=f1 (matches DrugBAN/GraphBAN reporting) +
+    SELECTION=mcc (preserves discriminative epoch picking).
+    """
+    val = os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_METRIC")
+    if val is None:
+        return _threshold_metric_env()
+    return str(val).lower()
+
+
+def _best_mcc_threshold(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+) -> tuple[float, float]:
+    """Back-compat wrapper. Honours BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC.
+
+    Returns (threshold, score_in_chosen_metric). When metric=="f1", the
+    second element is val-F1 at that threshold; when metric=="mcc",
+    it is val-MCC. Callers that explicitly need MCC at the chosen
+    threshold should recompute it from the returned threshold.
+    """
+    return _best_threshold(y_true, y_proba, metric=_threshold_metric_env())
 
 
 # ======================================================================
@@ -806,6 +1119,7 @@ def _platt_calibrate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
@@ -860,6 +1174,7 @@ def _temperature_calibrate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
@@ -945,6 +1260,21 @@ def _save_training_checkpoint(
     os.replace(tmp_path, path)
     tqdm.write(f"    Checkpoint saved at epoch {epoch}: {path}")
 
+def _set_aux_features(model: nn.Module, batch: dict, device, dtype) -> None:
+    """Stash auxiliary per-batch features onto the model BEFORE forward.
+
+    InteractionMapCNN.forward() does NOT take aux features as args; it
+    reads `self._morgan_feat` (and similar future hooks) just before the
+    classifier head. This helper extracts those features from `batch`,
+    moves to device, and assigns to the model. Should be called once
+    per batch in train/val/eval loops if Morgan FP injection is enabled.
+    """
+    _orig = getattr(model, "_orig_mod", model)
+    if "morgan_fp" in batch and getattr(_orig, "morgan_n_bits", 0) > 0:
+        _orig._morgan_feat = batch["morgan_fp"].to(
+            device=device, dtype=dtype, non_blocking=True)
+
+
 def _train_interaction_cnn(
     *,
     train_loader: DataLoader,
@@ -968,15 +1298,25 @@ def _train_interaction_cnn(
     adapter_layers: int = 1,
     adapter_self_attn: bool = False,
     adapter_lr_mult: float = 1.0,
+    adapter_layers_prot: int | None = None,
+    adapter_layers_lig: int | None = None,
+    adapter_attn_heads_prot: int = 4,
+    adapter_attn_heads_lig: int = 4,
     label_smooth: float = 0.0,
     mixup_alpha: float = 0.0,
     contrastive_weight: float = 0.0,
     cosine_feat: bool = False,
     contrastive_dim: int = 128,
+    pool_num_heads: int = 1,
     train_to_zero: bool = False,
     train_to_zero_threshold: float = 0.01,
     checkpoint_dir: str | None = None,
     checkpoint_every: int = 50,
+    swa_start: int = 0,
+    use_ban_residual: bool = False,
+    use_rope: bool = False,
+    morgan_n_bits: int = 0,
+    morgan_proj_dim: int = 32,
 ) -> tuple[InteractionMapCNN, dict]:
     """Train InteractionMapCNN end-to-end.
 
@@ -993,10 +1333,6 @@ def _train_interaction_cnn(
         torch.set_num_threads(n_cpus)
         torch.set_num_interop_threads(max(1, n_cpus // 2))
         tqdm.write(f"    CPU mode: using {n_cpus} threads")
-    else:
-        # GPU: enable TF32 for faster matmuls on Ampere+
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
 
     # --- Precision flags ----------------------------------------------
     use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"
@@ -1007,13 +1343,29 @@ def _train_interaction_cnn(
     use_amp = device.type == "cuda" and not no_amp and not use_double
     scaler = torch.amp.GradScaler(enabled=use_amp)
 
+    # TF32: OK with AMP (fp16 path dominates). With AMP off + fp32, TF32
+    # truncates matmul mantissa to ~10 bits (fp16-like precision) which
+    # kills accuracy in deep cross-attention stacks. Disable in pure-fp32.
+    if device.type == "cuda":
+        pure_fp32 = (not use_amp) and (not use_double)
+        tf32_on = not pure_fp32
+        torch.backends.cuda.matmul.allow_tf32 = tf32_on
+        torch.backends.cudnn.allow_tf32 = tf32_on
+
+    # cuDNN disable knob: diamante-02 driver 12.4 + cuDNN 9.x ABI mismatch
+    # triggers CUDNN_STATUS_NOT_INITIALIZED on Conv2d regardless of dtype.
+    # Also auto-disabled when double=true (cuDNN fp64 Conv2d unreliable).
+    disable_cudnn = os.getenv("BENCHMARK_LEVEL4CNN_DISABLE_CUDNN", "0") == "1"
+    if device.type == "cuda":
+        torch.backends.cudnn.enabled = (not disable_cudnn) and (not use_double)
+
     if deterministic:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
         torch.use_deterministic_algorithms(True, warn_only=True)
         tqdm.write("    Deterministic mode: ON (cudnn.benchmark=False)")
     elif device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.benchmark = torch.backends.cudnn.enabled
 
     precision_info = [f"variant={variant}"]
     if use_double:
@@ -1043,9 +1395,46 @@ def _train_interaction_cnn(
         adapter_bottleneck_lig=adapter_bottleneck_lig,
         adapter_layers=adapter_layers,
         adapter_self_attn=adapter_self_attn,
+        adapter_layers_prot=adapter_layers_prot,
+        adapter_layers_lig=adapter_layers_lig,
+        adapter_attn_heads_prot=adapter_attn_heads_prot,
+        adapter_attn_heads_lig=adapter_attn_heads_lig,
         contrastive_dim=contrastive_dim if contrastive_weight > 0 else 0,
         cosine_feat=cosine_feat,
+        pool_num_heads=pool_num_heads,
+        use_ban_residual=use_ban_residual,
+        use_rope=use_rope,
+        morgan_n_bits=morgan_n_bits,
+        morgan_proj_dim=morgan_proj_dim,
     ).to(device=device, dtype=dtype)
+
+    # Optional adversarial domain head (CDAN-style). Only constructed when
+    # BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA > 0. Attaches to the pooled
+    # feature vector (HierPool output, dim=cnn_channels[+1 if cosine_feat]).
+    adversarial_lambda = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADVERSARIAL_LAMBDA", "0.0"))
+    n_domains = int(os.getenv("BENCHMARK_LEVEL4CNN_ADVERSARIAL_N_DOMAINS", "2"))
+    pool_out_dim = cnn_channels + (1 if cosine_feat else 0)
+    adversarial_head = None
+    if adversarial_lambda > 0:
+        adversarial_head = DomainAdversarialHead(
+            in_dim=pool_out_dim, n_domains=n_domains,
+        ).to(device=device, dtype=dtype)
+        tqdm.write(
+            f"    Adversarial DA: λ_max={adversarial_lambda}, n_domains={n_domains}, "
+            f"pool_dim={pool_out_dim} (linear ramp first half of training)"
+        )
+
+    # CORAL (Sun & Saenko 2016) — second-order moment alignment.
+    # No extra head, no GRL, no λ schedule. Direct loss on pooled features.
+    # Requires mixed-domain batches (corpus=all). Orthogonal to CDAN: uses
+    # covariance match instead of adversarial discrimination.
+    coral_lambda = float(os.getenv("BENCHMARK_LEVEL4CNN_CORAL_LAMBDA", "0.0"))
+    if coral_lambda > 0:
+        tqdm.write(
+            f"    CORAL DA: λ={coral_lambda}, pool_dim={pool_out_dim} "
+            f"(requires corpus=all for mixed-domain batches)"
+        )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -1066,39 +1455,98 @@ def _train_interaction_cnn(
     )
 
     # --- torch.compile for fused training kernels (PyTorch 2.x) -------
+    # Disable via BENCHMARK_LEVEL4CNN_NO_COMPILE=1 (default on diamante-02:
+    # dynamic cross-attention shapes trigger noisy symbolic_shapes warnings
+    # and repeated recompiles; gain is marginal without cuDNN).
     compiled = False
-    if hasattr(torch, 'compile') and device.type == 'cuda' and not use_double:
+    no_compile = os.getenv("BENCHMARK_LEVEL4CNN_NO_COMPILE", "0") == "1"
+    if (hasattr(torch, 'compile') and device.type == 'cuda'
+            and not use_double and not no_compile):
         try:
             model = torch.compile(model, mode='reduce-overhead')
             compiled = True
             tqdm.write("    torch.compile: enabled (reduce-overhead)")
         except Exception as e:
             tqdm.write(f"    torch.compile: unavailable ({e})")
+    elif no_compile:
+        tqdm.write("    torch.compile: disabled via BENCHMARK_LEVEL4CNN_NO_COMPILE=1")
 
     # --- Optimiser, loss, scheduler -----------------------------------
     weight_decay = float(os.getenv("BENCHMARK_LEVEL4CNN_WEIGHT_DECAY", "0.02"))
-    if use_adapter and adapter_lr_mult != 1.0:
-        # Differential LR: adapters learn faster since they start from zero
-        adapter_params = (
-            list(model.prot_adapter.parameters())
-            + list(model.lig_adapter.parameters())
-        )
-        adapter_ids = {id(p) for p in adapter_params}
+    # Per-side adapter LR multipliers (Direção D — ligand-heavy optimisation
+    # bias). Defaults inherit adapter_lr_mult; override individually via
+    # BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_{PROT,LIG}. Hypothesis (kinase
+    # ATP-pocket conserved → ligand carries most discriminative signal):
+    # giving lig_adapter a higher LR than prot_adapter accelerates the
+    # side that needs more capacity.
+    lr_mult_prot = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_PROT", str(adapter_lr_mult)))
+    lr_mult_lig = float(os.getenv(
+        "BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT_LIG", str(adapter_lr_mult)))
+
+    # Optional dedicated LR multiplier for BAN-residual params (W_k + α_k):
+    # complements Lição 19 (capacity↔LR atomicidade) for BAN-residual case.
+    ban_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_BAN_LR_MULT", "1.0"))
+
+    use_per_side = use_adapter and (lr_mult_prot != 1.0 or lr_mult_lig != 1.0)
+    use_ban_lr   = use_ban_residual and ban_lr_mult != 1.0
+
+    if use_per_side or use_ban_lr:
+        param_groups = []
+        claimed_ids = set()
+
+        # Per-side adapter param groups (Direção D).
+        if use_per_side:
+            if lr_mult_prot == lr_mult_lig:
+                adapter_params = (
+                    list(model.prot_adapter.parameters())
+                    + list(model.lig_adapter.parameters())
+                )
+                claimed_ids.update(id(p) for p in adapter_params)
+                param_groups.append({"params": adapter_params, "lr": lr * lr_mult_prot})
+            else:
+                prot_params = list(model.prot_adapter.parameters())
+                lig_params = list(model.lig_adapter.parameters())
+                claimed_ids.update(id(p) for p in prot_params + lig_params)
+                param_groups.append({"params": prot_params, "lr": lr * lr_mult_prot})
+                param_groups.append({"params": lig_params,  "lr": lr * lr_mult_lig})
+
+        # BAN-residual params (W_k bilinear matrices + α_k scalar gates).
+        if use_ban_lr:
+            ban_params = list(model.ban_alphas.parameters()) + list(model.ban_weights.parameters())
+            ban_params = [p for p in ban_params if id(p) not in claimed_ids]
+            claimed_ids.update(id(p) for p in ban_params)
+            param_groups.append({"params": ban_params, "lr": lr * ban_lr_mult})
+
+        # Everything else (including adversarial_head if present).
         other_params = [
             p for p in model.parameters()
-            if id(p) not in adapter_ids and p.requires_grad
+            if id(p) not in claimed_ids and p.requires_grad
         ]
-        optimizer = torch.optim.AdamW([
-            {"params": adapter_params, "lr": lr * adapter_lr_mult},
-            {"params": other_params,   "lr": lr},
-        ], weight_decay=weight_decay, fused=(device.type == 'cuda' and not use_double))
-        tqdm.write(
-            f"    Differential LR: adapter={lr * adapter_lr_mult:.2e}, "
-            f"other={lr:.2e} (mult={adapter_lr_mult}x)"
-        )
-    else:
+        if adversarial_head is not None:
+            other_params += list(adversarial_head.parameters())
+        param_groups.append({"params": other_params, "lr": lr})
+
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr, weight_decay=weight_decay,
+            param_groups, weight_decay=weight_decay,
+            fused=(device.type == 'cuda' and not use_double),
+        )
+        msg = ["    Differential LR:"]
+        if use_per_side:
+            if lr_mult_prot == lr_mult_lig:
+                msg.append(f"adapter={lr * lr_mult_prot:.2e} ({lr_mult_prot}x)")
+            else:
+                msg.append(f"prot={lr*lr_mult_prot:.2e}({lr_mult_prot}x), lig={lr*lr_mult_lig:.2e}({lr_mult_lig}x)")
+        if use_ban_lr:
+            msg.append(f"ban={lr*ban_lr_mult:.2e}({ban_lr_mult}x)")
+        msg.append(f"other={lr:.2e}")
+        tqdm.write(", ".join(msg))
+    else:
+        all_params = list(model.parameters())
+        if adversarial_head is not None:
+            all_params += list(adversarial_head.parameters())
+        optimizer = torch.optim.AdamW(
+            all_params, lr=lr, weight_decay=weight_decay,
             fused=(device.type == 'cuda' and not use_double),
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -1144,6 +1592,20 @@ def _train_interaction_cnn(
 
     # --- Checkpoint paths ---------------------------------------------
     ckpt_path = os.path.join(checkpoint_dir, "training_checkpoint.pt") if checkpoint_dir else None
+
+    # --- Stochastic Weight Averaging (SWA) setup ----------------------
+    # When swa_start > 0, an AveragedModel is maintained in parallel and
+    # updated each epoch starting at swa_start. After training, BN
+    # running stats are recomputed via update_bn over train_loader, and
+    # the SWA model substitutes the best-checkpoint model for Platt /
+    # threshold / test evaluation. Izmailov et al., UAI 2018.
+    swa_enabled = swa_start > 0
+    swa_model = None
+    if swa_enabled:
+        from torch.optim.swa_utils import AveragedModel
+        _raw_for_swa = getattr(model, '_orig_mod', model)
+        swa_model = AveragedModel(_raw_for_swa).to(device)
+        tqdm.write(f"    SWA enabled: averaging weights from epoch {swa_start} onward")
 
     # --- Training loop ------------------------------------------------
     best_score = -float("inf")
@@ -1204,6 +1666,7 @@ def _train_interaction_cnn(
                 y = y * (1 - label_smooth) + label_smooth * 0.5
 
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                _set_aux_features(model, batch, device, dtype)
                 logits = model(p, l, pm, lm)
                 loss = criterion(logits, y)
 
@@ -1214,6 +1677,34 @@ def _train_interaction_cnn(
                         _orig._z_prot, _orig._z_lig, y,
                     )
                     loss = loss + contrastive_weight * c_loss
+
+                # Adversarial domain alignment (CDAN-style, Ganin 2015):
+                # only active when adversarial_lambda > 0 AND batch has
+                # both H+NH samples (joint training on `all` corpus).
+                if (adversarial_head is not None and adversarial_lambda > 0
+                        and "domain" in batch):
+                    domain = batch["domain"].to(device)
+                    valid_dom = domain >= 0
+                    if valid_dom.any():
+                        # λ schedule: linearly ramp from 0 to lambda_max
+                        # over the first half of training to avoid early
+                        # gradient noise dominating the classification.
+                        progress = min(1.0, epoch / max(epochs * 0.5, 1.0))
+                        lambd = adversarial_lambda * progress
+                        pooled = _orig._last_pooled
+                        domain_logits = adversarial_head(pooled[valid_dom], lambd)
+                        adv_loss = F.cross_entropy(
+                            domain_logits, domain[valid_dom])
+                        loss = loss + lambd * adv_loss
+
+                # CORAL alignment: covariance match across domains on pooled
+                # features. Requires mixed-domain batch (corpus=all). No GRL,
+                # no λ schedule — direct second-order regularizer.
+                if coral_lambda > 0 and "domain" in batch:
+                    domain = batch["domain"].to(device)
+                    pooled = _orig._last_pooled
+                    c_loss_coral = coral_loss(pooled, domain)
+                    loss = loss + coral_lambda * c_loss_coral
 
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
@@ -1243,6 +1734,7 @@ def _train_interaction_cnn(
                 y = batch["label"].to(device=device, dtype=dtype, non_blocking=True).unsqueeze(1)
 
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                    _set_aux_features(model, batch, device, dtype)
                     logits = model(p, l, pm, lm)
                     val_loss += criterion(logits, y).item()
 
@@ -1254,35 +1746,65 @@ def _train_interaction_cnn(
         probs = np.concatenate(val_probs) if val_probs else np.array([])
         targets = np.concatenate(val_targets) if val_targets else np.array([])
 
-        thr, val_mcc = _best_mcc_threshold(targets.astype(int), probs)
+        # Threshold for reporting (test eval will reuse): chosen by
+        # THRESHOLD_METRIC env (mcc|f1). Selection score is computed
+        # independently by SELECTION_METRIC env (defaults to threshold
+        # metric). See docs/01-methodology/licoes_aprendidas.md §6.7 — lesson 15.
+        threshold_metric = _threshold_metric_env()
+        selection_metric = _selection_metric_env()
 
-        # Early stopping on val_mcc (disabled in train-to-zero mode)
-        improved = val_mcc > best_score
+        thr, _thr_score = _best_threshold(
+            targets.astype(int), probs, metric=threshold_metric)
+        if selection_metric == threshold_metric:
+            val_selection_score = _thr_score
+        else:
+            _, val_selection_score = _best_threshold(
+                targets.astype(int), probs, metric=selection_metric)
+
+        # Real val MCC and val F1 at the reporting threshold (display).
+        _val_preds = (probs >= thr).astype(int)
+        val_mcc = float(matthews_corrcoef(targets.astype(int), _val_preds))
+        val_f1 = float(f1_score(targets.astype(int), _val_preds, zero_division=0))
+
+        # --- Composite selection criterion -----------------------------
+        # score = val_<selection_metric> - λ · val_loss
+        # λ=0 recovers pure val_<selection_metric> behaviour.
+        _lambda_loss = float(os.getenv("BENCHMARK_LEVEL4CNN_SELECTION_LAMBDA_LOSS", "0.0"))
+        composite_score = float(val_selection_score) - _lambda_loss * float(avg_val)
+
+        improved = composite_score > best_score
         marker = " ★" if improved else ""
 
         if train_to_zero:
             tqdm.write(
                 f"    Epoch {epoch:3d}: loss={avg_train:.6f}, "
                 f"val_loss={avg_val:.6f}, val_mcc={val_mcc:.4f}, "
-                f"thr={thr:.3f}{marker}"
+                f"val_f1={val_f1:.4f}, thr={thr:.3f}{marker}"
             )
         else:
             tqdm.write(
                 f"    Epoch {epoch:3d}: loss={avg_train:.4f}, "
                 f"val_loss={avg_val:.4f}, val_mcc={val_mcc:.4f}, "
-                f"thr={thr:.3f} ({no_improve}/{patience}){marker}"
+                f"val_f1={val_f1:.4f}, thr={thr:.3f} "
+                f"[sel:{selection_metric}={val_selection_score:.4f}] "
+                f"({no_improve}/{patience}){marker}"
             )
         sys.stdout.flush()
         sys.stderr.flush()
 
         if improved:
-            best_score = val_mcc
+            best_score = composite_score
             # Save raw (unwrapped) state_dict for portability
             _raw_best = getattr(model, '_orig_mod', model)
             best_state = {k: v.cpu().clone() for k, v in _raw_best.state_dict().items()}
             no_improve = 0
         else:
             no_improve += 1
+
+        # --- SWA update (after epoch >= swa_start) -------------------
+        if swa_enabled and epoch >= swa_start:
+            _raw_for_swa = getattr(model, '_orig_mod', model)
+            swa_model.update_parameters(_raw_for_swa)
 
         if train_to_zero:
             # In train-to-zero mode: stop only when both losses are below threshold
@@ -1309,8 +1831,41 @@ def _train_interaction_cnn(
                 use_amp, epoch, best_score, best_state, no_improve,
             )
 
-    # --- Restore best model -------------------------------------------
-    if best_state is not None:
+    # --- Restore best model OR finalize SWA ---------------------------
+    if swa_enabled and swa_model is not None:
+        # SWA path: recompute BN running stats with averaged weights
+        # (critical — without this the BN-CNN diverges from the new
+        # averaged Conv2d weights and predictions become unreliable).
+        # torch.optim.swa_utils.update_bn assumes loader yields tensors
+        # or tuples; our train_loader yields dict batches. Custom impl
+        # below mirrors the official function's logic.
+        tqdm.write("    SWA: recomputing BN running statistics over train_loader …")
+        _bn_momenta = {}
+        for _m in swa_model.modules():
+            if isinstance(_m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                _m.reset_running_stats()
+                _bn_momenta[_m] = _m.momentum
+                _m.momentum = None  # accumulate full statistics
+        if _bn_momenta:
+            swa_model.train()
+            _swa_dtype = next(swa_model.parameters()).dtype
+            with torch.no_grad():
+                for batch in train_loader:
+                    p = batch["protein_matrix"].to(device=device, dtype=_swa_dtype, non_blocking=True)
+                    l = batch["ligand_matrix"].to(device=device, dtype=_swa_dtype, non_blocking=True)
+                    pm = batch["protein_mask"].to(device, non_blocking=True)
+                    lm = batch["ligand_mask"].to(device, non_blocking=True)
+                    swa_model(p, l, pm, lm)
+            # Restore original momenta
+            for _m, _mom in _bn_momenta.items():
+                _m.momentum = _mom
+        # Replace the model used for downstream Platt / threshold / test
+        # with the SWA-averaged weights. Wrapper unwrap matches existing
+        # convention.
+        _raw_restore = getattr(model, '_orig_mod', model)
+        _raw_restore.load_state_dict(swa_model.module.state_dict())
+        tqdm.write("    SWA: averaged weights loaded into model")
+    elif best_state is not None:
         _raw_restore = getattr(model, '_orig_mod', model)
         _raw_restore.load_state_dict(best_state)
     # Call .to().eval() on the wrapper (delegates to _orig_mod internally)
@@ -1376,6 +1931,7 @@ def _evaluate(
         y = batch["label"].numpy()
 
         with torch.amp.autocast(device_type=device.type, enabled=eval_amp):
+            _set_aux_features(model, batch, device, model_dtype)
             logits = model(p, l, pm, lm)
 
         all_logits.append(logits.float().cpu().numpy().ravel())
@@ -1394,11 +1950,13 @@ def _evaluate(
         probs = 1.0 / (1.0 + np.exp(-scaled_logits))
 
     if threshold is None:
-        thr, mcc = _best_mcc_threshold(targets, probs)
+        # Pick threshold by active metric (mcc|f1) but always report
+        # MCC computed via matthews_corrcoef at that threshold.
+        thr, _ = _best_mcc_threshold(targets, probs)
     else:
         thr = threshold
-        preds_for_mcc = (probs >= thr).astype(int)
-        mcc = float(matthews_corrcoef(targets, preds_for_mcc))
+    preds_for_mcc = (probs >= thr).astype(int)
+    mcc = float(matthews_corrcoef(targets, preds_for_mcc))
 
     preds = (probs >= thr).astype(int)
     acc = float(accuracy_score(targets, preds))
@@ -1509,6 +2067,18 @@ class Level4CNNRunner(BaseLevelRunner):
         adapter_layers = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS", "1"))
         adapter_self_attn = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_SELF_ATTN", "0") == "1"
         adapter_lr_mult = float(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LR_MULT", "1.0"))
+        # Asymmetric adapter capacity per side. Empty/missing → fall back
+        # to symmetric (adapter_layers, attn_heads=4). Motivation: ligand
+        # carries more discriminative info in kinase domain (conserved
+        # ATP-binding pocket).
+        _alp = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_PROT", "")
+        _all = os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_LAYERS_LIG", "")
+        adapter_layers_prot = int(_alp) if _alp else None
+        adapter_layers_lig = int(_all) if _all else None
+        adapter_attn_heads_prot = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_PROT", "4"))
+        adapter_attn_heads_lig = int(os.getenv("BENCHMARK_LEVEL4CNN_ADAPTER_ATTN_HEADS_LIG", "4"))
+        pool_num_heads = int(os.getenv("BENCHMARK_LEVEL4CNN_POOL_HEADS", "1"))
+        swa_start = int(os.getenv("BENCHMARK_LEVEL4CNN_SWA_START", "0"))
 
         # --- Build dataloaders ----------------------------------------
         train_loader, val_loader, test_loader = build_matrix_dataloaders(
@@ -1537,6 +2107,18 @@ class Level4CNNRunner(BaseLevelRunner):
         contrastive_weight = float(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_WEIGHT", "0.0"))
         cosine_feat = os.getenv("BENCHMARK_LEVEL4CNN_COSINE_FEAT", "0") == "1"
         contrastive_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_CONTRASTIVE_DIM", "128"))
+        # Lição 12 reformulação: BAN-residual com α-gate aprendível.
+        use_ban_residual = os.getenv("BENCHMARK_LEVEL4CNN_BAN_RESIDUAL", "0") == "1"
+        # 2D RoPE (per-modality 1D RoPE applied before cross dot product).
+        use_rope = os.getenv("BENCHMARK_LEVEL4CNN_USE_ROPE", "0") == "1"
+        # Morgan FP topological feature (DrugBAN/GraphBAN GCN proxy).
+        # Activate via BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR (cache path).
+        # n_bits + proj_dim resolved here from env so model gets right dims.
+        morgan_n_bits = (
+            int(os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_BITS", "1024"))
+            if os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR") else 0
+        )
+        morgan_proj_dim = int(os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_PROJ", "32"))
 
         # --- Train ----------------------------------------------------
         tqdm.write(f"  Training InteractionMapCNN (variant={variant})...")
@@ -1562,15 +2144,25 @@ class Level4CNNRunner(BaseLevelRunner):
             adapter_layers=adapter_layers,
             adapter_self_attn=adapter_self_attn,
             adapter_lr_mult=adapter_lr_mult,
+            adapter_layers_prot=adapter_layers_prot,
+            adapter_layers_lig=adapter_layers_lig,
+            adapter_attn_heads_prot=adapter_attn_heads_prot,
+            adapter_attn_heads_lig=adapter_attn_heads_lig,
             label_smooth=label_smooth,
             mixup_alpha=mixup_alpha,
             contrastive_weight=contrastive_weight,
             cosine_feat=cosine_feat,
             contrastive_dim=contrastive_dim,
+            pool_num_heads=pool_num_heads,
+            swa_start=swa_start,
             train_to_zero=train_to_zero,
             train_to_zero_threshold=train_to_zero_thr,
             checkpoint_dir=output_dir,
             checkpoint_every=checkpoint_every,
+            use_ban_residual=use_ban_residual,
+            use_rope=use_rope,
+            morgan_n_bits=morgan_n_bits,
+            morgan_proj_dim=morgan_proj_dim,
         )
 
         # Unwrap torch.compile wrapper (if any) to access nn.Module API

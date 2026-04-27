@@ -70,10 +70,14 @@ class MatrixDataset(Dataset):
         df: pd.DataFrame,
         protein_matrix_dirs: Sequence[Path],
         ligand_matrix_dirs: Sequence[Path],
+        morgan_dir: Path | None = None,
+        morgan_n_bits: int = 1024,
     ) -> None:
         self._df = df
         self._protein_dirs = list(protein_matrix_dirs)
         self._ligand_dirs = list(ligand_matrix_dirs)
+        self._morgan_dir = Path(morgan_dir) if morgan_dir else None
+        self._morgan_n_bits = int(morgan_n_bits)
 
     def __len__(self) -> int:
         return len(self._df)
@@ -83,6 +87,16 @@ class MatrixDataset(Dataset):
         seq_id = row["seq_id"]
         chembl_id = row["chembl_id"]
         label = row["label"]
+        # Domain label for adversarial DA: 0=human, 1=non_human
+        # (universal split has dataset_source col; corpus-filtered splits
+        # may not — fallback to -1 = unknown).
+        ds = row.get("dataset_source", None)
+        if ds == "human":
+            domain = 0
+        elif ds == "non_human":
+            domain = 1
+        else:
+            domain = -1
 
         protein_mat = self._load_from_dirs(
             self._protein_dirs,
@@ -94,7 +108,15 @@ class MatrixDataset(Dataset):
             f"{chembl_id}_matrix.npy",
             fallback_shape=(50, 768),
         )
-        return protein_mat, ligand_mat, label, seq_id, chembl_id
+        # Optional Morgan fingerprint (topological auxiliary feature).
+        morgan_fp = None
+        if self._morgan_dir is not None:
+            mfp_path = self._morgan_dir / f"{chembl_id}_morgan.npy"
+            if mfp_path.exists():
+                morgan_fp = np.load(mfp_path).astype(np.float32)
+            else:
+                morgan_fp = np.zeros((self._morgan_n_bits,), dtype=np.float32)
+        return protein_mat, ligand_mat, label, seq_id, chembl_id, domain, morgan_fp
 
     @staticmethod
     def _load_from_dirs(
@@ -148,20 +170,33 @@ def pad_matrices(
 
 def collate_matrices(batch: list) -> dict:
     """Collate function for ``MatrixDataset`` — pads and stacks."""
-    protein_mats, ligand_mats, labels, seq_ids, chembl_ids = zip(*batch)
+    # Backward-compat: accept tuples with various field counts.
+    first = batch[0]
+    morgan_fps = None
+    if len(first) == 7:
+        protein_mats, ligand_mats, labels, seq_ids, chembl_ids, domains, morgan_fps = zip(*batch)
+    elif len(first) == 6:
+        protein_mats, ligand_mats, labels, seq_ids, chembl_ids, domains = zip(*batch)
+    else:
+        protein_mats, ligand_mats, labels, seq_ids, chembl_ids = zip(*batch)
+        domains = [-1] * len(batch)
 
     protein_batch, protein_mask = pad_matrices(protein_mats)
     ligand_batch, ligand_mask = pad_matrices(ligand_mats)
 
-    return {
+    out = {
         "protein_matrix": torch.from_numpy(protein_batch),
         "ligand_matrix": torch.from_numpy(ligand_batch),
         "protein_mask": torch.from_numpy(protein_mask),
         "ligand_mask": torch.from_numpy(ligand_mask),
         "label": torch.tensor(labels, dtype=torch.float32),
+        "domain": torch.tensor(domains, dtype=torch.long),
         "seq_id": seq_ids,
         "chembl_id": chembl_ids,
     }
+    if morgan_fps is not None and morgan_fps[0] is not None:
+        out["morgan_fp"] = torch.from_numpy(np.stack(morgan_fps))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +316,13 @@ def _resolve_matrix_dirs(
 
     For ligands, searches both ``ligand_matrices/`` and ``molformer_matrix/``
     because naming conventions vary across machines and datasets.
+
+    Optional env overrides (PREPENDED to search list, fallback to defaults):
+      BENCHMARK_LEVEL4CNN_PROTEIN_CACHE_OVERRIDE
+      BENCHMARK_LEVEL4CNN_LIGAND_CACHE_OVERRIDE
+    Use these to point at LoRA-fine-tuned embedding caches without losing
+    the ability to fall back on canonical caches if a specific molecule
+    is missing.
     """
     if dataset_type in ("all",):
         base_paths = _EMBEDDING_BASE_PATHS_ALL
@@ -296,6 +338,13 @@ def _resolve_matrix_dirs(
         build = Path(bp) / embedding_name / "build"
         ligand_dirs.append(build / "ligand_matrices")
         ligand_dirs.append(build / "molformer_matrix")
+
+    prot_override = os.getenv("BENCHMARK_LEVEL4CNN_PROTEIN_CACHE_OVERRIDE")
+    lig_override = os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_CACHE_OVERRIDE")
+    if prot_override:
+        protein_dirs = [Path(prot_override)] + protein_dirs
+    if lig_override:
+        ligand_dirs = [Path(lig_override)] + ligand_dirs
     return protein_dirs, ligand_dirs
 
 
@@ -307,8 +356,13 @@ def _make_loader(
     shuffle: bool,
 ) -> DataLoader:
     _validate_matrix_coverage(df, protein_dirs, ligand_dirs)
+    morgan_dir_env = os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_DIR")
+    morgan_n_bits = int(os.getenv("BENCHMARK_LEVEL4CNN_LIGAND_MORGAN_BITS", "1024"))
     return DataLoader(
-        MatrixDataset(df, protein_dirs, ligand_dirs),
+        MatrixDataset(
+            df, protein_dirs, ligand_dirs,
+            morgan_dir=morgan_dir_env, morgan_n_bits=morgan_n_bits,
+        ),
         batch_size=batch_size,
         shuffle=shuffle,
         collate_fn=collate_matrices,

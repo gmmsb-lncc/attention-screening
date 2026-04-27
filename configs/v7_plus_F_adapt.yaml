@@ -1,0 +1,101 @@
+# ============================================================================
+# DT-Kinase v7-plus_F_adapt — Tier A + C + F + EmbeddingAdapter §6.5 fixes
+# ============================================================================
+# Base: configs/v7_plus_F.yaml (best validated 3-seed candidate, MCC 0.5260).
+# Adiciona APENAS as três correções estruturais do EmbeddingAdapter
+# documentadas em licoes_aprendidas.md §6.5 — TODAS já hardcoded em
+# benchmark/levels/level4_cnn.py (commits 58805ca, abc4167):
+#
+#   1. Zero-init self_attn.out_proj  (attn_out = 0 em t=0)
+#   2. LoRA-style scalar gates       (attn_scale + mlp_scales = 0 em t=0)
+#   3. Pre-norm residual             (LayerNorm antes do sublayer; identidade
+#                                     exata em t=0 com gates zerados)
+#
+# NÃO inclui assimetria estrutural (item 4 de §6.5) — adapter permanece
+# simétrico (prot_dim=512/lig_dim=1024, layers=1, attn_heads=4).
+#
+# Threshold criterion alterado de MCC-optimal val (default DT-Kinase) para
+# F1-optimal val (critério nativo DrugBAN/GraphBAN), para comparabilidade
+# com baselines. Setado via env no runner script:
+#   BENCHMARK_LEVEL4CNN_THRESHOLD_METRIC=f1
+#
+# Espera-se: ganho marginal das correções §6.5 (lições 12 sugerem +0.005
+# a +0.015) sem regressão por overcapacity (sem assimetria).
+#
+# Usage (diamante-01 com cuDNN):
+#   bash scripts/v8/run_v7_plus_F_adapt.sh
+# ============================================================================
+
+dataset: non_human
+embedding: 8M
+levels: 4cnn
+epochs: 500
+model_selection_metric: mcc
+
+output_root: results/benchmark_plusF_adapt_{dataset}_{embedding}
+
+level4_cnn:
+  variant: v7              # v7 dot-product heads, NOT v8 BAN
+  num_heads: 16            # Tier A
+  head_dim: 64             # Tier A
+  channels: 64
+  batch_size: 128
+
+  dropout: 0.35
+  weight_decay: 0.04
+
+  double: false
+  no_amp: true
+  deterministic: false
+
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  adapter:
+    enabled: true
+    layers: 1                # SIMÉTRICO (sem layers_lig=2)
+    self_attn: true
+    lr_mult: 2.0
+    prot_dim: 512            # Tier A
+    lig_dim: 1024            # Tier A
+    # NB: pre-norm + LoRA gates + zero-init self_attn já estão automáticos
+    # no EmbeddingAdapter (level4_cnn.py L240-313). Nada a fazer aqui.
+
+  calibration:
+    platt: true
+    temperature: false
+
+  # Tier C
+  contrastive_weight: 0.3
+  contrastive_dim: 128
+  cosine_feat: true
+  cosine_sim: false
+
+  mlp_head: true
+
+  pool_num_heads: 1
+
+  swa_start: 0
+
+  # Tier F
+  label_smooth: 0.05
+
+  # Tier E desativado (Mixup tóxico — confirmado §6.4)
+  mixup_alpha: 0.0
+
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  checkpoint_every: 10
+
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+gate:
+  target_test_mcc: 0.55
+  max_test_mcc_std: 0.08
+
+suppress_warnings: true

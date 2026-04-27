@@ -1,0 +1,366 @@
+"""
+Inferência GraphBAN sobre universal_val.tsv + universal_test.tsv.
+Carrega checkpoint best_model, processa universal val + test, salva raw_predictions.npz.
+
+Uso (diamante-02):
+    cd <semantic-screening root>
+    python infer_graphban_universal.py --corpus all --seeds 42 123 456 789 1024
+"""
+
+import argparse, os, sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import torch
+import yaml
+
+REPO = Path(__file__).parent.resolve()
+# GraphBAN upstream coloca módulos em src/case_study/ (inductive mode)
+GRAPHBAN_SRC = REPO / "GraphBAN" / "src" / "case_study"
+if not GRAPHBAN_SRC.exists():
+    GRAPHBAN_SRC = REPO / "GraphBAN" / "src"  # fallback para estrutura plana
+sys.path.insert(0, str(GRAPHBAN_SRC))
+
+from dataloader import DTIDataset  # type: ignore
+from models import GraphBAN  # type: ignore
+from torch.utils.data import DataLoader
+
+import dgl  # fornecido pelo env 'graphban'
+
+
+def _to_f32(x):
+    arr = np.asarray(x, dtype=np.float32)
+    return torch.from_numpy(arr)
+
+
+def _cast_graph_f32(g):
+    """Cast incondicional de qualquer ndata/edata floating a float32."""
+    for k in list(g.ndata.keys()):
+        t = g.ndata[k]
+        if t.is_floating_point() and t.dtype != torch.float32:
+            g.ndata[k] = t.to(torch.float32)
+    for k in list(g.edata.keys()):
+        t = g.edata[k]
+        if t.is_floating_point() and t.dtype != torch.float32:
+            g.edata[k] = t.to(torch.float32)
+    return g
+
+
+def graph_collate_func(batch):
+    """Collate para DTIDataset do GraphBAN (case_study). Retorna (v_d, fcfps, v_p, esm).
+    Força float32 em fcfp/esm + ndata/edata do grafo — cache contém float64 e
+    colide com autocast half."""
+    drugs, fcfps, proteins, esms = zip(*batch)
+    drugs = [_cast_graph_f32(d) for d in drugs]
+    drugs_batch = dgl.batch(drugs)
+    fcfps_batch = _to_f32(np.stack([np.asarray(f, dtype=np.float32) for f in fcfps]))
+    esms_batch = _to_f32(np.stack([np.asarray(e, dtype=np.float32) for e in esms]))
+    proteins_batch = torch.as_tensor(np.stack(proteins))
+    return drugs_batch, fcfps_batch, proteins_batch, esms_batch
+
+
+UNIVERSAL_TSV = {
+    "non_human": ("scaffolds_splits/output/non_human_val.tsv",
+                  "scaffolds_splits/output/non_human_test.tsv"),
+    "human": ("scaffolds_splits/output/human_val.tsv",
+              "scaffolds_splits/output/human_test.tsv"),
+    "all": ("scaffolds_splits/output/universal_val.tsv",
+            "scaffolds_splits/output/universal_test.tsv"),
+}
+
+
+import pickle
+
+
+def load_feature_lookups(corpus: str) -> tuple[dict, dict]:
+    """Carrega cache GraphBAN train+val+test e constrói lookups por-SMILES (fcfp) e
+    por-Protein (esm), sem recomputar ESM-1b."""
+    cache_path = REPO / f"GraphBAN/results/{corpus}/feature_cache/features_extracted.pkl"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Cache {cache_path} não encontrado. GraphBAN requer features pré-computadas."
+        )
+    print(f"    carregando cache: {cache_path.name}")
+    d = pickle.load(open(cache_path, "rb"))
+    fcfp_by_smiles: dict = {}
+    esm_by_protein: dict = {}
+    for split_name in ("train", "val", "test"):
+        if split_name not in d:
+            continue
+        df = d[split_name]
+        for _, row in df.iterrows():
+            s = row["SMILES"]
+            p = row["Protein"]
+            if s not in fcfp_by_smiles:
+                fcfp_by_smiles[s] = row["fcfp"]
+            if p not in esm_by_protein:
+                esm_by_protein[p] = row["esm"]
+    print(f"      {len(fcfp_by_smiles)} SMILES únicos com FCFP; {len(esm_by_protein)} proteínas únicas com ESM")
+    return fcfp_by_smiles, esm_by_protein
+
+
+def _compute_chemberta_for_missing(missing_smiles: list[str], device: torch.device) -> dict:
+    """Compute ChemBERTa-77M-MTR CLS embedding (384-d) for SMILES missing
+    from the training cache. Replicates GraphBAN/run_baseline.py
+    extract_chemberta_features. The GraphBAN dataloader expects a column
+    called ``fcfp`` even though its contents are ChemBERTa embeddings —
+    naming is upstream-legacy."""
+    if not missing_smiles:
+        return {}
+    print(f"    computando ChemBERTa (fcfp) para {len(missing_smiles)} SMILES ausentes do cache…")
+    from transformers import AutoTokenizer, RobertaModel  # type: ignore
+    model_name = "DeepChem/ChemBERTa-77M-MTR"
+    model = RobertaModel.from_pretrained(model_name, add_pooling_layer=False, use_safetensors=True)
+    model = model.to(device).eval()
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    out: dict = {}
+    with torch.no_grad():
+        for s in missing_smiles:
+            enc = tokenizer(s, return_tensors="pt", padding="max_length",
+                            max_length=290, truncation=True)
+            enc = {k: v.to(device) for k, v in enc.items()}
+            res = model(**enc)
+            emb = res.last_hidden_state[0, 0, :].cpu().numpy().astype(np.float64)
+            out[s] = emb
+    del model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return out
+
+
+def _compute_esm1b_for_missing(missing_seqs: list[str], device: torch.device) -> dict:
+    """Computa ESM-1b 1280-d pooled embedding para sequências ausentes do cache.
+    Usa esm.pretrained.esm1b_t33_650M_UR50S. Requer env com esm instalado."""
+    if not missing_seqs:
+        return {}
+    print(f"    computando ESM-1b para {len(missing_seqs)} proteínas ausentes do cache…")
+    import esm  # type: ignore
+    model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
+    model = model.to(device).eval()
+    batch_converter = alphabet.get_batch_converter()
+    out: dict = {}
+    # ESM-1b: limite 1022 tokens; truncar
+    MAX_LEN = 1022
+    BATCH = 4
+    with torch.no_grad():
+        for i in range(0, len(missing_seqs), BATCH):
+            chunk = missing_seqs[i:i+BATCH]
+            data = [(f"p{j}", s[:MAX_LEN]) for j, s in enumerate(chunk)]
+            _, _, tokens = batch_converter(data)
+            tokens = tokens.to(device)
+            res = model(tokens, repr_layers=[33], return_contacts=False)
+            reps = res["representations"][33]  # (B, L, 1280)
+            # Mean-pool excluindo tokens especiais (CLS=0, pad, EOS)
+            for j, seq in enumerate(chunk):
+                L = min(len(seq), MAX_LEN)
+                pooled = reps[j, 1:1+L].mean(0).cpu().numpy().astype(np.float32)
+                out[seq] = pooled
+    return out
+
+
+def tsv_to_graphban_df(
+    tsv_path: Path,
+    fcfp_by_smiles: dict,
+    esm_by_protein: dict,
+    device: torch.device,
+    compute_missing_esm: bool = True,
+    compute_missing_fcfp: bool = True,
+) -> pd.DataFrame:
+    """Monta DataFrame no formato GraphBAN, reutilizando cache ESM/FCFP do treino.
+    Se compute_missing_esm=True e houver proteínas fora do cache, computa ESM-1b
+    on-the-fly. Idem compute_missing_fcfp para SMILES ausentes (ChemBERTa 384-d).
+    Zero-fill invalida métrica em cross-dataset (40%+ SMILES ausentes em H->NH)."""
+    df = pd.read_csv(tsv_path, sep="\t")
+    smiles_list = df["canonical_smiles"].astype(str).tolist()
+    protein_list = df["seq"].astype(str).tolist()
+    # Identificar proteínas e SMILES ausentes ANTES de montar colunas
+    missing_prots = sorted({p for p in protein_list if p not in esm_by_protein})
+    if missing_prots and compute_missing_esm:
+        extra = _compute_esm1b_for_missing(missing_prots, device)
+        esm_by_protein.update(extra)
+        print(f"    cache ESM ampliado para {len(esm_by_protein)} proteínas")
+    missing_smiles = sorted({s for s in smiles_list if s not in fcfp_by_smiles})
+    if missing_smiles and compute_missing_fcfp:
+        extra = _compute_chemberta_for_missing(missing_smiles, device)
+        fcfp_by_smiles.update(extra)
+        print(f"    cache FCFP ampliado para {len(fcfp_by_smiles)} SMILES")
+    fcfp_col = []
+    esm_col = []
+    n_missing_fcfp = 0
+    n_missing_esm = 0
+    for s, p in zip(smiles_list, protein_list):
+        if s in fcfp_by_smiles:
+            fcfp_col.append(fcfp_by_smiles[s])
+        else:
+            fcfp_col.append(np.zeros(384, dtype=np.float64))
+            n_missing_fcfp += 1
+        if p in esm_by_protein:
+            esm_col.append(esm_by_protein[p])
+        else:
+            esm_col.append(np.zeros(1280, dtype=np.float32))
+            n_missing_esm += 1
+    if n_missing_fcfp or n_missing_esm:
+        print(f"    AVISO: {n_missing_fcfp}/{len(smiles_list)} SMILES sem FCFP em cache; "
+              f"{n_missing_esm}/{len(protein_list)} proteínas sem ESM (zero-preenchidos)")
+    out = pd.DataFrame({
+        "SMILES": smiles_list,
+        "Protein": protein_list,
+        "Y": df["label"].astype(int),
+    })
+    out["fcfp"] = fcfp_col
+    out["esm"] = esm_col
+    return out
+
+
+def _install_linear_f32_hook(model: torch.nn.Module) -> None:
+    """Hook forward-pre em cada nn.Linear: cast input a float32 se for FP
+    Double. Resolve o caso em que molecule_FCFP materializa fingerprint
+    em float64 internamente (via RDKit), conflitando com pesos Float32."""
+    import torch.nn as nn
+
+    def pre_hook(_module, inputs):
+        new = []
+        for x in inputs:
+            if torch.is_tensor(x) and x.is_floating_point() and x.dtype != torch.float32:
+                new.append(x.to(torch.float32))
+            else:
+                new.append(x)
+        return tuple(new)
+
+    for m in model.modules():
+        if isinstance(m, nn.Linear):
+            m.register_forward_pre_hook(pre_hook)
+
+
+def load_model(checkpoint_path: Path, config: dict, device: torch.device):
+    model = GraphBAN(**config).to(device)
+    state = torch.load(checkpoint_path, map_location=device)
+    if isinstance(state, dict) and "model_state_dict" in state:
+        state = state["model_state_dict"]
+    model.load_state_dict(state, strict=False)
+    model.eval()
+    model = model.float()
+    _install_linear_f32_hook(model)
+    return model
+
+
+@torch.no_grad()
+def predict(model, loader, y_true_all: np.ndarray, device):
+    """Inferência GraphBAN. DTIDataset retorna (v_d, fcfps, v_p, esm);
+    Y vem da DataFrame externa por ordenação (shuffle=False)."""
+    ps = []
+    # AMP off: molecule_FCFP materializa fingerprint Morgan internamente em
+    # float64 (RDKit default); cast explícito no grafo evita Double no Linear.
+    model = model.float()
+    printed = False
+    for batch in loader:
+        v_d, fcfps, v_p, esms = batch
+        v_d = v_d.to(device, non_blocking=True)
+        v_d = _cast_graph_f32(v_d)
+        v_p = v_p.to(device, non_blocking=True)
+        fcfps = fcfps.to(device, non_blocking=True).float()
+        esms = esms.to(device, non_blocking=True).float()
+        if not printed:
+            print(f"    dtypes: v_d.ndata={ {k: str(v_d.ndata[k].dtype) for k in v_d.ndata} }  "
+                  f"v_d.edata={ {k: str(v_d.edata[k].dtype) for k in v_d.edata} }  "
+                  f"fcfps={fcfps.dtype}  v_p={v_p.dtype}  esms={esms.dtype}")
+            printed = True
+        # Assinatura canônica (run_baseline.py:322): (v_d, sm, v_p, esm, device)
+        out = model(v_d, fcfps, v_p, esms, device)
+        logits = out[-1] if isinstance(out, tuple) else out
+        prob = torch.softmax(logits.float(), dim=1)[:, 1]
+        ps.append(prob.cpu().numpy())
+    return y_true_all, np.concatenate(ps)
+
+
+def best_checkpoint(seed_dir: Path) -> Path | None:
+    """Return first best_model_epoch_*.pth or None if absent.
+
+    Cross-dataset matrix runs across all (corpus × seed) combos but checkpoints
+    may be incomplete on some hosts (e.g. diamante-02 only has NH trained
+    locally). Caller must handle None → skip seed.
+    """
+    cands = sorted(seed_dir.glob("best_model_epoch_*.pth"))
+    return cands[0] if cands else None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", required=True, choices=["non_human","human","all"])
+    ap.add_argument("--seeds", nargs="+", type=int, default=[42,123,456,789,1024])
+    ap.add_argument("--checkpoint-root", default="GraphBAN/results")
+    ap.add_argument("--config", default="GraphBAN/configs/kinase_inductive.yaml")
+    ap.add_argument("--output-dir", default="GraphBAN/results_universal")
+    ap.add_argument("--batch-size", type=int, default=128)
+    ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--val-tsv", default=None,
+                    help="Override val TSV (used to calibrate threshold). "
+                         "Defaults to the training corpus val TSV.")
+    ap.add_argument("--test-tsv", default=None,
+                    help="Override test TSV. Defaults to the training corpus test TSV.")
+    args = ap.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    if device.type == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
+
+    with open(REPO / args.config) as f:
+        config = yaml.safe_load(f)
+
+    default_val, default_test = UNIVERSAL_TSV[args.corpus]
+    val_tsv = Path(args.val_tsv) if args.val_tsv else REPO / default_val
+    test_tsv = Path(args.test_tsv) if args.test_tsv else REPO / default_test
+    print(f"  val tsv: {val_tsv}")
+    print(f"  test tsv: {test_tsv}")
+    print("  montando DataFrame com features cacheadas do treino…")
+    fcfp_lookup, esm_lookup = load_feature_lookups(args.corpus)
+    val_df = tsv_to_graphban_df(val_tsv, fcfp_lookup, esm_lookup, device)
+    test_df = tsv_to_graphban_df(test_tsv, fcfp_lookup, esm_lookup, device)
+    print(f"val n={len(val_df)} pos={val_df['Y'].mean():.3f}")
+    print(f"test n={len(test_df)} pos={test_df['Y'].mean():.3f}")
+
+    use_pin = device.type == "cuda"
+    val_loader = DataLoader(DTIDataset(val_df.index.values, val_df),
+        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func,
+        num_workers=args.num_workers, pin_memory=use_pin,
+        persistent_workers=(args.num_workers > 0))
+    test_loader = DataLoader(DTIDataset(test_df.index.values, test_df),
+        batch_size=args.batch_size, shuffle=False, collate_fn=graph_collate_func,
+        num_workers=args.num_workers, pin_memory=use_pin,
+        persistent_workers=(args.num_workers > 0))
+
+    # Cross-dataset mode (--test-tsv override): flat layout output_dir/seed_{s}/.
+    # Legacy diagonal mode keeps the output_dir/{corpus}/seed_{s}/ nesting.
+    if args.test_tsv is not None:
+        out_root = REPO / args.output_dir
+    else:
+        out_root = REPO / args.output_dir / args.corpus
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    for seed in args.seeds:
+        sd = REPO / args.checkpoint_root / args.corpus / f"seed_{seed}"
+        if not sd.exists():
+            print(f"[skip] {sd}"); continue
+        o = out_root / f"seed_{seed}"
+        out_npz = o / "raw_predictions.npz"
+        if out_npz.exists():
+            print(f"[seed {seed}] já concluído → {out_npz.relative_to(REPO)} (pulando)")
+            continue
+        ckpt = best_checkpoint(sd)
+        if ckpt is None:
+            print(f"[skip seed={seed}] no best_model_epoch_*.pth in {sd.relative_to(REPO)}")
+            continue
+        print(f"[seed {seed}] {ckpt.relative_to(REPO)}")
+        m = load_model(ckpt, config, device)
+        vy, vp = predict(m, val_loader, val_df["Y"].to_numpy(), device)
+        ty, tp = predict(m, test_loader, test_df["Y"].to_numpy(), device)
+        o.mkdir(exist_ok=True)
+        np.savez(out_npz,
+            val_y_true=vy, val_y_prob=vp, test_y_true=ty, test_y_prob=tp)
+        print(f"  saved → {out_npz.relative_to(REPO)}")
+
+
+if __name__ == "__main__":
+    main()

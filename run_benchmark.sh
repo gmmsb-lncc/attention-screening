@@ -15,6 +15,10 @@ set -euo pipefail
 DATASET="${DATASET:-non_human}"
 EMBEDDING="${EMBEDDING:-8M}"
 LEVELS_CSV="${LEVELS_CSV:-3a}"
+# Seeds: space-separated list. Default single seed (42) for fast iteration;
+# expand to "42 123 456 789 1024" for full thesis multi-seed protocol.
+SEEDS="${SEEDS:-42}"
+IFS=' ' read -r -a SEEDS_ARR <<< "${SEEDS}"
 IFS=',' read -r -a LEVELS <<< "${LEVELS_CSV}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/benchmark_${DATASET}_${EMBEDDING}_16_03_2026}"
 EPOCHS="${EPOCHS:-500}"
@@ -163,6 +167,7 @@ run_phase() {
         --epochs "${EPOCHS}" \
         --model_selection_metric "${MODEL_SELECTION_METRIC}" \
         --output_dir "${OUTPUT_ROOT}" \
+        --seeds "${SEEDS_ARR[@]}" \
         "--${mode}"
 }
 

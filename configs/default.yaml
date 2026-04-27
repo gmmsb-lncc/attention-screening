@@ -1,0 +1,108 @@
+# ============================================================================
+# DT-Kinase Benchmark — default.yaml (canonical defaults)
+# ============================================================================
+# Este arquivo documenta os defaults efetivos usados pelo benchmark quando um
+# parâmetro não é declarado em configs/v7.yaml. Os valores aqui espelham os
+# defaults em benchmark/config.py e os literais hard-coded em
+# benchmark/levels/level4_cnn.py. Serve como referência de reprodutibilidade
+# para o Apêndice C da tese.
+#
+# Usage:
+#   python3 run_from_config.py configs/default.yaml --dataset non_human
+# ============================================================================
+
+# --- Dataset & Embedding ---------------------------------------------------
+dataset: human                  # non_human | human | all
+embedding: 8M                   # 8M | 150M | 650M
+levels: 4cnn                    # comma-separated: 1a,2,3a,4cnn
+epochs: 500
+model_selection_metric: mcc     # mcc | auc | f1
+
+# --- Output ----------------------------------------------------------------
+output_root: results/benchmark_{dataset}_{embedding}_default
+
+# --- Level 4 CNN Architecture (v7 defaults) -------------------------------
+level4_cnn:
+  variant: v7                   # v7 | v7_gated | v8 | v9 | v10
+  num_heads: 8
+  head_dim: 32
+  channels: 64
+  batch_size: 128
+
+  # Regularisation
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # Precision (thesis benchmark)
+  double: false                 # float32 + AMP (habilitado por no_amp=false)
+  no_amp: false
+  deterministic: false          # throughput prioritário
+
+  # Training
+  patience: 15
+  focal: true
+  focal_gamma: 2.0
+
+  # Embedding Adapter
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 5.0
+    prot_dim: 256
+    lig_dim: 512
+
+  # Calibration
+  calibration:
+    platt: true                 # regressão logística 2-parâmetros em val
+    temperature: false
+
+  # Contrastive (OFF no benchmark canônico)
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  # MLP classifier head (canônico: Linear 64->1)
+  mlp_head: false
+
+  # Regularisation extras
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  # Train-to-zero mode
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  # Checkpointing
+  checkpoint_every: 10
+
+# --- Optimiser & Schedule (hard-coded em level4_cnn.py) -------------------
+# Valores abaixo NÃO são lidos pelo runner; documentados apenas para
+# auditoria. Ver benchmark/levels/level4_cnn.py:1091-1104 e
+# benchmark/config.py:161.
+optimiser_reference:
+  optimizer: AdamW
+  betas: [0.9, 0.999]
+  learning_rate: 1.0e-4          # benchmark/config.py:161
+  scheduler: CosineAnnealingLR
+  scheduler_T_max: 500           # = epochs
+  warmup_steps: 0
+  grad_clip_norm: 1.0            # torch.nn.utils.clip_grad_norm_
+
+# --- Reprodutibilidade -----------------------------------------------------
+seeds_canonical: [42, 123, 456, 789, 1024]
+
+# --- Rigor Safeguards ------------------------------------------------------
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+# --- Acceptance Gate -------------------------------------------------------
+gate:
+  target_test_mcc: 0.6
+  max_test_mcc_std: 0.08
+
+# --- Warnings Suppression -------------------------------------------------
+suppress_warnings: true
