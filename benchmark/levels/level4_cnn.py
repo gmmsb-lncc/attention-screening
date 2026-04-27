@@ -1064,7 +1064,7 @@ def _selection_metric_env() -> str:
 
     Controls which metric the checkpoint-selection composite score
     maximises during training. Decouples model selection from the
-    reporting threshold (lesson 15 in licoes_aprendidas.md §6.7).
+    reporting threshold (lesson 15 in docs/01-methodology/licoes_aprendidas.md §6.7).
     Typical use: THRESHOLD=f1 (matches DrugBAN/GraphBAN reporting) +
     SELECTION=mcc (preserves discriminative epoch picking).
     """
@@ -1749,7 +1749,7 @@ def _train_interaction_cnn(
         # Threshold for reporting (test eval will reuse): chosen by
         # THRESHOLD_METRIC env (mcc|f1). Selection score is computed
         # independently by SELECTION_METRIC env (defaults to threshold
-        # metric). See licoes_aprendidas §6.7 — lesson 15.
+        # metric). See docs/01-methodology/licoes_aprendidas.md §6.7 — lesson 15.
         threshold_metric = _threshold_metric_env()
         selection_metric = _selection_metric_env()
 

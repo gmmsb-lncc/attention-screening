@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Run configs/v7_ban_res.yaml — v7+F + BAN-residual com α-gate aprendível.
-# Implementa lição 12 reformulada (licoes_aprendidas §6.4).
+# Implementa lição 12 reformulada (docs/01-methodology/licoes_aprendidas.md §6.4).
 #
 # Identity-init em t=0 (α_k=0) → modelo idêntico ao v7+F. Gradient flui
 # para α via W_k Xavier (anti-cascade). W_k começa treinar quando α > 0.
