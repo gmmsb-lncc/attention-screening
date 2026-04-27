@@ -347,6 +347,24 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 
 ## Citation
 
+If you use this framework, please cite the underlying PhD thesis:
+
+```bibtex
+@phdthesis{sulfierry2026attentionscreening,
+  author  = {Sulfierry Corr{\^e}a Costa, Leon},
+  title   = {Triagem Atencional em Sequ{\^e}ncias Prim{\'a}rias
+             de Quinases e Ligantes},
+  school  = {Laborat{\'o}rio Nacional de Computa{\c{c}}{\~a}o
+             Cient{\'i}fica (LNCC)},
+  type    = {Tese de Doutorado em Modelagem Computacional},
+  address = {Petr{\'o}polis, RJ, Brasil},
+  year    = {2026},
+  url     = {https://github.com/gmmsb-lncc/attention-screening}
+}
+```
+
+The companion software repository can additionally be referenced as:
+
 ```bibtex
 @software{attentionscreening2026,
   title   = {attention-screening: kinase-ligand interaction profiling
