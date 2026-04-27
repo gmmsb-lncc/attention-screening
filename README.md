@@ -4,12 +4,23 @@
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 [![License: LGPL-3.0](https://img.shields.io/badge/License-LGPL--3.0-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**Hierarchical kinase-ligand interaction prediction with foundation language models.**
+**Hierarchical kinase-ligand interaction prediction through attention-based
+foundation models.**
 
 semantic-screening is a kinase-inhibitor screening framework that runs four
 independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
 **committee** and returns ranked predictions with attention maps, given a
 SMILES, a FASTA sequence, or a batch file as input.
+
+> **Why this could also be called *attention-screening*** — the unifying
+> mechanism across all four committee models is an **attention operator**,
+> direct or indirect: cross-attention 2D + HierPool (DT-Kinase), Bilinear
+> Attention Network (DrugBAN, GraphBAN), and contrastive co-embedding /
+> alignment in the metric space (ConPLex). The framework is a *committee
+> of four attention paradigms* applied to the same protein-ligand pair, and
+> the per-model attention tensors are exposed as first-class outputs
+> (residue-level + atom-level + interaction-cell-level). See the **Attention
+> as the unifying core** section below.
 
 ```mermaid
 flowchart LR
@@ -100,6 +111,11 @@ fallback is auto-detected on macOS or hosts without `nvidia-smi`.
 
 ### 2. Run the committee on your data
 
+> Entry point: **`attention_screening.py`** at the repository root.
+> A backward-compatible symlink `kinase_profiling.py` → `attention_screening.py`
+> is preserved for users following older docs. Both names invoke the same
+> pipeline.
+
 A single command does everything. The script auto-detects whether the input
 is a SMILES string, a sequence, or a file:
 
@@ -108,26 +124,26 @@ is a SMILES string, a sequence, or a file:
 # matched ckpts). Outputs are emitted into the same dir with prefixes:
 #   human_consensus.csv, human_scores_dtkinase.csv, ...
 #   non_human_consensus.csv, non_human_scores_dtkinase.csv, ...
-python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O"
 
 # Single-organism override
-python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
-python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O" --organism all
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism all
 
 # Inline AA sequence → ranked against the 110k ChEMBL kinase-inhibitor library
-python kinase_profiling.py "MGNNHGTYLG..."
+python attention_screening.py "MGNNHGTYLG..."
 
 # File: FASTA → same as inline sequence
-python kinase_profiling.py my_kinase.fa
+python attention_screening.py my_kinase.fa
 
 # File: .smi (Daylight format, optionally multi-line)
-python kinase_profiling.py compounds.smi
+python attention_screening.py compounds.smi
 
 # File: CSV / TSV / TXT (column order does not matter)
-python kinase_profiling.py pairs.csv
+python attention_screening.py pairs.csv
 
 # Use unified env explicitly
-python kinase_profiling.py "CCO..." --single-env baseline --top-k 50
+python attention_screening.py "CCO..." --single-env baseline --top-k 50
 ```
 
 ### 3. Read the consensus
@@ -189,11 +205,48 @@ bash scripts/inference/examples/run_kpneumo_thil_demo.sh
 
 ---
 
+## 🎯 Attention as the unifying core
+
+All four committee models are **attention-based**, directly or indirectly,
+and the framework's interpretability story is built on extracting and
+comparing those attention signals across paradigms:
+
+| Model | Attention mechanism | Per-pair output exposed |
+|---|---|---|
+| **DT-Kinase** | Cross-attention 2D over ESM-2 + MoLFormer; multi-head dot product → 16-channel interaction map → CNN 2D → hierarchical attention pooling (lig-axis → prot-axis) | Three levels: M_k pre-CNN, HierPool stage-1, HierPool stage-2 — saved as `dtkinase_Mk.npz`, `dtkinase_hierpool.npz`, plus structured JSON with per-atom + per-residue weights |
+| **DrugBAN** | Bilinear Attention Network (BAN) — pairwise residue × atom matrix learned end-to-end | `drugban_BAN.npz` with the bilinear attention matrix |
+| **GraphBAN** | BAN on top of ESM-1b + ChemBERTa knowledge-distilled features (attention enters via the teacher embeddings + the BAN head) | `graphban_BAN.npz` (analogous schema) |
+| **ConPLex** | Contrastive co-embedding (ProtBERT + Morgan FP projected into a shared metric space; alignment is the implicit attention signal) | Cosine similarity per pair (no positional matrix); contributes to the consensus rank but not to the attention overlay |
+
+For each pair flagged as STRONG/LIKELY by the committee, the pipeline
+emits:
+
+```
+attention/<pair_id>/
+├── <pair_id>_attention.png       4-panel overview (M̄, prot bar, lig bar, per-head)
+├── <pair_id>_attention.pdf       vector overview
+├── <pair_id>_hotspots.png        residue × token cell heatmap with top-3 boxed
+├── <pair_id>_sequence_track.png  1D protein-sequence attention track + sliding mean
+├── <pair_id>_ligand_2d.png       2D molecule colored by per-atom attention
+├── <pair_id>_attention.json      structured graph (atoms, bonds, residues, top cells)
+├── dtkinase_Mk.npz               raw [16, sp, sl] tensor + per-axis aggregates
+├── dtkinase_hierpool.npz         stage-1 + stage-2 weights
+├── drugban_BAN.npz               BAN matrix (when adapter available)
+└── graphban_BAN.npz              BAN matrix (when adapter available)
+```
+
+The structured JSON is the same data the PNGs render from; consume it from
+Cytoscape, D3.js, NetworkX, Mol\* / NGL Viewer, RDKit Draw, or biotite for
+custom visualizations.
+
+---
+
 ## 📂 Project Structure
 
 ```
 semantic-screening/
-├── kinase_profiling.py                 # ★ single-command user entry point
+├── attention_screening.py              # ★ single-command user entry point
+├── kinase_profiling.py                 # legacy alias (symlink → attention_screening.py)
 ├── requirements-baseline.txt           # pip/venv dependency manifest
 ├── scripts/
 │   └── inference/                      # ★ committee pipeline
