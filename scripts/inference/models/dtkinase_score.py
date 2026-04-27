@@ -104,21 +104,24 @@ def build_model(config_path: Path, device: torch.device) -> InteractionMapCNN:
 
 def load_checkpoint(model: InteractionMapCNN, ckpt_path: Path,
                     device: torch.device) -> None:
-    """Load bare state_dict, stripping torch.compile prefix if present."""
+    """Load bare state_dict, applying backward-compatibility renames.
+
+    Backward-compat:
+      - Strips torch.compile `_orig_mod.` prefix (compiled-model checkpoint).
+      - Renames `pool.{lig,prot}_pool.query` → `queries` for ckpts saved
+        before the multi-head pool refactor (single-head shape is identical;
+        pool_num_heads=1 in the canonical config).
+    """
     state = torch.load(ckpt_path, map_location=device, weights_only=True)
     if isinstance(state, dict) and "state_dict" in state:
         state = state["state_dict"]
-    cleaned = {
-        (k[len("_orig_mod."):] if k.startswith("_orig_mod.") else k): v
-        for k, v in state.items()
-    }
-    missing, unexpected = model.load_state_dict(cleaned, strict=False)
-    if missing:
-        print(f"  warn: missing keys ({len(missing)}): {missing[:3]}...",
-              file=sys.stderr)
-    if unexpected:
-        print(f"  warn: unexpected keys ({len(unexpected)}): {unexpected[:3]}...",
-              file=sys.stderr)
+    cleaned = {}
+    for k, v in state.items():
+        k = k[len("_orig_mod."):] if k.startswith("_orig_mod.") else k
+        if k.endswith(".query"):
+            k = k[:-len(".query")] + ".queries"
+        cleaned[k] = v
+    missing, unexpected = model.load_state_dict(cleaned, strict=True)
 
 
 def load_calibration(ckpt_path: Path) -> dict:
