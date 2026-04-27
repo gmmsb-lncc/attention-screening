@@ -104,13 +104,20 @@ A single command does everything. The script auto-detects whether the input
 is a SMILES string, a sequence, or a file:
 
 ```bash
-# SMILES string  → ranked against the 518-kinase human kinome reference
+# SMILES string → DEFAULT: runs human FIRST, then non_human (two passes,
+# matched ckpts). Outputs are emitted into the same dir with prefixes:
+#   human_consensus.csv, human_scores_dtkinase.csv, ...
+#   non_human_consensus.csv, non_human_scores_dtkinase.csv, ...
 python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
 
-# Inline AA sequence  → ranked against the 110k ChEMBL kinase-inhibitor library
+# Single-organism override
+python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
+python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O" --organism all
+
+# Inline AA sequence → ranked against the 110k ChEMBL kinase-inhibitor library
 python kinase_profiling.py "MGNNHGTYLG..."
 
-# File: FASTA  → same as inline sequence
+# File: FASTA → same as inline sequence
 python kinase_profiling.py my_kinase.fa
 
 # File: .smi (Daylight format, optionally multi-line)
@@ -125,26 +132,34 @@ python kinase_profiling.py "CCO..." --single-env baseline --top-k 50
 
 ### 3. Read the consensus
 
-Each run writes a self-contained directory under `results/inference/`:
+Each run writes a self-contained directory under `results/inference/`. In
+the **default dual-pass** mode (no `--organism` flag), files are prefixed
+with `human_` and `non_human_` so the user can compare the two screens
+side-by-side without navigating into per-organism subdirectories:
 
 ```
 results/inference/<run_id>/
-├── pairs.tsv                       (input expanded into protein-ligand pairs)
-├── scores_dtkinase.csv             (per-model probability + threshold)
-├── scores_drugban.csv
-├── scores_graphban.csv
-├── scores_conplex.csv
-├── consensus.csv                   (ranked, with prob_mean + tier)
-├── consensus.annotated.csv         (+ kinase target names + organism)
-├── consensus.top.csv               (top-K subset)
-└── attention/                      (only for STRONG / LIKELY pairs)
-    └── <pair_id>/
-        ├── dtkinase_Mk.npz
-        ├── dtkinase_hierpool.npz
-        ├── drugban_BAN.npz
-        ├── graphban_BAN.npz
-        └── consensus_heatmap.pdf
+├── human_pairs.tsv
+├── human_scores_dtkinase.csv         (per-model probability + threshold)
+├── human_scores_drugban.csv
+├── human_scores_graphban.csv
+├── human_scores_conplex.csv
+├── human_consensus.csv               (ranked, with prob_mean + tier)
+├── human_consensus.annotated.csv     (+ kinase target names + organism)
+├── human_consensus.top.csv
+├── human_attention/                  (top-K STRONG / LIKELY pairs)
+│   └── <pair_id>/
+│       ├── dtkinase_Mk.npz
+│       ├── dtkinase_hierpool.npz
+│       ├── drugban_BAN.npz
+│       ├── graphban_BAN.npz
+│       └── consensus_heatmap.pdf
+└── non_human_*    (same set of files, prefixed `non_human_`)
 ```
+
+When `--organism` is given explicitly, the prefix is omitted and the
+single-pass output (`pairs.tsv`, `consensus.csv`, `attention/`, etc.)
+sits directly in `<run_id>/`.
 
 The committee verdict per pair is the **tier** column:
 
