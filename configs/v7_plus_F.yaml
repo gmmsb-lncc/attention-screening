@@ -75,9 +75,11 @@ level4_cnn:
 
   # Tier C: contrastive aux loss (ConPLex-inspired regularizer).
   # Pooled prot+lig features get projected to 128-d unit sphere.
-  # Aux loss = InfoNCE pulling positive pairs (label=1) close, pushing
-  # negatives apart. Weight 0.3 = 30% of total loss. Acts as feature
-  # regularizer without changing primary task. Should help generalization.
+  # Aux loss = margin-based contrastive (Sledzieski et al., PNAS 2023):
+  #   pos pairs: (1 - cos_sim)^2  → maximize cosine similarity
+  #   neg pairs: relu(cos_sim - margin)^2 with margin=0.5
+  # Weight 0.3 = 30% of total loss. Acts as feature regularizer without
+  # changing primary task. Should help generalization.
   contrastive_weight: 0.3
   contrastive_dim: 128
   cosine_feat: true        # add cosine_sim(prot, lig) as scalar feature to classifier

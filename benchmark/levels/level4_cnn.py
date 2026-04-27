@@ -1007,8 +1007,12 @@ def _best_threshold(
 ) -> tuple[float, float]:
     """Two-pass threshold sweep that maximises `metric` ∈ {"mcc","f1"}.
 
-    Pass 1: coarse grid (100 points) over [0.01, 0.99]
-    Pass 2: fine grid (100 points) in ±0.05 around the best
+    Pass 1: 100-point linear grid over [0.01, 0.99] UNIONED with
+            probability anchors np.unique(np.clip(y_proba, 0.01, 0.99)).
+            Anchors densify the sweep where the predicted-probability
+            mass actually lives, avoiding aliasing of nearby probas
+            into the same bin.
+    Pass 2: 100-point fine grid in ±0.05 around the best.
 
     F1 mode mirrors DrugBAN/GraphBAN native criterion (val-F1-optimal).
     """

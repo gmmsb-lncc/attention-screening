@@ -98,7 +98,14 @@ def _load_checkpoint_state(ckpt_path: Path, model: torch.nn.Module, device: torc
     # Strip torch.compile prefix if present
     cleaned = {}
     for k, v in state.items():
-        cleaned[k[len("_orig_mod."):] if k.startswith("_orig_mod.") else k] = v
+        k = k[len("_orig_mod."):] if k.startswith("_orig_mod.") else k
+        # Backward-compat: old ckpts used `query` (singular) before multi-head
+        # pool refactor that renamed it to `queries` (plural). The shape is
+        # identical for pool_num_heads=1 (canonical), so a key rename is
+        # sufficient. See _AxisAttentionPool in benchmark/levels/level4_cnn.py.
+        if k.endswith(".query"):
+            k = k[:-len(".query")] + ".queries"
+        cleaned[k] = v
     model.load_state_dict(cleaned, strict=True)
 
 

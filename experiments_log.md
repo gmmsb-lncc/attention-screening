@@ -70,6 +70,7 @@ referenciar este registro.
 | 28 | **v7_rope (2D RoPE per-modality) 3-seed** | d02 | 3 | 42,123,456 | — | **0,4971 ± 0,0220** | 0,022 | **~0,506 (adj)** | **−0,020** | **REGREDIU — Lição 22**: RoPE em cross-modal map é category error (offset i−j sem semântica entre prot/lig) |
 | 24 | v7+F + LoRA-MLM offline (rank=8, top-2L, 10 ep MLM) 3-seed | d03 | 3 | 42,123,456 | — | 0,4933 ± 0,0321 | 0,032 | ~0,502 (adj) | −0,025 | **REFUTADO lição 20**: MLM não-alinhado a downstream + corpus 5276 SMILES = overfit; AUROC −0,010 confirma piora real do encoder |
 | 29 | **v7_ban_res_lr (BAN-residual + BAN_LR_MULT=5) 2-seed** | d03 | 2 | 42,123 | — | **0,5108 ± 0,0459** | 0,046 | 0,8081 ± 0,0037 | **−0,016** | **REFUTA correção §6.12**: LR-boost dedicado em $W_k$ não recupera; gargalo é acoplamento multiplicativo $\alpha_k \cdot W_k L^\top$ (gate zero $\Rightarrow$ grad zero), não magnitude de update. F1=0,7912 ± 0,0159; elapsed=1312s |
+| 30 | **v7+F LEGACY 5-seed (RE-EXECUÇÃO)** | d01? | **5** | 42,123,456,789,1024 | — | **0,4923 ± 0,0250** | 0,025 | 0,8027 ± 0,0066 | **−0,034** vs 3-seed | **LIÇÃO 24**: 3-seed 0,5266 era cherry-pick upper-tail; seeds 789+1024 médio ~0,441. v7+F 5-seed = empate estatístico c/ vanilla v7 baseline (z=0,55σ). Tier F efeito empírico nulo sob 5-seed. F1=0,7829, recall=0,8716, precision=0,7114, elapsed=3047s |
 
 ---
 
@@ -500,6 +501,43 @@ next_step: |
   com α_k(t=0) ≠ 0 pequeno (e.g. 0.01) ou schedule dedicado
   desacoplando crescimento de α_k do crescimento de W_k.
   Não é prioridade no plateau atual (Lição 21).
+```
+
+### v7+F LEGACY 5-seed (RE-EXECUÇÃO — Lição 24)
+
+```yaml
+config: configs/v7_plus_F.yaml
+host: diamante-?? (provável d01 — AUROC 0.803 alinhado com d01 cuDNN ON)
+corpus: non_human
+embedding: 8M
+seeds: [42, 123, 456, 789, 1024]
+elapsed_seconds: 3046.9
+env:
+  BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY: 1  # default desde commit de2ef0e
+results:
+  level4_cnn_mlp:
+    accuracy:  0.743008 ± 0.013036
+    mcc:       0.492251 ± 0.024974
+    f1:        0.782862 ± 0.010172
+    precision: 0.711402 ± 0.018410
+    recall:    0.871602 ± 0.032950
+    auc:       0.802718 ± 0.006567
+comparison:
+  vs_3seed_v7+F_LEGACY: -0.034 MCC (3-seed cherry-pick upper-tail)
+  vs_vanilla_v7_5seed:  -0.014 MCC, z=0.55σ → empate estatístico
+  vs_AUROC_v7+F_LEGACY: -0.005 (ranking quality preservado)
+seed_decomposition:
+  seeds_42_123_456_avg:  ~0.5266 (3-seed antigo)
+  seeds_789_1024_avg:    ~0.441  (back-out: (5×0.4923 - 3×0.5266)/2)
+diagnosis: |
+  3-seed (42,123,456) era amostragem upper-tail. 5-seed canônico
+  expõe true mean ≈ 0.49, indistinguível de vanilla v7 (0.506 ± 0.006).
+  Tier F (label_smooth=0.05) NÃO sobrevive validação 5-seed.
+  Aplicação direta da Lição 3 ao próprio caso v7+F.
+canonical_decision: |
+  configs/v7.yaml (vanilla v7) é o ckpt operacional canônico da tese
+  (já adotado em Cap 5). v7+F é tratado como tentativa promissora em
+  3-seed que regrediu para empate em 5-seed (Lição 24).
 ```
 
 ### A+D Grid Sweep (6 cells, lr_mult_lig × layers_lig) 3-seed em `diamante-02`
