@@ -160,7 +160,7 @@ export BENCHMARK_LEVEL4CNN_WEIGHT_DECAY
 run_phase() {
     local mode="$1"
 
-    python semantic_screening_models.py \
+    python attention_screening_models.py \
         --dataset "${DATASET}" \
         --embedding "${EMBEDDING}" \
         --levels "${LEVELS[@]}" \

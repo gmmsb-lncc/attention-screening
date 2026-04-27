@@ -576,7 +576,7 @@ def main() -> None:
                     help="run model scoring subprocesses in parallel")
     ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
                     help="run all models in a single conda env (e.g. 'baseline'); "
-                         "default uses per-model envs (semantic-screening, drugban, ...)")
+                         "default uses per-model envs (attention-screening, drugban, ...)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved pipeline command without executing")
     args = ap.parse_args()

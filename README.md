@@ -1,4 +1,4 @@
-# semantic-screening 🧬
+# attention-screening 🧬
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
@@ -7,20 +7,19 @@
 **Hierarchical kinase-ligand interaction prediction through attention-based
 foundation models.**
 
-semantic-screening is a kinase-inhibitor screening framework that runs four
+attention-screening is a kinase-inhibitor screening framework that runs four
 independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
 **committee** and returns ranked predictions with attention maps, given a
 SMILES, a FASTA sequence, or a batch file as input.
 
-> **Why this could also be called *attention-screening*** — the unifying
-> mechanism across all four committee models is an **attention operator**,
-> direct or indirect: cross-attention 2D + HierPool (DT-Kinase), Bilinear
-> Attention Network (DrugBAN, GraphBAN), and contrastive co-embedding /
-> alignment in the metric space (ConPLex). The framework is a *committee
-> of four attention paradigms* applied to the same protein-ligand pair, and
-> the per-model attention tensors are exposed as first-class outputs
-> (residue-level + atom-level + interaction-cell-level). See the **Attention
-> as the unifying core** section below.
+> **Why the name** — unifying mechanism across all four committee models is
+> an **attention operator**, direct or indirect: cross-attention 2D +
+> HierPool (DT-Kinase), Bilinear Attention Network (DrugBAN, GraphBAN), and
+> contrastive co-embedding / alignment in the metric space (ConPLex). The
+> framework is a *committee of four attention paradigms* applied to the
+> same protein-ligand pair, and the per-model attention tensors are exposed
+> as first-class outputs (residue-level + atom-level + interaction-cell-level).
+> See the **Attention as the unifying core** section below.
 
 ```mermaid
 flowchart LR
@@ -34,7 +33,7 @@ flowchart LR
     A1 --> KP
     A2 --> KP
     A3 --> KP
-    KP["<b>kinase_profiling.py</b><br/>detect input + dispatch"]:::orch
+    KP["<b>attention_screening.py</b><br/>detect input + dispatch"]:::orch
     KP --> PAIRS["<b>pairs.tsv</b><br/>N × M protein–ligand pairs"]:::data
 
     PAIRS --> DTK["<b>DT-Kinase</b><br/>cross-attn 2D + CNN"]:::dtk
@@ -72,7 +71,7 @@ roughly 30% of all cellular proteins through phosphorylation. Achieving
 **selectivity** across 518 paralogs that share more than 85% structural
 similarity in the ATP pocket is the central pharmacological challenge.
 
-semantic-screening abandons geometric representations and operates directly
+attention-screening abandons geometric representations and operates directly
 on **primary sequence and SMILES** interpreted through contextual embeddings
 from foundation language models (ESM-2 + MoLFormer). Selectivity becomes a
 question of **semantic compatibility in latent space** rather than 3D fit,
@@ -93,8 +92,8 @@ recommended setup now installs all four in a single environment named
 `baseline` (~3-4 GB). Pick **one** path:
 
 ```bash
-git clone https://github.com/gmmsb-lncc/semantic-screening.git
-cd semantic-screening
+git clone https://github.com/gmmsb-lncc/attention-screening.git
+cd attention-screening
 
 # Option A — conda (recommended, ~10 min)
 bash scripts/inference/setup_baseline_env.sh
@@ -244,7 +243,7 @@ custom visualizations.
 ## 📂 Project Structure
 
 ```
-semantic-screening/
+attention-screening/
 ├── attention_screening.py              # ★ single-command user entry point
 ├── kinase_profiling.py                 # legacy alias (symlink → attention_screening.py)
 ├── requirements-baseline.txt           # pip/venv dependency manifest
@@ -349,12 +348,12 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 ## Citation
 
 ```bibtex
-@software{semanticscreening2026,
-  title   = {semantic-screening: kinase-ligand interaction profiling
+@software{attentionscreening2026,
+  title   = {attention-screening: kinase-ligand interaction profiling
              with a foundation-model committee},
   author  = {Sulfierry, Leon and GMMSB-LNCC},
   year    = {2026},
-  url     = {https://github.com/gmmsb-lncc/semantic-screening},
+  url     = {https://github.com/gmmsb-lncc/attention-screening},
   version = {4.0}
 }
 ```
@@ -363,7 +362,7 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 
 ## Contact
 
-Repository: [gmmsb-lncc/semantic-screening](https://github.com/gmmsb-lncc/semantic-screening)
-Issues: [Bug reports & features](https://github.com/gmmsb-lncc/semantic-screening/issues)
+Repository: [gmmsb-lncc/attention-screening](https://github.com/gmmsb-lncc/attention-screening)
+Issues: [Bug reports & features](https://github.com/gmmsb-lncc/attention-screening/issues)
 
 **Status**: Production Ready · **Version**: 4.0 · **Last updated**: April 2026

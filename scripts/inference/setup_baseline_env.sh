@@ -36,7 +36,7 @@
 #
 # After installation:
 #   conda activate baseline
-#   python kinase_profiling.py "..." --single-env baseline
+#   python attention_screening.py "..." --single-env baseline
 # =============================================================================
 
 set -euo pipefail
@@ -225,7 +225,7 @@ if [[ $? -eq 0 ]]; then
     echo " SUCCESS — env '${ENV_NAME}' ready for 4-model committee"
     echo "=============================================================="
     echo "Activate:    conda activate ${ENV_NAME}"
-    echo "Run demo:    python kinase_profiling.py 'CC(=O)Oc1ccccc1C(=O)O' --single-env"
+    echo "Run demo:    python attention_screening.py 'CC(=O)Oc1ccccc1C(=O)O' --single-env"
 else
     echo ""
     echo "=============================================================="

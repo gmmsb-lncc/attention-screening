@@ -59,12 +59,12 @@ Revisão completa e especializada da metodologia do DockTKinase.
 
 ## 🔑 Key Takeaways
 
-### What Makes semantic-screening Unique
+### What Makes attention-screening Unique
 
 1. **Scaffold-Based Splitting**: Murcko scaffold decomposition prevents chemical series leakage
 2. **3-Level Benchmark**: Fingerprints → PLM vectors → DT-Kinase (CNN+CrossAttention)
 3. **Multi-Seed Evaluation**: 5 seeds for statistical significance
-4. **Unified Orchestration**: Single script (`semantic_screening_models_beta.py`) coordinates all levels
+4. **Unified Orchestration**: Single script (`attention_screening_models_beta.py`) coordinates all levels
 5. **Interpretable Deep Learning**: CNN + Cross-Attention with attention maps
 
 ### 📈 Performance Summary

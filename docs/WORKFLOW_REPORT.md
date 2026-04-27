@@ -1,4 +1,4 @@
-# DockTKinase (semantic-screening) — Relatório Completo de Fluxo de Trabalho
+# DockTKinase (attention-screening) — Relatório Completo de Fluxo de Trabalho
 
 **Autor**: GMMSB-LNCC
 **Data**: Fevereiro 2026
@@ -9,7 +9,7 @@
 
 ## Sumário Executivo
 
-Este relatório documenta o fluxo de trabalho completo do **semantic-screening** (também conhecido como **DockTKinase**), uma plataforma de código aberto para predição de interações proteína-ligante usando aprendizado profundo. O sistema prediz se uma molécula (fármaco candidato) irá se ligar a uma proteína alvo (como quinases) e com qual intensidade — informação crítica para descoberta de novos medicamentos.
+Este relatório documenta o fluxo de trabalho completo do **attention-screening** (também conhecido como **DockTKinase**), uma plataforma de código aberto para predição de interações proteína-ligante usando aprendizado profundo. O sistema prediz se uma molécula (fármaco candidato) irá se ligar a uma proteína alvo (como quinases) e com qual intensidade — informação crítica para descoberta de novos medicamentos.
 
 **Objetivo central**: Dado um par (proteína, molécula), prever:
 1. **Classificação binária**: A molécula é ativa ou inativa contra a proteína?
@@ -21,7 +21,7 @@ Este relatório documenta o fluxo de trabalho completo do **semantic-screening**
 
 ### 1.1 O que o Sistema Faz
 
-O semantic-screening transforma dados textuais (sequências de aminoácidos e códigos moleculares SMILES) em predições de atividade biológica. Pense nele como um "tradutor" que:
+O attention-screening transforma dados textuais (sequências de aminoácidos e códigos moleculares SMILES) em predições de atividade biológica. Pense nele como um "tradutor" que:
 
 1. **Lê** a sequência de uma proteína (ex: `MTEYKLVVVGAGGVGKSALTIQLIQ...`)
 2. **Lê** o código SMILES de uma molécula (ex: `CC(=O)Nc1ccc(O)cc1`)
@@ -44,7 +44,7 @@ Proteínas similares terão vetores próximos; moléculas similares terão vetor
 
 ## 2. Pipeline Completo — Benchmark Unificado
 
-O sistema executa um pipeline de benchmark em 5 passos, orquestrado pelo script `semantic_screening_models_beta.py`:
+O sistema executa um pipeline de benchmark em 5 passos, orquestrado pelo script `attention_screening_models_beta.py`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -340,18 +340,18 @@ x_rotated = x · cos(mθ) + rotate_half(x) · sin(mθ)
 
 ```bash
 # Benchmark completo (3 níveis)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset non_human \
     --embedding 8M
 
 # Apenas Level 1 e 2 (baseline rápido)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset non_human \
     --embedding 8M \
     --levels 1,2
 
 # Apenas Level 3 com hiperparâmetros customizados
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset non_human \
     --embedding 8M \
     --levels 3 \
@@ -506,7 +506,7 @@ Com base neste pipeline, os próximos passos incluem:
 
 | Arquivo | Responsabilidade |
 |---------|------------------|
-| `semantic_screening_models_beta.py` | **Benchmark unificado (3 níveis)** |
+| `attention_screening_models_beta.py` | **Benchmark unificado (3 níveis)** |
 | `scaffold_split.py` | Geração de scaffold splits |
 | `scaffolds_splits/scenario_splitter.py` | Splitting por cenário (Sc, S1-S4) |
 | `split_comparison_analysis.py` | Level 1 e 2 (KNN/MLP) |

@@ -49,10 +49,10 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ---------------------------------------------------------------------------
-# Resolve paths: script is in DrugBAN/, semantic-screening is one level up
+# Resolve paths: script is in DrugBAN/, attention-screening is one level up
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent          # DrugBAN/
-REPO_ROOT   = SCRIPT_DIR.parent                        # semantic-screening/
+REPO_ROOT   = SCRIPT_DIR.parent                        # attention-screening/
 DRUGBAN_DATASETS = SCRIPT_DIR / "src" / "datasets"
 RESULTS_DIR = SCRIPT_DIR / "results" / "drugban_dataset_testes"
 
@@ -517,7 +517,7 @@ def load_model(protein_dim: int, variant: str = "v7",
     except ImportError as e:
         raise ImportError(
             f"Could not import InteractionMapCNN: {e}\n"
-            f"Make sure semantic-screening/ is in sys.path: {REPO_ROOT}"
+            f"Make sure attention-screening/ is in sys.path: {REPO_ROOT}"
         )
 
 

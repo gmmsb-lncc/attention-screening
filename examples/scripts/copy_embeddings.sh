@@ -7,10 +7,10 @@ set -e  # Sair imediatamente se algum comando falhar
 
 # Configurações de origem e destino
 SOURCE_HOST="leon@diamante-01.cmc3.lncc.br"
-SOURCE_DIR="/media/storage/leon/semantic-screening/results"
+SOURCE_DIR="/media/storage/leon/attention-screening/results"
 
 # Diretório de destino na máquina atual (diamante-03)
-DEST_DIR="/storage/leon/semantic-screening/results"
+DEST_DIR="/storage/leon/attention-screening/results"
 
 echo "Iniciando cópia dos embeddings da máquina diamante-01 para diamante-03..."
 

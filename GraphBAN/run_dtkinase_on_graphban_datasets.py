@@ -56,7 +56,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # Resolve paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent          # GraphBAN/
-REPO_ROOT   = SCRIPT_DIR.parent                        # semantic-screening/
+REPO_ROOT   = SCRIPT_DIR.parent                        # attention-screening/
 GRAPHBAN_DATA = SCRIPT_DIR / "upstream_data" / "Data"
 RESULTS_DIR = SCRIPT_DIR / "results" / "graphban_dataset_tests"
 
@@ -535,7 +535,7 @@ def load_model(protein_dim: int, variant: str = "v7",
     except ImportError as e:
         raise ImportError(
             f"Could not import InteractionMapCNN: {e}\n"
-            f"Make sure semantic-screening/ is in sys.path: {REPO_ROOT}"
+            f"Make sure attention-screening/ is in sys.path: {REPO_ROOT}"
         )
 
 

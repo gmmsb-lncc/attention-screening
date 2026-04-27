@@ -85,7 +85,7 @@ if __name__ == "__main__":
     print("🧬 Gerando matrizes de ligantes com MoLFormer para o benchmark de proteínas...")
     
     # Mudar para o diretório do projeto
-    os.chdir("/media/storage/leon/semantic-screening")
+    os.chdir("/media/storage/leon/attention-screening")
     
     success = run_molformer_pipeline()
     

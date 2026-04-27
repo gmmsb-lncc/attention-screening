@@ -26,11 +26,11 @@ stanza). Any new config/env knob/runner script gets a row in the
 
 ## Project overview
 
-**semantic-screening** — framework for protein-ligand interaction prediction on kinases. Implements **DT-Kinase** (Level 4 CNN v7, CNN 2D + bi-modal cross-attention) and evaluates it against three baselines (**DrugBAN**, **GraphBAN**, **ConPLex**) under an identical protocol.
+**attention-screening** — framework for protein-ligand interaction prediction on kinases. Implements **DT-Kinase** (Level 4 CNN v7, CNN 2D + bi-modal cross-attention) and evaluates it against three baselines (**DrugBAN**, **GraphBAN**, **ConPLex**) under an identical protocol.
 
 Scientific thesis: *semantic screening* — predicting bioactivity from 1D linear notations (amino acids, SMILES) without 3D structures or hand-crafted descriptors. Some models use PLMs (DT-Kinase, GraphBAN, ConPLex), one is from scratch (DrugBAN); the paradigm is defined by the input modality, not the encoder.
 
-Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
+Repo: `gmmsb-lncc/attention-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
 ## Active work (2026-04, 23 lessons; PLATEAU empírico atingido sobre v7+F)
 
@@ -215,8 +215,8 @@ Supporting (repo root):
 Diagonal-only aggregation with data from diamante-02:
 ```bash
 python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
-    --diagonal-dtkinase-{human,non_human,all}   results/semantic-screening-results/dt-kinase/benchmark_{c}_8M_<DATE>/test/level4_cnn_8M/{c} \
-    --diagonal-{drugban,graphban}-{human,non_human,all} results/semantic-screening-results/{m}/{c} \
+    --diagonal-dtkinase-{human,non_human,all}   results/attention-screening-results/dt-kinase/benchmark_{c}_8M_<DATE>/test/level4_cnn_8M/{c} \
+    --diagonal-{drugban,graphban}-{human,non_human,all} results/attention-screening-results/{m}/{c} \
     --diagonal-conplex-{human,non_human}        ConPLex/results_universal/{c} \
     --results-root results/cross_matrix --out-dir results/cross_matrix/summary
 ```

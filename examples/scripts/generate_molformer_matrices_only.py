@@ -118,7 +118,7 @@ def generate_molformer_matrices_only():
     return True
 
 if __name__ == "__main__":
-    os.chdir("/media/storage/leon/semantic-screening")
+    os.chdir("/media/storage/leon/attention-screening")
     success = generate_molformer_matrices_only()
     
     if success:

@@ -17,7 +17,7 @@ Level 6: Optimized Transformer (HPO com Optuna)
 
 ```bash
 # Pipeline completo (Levels 1, 2 e 3)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 1 2 3 \
@@ -262,17 +262,17 @@ patience = 5                  # Early stopping
 
 ```bash
 # Learning rate menor (mais estável)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --levels 3 \
     --learning_rate 5e-5
 
 # Batch size menor (economiza memória)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --levels 3 \
     --batch_size 16
 
 # Mais epochs (convergência completa)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --levels 3 \
     --epochs 100
 ```
@@ -304,7 +304,7 @@ python semantic_screening_models.py \
 ### Level 3 isolado
 
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 3 \
@@ -316,7 +316,7 @@ python semantic_screening_models.py \
 ### Pipeline completo
 
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 1 2 3 \
@@ -326,7 +326,7 @@ python semantic_screening_models.py \
 ### Forçar re-treino
 
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --levels 3 \
     --force
 ```
@@ -334,7 +334,7 @@ python semantic_screening_models.py \
 ### Embedding maior (650M)
 
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --embedding 650M \
     --levels 3 \
     --batch_size 16  # GPU memory!
@@ -374,7 +374,7 @@ python scripts/run_complete_pipeline.py \
 
 **Solução**:
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --levels 3 \
     --batch_size 16  # ou 8, 4
 ```
@@ -395,7 +395,7 @@ python semantic_screening_models.py \
 
 ## 🔗 Arquivos Relacionados
 
-- `semantic_screening_models_beta.py` - Script principal
+- `attention_screening_models_beta.py` - Script principal
 - `src/models/level5_lite.py` - Modelo Level 3
 - `crossattention_split_analysis/` - Módulo de experimentos
 - `LEVEL-5-LITE.md` - Documentação completa

@@ -42,7 +42,7 @@ INFER_DIR = Path(__file__).resolve().parent
 # pairs.tsv, and emit a uniform CSV. They live in scripts/inference/models/.
 MODEL_RUNNERS = {
     "dtkinase": {
-        "env":    "semantic-screening",
+        "env":    "attention-screening",
         "script": INFER_DIR / "models" / "dtkinase_score.py",
     },
     "drugban": {
@@ -83,7 +83,7 @@ def run_model(model: str, pairs_path: Path, out_dir: Path,
 
     Two execution modes:
       - Per-model conda envs (default): uses ``conda run -n {env}`` to switch
-        between {semantic-screening, drugban, graphban, conplex}. This handles
+        between {attention-screening, drugban, graphban, conplex}. This handles
         version conflicts between baseline upstream repos.
       - Unified env (``single_env`` set, e.g. ``baseline``): uses ``conda run
         -n {single_env}`` for ALL models. Requires a single env that satisfies

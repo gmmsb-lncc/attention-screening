@@ -105,7 +105,7 @@ Note:
     parser.add_argument(
         '--output_dir',
         type=str,
-        default='/media/storage/leon/semantic-screening/encoder_comparison_results',
+        default='/media/storage/leon/attention-screening/encoder_comparison_results',
         help='Output directory for results'
     )
 
