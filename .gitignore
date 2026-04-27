@@ -202,3 +202,4 @@ model_files/
 .DS_Store
 **/.DS_Store
 llm/models_cache/
+.claude/

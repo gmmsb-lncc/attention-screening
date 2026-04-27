@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Run configs/v7_plus_F_adapt_v2.yaml — decoupled threshold (F1) and
-# selection (MCC) criteria. Implements lesson 15 (licoes_aprendidas §6.7).
+# selection (MCC) criteria. Implements lesson 15 (docs/01-methodology/licoes_aprendidas.md §6.7).
 #
 # THRESHOLD: F1-optimal val (matches DrugBAN/GraphBAN reporting).
 # SELECTION: MCC-optimal val (preserves DT-Kinase discriminative signal).

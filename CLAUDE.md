@@ -11,16 +11,16 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `licoes_aprendidas.md` | optimization track narrative + **23 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
-| `experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
-| `v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
+| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **23 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `docs/01-methodology/experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
+| `docs/01-methodology/v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
 | `configs/*.yaml` | training configurations (each carries inline docstring) | when running or comparing variants |
 | `git log --oneline -30` | recent commits with detailed messages explaining each change | when reconstructing recent decisions |
 
 **Update rule**: any new methodological insight goes to
-`licoes_aprendidas.md` (with explicit lesson number). Any new
-multi-seed result goes to `experiments_log.md` (table row + YAML
+`docs/01-methodology/licoes_aprendidas.md` (with explicit lesson number). Any new
+multi-seed result goes to `docs/01-methodology/experiments_log.md` (table row + YAML
 stanza). Any new config/env knob/runner script gets a row in the
 `CLAUDE.md` tables below.
 
@@ -34,7 +34,7 @@ Repo: `gmmsb-lncc/semantic-screening` · Python 3.12 in `env/` · PyTorch 2.0+ �
 
 ## Active work (2026-04, 23 lessons; PLATEAU empírico atingido sobre v7+F)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `licoes_aprendidas.md` (sections §4-§14, **24 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `docs/01-methodology/licoes_aprendidas.md` (sections §4-§14, **24 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
    - **Canônico MCC primário (final, pós-Lição 24)** — `configs/v7.yaml` vanilla v7: **0.506 ± 0.006** NH 5-seed (cap 5 da tese). Ckpt operacional p/ matriz cross-dataset + comitê inferência + ranking final. v7+F LEGACY ré-classificado como tentativa que falhou validação 5-seed.
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
@@ -108,7 +108,7 @@ bash run_benchmark.sh                         # shell orchestrator
 
 ## DT-Kinase optimization variants (2026-04, snapshot)
 
-Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `licoes_aprendidas.md` (20 methodological lessons across §4-§11).
+Track: improve v7 toward MCC ≥ 0.55-0.60 on NH. Detailed log + lessons in `docs/01-methodology/licoes_aprendidas.md` (20 methodological lessons across §4-§11).
 
 **Status flags resumidos**:
 - **CONFIRMED (§6.9.1, lição 17)**: §6.5 EmbeddingAdapter fixes (pre-norm + LoRA gates + zero-init self-attn) **prejudicam** v7+F por −0.053 MCC, AUROC −0.033, σ ×5.6. Default flipped (commit `de2ef0e`): `BENCHMARK_LEVEL4CNN_ADAPTER_LEGACY=1` é o default; v7+F reproduz 0.5266 ± 0.010 em d01.

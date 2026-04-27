@@ -6,7 +6,7 @@
 # Pre-requisitos (verificados no início):
 #   - ConPLex/best_models/trained_all_rep{0,1,2}/  (checkpoints treinados)
 #   - ConPLex env Python ativável (conda activate conplex)
-#   - infer_conplex_universal.py funcional
+#   - scripts/inference/legacy/infer_conplex_universal.py funcional
 #
 # Pipeline (5 estágios sequenciais, cada um guarded por verificação):
 #   1. Detect available reps + seeds
@@ -43,7 +43,7 @@ OUT_ROOT="ConPLex/results_universal/all"
 SUMMARY_DIR="results/cross_matrix/summary"
 SLIDES_DIR="slides/cross_matrix"
 
-# Mapping seed → rep (matches CANONICAL_SEEDS in infer_conplex_universal.py).
+# Mapping seed → rep (matches CANONICAL_SEEDS in scripts/inference/legacy/infer_conplex_universal.py).
 declare -A SEED_TO_REP
 SEED_TO_REP[42]=0
 SEED_TO_REP[123]=1

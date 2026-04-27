@@ -7,7 +7,7 @@
 #   scaffolds_splits/output/universal_test.tsv  (41 441 rows).
 #
 # Val probs come from the *training corpus* val split (default behavior of
-# infer_conplex_universal.py) so that any downstream threshold calibration
+# scripts/inference/legacy/infer_conplex_universal.py) so that any downstream threshold calibration
 # stays pinned to the training distribution.
 #
 # Outputs:
@@ -126,7 +126,7 @@ for corpus in ${CORPORA}; do
     corpus_start=$(date +%s)
     # Pre-featurization happens once per corpus (all 5 seeds share the same
     # val+test embeddings — ProtBert is the expensive step).
-    python infer_conplex_universal.py \
+    python scripts/inference/legacy/infer_conplex_universal.py \
         --corpus "${corpus}" \
         --seeds ${SEEDS} \
         --test-tsv "${UNIVERSAL_TSV}" \

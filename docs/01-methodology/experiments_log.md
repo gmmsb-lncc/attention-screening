@@ -171,7 +171,7 @@ notes: |
   THRESHOLD↔SELECTION na mesma env var: ao trocar p/ F1, seleção
   de checkpoint passou também a otimizar F1. Modelo escolhe
   epoch com recall alto / precision baixo (ótimo p/ F1, subótimo
-  p/ MCC). Lição 15 documentada em licoes_aprendidas §6.7.
+  p/ MCC). Lição 15 documentada em licoes_aprendidas.md §6.7.
 
   Recall=0.904 vs precision=0.697 confirma diagnóstico (vs v7+F
   típico recall~0.85, precision~0.73).

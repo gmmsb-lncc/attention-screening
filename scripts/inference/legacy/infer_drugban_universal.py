@@ -223,7 +223,7 @@ def main():
         print(f"  saved → {out_npz.relative_to(repo)}")
 
     print("\nDone. Recalibrate via:")
-    print(f"  python recalibrate_baselines_f1val.py --results-root {args.output_dir.replace('/results_universal', '')} --models DrugBAN --output RECALIB_F1VAL_DRUGBAN_UNIVERSAL.json")
+    print(f"  python scripts/inference/legacy/recalibrate_baselines_f1val.py --results-root {args.output_dir.replace('/results_universal', '')} --models DrugBAN --output RECALIB_F1VAL_DRUGBAN_UNIVERSAL.json")
 
 
 if __name__ == "__main__":
