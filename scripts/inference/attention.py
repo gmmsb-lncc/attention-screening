@@ -143,6 +143,258 @@ def _topk_indices(arr: np.ndarray, k: int = 10) -> np.ndarray:
     return idx[np.argsort(-arr[idx])]
 
 
+# ======================================================================
+# JSON export — structured graph data for downstream visualization
+# ======================================================================
+
+def _smiles_char_to_atom_idx(smi: str) -> dict:
+    """Map SMILES character position → RDKit atom index.
+
+    Walks the SMILES string and assigns each character that's part of
+    an atom token (single-letter, two-letter halogens, or bracket atom
+    `[...]`) to a sequential atom index. Bond, ring-closure, and
+    parenthesis characters are not mapped. The output is suitable for
+    aggregating per-character attention into per-atom attention.
+    """
+    mapping = {}
+    i = 0
+    atom_idx = 0
+    n = len(smi)
+    while i < n:
+        c = smi[i]
+        if c == "[":
+            j = smi.find("]", i)
+            if j == -1:
+                i += 1; continue
+            for k in range(i, j + 1):
+                mapping[k] = atom_idx
+            atom_idx += 1
+            i = j + 1
+        elif c in "Cc" and i + 1 < n and smi[i + 1] == "l":
+            mapping[i] = atom_idx
+            mapping[i + 1] = atom_idx
+            atom_idx += 1
+            i += 2
+        elif c in "Bb" and i + 1 < n and smi[i + 1] == "r":
+            mapping[i] = atom_idx
+            mapping[i + 1] = atom_idx
+            atom_idx += 1
+            i += 2
+        elif c in "BCNOSPFIbcnosp":
+            mapping[i] = atom_idx
+            atom_idx += 1
+            i += 1
+        else:
+            i += 1
+    return mapping
+
+
+def _build_ligand_graph(smiles: str, token_attention: np.ndarray) -> dict:
+    """Build a JSON-serializable ligand graph annotated with per-atom attention.
+
+    Output schema (Cytoscape / D3 / NetworkX compatible):
+      {
+        "smiles": str,
+        "canonical_smiles": str,
+        "molblock": <RDKit 2D MOL block, or "" if RDKit unavailable>,
+        "n_atoms": int,
+        "atoms": [
+          {"idx": int, "element": str, "x": float, "y": float,
+           "attention": float, "rank": int|null, "is_top": bool},
+          ...
+        ],
+        "bonds": [
+          {"source": int, "target": int, "order": int, "aromatic": bool},
+          ...
+        ]
+      }
+
+    Per-atom attention is the mean of per-SMILES-char attention values
+    over the chars belonging to that atom (single-letter, halogen pair,
+    or bracket-atom contents). Atoms with no chars in the (truncated)
+    token window get attention = 0.
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+    except ImportError:
+        return {"smiles": smiles, "canonical_smiles": smiles,
+                "molblock": "", "n_atoms": 0, "atoms": [], "bonds": []}
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return {"smiles": smiles, "canonical_smiles": smiles,
+                "molblock": "", "n_atoms": 0, "atoms": [], "bonds": []}
+
+    canon = Chem.MolToSmiles(mol, canonical=True)
+    n_atoms = mol.GetNumAtoms()
+
+    # Aggregate token attention → atom attention via SMILES char walk.
+    char_to_atom = _smiles_char_to_atom_idx(canon)
+    atom_attn = np.zeros(n_atoms, dtype=float)
+    atom_n    = np.zeros(n_atoms, dtype=float)
+    if token_attention is not None:
+        n_chars = min(len(canon), len(token_attention))
+        for char_pos in range(n_chars):
+            a = char_to_atom.get(char_pos)
+            if a is not None and a < n_atoms:
+                atom_attn[a] += float(token_attention[char_pos])
+                atom_n[a] += 1
+    atom_attn = atom_attn / np.clip(atom_n, 1.0, None)
+
+    # 2D coordinates for graph visualization.
+    try:
+        mol_2d = Chem.Mol(mol)
+        AllChem.Compute2DCoords(mol_2d)
+        conf = mol_2d.GetConformer()
+        coords = [(conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y)
+                  for i in range(n_atoms)]
+        molblock = Chem.MolToMolBlock(mol_2d)
+    except Exception:
+        coords = [(0.0, 0.0)] * n_atoms
+        molblock = ""
+
+    # Top atoms by attention (rank 1 = strongest).
+    top_idx = list(np.argsort(-atom_attn))
+    rank_of = {int(idx): r + 1 for r, idx in enumerate(top_idx)}
+    top_set = set(int(idx) for idx in top_idx[:5])
+
+    atoms = []
+    for i in range(n_atoms):
+        a = mol.GetAtomWithIdx(i)
+        atoms.append({
+            "idx":       i,
+            "element":   a.GetSymbol(),
+            "aromatic":  a.GetIsAromatic(),
+            "charge":    a.GetFormalCharge(),
+            "x":         float(coords[i][0]),
+            "y":         float(coords[i][1]),
+            "attention": float(atom_attn[i]),
+            "rank":      rank_of.get(i),
+            "is_top":    i in top_set,
+        })
+    bonds = [{
+        "source":   b.GetBeginAtomIdx(),
+        "target":   b.GetEndAtomIdx(),
+        "order":    int(b.GetBondTypeAsDouble()),
+        "aromatic": b.GetIsAromatic(),
+    } for b in mol.GetBonds()]
+
+    return {
+        "smiles":           smiles,
+        "canonical_smiles": canon,
+        "molblock":         molblock,
+        "n_atoms":          n_atoms,
+        "atoms":            atoms,
+        "bonds":            bonds,
+    }
+
+
+def save_attention_json(att: dict, pair_id: str, out_dir: Path,
+                         sequence: str | None,
+                         smiles: str | None,
+                         uniprot: str | None = None) -> Path:
+    """Save a structured JSON with ligand graph + protein residues + attention.
+
+    File layout (out_dir/<pair_id>_attention.json):
+      {
+        "pair_id": str, "uniprot": str, "logit": float,
+        "ligand":   {graph from _build_ligand_graph},
+        "protein":  {sequence + per-residue attention + top-K residues},
+        "interaction": {
+            "shape": [sp, sl],
+            "per_head": [...],
+            "top_cells": [{"residue": i, "aa": "F", "token": j, "char": "c",
+                           "attention": float}, ...]
+        },
+        "metadata": {model name, num heads, generation timestamp}
+      }
+    Designed for downstream graph viz (Cytoscape / D3 / Mol*) — atoms
+    carry pre-computed 2D coords + attention so a viewer just needs to
+    bind the value to color/size.
+    """
+    import json
+    import time
+
+    Mk_mean  = att.get("Mk_mean")
+    per_head = att.get("per_head")
+    hp_prot  = att.get("hierpool_prot")
+    hp_lig   = att.get("hierpool_lig")
+
+    # Ligand graph (with per-atom attention from token-level signal).
+    ligand_block = _build_ligand_graph(smiles or "", hp_lig)
+
+    # Per-residue annotation.
+    if sequence is None:
+        seq_eff = ""
+    elif Mk_mean is not None:
+        sp = Mk_mean.shape[0]
+        seq_eff = sequence[:sp]
+    else:
+        seq_eff = sequence
+
+    res_attn = hp_prot if hp_prot is not None else att.get("prot_imp")
+    residues = []
+    if res_attn is not None:
+        n = min(len(res_attn), len(seq_eff)) if seq_eff else len(res_attn)
+        rank_of = {int(idx): r + 1 for r, idx in enumerate(np.argsort(-res_attn))}
+        top_set = set(int(i) for i in np.argsort(-res_attn)[:10])
+        for i in range(n):
+            aa = seq_eff[i] if i < len(seq_eff) else "X"
+            residues.append({
+                "position":  i + 1,                # 1-based for biology
+                "aa":        aa,
+                "attention": float(res_attn[i]),
+                "rank":      rank_of.get(i),
+                "is_top":    i in top_set,
+            })
+
+    # Top interaction cells (residue × token).
+    top_cells = []
+    if Mk_mean is not None:
+        flat = Mk_mean.ravel()
+        top_flat = np.argsort(-flat)[:20]
+        sp, sl = Mk_mean.shape
+        smi_tokens = list(smiles or "")
+        for f in top_flat:
+            r, t = int(f // sl), int(f % sl)
+            top_cells.append({
+                "residue":     r + 1,
+                "aa":          seq_eff[r] if r < len(seq_eff) else "X",
+                "token":       t,
+                "smiles_char": smi_tokens[t] if t < len(smi_tokens) else "?",
+                "attention":   float(Mk_mean[r, t]),
+            })
+
+    payload = {
+        "pair_id":   pair_id,
+        "uniprot":   uniprot,
+        "logit":     float(att.get("logit", 0.0)),
+        "ligand":    ligand_block,
+        "protein": {
+            "sequence_length": len(seq_eff),
+            "residues":        residues,
+        },
+        "interaction": {
+            "shape":      list(Mk_mean.shape) if Mk_mean is not None else None,
+            "per_head":   per_head.tolist() if per_head is not None else None,
+            "top_cells":  top_cells,
+        },
+        "metadata": {
+            "model":            "DT-Kinase v7",
+            "n_heads":          int(Mk_mean.shape[0]) if Mk_mean is not None and Mk_mean.ndim > 2 else None,
+            "generated_utc":    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "schema_version":   "1.0",
+        },
+    }
+
+    out_path = out_dir / f"{pair_id}_attention.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as fh:
+        json.dump(payload, fh, indent=2, ensure_ascii=False)
+    return out_path
+
+
 def plot_consensus_heatmap(att: dict, pair_id: str, out_dir: Path,
                             sequence: str | None = None,
                             smiles_tokens: list[str] | None = None,
@@ -440,16 +692,29 @@ def main() -> None:
                 prot_weights=att.get("hierpool_prot"),
                 lig_weights=att.get("hierpool_lig"),
             )
+        seq = str(row.get("sequence", "")) or None
+        smi = str(row.get("smiles", "")) or None
+        smiles_tokens = list(smi) if smi else None
+
         if not args.no_plot:
             # Pass sequence + SMILES tokens so the plot annotates top
             # residues with their AA letter and top tokens with the SMILES
             # character at that position.
-            seq = str(row.get("sequence", "")) or None
-            smi = str(row.get("smiles", ""))
-            smiles_tokens = list(smi) if smi else None
             plot_consensus_heatmap(att, pair_id, sub,
                                    sequence=seq,
                                    smiles_tokens=smiles_tokens)
+
+        # Structured JSON: ligand atomic graph + per-atom attention +
+        # per-residue attention + top interaction cells. Consumable by
+        # Cytoscape, D3.js, NetworkX, or a Mol* viewer for visualization
+        # of the strongest attention regions on the molecular graph.
+        try:
+            save_attention_json(att, pair_id, sub,
+                                sequence=seq, smiles=smi,
+                                uniprot=str(row.get("uniprot", "")))
+        except Exception as e:
+            print(f"  {pair_id}: JSON export failed: {e}", file=sys.stderr)
+
         print(f"  {pair_id}: logit={att['logit']:+.3f}", file=sys.stderr)
 
 
