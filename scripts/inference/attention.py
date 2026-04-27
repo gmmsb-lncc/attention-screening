@@ -357,10 +357,32 @@ def main() -> None:
           file=sys.stderr)
 
     # Join consensus with pairs to recover sequences/SMILES
+    # Cast keys to str on both sides to avoid type mismatch from CSV sniffing.
+    sel["uniprot"]   = sel["uniprot"].astype(str)
+    sel["chembl_id"] = sel["chembl_id"].astype(str)
+    pairs["uniprot"]   = pairs["uniprot"].astype(str)
+    pairs["chembl_id"] = pairs["chembl_id"].astype(str)
     merged = sel.merge(
         pairs[["uniprot", "sequence", "chembl_id", "smiles"]],
         on=["uniprot", "chembl_id"], how="left",
     )
+
+    # Filter rows where sequence/smiles couldn't be recovered (NaN merge result):
+    # this happens if pairs.tsv chembl_id space doesn't intersect consensus
+    # chembl_id space (e.g., lookup-mode demo where pairs.tsv was generated
+    # for one query SMILES but consensus rows came from a different chembl_id
+    # via raw_predictions.npz indexing).
+    n_total = len(merged)
+    merged = merged.dropna(subset=["sequence", "smiles"])
+    n_dropped = n_total - len(merged)
+    if n_dropped:
+        print(f"  WARN: {n_dropped}/{n_total} pairs lack sequence/SMILES in pairs.tsv "
+              f"(chembl_id mismatch between consensus and pairs); skipping these.",
+              file=sys.stderr)
+    if len(merged) == 0:
+        print("  no pairs left after merge — re-run with a pairs.tsv that "
+              "shares chembl_id with the consensus output.", file=sys.stderr)
+        return
 
     # Build model + ckpt
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
