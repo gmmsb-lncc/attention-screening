@@ -263,6 +263,28 @@ PYEOF
 }
 
 # -----------------------------------------------------------------------------
+# Stage 5: extract attention maps for top-K hits (single-model mode)
+# -----------------------------------------------------------------------------
+
+stage_attention() {
+    print_banner '[5/5] Extract attention maps for top hits (PNG + JSON)'
+    echo "  Extracts DT-Kinase 3-level attention via forward-hooks."
+    echo "  Per-pair output: <pair_id>_attention.{png,json} + <pair_id>_ligand_2d.png"
+    echo ""
+
+    "${PYBIN}" "${REPO}/scripts/inference/attention.py" \
+        --scores  "${OUT_DIR}/scores_dtkinase.csv" \
+        --pairs   "${OUT_DIR}/pairs.tsv" \
+        --out-dir "${OUT_DIR}/attention" \
+        --top-k   5 \
+        --corpus  "${CKPT_CORPUS}" \
+        2>&1 | grep -v -E "^\[2[0-3]:" | tail -25
+    echo ""
+    echo "  attention/ output:"
+    find "${OUT_DIR}/attention" -type f 2>/dev/null | head -20 | sed 's/^/    /'
+}
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 
@@ -280,6 +302,7 @@ main() {
     stage_extrapolation_check
     stage_score_dtkinase
     stage_report
+    stage_attention
 
     print_banner 'DONE'
     echo "outputs:"
