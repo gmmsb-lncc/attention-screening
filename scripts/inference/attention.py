@@ -290,6 +290,168 @@ def _build_ligand_graph(smiles: str, token_attention: np.ndarray) -> dict:
     }
 
 
+def plot_sequence_track(att: dict, pair_id: str, out_dir: Path,
+                         sequence: str | None,
+                         top_residues: int = 12) -> Path | None:
+    """Render the protein sequence as a horizontal attention track.
+
+    Output: <pair_id>_sequence_track.png
+
+    Designed for the "show me which region of the sequence the model
+    looked at" question. The plot is a single horizontal band where
+    each cell is a residue colored by attention intensity (inferno
+    colormap). The top-K residues are annotated above the band with
+    their position + AA letter, and a sliding-window mean is drawn
+    underneath to highlight contiguous high-attention regions.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib import colors as mcolors
+    except ImportError:
+        return None
+
+    res_attn = att.get("hierpool_prot")
+    if res_attn is None:
+        res_attn = att.get("prot_imp")
+    if res_attn is None or len(res_attn) == 0:
+        return None
+    res_attn = np.asarray(res_attn, dtype=float)
+    n = len(res_attn)
+    seq_eff = (sequence[:n] if sequence else "X" * n)
+
+    # Sliding-window mean to highlight contiguous regions
+    win = max(5, n // 50)
+    pad = np.pad(res_attn, win // 2, mode="edge")
+    smooth = np.convolve(pad, np.ones(win) / win, mode="valid")[:n]
+
+    fig = plt.figure(figsize=(min(20, max(10, n * 0.020)), 4.2))
+    gs  = fig.add_gridspec(2, 1, height_ratios=[1.6, 1.0], hspace=0.35)
+    ax_track  = fig.add_subplot(gs[0])
+    ax_smooth = fig.add_subplot(gs[1], sharex=ax_track)
+
+    # Top track: per-residue heatmap (1 row × n cols)
+    norm = mcolors.Normalize(vmin=res_attn.min(), vmax=res_attn.max())
+    band = res_attn[np.newaxis, :]
+    im = ax_track.imshow(band, aspect="auto", cmap="inferno", norm=norm,
+                         interpolation="nearest", extent=[0, n, 0, 1])
+    ax_track.set_yticks([])
+    ax_track.set_ylim(0, 1)
+    ax_track.set_xlim(0, n)
+    ax_track.set_title(f"DT-Kinase attention along protein sequence — {pair_id}\n"
+                       f"(n = {n} residues; logit = {att.get('logit', 0.0):+.2f})",
+                       fontsize=11)
+    cbar = plt.colorbar(im, ax=ax_track, fraction=0.04, pad=0.02,
+                        orientation="vertical")
+    cbar.set_label("attention weight", fontsize=8)
+
+    # Annotate top-K residues
+    top = _topk_indices(res_attn, top_residues)
+    for r in top:
+        r = int(r)
+        aa = seq_eff[r] if r < len(seq_eff) else "X"
+        ax_track.annotate(f"{r+1}·{aa}",
+                          xy=(r + 0.5, 1.0),
+                          xytext=(0, 4), textcoords="offset points",
+                          ha="center", fontsize=7,
+                          color="#A04500", weight="bold",
+                          rotation=0)
+
+    # Bottom: smoothed signal showing contiguous regions
+    ax_smooth.plot(np.arange(n), smooth, color="#2E86AB", linewidth=1.6)
+    ax_smooth.fill_between(np.arange(n), smooth, alpha=0.25, color="#2E86AB")
+    ax_smooth.axhline(np.percentile(res_attn, 90), color="#E8630A",
+                      linestyle="--", linewidth=0.9, label="P90 threshold")
+    ax_smooth.set_xlabel("residue position (N → C)", fontsize=9)
+    ax_smooth.set_ylabel(f"sliding mean (w={win})", fontsize=8)
+    ax_smooth.set_xlim(0, n)
+    ax_smooth.legend(loc="upper right", fontsize=7, framealpha=0.9)
+
+    fig.tight_layout()
+    out_path = out_dir / f"{pair_id}_sequence_track.png"
+    fig.savefig(out_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out_path
+
+
+def plot_ligand_2d(att: dict, pair_id: str, out_dir: Path,
+                    smiles: str | None) -> Path | None:
+    """Render the ligand as a 2D molecule with atoms colored by attention.
+
+    Output: <pair_id>_ligand_2d.png
+
+    Uses RDKit's drawing engine to render the canonical SMILES with
+    a per-atom color overlay derived from the per-SMILES-character
+    HierPool weights. Atoms in the top-K by attention are circled and
+    labeled; bond order and aromaticity are rendered standard.
+    """
+    if not smiles:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from rdkit import Chem
+        from rdkit.Chem import AllChem, Draw
+        from rdkit.Chem.Draw import rdMolDraw2D
+    except ImportError:
+        return None
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    canon = Chem.MolToSmiles(mol, canonical=True)
+    mol_canon = Chem.MolFromSmiles(canon)
+    AllChem.Compute2DCoords(mol_canon)
+    n_atoms = mol_canon.GetNumAtoms()
+
+    # Aggregate token attention → per-atom attention
+    char_to_atom = _smiles_char_to_atom_idx(canon)
+    hp_lig = att.get("hierpool_lig")
+    if hp_lig is None or len(hp_lig) == 0:
+        return None
+
+    atom_attn = np.zeros(n_atoms, dtype=float)
+    atom_n    = np.zeros(n_atoms, dtype=float)
+    n_chars = min(len(canon), len(hp_lig))
+    for char_pos in range(n_chars):
+        a = char_to_atom.get(char_pos)
+        if a is not None and a < n_atoms:
+            atom_attn[a] += float(hp_lig[char_pos])
+            atom_n[a] += 1
+    atom_attn = atom_attn / np.clip(atom_n, 1.0, None)
+    if atom_attn.max() > 0:
+        atom_attn_norm = (atom_attn - atom_attn.min()) / (atom_attn.max() - atom_attn.min() + 1e-12)
+    else:
+        atom_attn_norm = atom_attn
+
+    # Map normalized attention → inferno color
+    cmap = plt.get_cmap("inferno")
+    atom_colors = {i: cmap(0.15 + 0.7 * atom_attn_norm[i])[:3]
+                   for i in range(n_atoms)}
+    top = _topk_indices(atom_attn, min(5, n_atoms))
+    highlight_atoms = [int(i) for i in top]
+
+    # Render with rdMolDraw2D
+    drawer = rdMolDraw2D.MolDraw2DCairo(900, 700)
+    opts = drawer.drawOptions()
+    opts.padding = 0.10
+    opts.bondLineWidth = 2
+    opts.fixedFontSize = 18
+    rdMolDraw2D.PrepareAndDrawMolecule(
+        drawer, mol_canon,
+        highlightAtoms=highlight_atoms,
+        highlightAtomColors=atom_colors,
+    )
+    drawer.FinishDrawing()
+    png_bytes = drawer.GetDrawingText()
+    out_path = out_dir / f"{pair_id}_ligand_2d.png"
+    with open(out_path, "wb") as fh:
+        fh.write(png_bytes)
+    return out_path
+
+
 def save_attention_json(att: dict, pair_id: str, out_dir: Path,
                          sequence: str | None,
                          smiles: str | None,
@@ -366,6 +528,28 @@ def save_attention_json(att: dict, pair_id: str, out_dir: Path,
                 "attention":   float(Mk_mean[r, t]),
             })
 
+    # Hints for downstream 3D structural visualization. The JSON itself
+    # carries 1D per-residue attention; viewers that want to render the
+    # signal on a 3D structure (PyMOL/ChimeraX/Mol*) can pull the
+    # corresponding model from AlphaFold (when uniprot is a real ID),
+    # then bind residues[].attention to the B-factor / pLDDT field.
+    pdb_hint = None
+    if uniprot and not uniprot.startswith("USER_") and uniprot.isalpha() is False:
+        # Heuristic: assume it's a UniProt ID (e.g. P00519). The
+        # AlphaFold URL pattern is stable; viewers do the actual fetch.
+        # Skip if uniprot is just a numeric seq_id (e.g. "173").
+        try:
+            int(uniprot)
+            pdb_hint = None  # numeric seq_id, no public PDB mapping
+        except ValueError:
+            pdb_hint = {
+                "uniprot_id":     uniprot,
+                "alphafold_pdb":  f"https://alphafold.ebi.ac.uk/files/AF-{uniprot}-F1-model_v4.pdb",
+                "alphafold_html": f"https://alphafold.ebi.ac.uk/entry/{uniprot}",
+                "rcsb_search":    f"https://www.rcsb.org/search?q={uniprot}",
+                "binding_field":  "B-factor (write residue.attention into atom B-factor column)",
+            }
+
     payload = {
         "pair_id":   pair_id,
         "uniprot":   uniprot,
@@ -374,6 +558,7 @@ def save_attention_json(att: dict, pair_id: str, out_dir: Path,
         "protein": {
             "sequence_length": len(seq_eff),
             "residues":        residues,
+            "pdb_hint":        pdb_hint,
         },
         "interaction": {
             "shape":      list(Mk_mean.shape) if Mk_mean is not None else None,
@@ -703,6 +888,11 @@ def main() -> None:
             plot_consensus_heatmap(att, pair_id, sub,
                                    sequence=seq,
                                    smiles_tokens=smiles_tokens)
+            # Sequence track + 2D ligand structure (the two viz the user
+            # cares about for "where in the sequence/molecule does the
+            # model focus").
+            plot_sequence_track(att, pair_id, sub, sequence=seq)
+            plot_ligand_2d(att, pair_id, sub, smiles=smi)
 
         # Structured JSON: ligand atomic graph + per-atom attention +
         # per-residue attention + top interaction cells. Consumable by
