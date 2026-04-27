@@ -8,7 +8,7 @@
 #   3. Agregação por corpus em JSON consumível pelas tabelas da tese
 #
 # Uso (em diamante-02):
-#     cd /path/to/semantic-screening
+#     cd /path/to/attention-screening
 #     git checkout cross_attention_lite
 #     git pull
 #     bash run_universal_f1val_baselines.sh

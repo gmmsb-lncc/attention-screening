@@ -361,6 +361,6 @@ These tests should be run:
 ---
 
 **Created**: November 2025  
-**Author**: semantic-screening Team  
+**Author**: attention-screening Team  
 **Branch**: modules-testing  
 **Status**: 🚧 In Development

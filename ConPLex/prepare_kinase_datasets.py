@@ -148,10 +148,10 @@ def main():
         search_roots = [Path(args.source_root)]
     else:
         search_roots = [
-            script_dir.parent,                    # ../  (semantic-screening/)
+            script_dir.parent,                    # ../  (attention-screening/)
             script_dir,                           # .    (ConPLex/)
             Path('/data/docktkinase'),             # GPU machine standard
-            Path('/storage/leon/semantic-screening'),  # old GPU machine
+            Path('/storage/leon/attention-screening'),  # old GPU machine
         ]
     
     datasets = ['non_human', 'human', 'all']

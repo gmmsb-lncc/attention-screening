@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
-            "  python semantic_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
+            "  python attention_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 4\n"
+            "  python attention_screening_models.py --dataset human --embedding 8M --levels 1a 2 3 --finetune\n"
         ),
     )
 

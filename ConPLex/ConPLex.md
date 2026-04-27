@@ -205,7 +205,7 @@ Adicionalmente, corrigido caminho hardcoded do MIT CSAIL em `molecule.py`:
 ### 5.2 Instalação na Máquina GPU
 
 ```bash
-cd /path/to/semantic-screening/ConPLex
+cd /path/to/attention-screening/ConPLex
 bash setup_env.sh        # auto-detecta CUDA, instala tudo
 conda activate conplex
 ```

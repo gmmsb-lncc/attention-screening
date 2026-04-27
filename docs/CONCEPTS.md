@@ -1,10 +1,10 @@
-# Fundamental Concepts: semantic-screening
+# Fundamental Concepts: attention-screening
 
-## 📌 What is semantic-screening?
+## 📌 What is attention-screening?
 
-**semantic-screening** is an open-source platform for predicting protein–ligand bioactivity using foundation language models. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol.
+**attention-screening** is an open-source platform for predicting protein–ligand bioactivity using foundation language models. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol.
 
-**Core hypothesis**: Sequence determines structure, which determines function — and this mapping is computationally recoverable via pre-trained language models. By leveraging the contextual embeddings from protein (ESM-2) and molecular (MoLFormer) language models, semantic-screening predicts interaction compatibility in latent space rather than through geometric fitting.
+**Core hypothesis**: Sequence determines structure, which determines function — and this mapping is computationally recoverable via pre-trained language models. By leveraging the contextual embeddings from protein (ESM-2) and molecular (MoLFormer) language models, attention-screening predicts interaction compatibility in latent space rather than through geometric fitting.
 
 ---
 

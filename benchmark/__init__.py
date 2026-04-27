@@ -1,4 +1,4 @@
-"""Benchmark package for semantic-screening model comparison.
+"""Benchmark package for attention-screening model comparison.
 
 Provides a modular, extensible framework for running multi-level benchmarks
 comparing fingerprint, embedding, matrix-pooling, and cross-attention models.

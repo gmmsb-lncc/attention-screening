@@ -12,7 +12,7 @@ A execução completa exige quatro ambientes Conda separados (um por modelo, dev
 
 | Ambiente | Modelo | Dependências principais |
 |---|---|---|
-| `semantic-screening` | DT-Kinase-LEGACY | PyTorch 2.x, RDKit, ESM-2 8M, MoLFormer |
+| `attention-screening` | DT-Kinase-LEGACY | PyTorch 2.x, RDKit, ESM-2 8M, MoLFormer |
 | `drugban` | DrugBAN | PyTorch 1.x, DGL, RDKit |
 | `graphban` | GraphBAN | PyTorch + DGL + ESM-1b + ChemBERTa |
 | `conplex` | ConPLex | PyTorch + ProtBERT |

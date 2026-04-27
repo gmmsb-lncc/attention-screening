@@ -24,13 +24,13 @@
 #
 # After install:
 #   source env_baseline/bin/activate
-#   python kinase_profiling.py "..." --single-env baseline
+#   python attention_screening.py "..." --single-env baseline
 #
 # Note: `--single-env baseline` in committee.py uses `conda run -n baseline`,
 # so when running under venv the orchestrator instead inherits the active
 # Python via PYBIN env var:
 #
-#   PYBIN=$(which python) python kinase_profiling.py "..."
+#   PYBIN=$(which python) python attention_screening.py "..."
 #
 # (committee.py defaults to `conda run -n {env}`; see TODO in committee.py
 #  to support venv-style direct invocation as well).
@@ -205,7 +205,7 @@ if [[ $? -eq 0 ]]; then
     echo " SUCCESS — venv ready at ${VENV_DIR}"
     echo "=============================================================="
     echo "Activate:  source ${VENV_DIR}/bin/activate"
-    echo "Demo:      python kinase_profiling.py 'CC(=O)Oc1ccccc1C(=O)O'"
+    echo "Demo:      python attention_screening.py 'CC(=O)Oc1ccccc1C(=O)O'"
 else
     echo ""
     echo "=============================================================="

@@ -1,4 +1,4 @@
-# 🎯 Quick Reference - semantic-screening & DT-Kinase
+# 🎯 Quick Reference - attention-screening & DT-Kinase
 
 **Documento**: METHODOLOGY_REVIEW.md  
 **Linhas**: 1,118 (especializado, completo)  
@@ -8,7 +8,7 @@
 
 ## ⚡ 30-Second Summary
 
-**semantic-screening** é uma plataforma para screening semântico de interações proteína-ligante.
+**attention-screening** é uma plataforma para screening semântico de interações proteína-ligante.
 **DT-Kinase** é a arquitetura neural implementada (PLM + CNN + Cross-Attention).
 
 ```
@@ -48,7 +48,7 @@ Classificação:       ExtraTrees baseline (ROC-AUC = 0.9731)
 Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 ```
 
-**DT-Kinase** é implementado na plataforma **semantic-screening**.
+**DT-Kinase** é implementado na plataforma **attention-screening**.
 
 ---
 
@@ -155,7 +155,7 @@ Regressão:          RandomForest baseline (R² = 0.4397, MAE = 0.5325)
 
 ## 🔗 Referências Cruzadas
 
-- **Benchmark**: `semantic_screening_models_beta.py`
+- **Benchmark**: `attention_screening_models_beta.py`
 - **Scaffold splits**: `scaffold_split.py`, `scaffolds_splits/`
 - **Level 1 & 2**: `split_comparison_analysis.py`
 - **Level 3**: `crossattention_split_analysis/experiment.py`
