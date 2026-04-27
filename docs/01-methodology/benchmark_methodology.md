@@ -50,6 +50,47 @@ chosen ESM-2 variant (8M / 150M / 650M).
   interaction maps → 4-layer CNN 2D (including dilated convolution) →
   hierarchical attention pooling → end-to-end classification.
 
+The Level 4 architecture (DT-Kinase) is detailed below.
+
+```mermaid
+flowchart TD
+    P["<b>Protein Sequence</b><br/>e.g., <code>ARNDCETYSPCYL...</code>"]:::input
+    L["<b>Ligand SMILES</b><br/>e.g., <code>CC(=O)Oc1ccccc1C(=O)O</code>"]:::input
+
+    P --> ESM["<b>ESM-2</b><br/>Foundation model (frozen)<br/>320-d per residue"]:::enc
+    L --> MOL["<b>MoLFormer</b><br/>Foundation model (frozen)<br/>768-d per token"]:::enc
+
+    ESM --> EAP["<b>Embedding Adapter</b><br/>protein 320 → 512<br/>self-attn + MLP"]:::adapt
+    MOL --> EAL["<b>Embedding Adapter</b><br/>ligand 768 → 1024<br/>self-attn + MLP"]:::adapt
+
+    EAP --> DOT(("⊗<br/><b>Dot Product</b><br/>K = 16 heads"))
+    EAL --> DOT
+
+    DOT --> IM["<b>Interaction Map</b><br/>M_k ∈ ℝ<sup>K × s_p × s_l</sup><br/>16 channels"]:::map
+    IM --> CNN["<b>CNN 2D</b><br/>4 layers + dilated conv<br/>16 → 32 → 64 → 64 → 64"]:::cnn
+    CNN --> POOL["<b>Hierarchical Attention Pooling</b><br/>ligand axis → protein axis"]:::pool
+    POOL --> HEAD["<b>Classifier</b><br/>MLP + Platt scaling + MCC threshold"]:::head
+
+    HEAD --> ACT["✓ <b>Active</b>"]:::active
+    HEAD --> INA["✗ <b>Inactive</b>"]:::inactive
+
+    classDef input    fill:#FFF59D,stroke:#F57F17,stroke-width:1.5px,color:#222
+    classDef enc      fill:#BBDEFB,stroke:#1565C0,stroke-width:1.5px,color:#222
+    classDef adapt    fill:#E1BEE7,stroke:#6A1B9A,stroke-width:1.5px,color:#222
+    classDef map      fill:#C8E6C9,stroke:#2E7D32,stroke-width:1.5px,color:#222
+    classDef cnn      fill:#A5D6A7,stroke:#1B5E20,stroke-width:1.5px,color:#222
+    classDef pool     fill:#80CBC4,stroke:#00695C,stroke-width:1.5px,color:#222
+    classDef head     fill:#FFCC80,stroke:#E65100,stroke-width:1.5px,color:#222
+    classDef active   fill:#A5D6A7,stroke:#1B5E20,stroke-width:2px,color:#1B5E20
+    classDef inactive fill:#EF9A9A,stroke:#B71C1C,stroke-width:2px,color:#B71C1C
+```
+
+Component dimensions assume ESM-2 8M (`d_P = 320`); for ESM-2 150M
+(`d_P = 640`) and 650M (`d_P = 1280`) the protein adapter input dimension
+scales accordingly. The adapter outputs 512 (protein) and 1024 (ligand) by
+default in v7+F; both branches feed the dot-product head producing
+`K = 16` interaction-map channels.
+
 ---
 
 ## Evaluation Protocol
