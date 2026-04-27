@@ -326,6 +326,7 @@ def run_smiles_string(smiles: str, args: argparse.Namespace) -> Path:
         "--models",   args.models,
     ]
     if args.parallel: cmd.append("--parallel")
+    if args.single_env: cmd += ["--single-env", args.single_env]
     if args.dry_run:  cmd.append("--dry-run")
     print(f"[run] mode = smiles → kinome × ligand")
     print(f"[run] cmd  = {' '.join(cmd)}")
@@ -344,6 +345,7 @@ def run_fasta_file(path: Path, args: argparse.Namespace) -> Path:
         "--models", args.models,
     ]
     if args.parallel: cmd.append("--parallel")
+    if args.single_env: cmd += ["--single-env", args.single_env]
     if args.dry_run:  cmd.append("--dry-run")
     print(f"[run] mode = fasta → ligand library")
     print(f"[run] cmd  = {' '.join(cmd)}")
@@ -406,6 +408,7 @@ def run_smi_file(smiles_list: list[str], path: Path, args: argparse.Namespace) -
         "--models", args.models,
     ]
     if args.parallel: cmd.append("--parallel")
+    if args.single_env: cmd += ["--single-env", args.single_env]
     if args.dry_run:  cmd.append("--dry-run")
     subprocess.run(cmd, check=True)
     return args.out / "consensus.csv"
@@ -479,6 +482,7 @@ def run_batch_file(path: Path, payload: dict, args: argparse.Namespace) -> Path:
         "--models", args.models,
     ]
     if args.parallel: cmd.append("--parallel")
+    if args.single_env: cmd += ["--single-env", args.single_env]
     if args.dry_run:  cmd.append("--dry-run")
     subprocess.run(cmd, check=True)
     return args.out / "consensus.csv"
@@ -530,6 +534,9 @@ def main() -> None:
                     help="comma-separated subset of models to run")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring subprocesses in parallel")
+    ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
+                    help="run all models in a single conda env (e.g. 'baseline'); "
+                         "default uses per-model envs (semantic-screening, drugban, ...)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved pipeline command without executing")
     args = ap.parse_args()

@@ -70,17 +70,28 @@ def run_expand(args: argparse.Namespace, out_dir: Path) -> Path:
 
 
 def run_model(model: str, pairs_path: Path, out_dir: Path,
-              ckpt_corpus: str, dry_run: bool = False) -> tuple[str, Path]:
-    """Invoke a single baseline scoring script in its own conda env.
+              ckpt_corpus: str, single_env: str | None = None,
+              dry_run: bool = False) -> tuple[str, Path]:
+    """Invoke a single baseline scoring script.
 
-    Each adapter (scripts/inference/models/<model>_score.py) reads
-    pairs.tsv and emits a uniform CSV (uniprot, chembl_id, prob, pred,
-    threshold) that aggregate.py merges via outer-join.
+    Two execution modes:
+      - Per-model conda envs (default): uses ``conda run -n {env}`` to switch
+        between {semantic-screening, drugban, graphban, conplex}. This handles
+        version conflicts between baseline upstream repos.
+      - Unified env (``single_env`` set, e.g. ``baseline``): uses ``conda run
+        -n {single_env}`` for ALL models. Requires a single env that satisfies
+        the union of dependencies (see scripts/inference/setup_baseline_env.sh).
+        Eliminates per-model env switching overhead and disk usage.
+
+    Each adapter (scripts/inference/models/<model>_score.py) reads pairs.tsv
+    and emits a uniform CSV (uniprot, chembl_id, prob, pred, threshold) that
+    aggregate.py merges via outer-join.
     """
     cfg = MODEL_RUNNERS[model]
+    target_env = single_env if single_env else cfg["env"]
     out_path = out_dir / f"scores_{model}.csv"
     cmd = [
-        "conda", "run", "-n", cfg["env"], "--no-capture-output",
+        "conda", "run", "-n", target_env, "--no-capture-output",
         "python", str(cfg["script"]),
         "--pairs",  str(pairs_path),
         "--out",    str(out_path),
@@ -147,6 +158,9 @@ def main() -> None:
                     help="comma-separated subset of models to run")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring in parallel (requires 4× GPU memory)")
+    ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
+                    help="run all models in a single conda env (e.g. 'baseline'); "
+                         "see scripts/inference/setup_baseline_env.sh")
     ap.add_argument("--dry-run", action="store_true",
                     help="print model commands without executing")
     args = ap.parse_args()
@@ -160,11 +174,12 @@ def main() -> None:
     print(f"[1/4] expanding pairs → {args.out}/pairs.tsv")
     pairs_path = run_expand(args, args.out)
 
-    print(f"[2/4] scoring with models: {selected}")
+    env_mode = f"single env '{args.single_env}'" if args.single_env else "per-model envs"
+    print(f"[2/4] scoring with models: {selected} ({env_mode})")
     if args.parallel:
         with ThreadPoolExecutor(max_workers=len(selected)) as ex:
             futures = [ex.submit(run_model, m, pairs_path, args.out,
-                                 args.ckpt_corpus, args.dry_run)
+                                 args.ckpt_corpus, args.single_env, args.dry_run)
                        for m in selected]
             for fut in as_completed(futures):
                 model, out_path = fut.result()
@@ -172,7 +187,8 @@ def main() -> None:
     else:
         for m in selected:
             model, out_path = run_model(m, pairs_path, args.out,
-                                        args.ckpt_corpus, args.dry_run)
+                                        args.ckpt_corpus,
+                                        args.single_env, args.dry_run)
             print(f"  ✓ {model} → {out_path}")
 
     if args.dry_run:
