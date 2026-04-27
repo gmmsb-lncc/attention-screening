@@ -1,6 +1,6 @@
-# 🧪 Testes do semantic-screening Pipeline
+# 🧪 Testes do attention-screening Pipeline
 
-Este diretório contém todos os testes do sistema semantic-screening, organizados e executáveis a partir da pasta `tests/`.
+Este diretório contém todos os testes do sistema attention-screening, organizados e executáveis a partir da pasta `tests/`.
 
 ## 📁 Estrutura dos Testes
 

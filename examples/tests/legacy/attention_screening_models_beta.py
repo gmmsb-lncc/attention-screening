@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified benchmark orchestrator for semantic-screening model comparison.
+"""Unified benchmark orchestrator for attention-screening model comparison.
 
 Coordinates the full pipeline:
   Step 0:  Verify / generate scaffold splits
@@ -12,9 +12,9 @@ Coordinates the full pipeline:
   Report:  Comparative report and visualizations
 
 Usage:
-    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3
-    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3 --finetune
-    python semantic_screening_models_beta.py --dataset human --embedding 8M --levels 6 --opt --n_trials 20
+    python attention_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3
+    python attention_screening_models_beta.py --dataset human --embedding 8M --levels 1 2 3 --finetune
+    python attention_screening_models_beta.py --dataset human --embedding 8M --levels 6 --opt --n_trials 20
 """
 
 from __future__ import annotations

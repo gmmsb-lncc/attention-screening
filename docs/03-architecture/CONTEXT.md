@@ -1,14 +1,14 @@
 # CONTEXT.md — Project Context for Developers and LLMs
 
 This document provides the full context needed to understand, modify, or extend the
-**semantic-screening** project. It is designed to be self-contained: any developer or LLM
+**attention-screening** project. It is designed to be self-contained: any developer or LLM
 reading only this file should be able to orient themselves in the codebase.
 
 ---
 
 ## 1. What This Project Does
 
-**semantic-screening** predicts whether a small molecule (drug candidate) will bind to a
+**attention-screening** predicts whether a small molecule (drug candidate) will bind to a
 protein target (kinase), and how strongly. It does this entirely from **primary sequences**
 (amino acids for proteins, SMILES for molecules) — no 3D crystal structures required.
 
@@ -25,7 +25,7 @@ then compared using various ML and deep learning models to predict interaction.
 
 ## 2. The 4-Level Benchmark
 
-The project implements a unified benchmark (`semantic_screening_models_beta.py`) that
+The project implements a unified benchmark (`attention_screening_models_beta.py`) that
 evaluates models at 4 levels of increasing complexity:
 
 ```
@@ -46,13 +46,13 @@ Each level answers a scientific question:
 
 ```bash
 # Default: Levels 1, 2, 3
-python semantic_screening_models.py --dataset non_human --embedding 8M
+python attention_screening_models.py --dataset non_human --embedding 8M
 
 # All 4 levels
-python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1,2,3,4
+python attention_screening_models.py --dataset non_human --embedding 8M --levels 1,2,3,4
 
 # Quick test (only baseline levels)
-python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1,2
+python attention_screening_models.py --dataset non_human --embedding 8M --levels 1,2
 ```
 
 ### CLI arguments
@@ -230,7 +230,7 @@ All 4 levels use the **same test set** from the same scaffold split files.
 
 | File | Purpose |
 |------|---------|
-| `semantic_screening_models_beta.py` | **Unified benchmark orchestrator** (main entry point) |
+| `attention_screening_models_beta.py` | **Unified benchmark orchestrator** (main entry point) |
 | `scaffold_split.py` | Generate scaffold splits |
 | `split_comparison_analysis.py` | Level 1 & 2 (KNN/MLP with fingerprints or embeddings) |
 | `crossattention_split_analysis/experiment.py` | Level 3 & 4 (CNN / CNN+CrossAttention) |
@@ -365,14 +365,14 @@ python scripts/scaffold_split.py --output-dir scaffolds_splits/output --scenario
 
 ```bash
 # Level 1 only
-python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1
+python attention_screening_models.py --dataset non_human --embedding 8M --levels 1
 
 # Level 3 with custom epochs
-python semantic_screening_models.py --dataset non_human --embedding 8M --levels 3 --epochs 100
+python attention_screening_models.py --dataset non_human --embedding 8M --levels 3 --epochs 100
 ```
 
 ### Force recalculation
 
 ```bash
-python semantic_screening_models.py --dataset non_human --embedding 8M --force
+python attention_screening_models.py --dataset non_human --embedding 8M --force
 ```

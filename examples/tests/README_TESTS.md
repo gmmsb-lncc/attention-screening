@@ -1,4 +1,4 @@
-# Testes do Sistema semantic-screening
+# Testes do Sistema attention-screening
 
 Este diretório contém todos os testes do sistema de classificação MLP com auto-adaptação dimensional.
 

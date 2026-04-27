@@ -201,12 +201,12 @@ else
 
     python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
         ${DTK_DIAG_ARGS} \
-        --diagonal-drugban-human        results/semantic-screening-results/drugban/human \
-        --diagonal-drugban-non_human    results/semantic-screening-results/drugban/non_human \
-        --diagonal-drugban-all          results/semantic-screening-results/drugban/all \
-        --diagonal-graphban-human       results/semantic-screening-results/graphban/human \
-        --diagonal-graphban-non_human   results/semantic-screening-results/graphban/non_human \
-        --diagonal-graphban-all         results/semantic-screening-results/graphban/all \
+        --diagonal-drugban-human        results/attention-screening-results/drugban/human \
+        --diagonal-drugban-non_human    results/attention-screening-results/drugban/non_human \
+        --diagonal-drugban-all          results/attention-screening-results/drugban/all \
+        --diagonal-graphban-human       results/attention-screening-results/graphban/human \
+        --diagonal-graphban-non_human   results/attention-screening-results/graphban/non_human \
+        --diagonal-graphban-all         results/attention-screening-results/graphban/all \
         --diagonal-conplex-human        ConPLex/results_universal/human \
         --diagonal-conplex-non_human    ConPLex/results_universal/non_human \
         --diagonal-conplex-all          ConPLex/results_universal/all \

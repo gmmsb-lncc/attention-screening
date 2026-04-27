@@ -236,7 +236,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    os.chdir("/media/storage/leon/semantic-screening")
+    os.chdir("/media/storage/leon/attention-screening")
 
     args = parse_args()
     success = replace_ligand_matrices_with_molformer(args.dataset_type)

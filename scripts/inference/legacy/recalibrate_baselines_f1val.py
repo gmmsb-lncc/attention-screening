@@ -5,7 +5,7 @@ Carrega raw_predictions.npz salvos (contêm val + test predictions),
 re-aplica sweep F1-val para obter novo τ*, recalcula métricas de teste.
 
 Uso (em amazonita-01):
-    cd /media/leon/ssd2tb/semantic-screening
+    cd /media/leon/ssd2tb/attention-screening
     python recalibrate_baselines_f1val.py \
         --results-root results/ \
         --output recalibrated_f1val.json

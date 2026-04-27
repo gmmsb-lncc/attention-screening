@@ -1,8 +1,8 @@
-# 🧬 semantic-screening Source Code
+# 🧬 attention-screening Source Code
 
 **Modular architecture for comprehensive protein-ligand analysis and machine learning prediction.**
 
-This directory contains the core source code of semantic-screening, organized into modules that work together to provide a complete platform for protein-ligand interaction screening.
+This directory contains the core source code of attention-screening, organized into modules that work together to provide a complete platform for protein-ligand interaction screening.
 
 ---
 
@@ -347,7 +347,7 @@ python tests/benchmark_pipeline.py
 
 ## 📄 **License & Citation**
 
-This project is licensed under the MIT License. If you use semantic-screening or the DT-Kinase architecture in your research, please cite:
+This project is licensed under the MIT License. If you use attention-screening or the DT-Kinase architecture in your research, please cite:
 
 ```bibtex
 @phdthesis{dtkinase2026,
@@ -359,10 +359,10 @@ This project is licensed under the MIT License. If you use semantic-screening or
 }
 
 @software{semanticscreening2025,
-  title = {semantic-screening: Open Platform for Semantic Protein-Ligand Interaction Screening},
+  title = {attention-screening: Open Platform for Semantic Protein-Ligand Interaction Screening},
   author = {GMMSB-LNCC Team},
   year = {2025},
-  url = {https://github.com/gmmsb-lncc/semantic-screening}
+  url = {https://github.com/gmmsb-lncc/attention-screening}
 }
 ```
 

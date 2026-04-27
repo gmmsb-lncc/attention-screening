@@ -146,7 +146,7 @@ Comitê parcial (3 modelos): rescala 3→3=STRONG, 2→3=LIKELY, 1→3=UNCERTAIN
 
 **A. Per-model conda envs** (default, mais robusto):
 ```
-semantic-screening:  DT-Kinase, ESM-2 8M, MoLFormer, RDKit
+attention-screening:  DT-Kinase, ESM-2 8M, MoLFormer, RDKit
 drugban:             DrugBAN + DGL + RDKit
 graphban:            GraphBAN + ESM-1b + ChemBERTa + DGL
 conplex:             ConPLex + ProtBERT + Morgan FP
@@ -156,7 +156,7 @@ Cada baseline executa em subprocess `conda run -n {env}`; conflitos de versão i
 **B. Conda env unificado** (`baseline`):
 ```bash
 bash scripts/inference/setup_baseline_env.sh
-python kinase_profiling.py "..." --single-env baseline
+python attention_screening.py "..." --single-env baseline
 ```
 1 env de ~3-4 GB hospeda todas as deps. Pin: Python 3.10, PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3.
 

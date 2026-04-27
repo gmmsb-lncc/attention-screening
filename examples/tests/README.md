@@ -1,6 +1,6 @@
-# 🧪 Testes do semantic-screening
+# 🧪 Testes do attention-screening
 
-Esta pasta contém todos os testes, validações e relatórios do sistema semantic-screening.
+Esta pasta contém todos os testes, validações e relatórios do sistema attention-screening.
 
 ## 📋 Estrutura dos Testes
 

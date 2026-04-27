@@ -1,6 +1,6 @@
-# 📚 Exemplos do semantic-screening
+# 📚 Exemplos do attention-screening
 
-Esta pasta contém exemplos práticos demonstrando as funcionalidades da plataforma semantic-screening.
+Esta pasta contém exemplos práticos demonstrando as funcionalidades da plataforma attention-screening.
 
 ## 🎯 Exemplos Disponíveis
 
@@ -26,7 +26,7 @@ Esta pasta contém exemplos práticos demonstrando as funcionalidades da platafo
 
 ### Executar Exemplo Específico
 ```bash
-cd /path/to/semantic-screening
+cd /path/to/attention-screening
 
 # Exemplo de configuração
 python examples/exemplo_config_management.py

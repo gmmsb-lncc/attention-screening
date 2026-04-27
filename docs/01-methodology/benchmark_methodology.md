@@ -1,6 +1,6 @@
 # Benchmark Methodology
 
-Detailed methodological description of the semantic-screening benchmark. This
+Detailed methodological description of the attention-screening benchmark. This
 document was previously the body of the project README and is preserved here
 for thesis and paper-supplement readers. The README itself is now focused on
 end-user inference; for the user-facing committee guide see
@@ -206,7 +206,7 @@ evaluation:
 ## CLI Reference (Benchmark Training)
 
 For benchmark reproducibility (training the 6 levels from scratch). For
-inference on user-supplied inputs see `kinase_profiling.py` documented in the
+inference on user-supplied inputs see `attention_screening.py` documented in the
 top-level README.
 
 | Argument | Description | Default |
