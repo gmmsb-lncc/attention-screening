@@ -16,3 +16,27 @@ __pycache__/
 
 # OS/editor
 .DS_Store
+
+# Committee inference subset: track seed_42 best_model_epoch_*.pth.
+# Parent-dir dance to defeat results/ above. Calibration jsons live in
+# DrugBAN/results_universal/results_universal/ (not gitignored at dir
+# level) and are negated by **/drugban_calibration.json in repo root.
+!results/
+results/*
+!results/human/
+results/human/*
+!results/human/seed_42/
+results/human/seed_42/*
+!results/human/seed_42/best_model_epoch_*.pth
+
+!results/non_human/
+results/non_human/*
+!results/non_human/seed_42/
+results/non_human/seed_42/*
+!results/non_human/seed_42/best_model_epoch_*.pth
+
+!results/all/
+results/all/*
+!results/all/seed_42/
+results/all/seed_42/*
+!results/all/seed_42/best_model_epoch_*.pth

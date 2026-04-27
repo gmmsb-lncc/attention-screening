@@ -7,3 +7,27 @@ __pycache__/
 *.pth
 *.parquet
 feature_cache/
+
+# Committee inference subset: track seed_42 best_model_epoch_*.pth.
+# Defeats both results/ above and the local *.pth above. Calibration
+# jsons live in GraphBAN/results_universal/ (not gitignored) and are
+# negated by **/graphban_calibration.json in repo root.
+!results/
+results/*
+!results/human/
+results/human/*
+!results/human/seed_42/
+results/human/seed_42/*
+!results/human/seed_42/best_model_epoch_*.pth
+
+!results/non_human/
+results/non_human/*
+!results/non_human/seed_42/
+results/non_human/seed_42/*
+!results/non_human/seed_42/best_model_epoch_*.pth
+
+!results/all/
+results/all/*
+!results/all/seed_42/
+results/all/seed_42/*
+!results/all/seed_42/best_model_epoch_*.pth
