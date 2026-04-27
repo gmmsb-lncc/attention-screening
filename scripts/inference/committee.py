@@ -17,7 +17,14 @@ Outputs in <out>/:
     scores_dtkinase.csv, scores_drugban.csv, scores_graphban.csv, scores_conplex.csv
     consensus.csv
     consensus.top.csv (if --top-k > 0)
-    attention/<pair_id>/{dtkinase_Mk.npz, dtkinase_hierpool.npz, drugban_BAN.npz, graphban_BAN.npz, consensus_heatmap.pdf}
+    attention/<pair_id>/
+        <pair_id>_attention.png       overview 4-panel (PNG, ~250 KB)
+        <pair_id>_attention.pdf       vector overview (PDF)
+        <pair_id>_hotspots.png        focused single-panel heatmap with
+                                      top residues + tokens annotated
+        dtkinase_Mk.npz               raw [K, sp, sl] tensor + agg
+        dtkinase_hierpool.npz         stage 1 + stage 2 attention weights
+        drugban_BAN.npz, graphban_BAN.npz   (when adapters available)
 """
 from __future__ import annotations
 import argparse
@@ -119,9 +126,19 @@ def run_aggregate(out_dir: Path, top_k: int) -> Path:
     return consensus_path
 
 
-def run_attention(out_dir: Path, consensus_path: Path,
-                  pairs_path: Path, top_k: int) -> None:
-    """Extract attention for top-K STRONG/LIKELY pairs (if attention.py exists)."""
+def run_attention(out_dir: Path, consensus_path: Path, pairs_path: Path,
+                  top_k: int, ckpt_corpus: str = "all") -> None:
+    """Extract attention for top-K STRONG/LIKELY pairs.
+
+    Generates per-pair PNG + PDF visualizations under
+    <out_dir>/attention/<pair_id>/:
+      <pair_id>_attention.png    overview 4-panel
+      <pair_id>_attention.pdf    vector overview
+      <pair_id>_hotspots.png     focused single-panel heatmap with top
+                                 residues + tokens annotated
+      dtkinase_Mk.npz            raw [K, sp, sl] tensor + agg stats
+      dtkinase_hierpool.npz      stage 1 + stage 2 weights
+    """
     att_script = INFER_DIR / "attention.py"
     if not att_script.exists():
         print("attention.py not yet implemented — skipping attention extraction")
@@ -133,6 +150,7 @@ def run_attention(out_dir: Path, consensus_path: Path,
         "--out-dir",   str(out_dir / "attention"),
         "--top-k",     str(top_k),
         "--tier",      "STRONG,LIKELY",
+        "--corpus",    ckpt_corpus,
     ]
     subprocess.run(cmd, check=True)
 
@@ -199,7 +217,8 @@ def main() -> None:
     consensus_path = run_aggregate(args.out, args.top_k)
 
     print(f"[4/4] attention extraction (top-{args.top_k} STRONG/LIKELY)")
-    run_attention(args.out, consensus_path, pairs_path, args.top_k)
+    run_attention(args.out, consensus_path, pairs_path, args.top_k,
+                  ckpt_corpus=args.ckpt_corpus)
 
     print(f"done. consensus → {consensus_path}")
 
