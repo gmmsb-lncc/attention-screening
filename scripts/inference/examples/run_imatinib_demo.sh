@@ -86,7 +86,7 @@ require_file() {
 # -----------------------------------------------------------------------------
 
 check_prerequisites() {
-    print_banner '[0/5] Pre-flight checks'
+    print_banner '[0/6] Pre-flight checks'
 
     [[ -x "${PYBIN}" ]] || {
         echo "FATAL: python interpreter not found at ${PYBIN}" >&2
@@ -116,7 +116,7 @@ check_prerequisites() {
 # -----------------------------------------------------------------------------
 
 stage_expand_pairs() {
-    print_banner '[1/5] Expand pairs (imatinib × human kinome)'
+    print_banner '[1/6] Expand pairs (imatinib × human kinome)'
     mkdir -p "${OUT_DIR}"
 
     "${PYBIN}" "${REPO}/scripts/inference/expand_pairs.py" \
@@ -134,7 +134,7 @@ stage_expand_pairs() {
 # -----------------------------------------------------------------------------
 
 stage_score_via_lookup() {
-    print_banner '[2/5] Score 4 models via lookup on universal test set'
+    print_banner '[2/6] Score 4 models via lookup on universal test set'
 
     REPO_ARG="${REPO}" \
     OUT_ARG="${OUT_DIR}" \
@@ -175,6 +175,19 @@ if n_hits == 0:
 print(f"  {QUERY_CHEMBL} matches in universal_test: {n_hits} rows "
       f"({hit_rows.drop_duplicates(['seq_id']).shape[0]} unique kinases)")
 
+# Overwrite pairs.tsv with the lookup-aligned rows. The original pairs.tsv
+# (from stage 1 expand_pairs.py) used chembl_id=USER_LIGAND placeholder;
+# replacing it here with chembl_id=CHEMBL941 + universal_test sequences
+# means downstream attention.py can recover sequence/SMILES via merge.
+pd.DataFrame({
+    "uniprot":   hit_rows["seq_id"].astype(str).values,
+    "sequence":  hit_rows["seq"].values,
+    "chembl_id": QUERY_CHEMBL,
+    "smiles":    hit_rows["canonical_smiles"].values,
+    "source":    "imatinib_demo_lookup",
+}).to_csv(OUT/"pairs.tsv", sep="\t", index=False)
+print(f"  rewrote pairs.tsv with lookup-aligned rows ({QUERY_CHEMBL} ↔ universal_test)")
+
 MODELS = [
     ("dtkinase",  os.environ["DTK_NPZ_ARG"], os.environ["DTK_SIDE_ARG"]),
     ("drugban",   os.environ["DBN_NPZ_ARG"], os.environ["DBN_SIDE_ARG"]),
@@ -207,7 +220,7 @@ PYEOF
 # -----------------------------------------------------------------------------
 
 stage_aggregate() {
-    print_banner '[3/5] Aggregate consensus (soft mean + Borda + tier)'
+    print_banner '[3/6] Aggregate consensus (soft mean + Borda + tier)'
 
     "${PYBIN}" "${REPO}/scripts/inference/aggregate.py" \
         --scores-dir "${OUT_DIR}" \
@@ -220,7 +233,7 @@ stage_aggregate() {
 # -----------------------------------------------------------------------------
 
 stage_annotate() {
-    print_banner '[4/5] Annotate consensus with kinase metadata'
+    print_banner '[4/6] Annotate consensus with kinase metadata'
 
     REPO_ARG="${REPO}" OUT_ARG="${OUT_DIR}" \
     "${PYBIN}" - <<'PYEOF'
@@ -253,7 +266,7 @@ PYEOF
 # -----------------------------------------------------------------------------
 
 stage_validate() {
-    print_banner '[5/5] Biological validation report'
+    print_banner '[5/6] Biological validation report'
 
     OUT_ARG="${OUT_DIR}" \
     "${PYBIN}" - <<'PYEOF'
@@ -319,6 +332,27 @@ PYEOF
 # Main
 # -----------------------------------------------------------------------------
 
+stage_attention() {
+    print_banner '[6/6] Extract attention maps for top STRONG hits (PNG + PDF)'
+    echo "  Extracts DT-Kinase 3-level attention via forward-hooks."
+    echo "  Cold-start cost: ~30 s (ESM-2 8M load + MoLFormer load)."
+    echo "  Per-pair output: <pair_id>_attention.{png,pdf} + <pair_id>_hotspots.png"
+    echo ""
+
+    "${PYBIN}" "${REPO}/scripts/inference/attention.py" \
+        --consensus "${OUT_DIR}/consensus.csv" \
+        --pairs     "${OUT_DIR}/pairs.tsv" \
+        --out-dir   "${OUT_DIR}/attention" \
+        --top-k     5 \
+        --tier      "STRONG" \
+        --corpus    "${CKPT_CORPUS}" \
+        2>&1 | grep -v -E "^\[2[0-3]:" | tail -20
+    echo ""
+    echo "  attention/ output:"
+    find "${OUT_DIR}/attention" -type f 2>/dev/null | head -20 | sed 's/^/    /'
+}
+
+
 main() {
     echo "=============================================================="
     echo " DT-Kinase committee demo"
@@ -334,6 +368,7 @@ main() {
     stage_aggregate
     stage_annotate
     stage_validate
+    stage_attention
 
     print_banner 'DONE'
     echo "outputs:"
