@@ -1,4 +1,4 @@
-# 📘 semantic-screening: DT-Kinase Methodology Review
+# 📘 attention-screening: DT-Kinase Methodology Review
 
 **Versão**: 3.0
 **Data**: Fevereiro 2026  
@@ -9,7 +9,7 @@
 
 ## 🎯 Executive Summary
 
-**semantic-screening** é uma plataforma aberta para **predição de interações proteína-ligante** implementando a arquitetura neural **DT-Kinase** (CNN + Cross-Attention). O sistema combina:
+**attention-screening** é uma plataforma aberta para **predição de interações proteína-ligante** implementando a arquitetura neural **DT-Kinase** (CNN + Cross-Attention). O sistema combina:
 
 - **Machine Learning clássico** (12 algoritmos por problema)
 - **Deep Learning** (DT-Kinase: CNN + Cross-Attention)
@@ -875,7 +875,7 @@ config = IntegratedConfig(
 
 ```bash
 # Benchmark completo com todos os 3 níveis e 5 seeds
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset non_human --embedding 650M \
     --seeds 42 123 456 789 1024
 ```
@@ -884,7 +884,7 @@ python semantic_screening_models.py \
 
 ```bash
 # Apenas Level 1 e 2 (sem GPU, rápido)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset non_human --embedding 8M --levels 1,2
     
     classification_models=['RandomForest', 'XGBoost'],

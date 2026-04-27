@@ -80,7 +80,7 @@ Scaffold Split:  Train (~80%)  /  Val (~10%)  /  Test (~10%)
 ## Architecture
 
 ```
-semantic_screening_models.py          ← Thin CLI entry point
+attention_screening_models.py          ← Thin CLI entry point
 │
 └── benchmark/
     ├── __init__.py                   ← Public API exports
@@ -134,11 +134,11 @@ semantic_screening_models.py          ← Thin CLI entry point
 ```bash
 # Full benchmark: core 6 levels (non-human dataset, ESM-2 8M)
 # Train
-python semantic_screening_models.py --dataset non_human --embedding 8M \
+python attention_screening_models.py --dataset non_human --embedding 8M \
     --levels 1a 1b 1c 2 3 4cnn --train
 
 # Test
-python semantic_screening_models.py --dataset non_human --embedding 8M \
+python attention_screening_models.py --dataset non_human --embedding 8M \
     --levels 1a 1b 1c 2 3 4cnn --test
 
 # Or use the automated script:
@@ -148,7 +148,7 @@ DATASET=non_human EMBEDDING=8M LEVELS_CSV=1a,1b,1c,2,3,4cnn bash run_benchmark.s
 ## CLI Reference
 
 ```
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset {human,non_human,all}       # Required
     --embedding {8M,150M,650M}            # Default: 8M
     --levels 1a 1b 1c 2 3 4cnn           # Default: all available

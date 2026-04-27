@@ -1,4 +1,4 @@
-# semantic-screening - Requirements
+# attention-screening - Requirements
 # Dependências para o projeto completo incluindo módulo build
 
 # ==============================================================================

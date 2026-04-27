@@ -418,5 +418,5 @@ The test suite provides comprehensive coverage from basic validation to advanced
 
 ---
 
-**Maintained by**: semantic-screening Development Team  
+**Maintained by**: attention-screening Development Team  
 **Contact**: For issues, open a GitHub issue or contact the team

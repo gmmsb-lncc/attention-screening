@@ -1,5 +1,5 @@
 """
-Exemplo de uso do ESM-C (esmc-300m-2024-12) na plataforma semantic-screening.
+Exemplo de uso do ESM-C (esmc-300m-2024-12) na plataforma attention-screening.
 
 Este script demonstra como usar o novo modelo ESM-C para gerar
 embeddings de proteínas usando a interface integrada.
@@ -10,7 +10,7 @@ Features demonstradas:
 3. Comparação de desempenho ESM-2 vs ESM-C
 4. Uso do ProteinEmbedding com novo modelo
 
-Autor: semantic-screening team
+Autor: attention-screening team
 Data: 2025-11-20
 """
 

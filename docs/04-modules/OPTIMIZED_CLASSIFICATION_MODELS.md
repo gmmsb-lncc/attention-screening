@@ -1,4 +1,4 @@
-# Optimized Classification Models - semantic-screening
+# Optimized Classification Models - attention-screening
 
 ## 📋 Summary of Changes
 
@@ -70,7 +70,7 @@
 - ⚠️ Does not capture complex non-linear relationships
 - ⚠️ Assumes linear (or near-linear) separation
 
-**Why it works well for semantic-screening**:
+**Why it works well for attention-screening**:
 ```python
 # Embeddings are already high-dimensional representations (1536 features)
 # Linear models work surprisingly well in these spaces!

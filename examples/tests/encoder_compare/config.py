@@ -27,11 +27,11 @@ LIGAND_DIM = 768
 # =============================================================================
 
 DATASET_PATHS = {
-    'human': '/media/storage/leon/semantic-screening/tests/datasets/kinase_human_compounds.tsv',
-    'non_human': '/media/storage/leon/semantic-screening/tests/datasets/kinase_non_human_compounds.tsv',
+    'human': '/media/storage/leon/attention-screening/tests/datasets/kinase_human_compounds.tsv',
+    'non_human': '/media/storage/leon/attention-screening/tests/datasets/kinase_non_human_compounds.tsv',
 }
 
-EMBEDDING_BASE_PATH = '/media/storage/leon/semantic-screening/results/protein_model_benchmark_{dataset_type}_v2'
+EMBEDDING_BASE_PATH = '/media/storage/leon/attention-screening/results/protein_model_benchmark_{dataset_type}_v2'
 
 
 # =============================================================================

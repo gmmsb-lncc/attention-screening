@@ -643,7 +643,7 @@ conda activate docktkinase  # ou: source env/bin/activate
 
 **Passo 2**: Executar Level 5-Lite (1 seed, teste rápido)
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 5 \
@@ -658,7 +658,7 @@ cat results/benchmark_human_8M/level5_lite_8M/scaffold_seed42.json
 ### Para Produção (5 seeds + estatísticas)
 
 ```bash
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 5 \
@@ -871,7 +871,7 @@ python scripts/run_complete_pipeline.py \
 
 ### 2026-03-02 - v1.0 (Validado Experimentalmente)
 - ✅ Implementação completa em `crossattention_split_analysis/model.py`
-- ✅ Integração CLI em `semantic_screening_models.py` (or `legacy/semantic_screening_models_beta.py`) (`--levels 5`)
+- ✅ Integração CLI em `attention_screening_models.py` (or `legacy/attention_screening_models_beta.py`) (`--levels 5`)
 - ✅ Validação experimental: **MCC = 0.499 (Epoch 3) supera Level 1 (MCC = 0.428)**
 - ✅ Documentação atualizada com resultados reais
 
@@ -885,7 +885,7 @@ python scripts/run_complete_pipeline.py \
 ## 📞 Contato
 
 **Mantenedor**: Leon (gmmsb-lncc)  
-**Repositório**: https://github.com/gmmsb-lncc/semantic-screening  
+**Repositório**: https://github.com/gmmsb-lncc/attention-screening  
 **Branch**: `cross_attention_lite`  
 **Licença**: MIT
 

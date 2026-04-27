@@ -2,7 +2,7 @@
 
 *Registro científico do processo de diagnóstico e tentativas de melhoria
 sobre a arquitetura `cross-attention 2D + CNN + HierPool` no contexto da
-matriz cross-dataset 3×3 do benchmark `semantic-screening`.*
+matriz cross-dataset 3×3 do benchmark `attention-screening`.*
 
 ---
 

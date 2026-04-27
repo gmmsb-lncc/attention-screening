@@ -1,15 +1,25 @@
-# semantic-screening 🧬
+# attention-screening 🧬
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 [![License: LGPL-3.0](https://img.shields.io/badge/License-LGPL--3.0-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**Hierarchical kinase-ligand interaction prediction with foundation language models.**
+**Hierarchical kinase-ligand interaction prediction through attention-based
+foundation models.**
 
-semantic-screening is a kinase-inhibitor screening framework that runs four
+attention-screening is a kinase-inhibitor screening framework that runs four
 independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
 **committee** and returns ranked predictions with attention maps, given a
 SMILES, a FASTA sequence, or a batch file as input.
+
+> **Why the name** — unifying mechanism across all four committee models is
+> an **attention operator**, direct or indirect: cross-attention 2D +
+> HierPool (DT-Kinase), Bilinear Attention Network (DrugBAN, GraphBAN), and
+> contrastive co-embedding / alignment in the metric space (ConPLex). The
+> framework is a *committee of four attention paradigms* applied to the
+> same protein-ligand pair, and the per-model attention tensors are exposed
+> as first-class outputs (residue-level + atom-level + interaction-cell-level).
+> See the **Attention as the unifying core** section below.
 
 ```mermaid
 flowchart LR
@@ -23,7 +33,7 @@ flowchart LR
     A1 --> KP
     A2 --> KP
     A3 --> KP
-    KP["<b>kinase_profiling.py</b><br/>detect input + dispatch"]:::orch
+    KP["<b>attention_screening.py</b><br/>detect input + dispatch"]:::orch
     KP --> PAIRS["<b>pairs.tsv</b><br/>N × M protein–ligand pairs"]:::data
 
     PAIRS --> DTK["<b>DT-Kinase</b><br/>cross-attn 2D + CNN"]:::dtk
@@ -61,7 +71,7 @@ roughly 30% of all cellular proteins through phosphorylation. Achieving
 **selectivity** across 518 paralogs that share more than 85% structural
 similarity in the ATP pocket is the central pharmacological challenge.
 
-semantic-screening abandons geometric representations and operates directly
+attention-screening abandons geometric representations and operates directly
 on **primary sequence and SMILES** interpreted through contextual embeddings
 from foundation language models (ESM-2 + MoLFormer). Selectivity becomes a
 question of **semantic compatibility in latent space** rather than 3D fit,
@@ -82,8 +92,8 @@ recommended setup now installs all four in a single environment named
 `baseline` (~3-4 GB). Pick **one** path:
 
 ```bash
-git clone https://github.com/gmmsb-lncc/semantic-screening.git
-cd semantic-screening
+git clone https://github.com/gmmsb-lncc/attention-screening.git
+cd attention-screening
 
 # Option A — conda (recommended, ~10 min)
 bash scripts/inference/setup_baseline_env.sh
@@ -100,51 +110,71 @@ fallback is auto-detected on macOS or hosts without `nvidia-smi`.
 
 ### 2. Run the committee on your data
 
+> Entry point: **`attention_screening.py`** at the repository root.
+> A backward-compatible symlink `kinase_profiling.py` → `attention_screening.py`
+> is preserved for users following older docs. Both names invoke the same
+> pipeline.
+
 A single command does everything. The script auto-detects whether the input
 is a SMILES string, a sequence, or a file:
 
 ```bash
-# SMILES string  → ranked against the 518-kinase human kinome reference
-python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
+# SMILES string → DEFAULT: runs human FIRST, then non_human (two passes,
+# matched ckpts). Outputs are emitted into the same dir with prefixes:
+#   human_consensus.csv, human_scores_dtkinase.csv, ...
+#   non_human_consensus.csv, non_human_scores_dtkinase.csv, ...
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O"
 
-# Inline AA sequence  → ranked against the 110k ChEMBL kinase-inhibitor library
-python kinase_profiling.py "MGNNHGTYLG..."
+# Single-organism override
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism all
 
-# File: FASTA  → same as inline sequence
-python kinase_profiling.py my_kinase.fa
+# Inline AA sequence → ranked against the 110k ChEMBL kinase-inhibitor library
+python attention_screening.py "MGNNHGTYLG..."
+
+# File: FASTA → same as inline sequence
+python attention_screening.py my_kinase.fa
 
 # File: .smi (Daylight format, optionally multi-line)
-python kinase_profiling.py compounds.smi
+python attention_screening.py compounds.smi
 
 # File: CSV / TSV / TXT (column order does not matter)
-python kinase_profiling.py pairs.csv
+python attention_screening.py pairs.csv
 
 # Use unified env explicitly
-python kinase_profiling.py "CCO..." --single-env baseline --top-k 50
+python attention_screening.py "CCO..." --single-env baseline --top-k 50
 ```
 
 ### 3. Read the consensus
 
-Each run writes a self-contained directory under `results/inference/`:
+Each run writes a self-contained directory under `results/inference/`. In
+the **default dual-pass** mode (no `--organism` flag), files are prefixed
+with `human_` and `non_human_` so the user can compare the two screens
+side-by-side without navigating into per-organism subdirectories:
 
 ```
 results/inference/<run_id>/
-├── pairs.tsv                       (input expanded into protein-ligand pairs)
-├── scores_dtkinase.csv             (per-model probability + threshold)
-├── scores_drugban.csv
-├── scores_graphban.csv
-├── scores_conplex.csv
-├── consensus.csv                   (ranked, with prob_mean + tier)
-├── consensus.annotated.csv         (+ kinase target names + organism)
-├── consensus.top.csv               (top-K subset)
-└── attention/                      (only for STRONG / LIKELY pairs)
-    └── <pair_id>/
-        ├── dtkinase_Mk.npz
-        ├── dtkinase_hierpool.npz
-        ├── drugban_BAN.npz
-        ├── graphban_BAN.npz
-        └── consensus_heatmap.pdf
+├── human_pairs.tsv
+├── human_scores_dtkinase.csv         (per-model probability + threshold)
+├── human_scores_drugban.csv
+├── human_scores_graphban.csv
+├── human_scores_conplex.csv
+├── human_consensus.csv               (ranked, with prob_mean + tier)
+├── human_consensus.annotated.csv     (+ kinase target names + organism)
+├── human_consensus.top.csv
+├── human_attention/                  (top-K STRONG / LIKELY pairs)
+│   └── <pair_id>/
+│       ├── dtkinase_Mk.npz
+│       ├── dtkinase_hierpool.npz
+│       ├── drugban_BAN.npz
+│       ├── graphban_BAN.npz
+│       └── consensus_heatmap.pdf
+└── non_human_*    (same set of files, prefixed `non_human_`)
 ```
+
+When `--organism` is given explicitly, the prefix is omitted and the
+single-pass output (`pairs.tsv`, `consensus.csv`, `attention/`, etc.)
+sits directly in `<run_id>/`.
 
 The committee verdict per pair is the **tier** column:
 
@@ -174,11 +204,48 @@ bash scripts/inference/examples/run_kpneumo_thil_demo.sh
 
 ---
 
+## 🎯 Attention as the unifying core
+
+All four committee models are **attention-based**, directly or indirectly,
+and the framework's interpretability story is built on extracting and
+comparing those attention signals across paradigms:
+
+| Model | Attention mechanism | Per-pair output exposed |
+|---|---|---|
+| **DT-Kinase** | Cross-attention 2D over ESM-2 + MoLFormer; multi-head dot product → 16-channel interaction map → CNN 2D → hierarchical attention pooling (lig-axis → prot-axis) | Three levels: M_k pre-CNN, HierPool stage-1, HierPool stage-2 — saved as `dtkinase_Mk.npz`, `dtkinase_hierpool.npz`, plus structured JSON with per-atom + per-residue weights |
+| **DrugBAN** | Bilinear Attention Network (BAN) — pairwise residue × atom matrix learned end-to-end | `drugban_BAN.npz` with the bilinear attention matrix |
+| **GraphBAN** | BAN on top of ESM-1b + ChemBERTa knowledge-distilled features (attention enters via the teacher embeddings + the BAN head) | `graphban_BAN.npz` (analogous schema) |
+| **ConPLex** | Contrastive co-embedding (ProtBERT + Morgan FP projected into a shared metric space; alignment is the implicit attention signal) | Cosine similarity per pair (no positional matrix); contributes to the consensus rank but not to the attention overlay |
+
+For each pair flagged as STRONG/LIKELY by the committee, the pipeline
+emits:
+
+```
+attention/<pair_id>/
+├── <pair_id>_attention.png       4-panel overview (M̄, prot bar, lig bar, per-head)
+├── <pair_id>_attention.pdf       vector overview
+├── <pair_id>_hotspots.png        residue × token cell heatmap with top-3 boxed
+├── <pair_id>_sequence_track.png  1D protein-sequence attention track + sliding mean
+├── <pair_id>_ligand_2d.png       2D molecule colored by per-atom attention
+├── <pair_id>_attention.json      structured graph (atoms, bonds, residues, top cells)
+├── dtkinase_Mk.npz               raw [16, sp, sl] tensor + per-axis aggregates
+├── dtkinase_hierpool.npz         stage-1 + stage-2 weights
+├── drugban_BAN.npz               BAN matrix (when adapter available)
+└── graphban_BAN.npz              BAN matrix (when adapter available)
+```
+
+The structured JSON is the same data the PNGs render from; consume it from
+Cytoscape, D3.js, NetworkX, Mol\* / NGL Viewer, RDKit Draw, or biotite for
+custom visualizations.
+
+---
+
 ## 📂 Project Structure
 
 ```
-semantic-screening/
-├── kinase_profiling.py                 # ★ single-command user entry point
+attention-screening/
+├── attention_screening.py              # ★ single-command user entry point
+├── kinase_profiling.py                 # legacy alias (symlink → attention_screening.py)
 ├── requirements-baseline.txt           # pip/venv dependency manifest
 ├── scripts/
 │   └── inference/                      # ★ committee pipeline
@@ -281,12 +348,12 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 ## Citation
 
 ```bibtex
-@software{semanticscreening2026,
-  title   = {semantic-screening: kinase-ligand interaction profiling
+@software{attentionscreening2026,
+  title   = {attention-screening: kinase-ligand interaction profiling
              with a foundation-model committee},
   author  = {Sulfierry, Leon and GMMSB-LNCC},
   year    = {2026},
-  url     = {https://github.com/gmmsb-lncc/semantic-screening},
+  url     = {https://github.com/gmmsb-lncc/attention-screening},
   version = {4.0}
 }
 ```
@@ -295,7 +362,7 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 
 ## Contact
 
-Repository: [gmmsb-lncc/semantic-screening](https://github.com/gmmsb-lncc/semantic-screening)
-Issues: [Bug reports & features](https://github.com/gmmsb-lncc/semantic-screening/issues)
+Repository: [gmmsb-lncc/attention-screening](https://github.com/gmmsb-lncc/attention-screening)
+Issues: [Bug reports & features](https://github.com/gmmsb-lncc/attention-screening/issues)
 
 **Status**: Production Ready · **Version**: 4.0 · **Last updated**: April 2026

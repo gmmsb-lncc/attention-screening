@@ -1,4 +1,4 @@
-# semantic-screening: Methodology & Theory
+# attention-screening: Methodology & Theory
 
 **Author**: Leon Sulfierry (GMMSB-LNCC)
 **Date**: March 2026
@@ -8,7 +8,7 @@
 
 ## Abstract
 
-semantic-screening is a modular, scalable platform for predicting kinase–ligand bioactivity using foundation language models. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical Morgan fingerprints to learned bimodal attention pooling and CNN 2D interaction maps — under a **single independent variable** protocol. All non-end-to-end levels share the same canonical KNN/MLP classifiers, scaffold-based splits (Bemis–Murcko), monotonic profile filtering, and multi-seed evaluation (5 seeds). The primary metric is MCC (Matthews Correlation Coefficient). This document details the theoretical foundations, architectural decisions, and evaluation methodology.
+attention-screening is a modular, scalable platform for predicting kinase–ligand bioactivity using foundation language models. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical Morgan fingerprints to learned bimodal attention pooling and CNN 2D interaction maps — under a **single independent variable** protocol. All non-end-to-end levels share the same canonical KNN/MLP classifiers, scaffold-based splits (Bemis–Murcko), monotonic profile filtering, and multi-seed evaluation (5 seeds). The primary metric is MCC (Matthews Correlation Coefficient). This document details the theoretical foundations, architectural decisions, and evaluation methodology.
 
 ---
 
@@ -22,7 +22,7 @@ Beyond human kinases, bacterial kinases of the Hanks type represent critical tar
 
 ### 1.2 The Semantic Hypothesis
 
-semantic-screening proposes a paradigm shift: abandon geometric representations and operate directly on **primary sequence information** interpreted through contextual embeddings from foundation language models. The central hypothesis: **sequence determines structure, determines function** — and this mapping is computationally recoverable via pre-trained Transformers.
+attention-screening proposes a paradigm shift: abandon geometric representations and operate directly on **primary sequence information** interpreted through contextual embeddings from foundation language models. The central hypothesis: **sequence determines structure, determines function** — and this mapping is computationally recoverable via pre-trained Transformers.
 
 ### 1.3 Problem Formulation
 
@@ -254,7 +254,7 @@ Every experiment runs across 5 independent seeds: `{42, 123, 456, 789, 1024}`. R
 
 ### 7.1 Software Architecture
 
-- **Entry point**: `semantic_screening_models.py` (thin CLI wrapper)
+- **Entry point**: `attention_screening_models.py` (thin CLI wrapper)
 - **Package**: `benchmark/` (SOLID-compliant, 15 modules)
 - **Design patterns**: Template Method, Facade, Frozen Dataclass
 

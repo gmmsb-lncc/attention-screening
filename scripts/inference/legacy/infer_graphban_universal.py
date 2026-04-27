@@ -3,7 +3,7 @@ Inferência GraphBAN sobre universal_val.tsv + universal_test.tsv.
 Carrega checkpoint best_model, processa universal val + test, salva raw_predictions.npz.
 
 Uso (diamante-02):
-    cd <semantic-screening root>
+    cd <attention-screening root>
     python infer_graphban_universal.py --corpus all --seeds 42 123 456 789 1024
 """
 

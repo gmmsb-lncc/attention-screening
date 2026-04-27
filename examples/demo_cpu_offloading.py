@@ -5,7 +5,7 @@ Exemplo: Pipeline com Modelo ESM-2 Grande usando CPU Offloading
 Este script demonstra como processar proteínas com modelos ESM-2 grandes
 (3B ou 15B parâmetros) em máquinas com VRAM limitada.
 
-Autor: semantic-screening Team
+Autor: attention-screening Team
 Data: 2024
 """
 
@@ -263,7 +263,7 @@ def demo_different_configurations():
 def main():
     """Main demonstration function."""
     print("\n" + "="*70)
-    print("🧬 semantic-screening - CPU Offloading Demo")
+    print("🧬 attention-screening - CPU Offloading Demo")
     print("="*70)
     print("\nThis demo shows how to use large ESM-2 models with CPU offloading")
     print("to process proteins on machines with limited GPU memory.\n")

@@ -103,7 +103,7 @@ if __name__ == "__main__":
     print("🧬 Starting pipeline with MoLFormer for ligand embedding matrices...")
     
     # Change to the project directory
-    os.chdir("/media/storage/leon/semantic-screening")
+    os.chdir("/media/storage/leon/attention-screening")
     
     # Activate environment and run pipeline
     run_pipeline_with_molformer()

@@ -335,7 +335,7 @@ configs = [
 ### 5.1 Baseline Replication
 ```bash
 # Current Level 5-Lite baseline
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 5 \
@@ -352,7 +352,7 @@ python semantic_screening_models.py \
 ### 5.2 Level 6 CLI Interface
 ```bash
 # Phase 1: Warmup + Augmentation
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
@@ -365,7 +365,7 @@ python semantic_screening_models.py \
     --augment_noise 0.05
 
 # Phase 2: Grid Search
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
@@ -374,7 +374,7 @@ python semantic_screening_models.py \
     --seeds 42
 
 # Phase 3: Full Optimization
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
@@ -626,7 +626,7 @@ ensemble_f1 = f1_score(all_labels, preds)
 
 ```bash
 # Full Level 6 pipeline (all 3 stages)
-python semantic_screening_models.py \
+python attention_screening_models.py \
     --dataset human \
     --embedding 8M \
     --levels 6 \
