@@ -142,16 +142,37 @@ Comitê parcial (3 modelos): rescala 3→3=STRONG, 2→3=LIKELY, 1→3=UNCERTAIN
 
 ## Requisitos
 
-### Conda envs (per CLAUDE.md)
+### 3 opções de instalação
 
+**A. Per-model conda envs** (default, mais robusto):
 ```
 semantic-screening:  DT-Kinase, ESM-2 8M, MoLFormer, RDKit
-drugban:             DrugBAN + DGL + RDKit (env conflict c/ outros)
+drugban:             DrugBAN + DGL + RDKit
 graphban:            GraphBAN + ESM-1b + ChemBERTa + DGL
 conplex:             ConPLex + ProtBERT + Morgan FP
 ```
+Cada baseline executa em subprocess `conda run -n {env}`; conflitos de versão isolados. ~15 GB total.
 
-Cada baseline executa em subprocess `conda run -n {env}`; conflitos de versão isolados.
+**B. Conda env unificado** (`baseline`):
+```bash
+bash scripts/inference/setup_baseline_env.sh
+python kinase_profiling.py "..." --single-env baseline
+```
+1 env de ~3-4 GB hospeda todas as deps. Pin: Python 3.10, PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3.
+
+**C. Python venv via pip** (`requirements-baseline.txt`):
+```bash
+bash scripts/inference/setup_baseline_venv.sh                 # auto-detect CUDA
+bash scripts/inference/setup_baseline_venv.sh --cpu           # force CPU build
+# OU manual:
+python -m venv env_baseline && source env_baseline/bin/activate
+pip install torch==2.4.1 torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu121
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu121/repo.html
+pip install -r requirements-baseline.txt
+pip install --no-deps dscript
+```
+Sem conda. ~3 GB venv. Compatível Linux+CUDA, macOS+CPU.
 
 ### Checkpoints (todos locais)
 
