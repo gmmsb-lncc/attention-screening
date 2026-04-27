@@ -1,135 +1,139 @@
 # semantic-screening 🧬
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 [![License: LGPL-3.0](https://img.shields.io/badge/License-LGPL--3.0-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
-[![GitHub](https://img.shields.io/badge/GitHub-gmmsb--lncc%2Fsemantic--screening-green.svg)](https://github.com/gmmsb-lncc/semantic-screening)
 
-**Hierarchical benchmark framework for semantic screening of protein–ligand interactions using foundation language models.**
+**Hierarchical kinase-ligand interaction prediction with foundation language models.**
 
-semantic-screening is an extensible platform that combines frozen protein language models ([ESM-2](https://github.com/facebookresearch/esm)) with molecular language models ([MoLFormer](https://github.com/IBM/molformer)) to predict compound bioactivity against kinase targets. It implements a **six-level hierarchical benchmark** that decomposes the sources of predictive gain — from classical fingerprints to learned bimodal attention pooling and 2D interaction maps — under a single, rigorously controlled experimental protocol with scaffold-based splitting and multi-seed evaluation.
+semantic-screening is a kinase-inhibitor screening framework that runs four
+independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
+**committee** and returns ranked predictions with attention maps, given a
+SMILES, a FASTA sequence, or a batch file as input.
 
 <p align="center">
-  <img src="docs/l4_architecture_workflow.png" alt="Level 4 Architecture — CNN 2D Interaction Maps" width="600">
+  <img src="docs/inference_pipeline.png" alt="Inference pipeline" width="800">
 </p>
 
 ---
 
-## 🔬 Scientific Motivation
+## 🔬 Motivation
 
-**Kinases** comprise ~2% of the human proteome (518 genes) but regulate ~30% of all cellular proteins through phosphorylation. Dysregulation drives oncogenic transformation, inflammatory disease, and antimicrobial resistance. The central pharmacological challenge is achieving **selectivity** across a highly conserved catalytic domain — all 518 human kinases share >85% structural similarity in their ATP-binding pocket.
+Kinases comprise about 2% of the human proteome (518 genes) but regulate
+roughly 30% of all cellular proteins through phosphorylation. Achieving
+**selectivity** across 518 paralogs that share more than 85% structural
+similarity in the ATP pocket is the central pharmacological challenge.
 
-**The semantic-screening hypothesis**: abandon geometric representations and operate directly on **primary sequence information** interpreted through contextual embeddings from foundation language models. This reformulation answers the selectivity question through *semantic compatibility in latent space* rather than geometric fit in 3D space — with universal applicability to any protein with a known sequence, including the ~40% of kinases lacking experimental structures (the "dark kinome").
+semantic-screening abandons geometric representations and operates directly
+on **primary sequence and SMILES** interpreted through contextual embeddings
+from foundation language models (ESM-2 + MoLFormer). Selectivity becomes a
+question of **semantic compatibility in latent space** rather than 3D fit,
+applicable to any protein with a known sequence, including the ~40% of
+kinases without experimental structures (the "dark kinome").
 
----
-
-## 🏗️ Six-Level Hierarchical Benchmark
-
-The framework evaluates six levels of increasing representational complexity, all under the **same scaffold split**, **same metrics**, and **same multi-seed protocol**. The only variable across levels is the **representation strategy**; classifiers are held constant.
-
-| Level | Representation | Protein? | Aggregation | Feature Dim | Trainable? | Isolated Variable |
-|-------|---------------|----------|-------------|-------------|------------|-------------------|
-| **1a** | Morgan FP (1024-bit, r=2) | No | — | 1024 | No | Baseline |
-| **1b** | MoLFormer embeddings | No | Mean pooling | 768 | No | Semantic repr. vs. classical |
-| **1c** | MoLFormer embeddings | No | Proj + Attention pooling (8h) | 256 | Yes (~264K) | Learned aggregation vs. uniform |
-| **2** | ESM-2 + MoLFormer | Yes | Mean pooling | d_P + 768 | No | + Protein modality |
-| **3** | ESM-2 + MoLFormer | Yes | Proj + Attention pooling (8h) | 512 | Yes (~528K) | Bimodal selective aggregation |
-| **4** | ESM-2 + MoLFormer | Yes | CNN 2D + Hierarchical Attn | 64 | Yes (~550K) | Spatial interaction modeling |
-
-> **Parameter counts** shown for ESM-2 8M (`d_P = 320`). Levels 3 and 4 scale with the chosen ESM-2 variant (8M / 150M / 650M).
-
-### Key Transitions
-
-- **1a → 1b**: Value of semantic pre-trained representations vs. classical fingerprints
-- **1b → 1c**: Value of learned projection + selective attention pooling vs. uniform mean pooling on raw embeddings
-- **1b → 2**: Value of adding protein information (both use parameter-free mean pooling)
-- **2 → 3**: Value of learned bimodal projection + attention pooling vs. raw bimodal mean pooling
-- **3 → 4**: Value of explicit spatial residue–atom interaction modeling (end-to-end)
-
-### Architecture Details
-
-- **Levels 1a, 1b, 2**: No trainable parameters. Level 1a uses Morgan fingerprints; Levels 1b and 2 apply masked mean pooling directly over raw foundation model embeddings.
-- **Levels 1c and 3** share the same backbone: `Linear → LayerNorm → GELU → Dropout` projection to 256 dimensions, followed by attention pooling with a single learned query and 8 attention heads. Level 3 replicates this backbone independently for both protein and ligand modalities, concatenating the resulting vectors.
-- **Level 4**: Multi-head linear projections → scaled dot-product interaction maps → 4-layer CNN 2D (including dilated convolution) → hierarchical attention pooling → end-to-end classification.
+For methodology, evaluation protocol, and benchmark levels see
+[`docs/01-methodology/benchmark_methodology.md`](docs/01-methodology/benchmark_methodology.md).
 
 ---
 
-## 🧪 Evaluation Protocol
+## 🚀 Quick Start
 
-### Scaffold Split (No Data Leakage)
+### 1. Install the unified `baseline` environment
 
-All levels are evaluated under **Bemis–Murcko scaffold splitting**, ensuring that no chemical scaffold appears in both training and test sets. A **universal partition** is computed once over the combined Human + Non-Human corpus, guaranteeing inter-corpus scaffold isolation.
+The four committee models historically lived in separate conda envs; the
+recommended setup now installs all four in a single environment named
+`baseline` (~3-4 GB). Pick **one** path:
 
-```
-Scaffold Split:  Train (~80%)  /  Val (~10%)  /  Test (~10%)
-                       │               │              │
-  Level 1a:            │    FP(val)  ──┤   FP(test) ──┤
-  Level 1b:            │  Mean(val)  ──┤  Mean(test) ─┤
-  Level 1c:  train AttnPool → pool(val)├  pool(test) ─┤
-  Level 2:             │  Mean₂(val) ──┤  Mean₂(test)─┤
-  Level 3:   train AttnPool₂→ pool(val)├  pool(test) ─┤
-  Level 4:   train CNN 2D → end-to-end evaluation     │
-                       │               │              │
-                       │         ┌─────┘       ┌──────┘
-                       │         ▼             ▼
-                       │    KNN/MLP.fit()  KNN/MLP.predict()
-                       │    (on val feats) (on test feats)
+```bash
+git clone https://github.com/gmmsb-lncc/semantic-screening.git
+cd semantic-screening
+
+# Option A — conda (recommended, ~10 min)
+bash scripts/inference/setup_baseline_env.sh
+conda activate baseline
+
+# Option B — Python venv (no conda required)
+bash scripts/inference/setup_baseline_venv.sh    # auto-detect CUDA
+source env_baseline/bin/activate
 ```
 
-### Canonical Classifiers (Levels 1a–3)
+Both scripts pin: PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3, RDKit,
+and the union of dependencies for the four committee models. CPU-only
+fallback is auto-detected on macOS or hosts without `nvidia-smi`.
 
-All non-end-to-end levels share the **exact same** classifier pipeline:
+### 2. Run the committee on your data
 
-| Component | Specification |
-|-----------|--------------|
-| **KNN** | FAISS cosine similarity, *k* = 5, distance-weighted voting |
-| **MLP** | `MLPClassifier(256, 128)`, ReLU, Adam (η=10⁻³), α=10⁻³, adaptive LR, early stopping (patience=20), max 2000 iterations |
-| **Scaler** | `StandardScaler` (fit on reference partition, applied to all) |
+A single command does everything. The script auto-detects whether the input
+is a SMILES string, a sequence, or a file:
 
-### Multi-Seed Protocol
+```bash
+# SMILES string  → ranked against the 518-kinase human kinome reference
+python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
 
-Every experiment runs across 5 independent seeds: `{42, 123, 456, 789, 1024}`. Metrics are reported as mean ± std, separating optimization variance from genuine performance differences.
+# Inline AA sequence  → ranked against the 110k ChEMBL kinase-inhibitor library
+python kinase_profiling.py "MGNNHGTYLG..."
 
-### Primary Metric: MCC
+# File: FASTA  → same as inline sequence
+python kinase_profiling.py my_kinase.fa
 
-The **Matthews Correlation Coefficient** (MCC) is the sole criterion for model comparison — the only binary classification metric invariant to class proportion and with complete statistical interpretation as a Pearson correlation.
+# File: .smi (Daylight format, optionally multi-line)
+python kinase_profiling.py compounds.smi
 
----
+# File: CSV / TSV / TXT (column order does not matter)
+python kinase_profiling.py pairs.csv
 
-## 📊 Datasets
+# Use unified env explicitly
+python kinase_profiling.py "CCO..." --single-env baseline --top-k 50
+```
 
-Built from **ChEMBL 35** with rigorous curation: direct biochemical assays only (IC₅₀, Kᵢ, K_d), PAINS filtering, IQR-based outlier removal, and monotonic profile filtering.
+### 3. Read the consensus
 
-| Dataset | Samples | Compounds | Kinases | Active % |
-|---------|---------|-----------|---------|----------|
-| **Human** | 473,760 | 136,003 | 517 | ~42% |
-| **Non-Human** | 14,080 | 7,428 | 114 | ~40% |
-| **All** (combined) | 487,840 | — | — | — |
-| **After monotonic filtering** | 386,099 | — | 642 | ~43% |
+Each run writes a self-contained directory under `results/inference/`:
 
-**Monotonic filtering** removes kinases and compounds with trivially predictable bioactivity profiles (all-active or all-inactive), reducing the Non-Human corpus by 30.8% and the Human corpus by 20.4%.
+```
+results/inference/<run_id>/
+├── pairs.tsv                       (input expanded into protein-ligand pairs)
+├── scores_dtkinase.csv             (per-model probability + threshold)
+├── scores_drugban.csv
+├── scores_graphban.csv
+├── scores_conplex.csv
+├── consensus.csv                   (ranked, with prob_mean + tier)
+├── consensus.annotated.csv         (+ kinase target names + organism)
+├── consensus.top.csv               (top-K subset)
+└── attention/                      (only for STRONG / LIKELY pairs)
+    └── <pair_id>/
+        ├── dtkinase_Mk.npz
+        ├── dtkinase_hierpool.npz
+        ├── drugban_BAN.npz
+        ├── graphban_BAN.npz
+        └── consensus_heatmap.pdf
+```
 
----
+The committee verdict per pair is the **tier** column:
 
-## 🧬 Foundation Models
+| `tier` | rule (n=4) | interpretation |
+|---|---|---|
+| `STRONG` | 4 of 4 models predict binder | high-priority experimental follow-up |
+| `LIKELY` | 3 of 4 | secondary screening |
+| `UNCERTAIN` | 2 of 4 | inconclusive |
+| `UNLIKELY` | ≤1 of 4 | negative consensus |
 
-Both models operate as **frozen feature extractors** — weights are never updated during benchmark training.
+The pipeline rescales tier thresholds automatically when a partial committee
+runs (e.g., 3 models present → STRONG = 3/3). Detailed semantics in
+[`scripts/inference/README.md`](scripts/inference/README.md) and
+[`docs/02-user-guide/inferencia-comite.md`](docs/02-user-guide/inferencia-comite.md).
 
-### Protein Encoder: ESM-2
+### Worked examples
 
-| Model | Parameters | Embedding Dim | Layers |
-|-------|-----------|---------------|--------|
-| `esm2_t6_8M_UR50D` | 8M | 320 | 6 |
-| `esm2_t30_150M_UR50D` | 150M | 640 | 30 |
-| `esm2_t33_650M_UR50D` | 650M | 1280 | 33 |
+Two end-to-end demo scripts ship with the repository:
 
-### Ligand Encoder: MoLFormer
+```bash
+# Imatinib (Gleevec) vs human kinome → ABL ranks top-3 STRONG (validated)
+bash scripts/inference/examples/run_imatinib_demo.sh
 
-| Model | Parameters | Embedding Dim | Pre-training |
-|-------|-----------|---------------|-------------|
-| MoLFormer-XL | 47M | 768 | MLM on 1.1B molecules (ZINC + PubChem) |
-
-Embeddings are **pre-computed once** and stored as `.npy` matrices, amortizing inference cost across all epochs, seeds, and levels.
+# Out-of-domain query: K. pneumoniae thiamine monophosphate kinase
+bash scripts/inference/examples/run_kpneumo_thil_demo.sh
+```
 
 ---
 
@@ -137,146 +141,103 @@ Embeddings are **pre-computed once** and stored as `.npy` matrices, amortizing i
 
 ```
 semantic-screening/
-├── semantic_screening_models.py        # CLI entry point (thin wrapper)
-├── run_benchmark.sh                    # Automated train→test pipeline
-├── benchmark/                          # Core benchmark package
-│   ├── cli.py                          # CLI parser → BenchmarkConfig
-│   ├── config.py                       # Frozen config, constants, paths
-│   ├── orchestrator.py                 # Multi-seed pipeline coordinator
-│   ├── classifiers.py                  # Canonical KNN + MLP classifiers
-│   ├── splits.py                       # Scaffold split verification
-│   ├── metrics.py                      # Metric aggregation
-│   ├── reporting.py                    # JSON export + terminal tables
-│   ├── visualization.py               # Plot generation (bar, radar, heatmap)
-│   ├── embeddings.py                   # AttentionPooling module
-│   ├── finetuning.py                   # Optional ESM-2/MoLFormer fine-tuning
-│   ├── progress.py                     # tqdm step tracker
-│   └── levels/                         # Level runners (Template Method)
-│       ├── base.py                     # BaseLevelRunner ABC
-│       ├── matrix_utils.py             # Matrix loading, padding, pooling
-│       ├── level1.py                   # Level 1a: Fingerprints
-│       ├── level1b.py                  # Level 1b: MoLFormer mean pooling
-│       ├── level1c.py                  # Level 1c: MoLFormer attention pooling
-│       ├── level2.py                   # Level 2: Bimodal mean pooling
-│       ├── level3.py                   # Level 3: Bimodal attention pooling
-│       ├── level4_cnn.py               # Level 4: CNN 2D interaction maps
-│       └── ...                         # Experimental levels
+├── kinase_profiling.py                 # ★ single-command user entry point
+├── requirements-baseline.txt           # pip/venv dependency manifest
+├── scripts/
+│   └── inference/                      # ★ committee pipeline
+│       ├── committee.py                # 4-model orchestrator
+│       ├── kinase_profiling.py         # mirror of top-level entry
+│       ├── expand_pairs.py             # input → pairs.tsv
+│       ├── encoders.py                 # ESM-2 + MoLFormer batch encoders
+│       ├── aggregate.py                # consensus (soft mean + Borda + tier)
+│       ├── attention.py                # 3-level attention map extraction
+│       ├── build_calibration.py        # Platt + threshold sidecar
+│       ├── setup_baseline_env.sh       # unified conda env installer
+│       ├── setup_baseline_venv.sh      # unified pip/venv installer
+│       ├── README.md                   # detailed pipeline documentation
+│       ├── models/                     # per-model scoring adapters
+│       │   ├── dtkinase_score.py
+│       │   ├── drugban_score.py
+│       │   ├── graphban_score.py
+│       │   └── conplex_score.py
+│       └── examples/                   # end-to-end demo .sh scripts
+│           ├── run_imatinib_demo.sh
+│           └── run_kpneumo_thil_demo.sh
 │
-├── scaffolds_splits/                   # Scaffold split logic & output
-│   └── output/                         # Pre-computed universal partitions
+├── data/reference/                     # kinome FASTAs + ligand library
+│   ├── kinome_human.fasta              # 483 human kinases
+│   ├── kinome_full.fasta               # 660 kinases (483 H + 177 NH)
+│   └── ligand_library.tsv              # 110,963 ChEMBL kinase compounds
 │
-├── scripts/                            # Utility scripts
-│   ├── scaffold_split.py               # Universal scaffold split generation
-│   └── ...
+├── benchmark/                          # benchmark training package
+│   ├── levels/                         # 6-level hierarchical benchmark
+│   └── ...                             # see docs/01-methodology/
 │
-├── src/                                # Legacy source & embedding generation
-│   └── build/embeddings/strategies/    # ESM-2, MoLFormer extractors
-│
-├── docs/                               # Extended documentation
-└── tests/                              # Unit and integration tests
+├── DrugBAN/  GraphBAN/  ConPLex/       # baseline upstream code + checkpoints
+├── tests/                              # 43 pytest unit tests
+└── docs/                               # extended documentation
+    ├── 01-methodology/                 # benchmark methodology + protocol
+    ├── 02-user-guide/                  # end-user guides (PT-BR + EN)
+    └── inference_pipeline.png          # diagram above
 ```
+
+The two starred entries are the entry points used by 99% of users; the rest
+is benchmark-training code, baseline upstreams, and supporting docs.
 
 ---
 
-## 🚀 Quick Start
+## 🛠 Modes of operation
 
-### Installation
+| Input | Auto-detected as | Pipeline |
+|---|---|---|
+| `"CCO..."` (RDKit-parseable) | `SMILES_STRING` | 1 ligand × kinome → ranking |
+| `"MGNNHGTYLG..."` (≥20 IUPAC AA) | `SEQUENCE_STRING` | 1 protein × ligand library → ranking |
+| `*.fa` / `*.fasta` / file with `>` header | `FASTA_FILE` | 1 protein × ligand library → ranking |
+| `*.smi` (Daylight format) | `SMI_FILE` | N ligands × kinome (concatenated ranking) |
+| `*.csv` / `*.tsv` / `*.txt` | `BATCH_FILE` | N explicit pairs (column order auto-detected) |
+
+For **CSV/TSV files** the column order is irrelevant: the script tries to
+parse each column as SMILES via RDKit; the highest-scoring column is the
+ligand, the other text-heavy column is the sequence. Optional metadata
+columns (`uniprot`, `chembl_id`, ...) are auto-detected from header names.
+
+---
+
+## 📊 Outputs at a glance
+
+| File | Content |
+|---|---|
+| `consensus.csv` | full ranking, ordered by `prob_mean` desc |
+| `consensus.annotated.csv` | same + kinase target names + organism (when input was SMILES) |
+| `consensus.top.csv` | subset of top-K (default K=20) |
+| `scores_<model>.csv` | per-model prob + binary pred + threshold |
+| `attention/<pair_id>/*.npz` | DT-Kinase 3-level attention + DrugBAN/GraphBAN BAN matrices |
+| `attention/<pair_id>/consensus_heatmap.pdf` | composite 2×2 visualization |
+| `config_snapshot.yaml` | git revision + checkpoint hashes for reproducibility |
+
+`consensus.csv` columns: `pair_id, uniprot, chembl_id, prob_<model>,
+pred_<model>, thr_<model>, prob_mean, prob_std, confidence,
+agreement_count, tier, rank_fusion`. Field semantics in
+[`scripts/inference/README.md`](scripts/inference/README.md).
+
+---
+
+## 🧪 Testing
 
 ```bash
-# Clone repository
-git clone https://github.com/gmmsb-lncc/semantic-screening.git
-cd semantic-screening
-
-# Create conda environment
-conda env create -f environment.yml
-conda activate docktkinase
-
-# Install post-install dependencies
-python scripts/post_install.py
-```
-
-### Running the Benchmark
-
-The benchmark operates in two phases: **train** (fit on train, evaluate on val) and **test** (fit on val, evaluate on held-out test). The test set is never loaded during training.
-
-```bash
-# Automated pipeline (recommended): train + test with rigor safeguards
-bash run_benchmark.sh
-
-# Manual: specify dataset, embedding, and levels
-# Train phase
-python semantic_screening_models.py \
-    --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 2 3 4cnn \
-    --epochs 500 --train
-
-# Test phase (reuses frozen train-phase MLP selection)
-python semantic_screening_models.py \
-    --dataset non_human --embedding 8M \
-    --levels 1a 1b 1c 2 3 4cnn \
-    --test
-
-# Quick baseline: Level 1a only (fingerprint, no GPU needed)
-python semantic_screening_models.py --dataset non_human --embedding 8M --levels 1a --train
-
-# Human dataset with ESM-2 150M
-python semantic_screening_models.py --dataset human --embedding 150M --levels 1a 1b 1c 2 3 --train
-```
-
-### Output Structure
-
-```
-results/benchmark_{dataset}_{embedding}/
-├── train/
-│   ├── benchmark_comparison.json       # Full results with metadata
-│   ├── benchmark_*.png                 # Visualization plots
-│   ├── level1a_fingerprint/            # Per-level, per-seed outputs
-│   ├── level1b_ligmean_{emb}/
-│   ├── level1c_ligattn_{emb}/
-│   ├── level2_bimean_{emb}/
-│   ├── level3_attnpool_{emb}/
-│   └── level4_cnn_{emb}/
-└── test/
-    ├── benchmark_comparison.json
-    └── ...
+pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
+# 43 unit tests cover dedupe, tier rescale (n={2,3,4}), Borda count,
+# partial committee, SMILES/FASTA validation, and dispatch modes
 ```
 
 ---
 
-## 🔒 Anti-Leakage Protocol
+## 📚 Further reading
 
-The framework enforces strict separation between model selection and final evaluation:
-
-1. **Train mode** (`--train`): Classifiers trained on train split (80%), evaluated on validation (10%). Test set is **never loaded**.
-2. **Test mode** (`--test`): Classifiers trained on validation (10%), evaluated on held-out test (10%). MLP configuration is **frozen** from train phase — no re-selection allowed.
-3. **Scaffold isolation**: Universal partition guarantees zero scaffold overlap between train/val/test, including inter-corpus isolation.
-4. **Monotonic filtering**: Removes trivially predictable entities (all-active/all-inactive kinases and compounds).
-
----
-
-## 📖 CLI Reference
-
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `--dataset` | `human`, `non_human`, or `all` | Required |
-| `--embedding` | ESM-2 variant: `8M`, `150M`, `650M` | `8M` |
-| `--levels` | Levels to run (e.g., `1a 1b 1c 2 3 4cnn`) | All |
-| `--train` / `--test` | Execution mode (mutually exclusive) | `--train` |
-| `--epochs` | Max training epochs for learned levels | `500` |
-| `--batch_size` | Batch size for learned levels | `32` |
-| `--learning_rate` | Learning rate for learned levels | `1e-4` |
-| `--model_selection_metric` | `val_loss` or `mcc` | `val_loss` |
-| `--seeds` | Custom seeds (space-separated) | `42 123 456 789 1024` |
-| `--force` | Force recalculation of all levels | Off |
-| `--output_dir` | Custom output directory | Auto |
-
----
-
-## 📚 Further Documentation
-
-- **[Benchmark Package README](benchmark/README.md)** — Architecture, module reference, design patterns
-- **[Scaffold Splits README](scaffolds_splits/README.md)** — Scaffold splitting methodology
-- **[LLM README](llm/README.md)** — Foundation model setup and usage
+- **Pipeline architecture and committee semantics**: [`scripts/inference/README.md`](scripts/inference/README.md)
+- **End-user guide (Portuguese)**: [`docs/02-user-guide/inferencia-comite.md`](docs/02-user-guide/inferencia-comite.md)
+- **Benchmark methodology, six-level hierarchy, evaluation protocol, anti-leakage**: [`docs/01-methodology/benchmark_methodology.md`](docs/01-methodology/benchmark_methodology.md)
+- **Thesis**: protocol, model variants, all 24 lessons in `~/PhD/tex/` (Anexo A — cross-dataset matrix; Anexo B — committee inference; Apêndice F — methodology lessons).
 
 ---
 
@@ -284,8 +245,8 @@ The framework enforces strict separation between model selection and final evalu
 
 ```bibtex
 @software{semanticscreening2026,
-  title   = {semantic-screening: Hierarchical benchmark for semantic screening
-             of protein-ligand interactions},
+  title   = {semantic-screening: kinase-ligand interaction profiling
+             with a foundation-model committee},
   author  = {Sulfierry, Leon and GMMSB-LNCC},
   year    = {2026},
   url     = {https://github.com/gmmsb-lncc/semantic-screening},
@@ -293,11 +254,11 @@ The framework enforces strict separation between model selection and final evalu
 }
 ```
 
-## Contact
-
-- **Repository**: [gmmsb-lncc/semantic-screening](https://github.com/gmmsb-lncc/semantic-screening)
-- **Issues**: [Bug reports & features](https://github.com/gmmsb-lncc/semantic-screening/issues)
-
 ---
 
-**Status**: Production Ready | **Version**: 4.0 | **Last Updated**: March 2026
+## Contact
+
+Repository: [gmmsb-lncc/semantic-screening](https://github.com/gmmsb-lncc/semantic-screening)
+Issues: [Bug reports & features](https://github.com/gmmsb-lncc/semantic-screening/issues)
+
+**Status**: Production Ready · **Version**: 4.0 · **Last updated**: April 2026
