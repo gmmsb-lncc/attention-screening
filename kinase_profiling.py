@@ -3,21 +3,31 @@
 
 Auto-detects input type and runs the appropriate inference pipeline:
 
+  # Inline strings (no file required)
   python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"      → SMILES vs human kinome
-  python kinase_profiling.py protein.fa                   → FASTA vs ligand library
+  python kinase_profiling.py "MGNNHGTYLG..."              → AA sequence vs ligand library
+
+  # Files
+  python kinase_profiling.py compound.smi                 → SMILES file
+  python kinase_profiling.py protein.fa                   → FASTA file
   python kinase_profiling.py batch.csv                    → batch (auto-detects which
                                                              column is SMILES vs sequence)
   python kinase_profiling.py pairs.tsv                    → idem (TSV)
+  python kinase_profiling.py pairs.txt                    → idem (auto-sniff delimiter)
 
 Detection rules:
   1. If input is a path to an existing file:
-       - File starts with '>' OR extension in {.fa, .fasta, .faa}     → FASTA
-       - File extension in {.csv, .tsv, .txt}                          → batch
-     Batch column order does not matter: the script tries to parse each
-     column with RDKit; the column that parses as valid SMILES is taken
-     as ligand, the other column is taken as protein sequence.
-  2. Otherwise input is treated as an inline SMILES string. The string
-     must parse via RDKit (Chem.MolFromSmiles).
+       - File starts with '>' OR ext in {.fa, .fasta, .faa}            → FASTA
+       - File extension == .smi                                         → SMILES file
+       - File extension in {.csv, .tsv, .txt} OR tabular shape          → batch
+  2. Else if input is a string that parses as a valid SMILES via RDKit  → inline SMILES
+  3. Else if input is a string that looks like an AA sequence
+       (length ≥ 20, ≥ 90% IUPAC AA characters, no SMILES delimiters)   → inline FASTA
+  4. Otherwise: graceful error with usage examples.
+
+Batch column order does not matter: each column is RDKit-scored, the
+column with the highest fraction of parseable SMILES is the ligand,
+the other text-heavy column is the sequence.
 
 Output directory:
   results/inference/<run_id>/
@@ -25,9 +35,10 @@ where <run_id> = kinase_profiling_<timestamp>_<input_hash>
 
 Usage examples:
   python kinase_profiling.py "CC(=O)Oc1ccccc1C(=O)O"
+  python kinase_profiling.py "MATGEFSLIARYFDRVKSARLDVE..."
   python kinase_profiling.py my_protein.fa --organism human --top-k 20
+  python kinase_profiling.py imatinib.smi --models dtkinase,drugban
   python kinase_profiling.py pairs.csv --out custom/path
-  python kinase_profiling.py CHEMBL941_inputs.txt --models dtkinase,drugban
 """
 from __future__ import annotations
 
@@ -49,38 +60,83 @@ INFER_DIR = REPO / "scripts" / "inference"
 # ======================================================================
 
 class InputType:
-    SMILES_STRING = "smiles_string"
-    FASTA_FILE    = "fasta_file"
-    BATCH_FILE    = "batch_file"
+    SMILES_STRING   = "smiles_string"
+    SEQUENCE_STRING = "sequence_string"
+    SMI_FILE        = "smi_file"
+    FASTA_FILE      = "fasta_file"
+    BATCH_FILE      = "batch_file"
+
+
+# Heuristic thresholds for inline AA-sequence detection
+_AA_ALPHABET    = set("ACDEFGHIKLMNPQRSTVWY")
+_AA_AMBIGUOUS   = set("BJOUXZ")             # extended IUPAC (also accepted)
+_MIN_SEQ_LEN    = 20                          # below this, ambiguous w/ short SMILES
+_MIN_AA_FRAC    = 0.90                        # fraction of chars that must be IUPAC AA
+_SMILES_BANNED  = set("()[]=#@+/\\.0123456789%")  # tokens never present in plain AA
+
+
+def _looks_like_aa_sequence(s: str) -> bool:
+    """Return True if `s` looks like an inline amino-acid sequence.
+
+    Used as the SECOND fallback in detect_input(): only checked when the
+    string failed RDKit parse. The check is intentionally conservative —
+    short strings or strings containing SMILES-only characters return False.
+    """
+    s_clean = s.strip()
+    if len(s_clean) < _MIN_SEQ_LEN:
+        return False
+    if any(c in _SMILES_BANNED for c in s_clean):
+        return False
+    upper = s_clean.upper()
+    valid = sum(1 for c in upper if c in _AA_ALPHABET or c in _AA_AMBIGUOUS)
+    return (valid / len(upper)) >= _MIN_AA_FRAC
 
 
 def detect_input(arg: str) -> tuple[str, dict]:
     """Return (input_type, parsed_payload).
 
     Payload dict keys per type:
-      SMILES_STRING:  {"smiles": str}
-      FASTA_FILE:     {"path": Path, "n_records": int}
-      BATCH_FILE:     {"path": Path, "smiles_col": str, "seq_col": str,
-                       "delimiter": str, "n_rows": int}
+      SMILES_STRING:    {"smiles": str}
+      SEQUENCE_STRING:  {"sequence": str, "fasta_path": Path}  (auto-written FASTA)
+      SMI_FILE:         {"path": Path, "smiles_list": list[str]}
+      FASTA_FILE:       {"path": Path, "n_records": int}
+      BATCH_FILE:       {"path": Path, "smiles_col": str, "seq_col": str, ...}
     """
     # Lazy-import RDKit (heavy, only needed for SMILES validation)
     from rdkit import Chem
 
+    # File-existence check, guarded against OS limits (macOS NAME_MAX = 255).
+    # A long inline AA sequence or SMILES would raise OSError on Path.exists();
+    # treat that as "not a file" and fall through to string-based detection.
     p = Path(arg)
-    if p.exists() and p.is_file():
+    try:
+        is_file = p.exists() and p.is_file()
+    except (OSError, ValueError):
+        is_file = False
+    if is_file:
         return _detect_from_file(p, Chem)
 
+    # Try as SMILES first (RDKit canonicalization)
     mol = Chem.MolFromSmiles(arg)
     if mol is not None:
         return InputType.SMILES_STRING, {"smiles": Chem.MolToSmiles(mol, canonical=True)}
+
+    # Fallback: inline AA sequence
+    if _looks_like_aa_sequence(arg):
+        # Caller writes a FASTA file and dispatches the FASTA branch
+        return InputType.SEQUENCE_STRING, {"sequence": arg.strip().upper()}
 
     raise SystemExit(
         f"Cannot interpret input: {arg!r}\n"
         f"  - Not a valid path to an existing file\n"
         f"  - Not a valid SMILES string parseable by RDKit\n"
-        f"Try one of:\n"
-        f"  python kinase_profiling.py 'CC(=O)Oc1ccccc1C(=O)O'   # SMILES\n"
+        f"  - Not recognizable as an amino-acid sequence "
+        f"(need ≥ {_MIN_SEQ_LEN} chars, ≥ {int(_MIN_AA_FRAC*100)}% IUPAC AA)\n"
+        f"\nTry one of:\n"
+        f"  python kinase_profiling.py 'CC(=O)Oc1ccccc1C(=O)O'   # inline SMILES\n"
+        f"  python kinase_profiling.py 'MGNNHGTYLG...'           # inline AA sequence\n"
         f"  python kinase_profiling.py protein.fa                # FASTA file\n"
+        f"  python kinase_profiling.py compound.smi              # SMILES file\n"
         f"  python kinase_profiling.py pairs.csv                 # batch file\n"
     )
 
@@ -89,21 +145,47 @@ def _detect_from_file(path: Path, Chem) -> tuple[str, dict]:
     """Inspect file head + extension to classify."""
     with open(path) as fh:
         head = fh.read(4096).lstrip()
+    ext = path.suffix.lower()
 
     # FASTA: starts with '>' or extension hints
-    if head.startswith(">") or path.suffix.lower() in {".fa", ".fasta", ".faa"}:
+    if head.startswith(">") or ext in {".fa", ".fasta", ".faa"}:
         n = sum(1 for line in open(path) if line.startswith(">"))
         if n == 0:
             raise SystemExit(f"file {path} looks like FASTA but has no '>' headers")
         return InputType.FASTA_FILE, {"path": path, "n_records": n}
 
+    # SMILES file (.smi): one SMILES per line, optional whitespace-separated id.
+    # Format per Daylight spec: "SMILES [id]" — id is ignored here, RDKit
+    # canonicalizes each line, invalid lines are dropped with a warning.
+    if ext == ".smi":
+        smiles_list = []
+        n_invalid = 0
+        with open(path) as fh:
+            for raw in fh:
+                tok = raw.strip().split()
+                if not tok or tok[0].startswith("#"):
+                    continue
+                smi = tok[0]
+                mol = Chem.MolFromSmiles(smi)
+                if mol is None:
+                    n_invalid += 1
+                    continue
+                smiles_list.append(Chem.MolToSmiles(mol, canonical=True))
+        if not smiles_list:
+            raise SystemExit(f"{path}: no valid SMILES found "
+                             f"(invalid lines skipped: {n_invalid})")
+        if n_invalid:
+            print(f"[detect] WARN: skipped {n_invalid} invalid SMILES line(s) in {path.name}")
+        return InputType.SMI_FILE, {"path": path, "smiles_list": smiles_list}
+
     # Batch file: CSV/TSV/TXT — sniff delimiter, find SMILES column
-    if path.suffix.lower() in {".csv", ".tsv", ".txt"} or _is_tabular(head):
+    if ext in {".csv", ".tsv", ".txt"} or _is_tabular(head):
         return _detect_batch_columns(path, Chem)
 
     raise SystemExit(
-        f"cannot classify file {path}: extension {path.suffix!r} unknown.\n"
-        f"  Supported: .fa/.fasta/.faa (FASTA), .csv/.tsv/.txt (batch)"
+        f"cannot classify file {path}: extension {ext!r} unknown.\n"
+        f"  Supported: .fa/.fasta/.faa (FASTA), .smi (SMILES), "
+        f".csv/.tsv/.txt (batch)"
     )
 
 
@@ -269,6 +351,66 @@ def run_fasta_file(path: Path, args: argparse.Namespace) -> Path:
     return args.out / "consensus.csv"
 
 
+def run_sequence_string(seq: str, args: argparse.Namespace) -> Path:
+    """Mode: inline AA sequence → write FASTA → dispatch fasta runner."""
+    args.out.mkdir(parents=True, exist_ok=True)
+    fasta_path = args.out / "query.fa"
+    fasta_path.write_text(f">user_query inline sequence (len={len(seq)})\n{seq}\n")
+    print(f"[run] wrote inline sequence → {fasta_path}")
+    return run_fasta_file(fasta_path, args)
+
+
+def run_smi_file(smiles_list: list[str], path: Path, args: argparse.Namespace) -> Path:
+    """Mode: .smi file (one SMILES per line) → run committee per SMILES.
+
+    For a single SMILES → equivalent to inline SMILES mode (vs kinome).
+    For multiple SMILES → expand each against kinome and concatenate
+    consensus tables, with `query_smi_idx` column to disambiguate.
+    """
+    if len(smiles_list) == 1:
+        # Same as inline SMILES path
+        args2 = argparse.Namespace(**vars(args))
+        return run_smiles_string(smiles_list[0], args2)
+
+    # Multi-SMILES: write a unified pairs.tsv (each SMILES × kinome)
+    args.out.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(INFER_DIR))
+    from expand_pairs import load_kinome, validate_smiles  # type: ignore
+
+    kinome = load_kinome(args.organism)
+    pairs_path = args.out / "pairs.tsv"
+    cols = ["uniprot", "sequence", "chembl_id", "smiles", "source"]
+    n_pairs = 0
+    with open(pairs_path, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
+        w.writeheader()
+        for i, smi in enumerate(smiles_list):
+            smi = validate_smiles(smi)
+            chembl_id = f"{path.stem}_smi{i:03d}"
+            for uid, seq in kinome:
+                w.writerow({
+                    "uniprot": uid, "sequence": seq,
+                    "chembl_id": chembl_id, "smiles": smi,
+                    "source": f"smi_file_idx{i}",
+                })
+                n_pairs += 1
+    print(f"[run] mode = .smi file ({len(smiles_list)} ligands × "
+          f"{len(kinome)} {args.organism} kinases = {n_pairs} pairs)")
+
+    cmd = [
+        sys.executable, str(INFER_DIR / "committee.py"),
+        "--pairs", str(pairs_path),
+        "--out",   str(args.out),
+        "--ckpt-corpus", args.ckpt_corpus,
+        "--top-k", str(args.top_k),
+        "--models", args.models,
+    ]
+    if args.parallel: cmd.append("--parallel")
+    if args.dry_run:  cmd.append("--dry-run")
+    subprocess.run(cmd, check=True)
+    return args.out / "consensus.csv"
+
+
 def run_batch_file(path: Path, payload: dict, args: argparse.Namespace) -> Path:
     """Mode 3: batch CSV/TSV — order-agnostic column detection.
 
@@ -415,6 +557,12 @@ def main() -> None:
     if kind == InputType.SMILES_STRING:
         print(f"[detect] canonical SMILES = {payload['smiles']}")
         print(f"[detect] will expand against {args.organism} kinome reference")
+    elif kind == InputType.SEQUENCE_STRING:
+        print(f"[detect] inline AA sequence (len={len(payload['sequence'])})")
+        print(f"[detect] will expand against ligand library")
+    elif kind == InputType.SMI_FILE:
+        print(f"[detect] SMILES file: {len(payload['smiles_list'])} valid ligand(s)")
+        print(f"[detect] will expand each ligand against {args.organism} kinome")
     elif kind == InputType.FASTA_FILE:
         print(f"[detect] FASTA records = {payload['n_records']}")
         if payload['n_records'] == 1:
@@ -435,6 +583,10 @@ def main() -> None:
     print()
     if kind == InputType.SMILES_STRING:
         consensus = run_smiles_string(payload["smiles"], args)
+    elif kind == InputType.SEQUENCE_STRING:
+        consensus = run_sequence_string(payload["sequence"], args)
+    elif kind == InputType.SMI_FILE:
+        consensus = run_smi_file(payload["smiles_list"], payload["path"], args)
     elif kind == InputType.FASTA_FILE:
         consensus = run_fasta_file(payload["path"], args)
     elif kind == InputType.BATCH_FILE:
