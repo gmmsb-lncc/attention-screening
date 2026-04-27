@@ -11,9 +11,46 @@ independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
 **committee** and returns ranked predictions with attention maps, given a
 SMILES, a FASTA sequence, or a batch file as input.
 
-<p align="center">
-  <img src="docs/inference_pipeline.png" alt="Inference pipeline" width="800">
-</p>
+```mermaid
+flowchart LR
+    subgraph IN["INPUT (auto-detect)"]
+        direction TB
+        A1["SMILES string<br/><code>'CC(=O)Oc1ccccc1...'</code>"]:::lig
+        A2["FASTA sequence<br/><code>'MGNNHGTYLG...'</code>"]:::prot
+        A3["File: .fa / .smi / .csv"]:::file
+    end
+
+    A1 --> KP
+    A2 --> KP
+    A3 --> KP
+    KP["<b>kinase_profiling.py</b><br/>detect input + dispatch"]:::orch
+    KP --> PAIRS["<b>pairs.tsv</b><br/>N × M protein–ligand pairs"]:::data
+
+    PAIRS --> DTK["<b>DT-Kinase</b><br/>cross-attn 2D + CNN"]:::dtk
+    PAIRS --> DBN["<b>DrugBAN</b><br/>BAN + GCN"]:::ban
+    PAIRS --> GBN["<b>GraphBAN</b><br/>BAN + distillation"]:::ban
+    PAIRS --> CPL["<b>ConPLex</b><br/>contrastive co-embed"]:::cpl
+
+    DTK --> AGG
+    DBN --> AGG
+    GBN --> AGG
+    CPL --> AGG
+    AGG["<b>aggregate.py</b><br/>soft mean + Borda + tier"]:::agg
+
+    AGG --> OUT1["<b>consensus.csv</b><br/>STRONG · LIKELY · UNCERTAIN · UNLIKELY"]:::out
+    AGG --> OUT2["<b>attention/&lt;pair&gt;/</b><br/>M_k + HierPool + BAN heatmaps"]:::out
+
+    classDef lig   fill:#FFE0B2,stroke:#E8630A,stroke-width:1.5px,color:#222
+    classDef prot  fill:#BBDEFB,stroke:#2E86AB,stroke-width:1.5px,color:#222
+    classDef file  fill:#E0E0E0,stroke:#555,stroke-width:1.5px,color:#222
+    classDef orch  fill:#FFECB3,stroke:#FF8F00,stroke-width:2px,color:#222
+    classDef data  fill:#FFFFFF,stroke:#444,stroke-width:1.5px,color:#222
+    classDef dtk   fill:#C5E1A5,stroke:#1B813E,stroke-width:1.5px,color:#222
+    classDef ban   fill:#B2DFDB,stroke:#00897B,stroke-width:1.5px,color:#222
+    classDef cpl   fill:#D1C4E9,stroke:#5C6BC0,stroke-width:1.5px,color:#222
+    classDef agg   fill:#A5D6A7,stroke:#1B5E20,stroke-width:2px,color:#222
+    classDef out   fill:#FFCDD2,stroke:#C62828,stroke-width:1.5px,color:#222
+```
 
 ---
 
