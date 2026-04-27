@@ -23,3 +23,21 @@ dataset/EnzPred
 dataset/DUDe/full.tsv
 dataset/DUDe/full_OLD.tsv
 large_scale_run.tsv
+
+# Committee inference subset: track rep0 (seed 42 mapping) best_model.pt
+# for each corpus. Defeats best_models/ above. Calibration jsons live in
+# ConPLex/results_universal/ (not gitignored) and are negated by
+# **/conplex_calibration.json in repo root.
+!best_models/
+best_models/*
+!best_models/trained_human_rep0/
+best_models/trained_human_rep0/*
+!best_models/trained_human_rep0/trained_human_rep0_best_model.pt
+
+!best_models/trained_non_human_rep0/
+best_models/trained_non_human_rep0/*
+!best_models/trained_non_human_rep0/trained_non_human_rep0_best_model.pt
+
+!best_models/trained_all_rep0/
+best_models/trained_all_rep0/*
+!best_models/trained_all_rep0/trained_all_rep0_best_model.pt

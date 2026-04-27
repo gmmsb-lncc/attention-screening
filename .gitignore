@@ -203,3 +203,65 @@ model_files/
 **/.DS_Store
 llm/models_cache/
 .claude/
+
+# ============================================
+# Committee inference artifacts (track subset)
+# ============================================
+# Override blanket rules (results/, *.pt, *.pth, *.json) to track the
+# minimal weights + calibrations consumed by
+# scripts/inference/models/{dtkinase,drugban,graphban,conplex}_score.py.
+# Only seed_42 (rep0 for ConPLex) representatives are versioned; full
+# 5-seed ensembles stay local. See CLAUDE.md "Committee model artifacts".
+
+# Baseline calibration sidecars (parent dirs not in any .gitignore;
+# only blocked by *.json above). Restrict to seed_42 — full 5-seed
+# calibrations stay local.
+!**/seed_42/drugban_calibration.json
+!**/seed_42/graphban_calibration.json
+!**/seed_42/conplex_calibration.json
+
+# DT-Kinase L4 CNN: parent-dir dance to expose 3 ckpts + 3 calibrations
+# inside the gitignored results/ tree. Re-include each parent, re-exclude
+# its other children, then re-include the target leaves.
+!results/
+results/*
+!results/benchmark_human_8M_13_05_2026/
+results/benchmark_human_8M_13_05_2026/*
+!results/benchmark_human_8M_13_05_2026/test/
+results/benchmark_human_8M_13_05_2026/test/*
+!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/*
+!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/*
+!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/*
+!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/level4_cnn_model.pt
+!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/level4_cnn_calibration.json
+
+!results/benchmark_non_human_8M_13_05_2026_v3/
+results/benchmark_non_human_8M_13_05_2026_v3/*
+!results/benchmark_non_human_8M_13_05_2026_v3/test/
+results/benchmark_non_human_8M_13_05_2026_v3/test/*
+!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/*
+!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/*
+!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/*
+!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/level4_cnn_model.pt
+!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/level4_cnn_calibration.json
+
+!results/all/
+results/all/*
+!results/all/benchmark_all_8M_13_04_2026/
+results/all/benchmark_all_8M_13_04_2026/*
+!results/all/benchmark_all_8M_13_04_2026/test/
+results/all/benchmark_all_8M_13_04_2026/test/*
+!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/*
+!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/*
+!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/*
+!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_model.pt
+!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_calibration.json

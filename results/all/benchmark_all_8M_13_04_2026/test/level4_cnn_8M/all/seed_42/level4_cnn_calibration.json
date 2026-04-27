@@ -1,0 +1,13 @@
+{
+  "platt_a": 1.0,
+  "platt_b": 0.0,
+  "threshold": 0.2431,
+  "calibration_metric": "mcc",
+  "val_score": 0.4377,
+  "n_val": 41441,
+  "model": "dtkinase",
+  "corpus": "all",
+  "seed": 42,
+  "source": "results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/raw_predictions.npz",
+  "note": "y_prob in npz is post-Platt at training; identity Platt re-applied at inference"
+}
