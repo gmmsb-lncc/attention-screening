@@ -46,6 +46,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from benchmark.levels.level4_cnn import InteractionMapCNN, MOLFORMER_DIM  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "inference"))
+from device_utils import pick_device, empty_cache  # noqa: E402
 from encoders import (  # noqa: E402
     load_esm2_8m, encode_proteins,
     load_molformer, encode_ligands,
@@ -208,7 +209,8 @@ def main() -> None:
     ap.add_argument("--batch-size-lig", type=int, default=64)
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
+    print(f"  device: {device}", file=sys.stderr)
 
     # Resolve the ensemble of (ckpt, calibration) pairs to score.
     if args.ckpt is not None:
@@ -247,16 +249,14 @@ def main() -> None:
     esm_model, esm_alpha = load_esm2_8m(device)
     prot_mats = encode_proteins(esm_model, esm_alpha, unique_prot, device)
     del esm_model, esm_alpha
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    empty_cache(device)
 
     print("  loading MoLFormer...", file=sys.stderr)
     mol_model, mol_tok = load_molformer(device)
     lig_mats = encode_ligands(mol_model, mol_tok, unique_lig, device,
                               batch_size=args.batch_size_lig)
     del mol_model, mol_tok
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    empty_cache(device)
 
     # Score every pair across the ensemble of seeds.
     # Each seed contributes a calibrated probability vector; the ensemble
