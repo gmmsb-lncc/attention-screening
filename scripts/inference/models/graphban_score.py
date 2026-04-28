@@ -24,6 +24,8 @@ from torch.utils.data import DataLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "inference"))
+from device_utils import pick_device, empty_cache  # noqa: E402
 
 GRAPHBAN_SRC = REPO_ROOT / "GraphBAN" / "src" / "case_study"
 if not GRAPHBAN_SRC.exists():
@@ -36,16 +38,21 @@ from dataloader import DTIDataset  # type: ignore
 from models import GraphBAN  # type: ignore
 import dgl
 
-CKPT_DIR_BY_CORPUS = {
-    # Trained ckpts under GraphBAN/results/{corpus}/seed_X/best_model_epoch_<N>.pth.
-    "human":     REPO_ROOT / "GraphBAN" / "results" / "human"     / "seed_42",
-    "non_human": REPO_ROOT / "GraphBAN" / "results" / "non_human" / "seed_42",
-    "all":       REPO_ROOT / "GraphBAN" / "results" / "all"       / "seed_42",
-}
+CANONICAL_SEEDS = (42, 123, 456, 789, 1024)
+
+
+def ckpt_seed_dir(corpus: str, seed: int) -> Path:
+    return REPO_ROOT / "GraphBAN" / "results" / corpus / f"seed_{seed}"
+
+
+def calibration_sidecar(corpus: str, seed: int) -> Path:
+    return (REPO_ROOT / "GraphBAN" / "results_universal" / corpus
+            / f"seed_{seed}" / "graphban_calibration.json")
+
+
+CKPT_DIR_BY_CORPUS = {c: ckpt_seed_dir(c, 42) for c in ("human", "non_human", "all")}
 CALIBRATION_SIDECAR_BY_CORPUS = {
-    "human":     REPO_ROOT / "GraphBAN" / "results_universal" / "human"     / "seed_42" / "graphban_calibration.json",
-    "non_human": REPO_ROOT / "GraphBAN" / "results_universal" / "non_human" / "seed_42" / "graphban_calibration.json",
-    "all":       REPO_ROOT / "GraphBAN" / "results_universal" / "all"       / "seed_42" / "graphban_calibration.json",
+    c: calibration_sidecar(c, 42) for c in ("human", "non_human", "all")
 }
 CANONICAL_CONFIG = REPO_ROOT / "GraphBAN" / "configs" / "GraphBAN.yaml"
 
@@ -84,8 +91,8 @@ def best_checkpoint(seed_dir: Path) -> Path:
     return candidates[0]
 
 
-def load_calibration(corpus: str) -> dict:
-    sidecar = CALIBRATION_SIDECAR_BY_CORPUS[corpus]
+def load_calibration(corpus: str, seed: int = 42) -> dict:
+    sidecar = calibration_sidecar(corpus, seed)
     if sidecar.exists():
         return json.loads(sidecar.read_text())
     print(f"  warn: no calibration sidecar at {sidecar}; using thr=0.5",
@@ -114,18 +121,29 @@ def main() -> None:
     ap.add_argument("--pairs", type=Path, required=True)
     ap.add_argument("--out",   type=Path, required=True)
     ap.add_argument("--corpus", choices=["human", "non_human", "all"], default="all")
-    ap.add_argument("--ckpt",  type=Path, default=None)
+    ap.add_argument("--ckpt",  type=Path, default=None,
+                    help="explicit ckpt path (overrides --corpus + --seeds)")
+    ap.add_argument("--seeds", type=str, default="42,123,456,789,1024",
+                    help="comma-separated seeds for the 5-seed ensemble")
     ap.add_argument("--config", type=Path, default=CANONICAL_CONFIG)
     ap.add_argument("--batch-size", type=int, default=64)
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed_dir = CKPT_DIR_BY_CORPUS[args.corpus]
-    ckpt = args.ckpt or best_checkpoint(seed_dir)
+    device = pick_device()
+    print(f"  device: {device}", file=sys.stderr)
+
+    if args.ckpt is not None:
+        seed_specs = [(args.ckpt, load_calibration(args.corpus, 42))]
+    else:
+        seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+        seed_specs = [
+            (best_checkpoint(ckpt_seed_dir(args.corpus, s)),
+             load_calibration(args.corpus, s)) for s in seed_list
+        ]
+    print(f"  ensemble: {len(seed_specs)} seed(s) (corpus={args.corpus})",
+          file=sys.stderr)
+
     cfg = yaml.safe_load(open(args.config))
-    calib = load_calibration(args.corpus)
-    print(f"  ckpt: {ckpt}", file=sys.stderr)
-    print(f"  thr: {calib['threshold']:.3f}", file=sys.stderr)
 
     df = pd.read_csv(args.pairs, sep="\t")
     drugban_df = pd.DataFrame({
@@ -137,20 +155,34 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=args.batch_size,
                         shuffle=False, collate_fn=graph_collate_func)
 
-    model = GraphBAN(**cfg).to(device)
-    state = torch.load(ckpt, map_location=device)
-    if isinstance(state, dict) and "model_state_dict" in state:
-        state = state["model_state_dict"]
-    model.load_state_dict(state, strict=False)
-    model.eval()
+    n = len(df)
+    probs_per_seed = np.empty((len(seed_specs), n), dtype=np.float64)
+    thresholds_per_seed = np.empty(len(seed_specs), dtype=np.float64)
 
-    probs = predict(model, loader, device)
+    for k, (ckpt, calib) in enumerate(seed_specs):
+        print(f"  [seed {k+1}/{len(seed_specs)}] ckpt={ckpt.parent.name} "
+              f"thr={calib['threshold']:.3f}", file=sys.stderr)
+        model = GraphBAN(**cfg).to(device)
+        state = torch.load(ckpt, map_location=device)
+        if isinstance(state, dict) and "model_state_dict" in state:
+            state = state["model_state_dict"]
+        model.load_state_dict(state, strict=False)
+        model.eval()
+        probs_per_seed[k] = predict(model, loader, device)
+        thresholds_per_seed[k] = calib["threshold"]
+        del model
+        empty_cache(device)
+
+    probs = probs_per_seed.mean(axis=0)
+    threshold = float(thresholds_per_seed.mean())
     out = pd.DataFrame({
         "uniprot":   df["uniprot"].to_numpy(),
         "chembl_id": df["chembl_id"].to_numpy(),
         "prob":      probs,
-        "pred":      (probs >= calib["threshold"]).astype(int),
-        "threshold": calib["threshold"],
+        "pred":      (probs >= threshold).astype(int),
+        "threshold": threshold,
+        "n_seeds":   len(seed_specs),
+        "prob_std":  probs_per_seed.std(axis=0, ddof=0),
     })
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.out, index=False)

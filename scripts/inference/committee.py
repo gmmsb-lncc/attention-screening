@@ -167,7 +167,14 @@ def main() -> None:
     ap.add_argument("--family", type=str, default=None,
                     help="optional kinase family filter (TK, CMGC, AGC, ...)")
     ap.add_argument("--ckpt-corpus", choices=["human", "non_human", "all"], default="all",
-                    help="which training-corpus checkpoint each model loads")
+                    help="which training-corpus checkpoint each model loads "
+                         "(canonical mode: same corpus for all 4 models)")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="hybrid dispatch: DT-Kinase uses --ckpt-corpus, baselines "
+                         "(DrugBAN/GraphBAN/ConPLex) override to 'all' regardless of "
+                         "--ckpt-corpus. Empirically optimal for non_human eval "
+                         "(committee MCC +0.036) and marginal for human eval (+0.008). "
+                         "See Anexo B §B.3.1 of the thesis for the ablation study.")
     ap.add_argument("--out",     type=Path, required=True,
                     help="output directory for this run")
     ap.add_argument("--top-k",   type=int, default=20,
@@ -192,12 +199,22 @@ def main() -> None:
     print(f"[1/4] expanding pairs → {args.out}/pairs.tsv")
     pairs_path = run_expand(args, args.out)
 
+    # Hybrid dispatch: DT-K keeps --ckpt-corpus; baselines pinned to 'all'.
+    def _ckpt_corpus_for(model: str) -> str:
+        if args.hybrid and model != "dtkinase":
+            return "all"
+        return args.ckpt_corpus
+
     env_mode = f"single env '{args.single_env}'" if args.single_env else "per-model envs"
-    print(f"[2/4] scoring with models: {selected} ({env_mode})")
+    mode_tag = "HYBRID" if args.hybrid else "canonical"
+    print(f"[2/4] scoring with models: {selected} ({env_mode}, {mode_tag})")
+    if args.hybrid:
+        for m in selected:
+            print(f"      {m:9s} ← ckpt_corpus={_ckpt_corpus_for(m)}")
     if args.parallel:
         with ThreadPoolExecutor(max_workers=len(selected)) as ex:
             futures = [ex.submit(run_model, m, pairs_path, args.out,
-                                 args.ckpt_corpus, args.single_env, args.dry_run)
+                                 _ckpt_corpus_for(m), args.single_env, args.dry_run)
                        for m in selected]
             for fut in as_completed(futures):
                 model, out_path = fut.result()
@@ -205,7 +222,7 @@ def main() -> None:
     else:
         for m in selected:
             model, out_path = run_model(m, pairs_path, args.out,
-                                        args.ckpt_corpus,
+                                        _ckpt_corpus_for(m),
                                         args.single_env, args.dry_run)
             print(f"  ✓ {model} → {out_path}")
 

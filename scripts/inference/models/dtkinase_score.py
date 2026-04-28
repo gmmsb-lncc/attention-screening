@@ -46,6 +46,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from benchmark.levels.level4_cnn import InteractionMapCNN, MOLFORMER_DIM  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "inference"))
+from device_utils import pick_device, empty_cache  # noqa: E402
 from encoders import (  # noqa: E402
     load_esm2_8m, encode_proteins,
     load_molformer, encode_ligands,
@@ -55,15 +56,28 @@ from encoders import (  # noqa: E402
 
 CANONICAL_CONFIG = REPO_ROOT / "configs" / "v7.yaml"
 # Canonical vanilla v7 ckpts per corpus (PR #206 Platt-on-val protocol,
-# matches thesis Capítulo 5 main baselines table). seed_42 is the default
-# ensemble member; full ensemble lives at seed_{42,123,456,789,1024}.
-CANONICAL_CKPT_BY_CORPUS = {
+# matches thesis Capítulo 5 main baselines table). All five canonical seeds
+# are versioned in the repository; the committee aggregates over them.
+CANONICAL_SEEDS = (42, 123, 456, 789, 1024)
+CANONICAL_CKPT_DIR_BY_CORPUS = {
     "human":     REPO_ROOT / "results" / "benchmark_human_8M_13_05_2026"
-                 / "test" / "level4_cnn_8M" / "human" / "seed_42" / "level4_cnn_model.pt",
+                 / "test" / "level4_cnn_8M" / "human",
     "non_human": REPO_ROOT / "results" / "benchmark_non_human_8M_13_05_2026_v3"
-                 / "test" / "level4_cnn_8M" / "non_human" / "seed_42" / "level4_cnn_model.pt",
+                 / "test" / "level4_cnn_8M" / "non_human",
     "all":       REPO_ROOT / "results" / "all" / "benchmark_all_8M_13_04_2026"
-                 / "test" / "level4_cnn_8M" / "all" / "seed_42" / "level4_cnn_model.pt",
+                 / "test" / "level4_cnn_8M" / "all",
+}
+
+
+def resolve_ckpt(corpus: str, seed: int) -> Path:
+    """Return the canonical ckpt path for a (corpus, seed) cell."""
+    return CANONICAL_CKPT_DIR_BY_CORPUS[corpus] / f"seed_{seed}" / "level4_cnn_model.pt"
+
+
+# Backwards-compat: keep the legacy single-seed map (used by older callers
+# that index by corpus directly).
+CANONICAL_CKPT_BY_CORPUS = {
+    c: resolve_ckpt(c, 42) for c in CANONICAL_CKPT_DIR_BY_CORPUS
 }
 
 
@@ -183,21 +197,34 @@ def main() -> None:
     ap.add_argument("--corpus",  choices=["human", "non_human", "all"], default="all",
                     help="which checkpoint corpus to load (default: all → broadest)")
     ap.add_argument("--ckpt",    type=Path, default=None,
-                    help="explicit checkpoint path (overrides --corpus auto-resolve)")
+                    help="explicit checkpoint path (overrides --corpus auto-resolve, "
+                         "single-seed mode; ignores --seeds)")
+    ap.add_argument("--seeds",   type=str, default="42,123,456,789,1024",
+                    help="comma-separated seeds for the 5-seed ensemble "
+                         "(default: all five canonical seeds; pass --seeds 42 for "
+                         "legacy single-seed behaviour)")
     ap.add_argument("--config",  type=Path, default=CANONICAL_CONFIG)
     ap.add_argument("--cache-dir", type=Path, default=None,
                     help="root for embedding cache (default: data/reference/cache)")
     ap.add_argument("--batch-size-lig", type=int, default=64)
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
+    print(f"  device: {device}", file=sys.stderr)
 
-    ckpt = args.ckpt or CANONICAL_CKPT_BY_CORPUS[args.corpus]
-    if not ckpt.exists():
-        sys.exit(
-            f"checkpoint not found: {ckpt}\n"
-            f"either pass --ckpt or train v7+F LEGACY for corpus={args.corpus}"
-        )
+    # Resolve the ensemble of (ckpt, calibration) pairs to score.
+    if args.ckpt is not None:
+        ckpts = [args.ckpt]
+    else:
+        seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+        ckpts = [resolve_ckpt(args.corpus, s) for s in seed_list]
+        missing_ckpts = [str(c) for c in ckpts if not c.exists()]
+        if missing_ckpts:
+            sys.exit(
+                "checkpoint(s) not found:\n  " + "\n  ".join(missing_ckpts) +
+                f"\nverify the seeds {seed_list} are populated for corpus={args.corpus}, "
+                "or pass --ckpt for single-seed mode."
+            )
 
     pairs = pd.read_csv(args.pairs, sep="\t")
     required = {"uniprot", "sequence", "chembl_id", "smiles"}
@@ -205,13 +232,7 @@ def main() -> None:
     if missing:
         sys.exit(f"pairs.tsv missing columns: {missing}")
     print(f"  loaded {len(pairs)} pairs from {args.pairs}", file=sys.stderr)
-
-    # Build model + load weights + load calibration
-    model = build_model(args.config, device)
-    load_checkpoint(model, ckpt, device)
-    calib = load_calibration(ckpt)
-    print(f"  ckpt: {ckpt}", file=sys.stderr)
-    print(f"  calib: a={calib['platt_a']:.4f} b={calib['platt_b']:.4f} thr={calib['threshold']:.3f}",
+    print(f"  ensemble: {len(ckpts)} seed(s) (corpus={args.corpus})",
           file=sys.stderr)
 
     # Encode unique proteins + ligands once
@@ -228,42 +249,64 @@ def main() -> None:
     esm_model, esm_alpha = load_esm2_8m(device)
     prot_mats = encode_proteins(esm_model, esm_alpha, unique_prot, device)
     del esm_model, esm_alpha
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    empty_cache(device)
 
     print("  loading MoLFormer...", file=sys.stderr)
     mol_model, mol_tok = load_molformer(device)
     lig_mats = encode_ligands(mol_model, mol_tok, unique_lig, device,
                               batch_size=args.batch_size_lig)
     del mol_model, mol_tok
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    empty_cache(device)
 
-    # Score every pair
-    logits = np.empty(len(pairs), dtype=np.float64)
-    for i, row in enumerate(pairs.itertuples(index=False)):
-        try:
-            pmat = prot_mats[row.uniprot]
-            lmat = lig_mats[row.chembl_id]
-        except KeyError as e:
-            sys.exit(f"missing embedding for {e!r} (row {i})")
-        logits[i] = score_pair(model, pmat, lmat, device)
-        if (i + 1) % 200 == 0:
-            print(f"    scored {i+1}/{len(pairs)}", file=sys.stderr)
+    # Score every pair across the ensemble of seeds.
+    # Each seed contributes a calibrated probability vector; the ensemble
+    # output is the mean over seeds (probability) and the mean of the
+    # per-seed thresholds (operational threshold).
+    n = len(pairs)
+    probs_per_seed = np.empty((len(ckpts), n), dtype=np.float64)
+    thresholds_per_seed = np.empty(len(ckpts), dtype=np.float64)
 
-    probs = apply_platt(logits, calib["platt_a"], calib["platt_b"])
-    preds = (probs >= calib["threshold"]).astype(int)
+    model = build_model(args.config, device)
+    for k, ckpt in enumerate(ckpts):
+        load_checkpoint(model, ckpt, device)
+        calib = load_calibration(ckpt)
+        print(
+            f"  [seed {k+1}/{len(ckpts)}] ckpt={ckpt.parent.name} "
+            f"a={calib['platt_a']:.4f} b={calib['platt_b']:.4f} thr={calib['threshold']:.3f}",
+            file=sys.stderr,
+        )
+        logits = np.empty(n, dtype=np.float64)
+        for i, row in enumerate(pairs.itertuples(index=False)):
+            try:
+                pmat = prot_mats[row.uniprot]
+                lmat = lig_mats[row.chembl_id]
+            except KeyError as e:
+                sys.exit(f"missing embedding for {e!r} (row {i})")
+            logits[i] = score_pair(model, pmat, lmat, device)
+        probs_per_seed[k] = apply_platt(logits, calib["platt_a"], calib["platt_b"])
+        thresholds_per_seed[k] = calib["threshold"]
+
+    # Ensemble aggregation: mean probability across seeds, mean threshold.
+    probs = probs_per_seed.mean(axis=0)
+    threshold = float(thresholds_per_seed.mean())
+    preds = (probs >= threshold).astype(int)
 
     out_df = pd.DataFrame({
         "uniprot":   pairs["uniprot"].to_numpy(),
         "chembl_id": pairs["chembl_id"].to_numpy(),
         "prob":      probs,
         "pred":      preds,
-        "threshold": calib["threshold"],
+        "threshold": threshold,
+        "n_seeds":   len(ckpts),
+        "prob_std":  probs_per_seed.std(axis=0, ddof=0),
     })
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(args.out, index=False)
-    print(f"  wrote {len(out_df)} rows → {args.out}", file=sys.stderr)
+    print(
+        f"  wrote {len(out_df)} rows → {args.out} "
+        f"(ensemble of {len(ckpts)} seeds, mean threshold={threshold:.3f})",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

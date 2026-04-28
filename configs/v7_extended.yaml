@@ -1,0 +1,99 @@
+# ============================================================================
+# DT-Kinase Benchmark — v7 Extended Training Configuration
+# ============================================================================
+# Cold-start v7 with extended training budget. Hypothesis: the 0.506 ± 0.006
+# NH 5-seed plateau (Lição 21, §6.13) is constrained by training budget
+# (patience=15, epochs=500) rather than by architectural capacity. This
+# configuration tests that hypothesis by enlarging the training horizon.
+#
+# Differences from v7.yaml:
+#   - patience: 15 → 50  (allow 50 stagnant epochs before early stop)
+#   - epochs:   500 → 2000  (raise ceiling so cosine-anneal can reach decay)
+#
+# All other hyperparameters identical to v7.yaml so any MCC delta is
+# attributable to the budget alone.
+#
+# Usage:
+#   python3 run_from_config.py configs/v7_extended.yaml --dataset all
+# ============================================================================
+
+# --- Dataset & Embedding ---------------------------------------------------
+dataset: all # non_human | human | all
+embedding: 8M # 8M | 150M | 650M
+levels: 4cnn
+epochs: 2000 # ↑ from 500 (consistent with cosine T_max)
+model_selection_metric: mcc
+
+# --- Output ----------------------------------------------------------------
+# Distinct dir to avoid clobbering canonical 13_04_2026 benchmark results
+output_root: results/benchmark_{dataset}_{embedding}_extended_27_04_2026
+
+# --- Level 4 CNN Architecture (v7) ----------------------------------------
+level4_cnn:
+  variant: v7
+  num_heads: 8
+  head_dim: 32
+  channels: 64
+  batch_size: 128
+
+  # Regularisation
+  dropout: 0.35
+  weight_decay: 0.04
+
+  # Precision
+  double: false
+  no_amp: true
+  deterministic: false
+
+  # Training — EXTENDED BUDGET
+  patience: 50 # ↑ from 15 (long-tail patience)
+  focal: true
+  focal_gamma: 2.0
+
+  # Embedding Adapter
+  adapter:
+    enabled: true
+    layers: 1
+    self_attn: true
+    lr_mult: 5.0
+    prot_dim: 256
+    lig_dim: 512
+
+  # Calibration
+  calibration:
+    platt: true
+    temperature: false
+
+  # Contrastive (off)
+  contrastive_weight: 0.0
+  contrastive_dim: 128
+  cosine_feat: false
+  cosine_sim: false
+
+  # MLP classifier head
+  mlp_head: false
+
+  # Regularisation extras
+  label_smooth: 0.0
+  mixup_alpha: 0.0
+
+  # Train-to-zero mode (disabled — early stopping with patience=50 governs)
+  train_to_zero: false
+  train_to_zero_thr: 0.01
+
+  # Checkpointing
+  checkpoint_every: 10
+
+# --- Rigor Safeguards ------------------------------------------------------
+rigor:
+  enforce: true
+  require_train_selection: true
+  strict_level_completeness: true
+
+# --- Acceptance Gate -------------------------------------------------------
+gate:
+  target_test_mcc: 0.55
+  max_test_mcc_std: 0.08
+
+# --- Warnings Suppression -------------------------------------------------
+suppress_warnings: true
