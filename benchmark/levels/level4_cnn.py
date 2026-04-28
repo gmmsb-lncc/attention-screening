@@ -1877,12 +1877,24 @@ def _train_interaction_cnn(
     # produces a plain function wrapper that loses nn.Module API.
 
     # --- Clean up checkpoint (training complete) -----------------------
+    # Default: remove the resumable checkpoint to free disk space once
+    # training is done. To preserve it (e.g., to extend training in a
+    # subsequent run with a larger epochs budget or higher patience),
+    # set BENCHMARK_LEVEL4CNN_KEEP_CHECKPOINT=1.
+    keep_ckpt = os.environ.get("BENCHMARK_LEVEL4CNN_KEEP_CHECKPOINT", "0") == "1"
     if checkpoint_dir is not None:
         assert isinstance(checkpoint_dir, str)
         final_ckpt = os.path.join(checkpoint_dir, "training_checkpoint.pt")
         if os.path.exists(final_ckpt):
-            os.remove(final_ckpt)
-            tqdm.write(f"    Removed training checkpoint (training complete)")
+            if keep_ckpt:
+                tqdm.write(
+                    f"    Preserved training checkpoint at {final_ckpt} "
+                    f"(BENCHMARK_LEVEL4CNN_KEEP_CHECKPOINT=1; ready to resume "
+                    f"with extended epochs/patience)"
+                )
+            else:
+                os.remove(final_ckpt)
+                tqdm.write(f"    Removed training checkpoint (training complete)")
 
     return model, {"best_val_mcc": best_score}
 

@@ -1,0 +1,17 @@
+{
+  "Split by Scaffold": {
+    "MLP": {
+      "mcc": 0.452755,
+      "mcc_at_05": 0.449016,
+      "threshold": 0.3265,
+      "accuracy": 0.739576,
+      "f1": 0.658415,
+      "precision": 0.61439,
+      "recall": 0.709237,
+      "auc": 0.805436,
+      "best_val_mcc": 0.56756,
+      "val_threshold": 0.3265,
+      "temperature": 1.0
+    }
+  }
+}

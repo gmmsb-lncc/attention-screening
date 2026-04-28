@@ -1,22 +1,46 @@
-"""Aggregate per-model scores into committee consensus.
+"""Aggregate per-model scores into committee consensus with two-source
+uncertainty decomposition.
 
 Reads N CSV files, one per model (dtkinase/drugban/graphban/conplex),
 each with columns:
-    uniprot, chembl_id, prob, pred, threshold
+    uniprot, chembl_id, prob, pred, threshold,
+    prob_std (per-model inter-seed dispersion, optional),
+    n_seeds  (number of seeds aggregated by the scoring script, optional)
+
+prob_std + n_seeds are produced by the 5-seed scoring patch
+(scripts/inference/models/*_score.py); legacy single-seed CSVs without
+these columns are still accepted (treated as prob_std = 0, n_seeds = 1).
 
 Emits consensus.csv with:
     pair_id, uniprot, chembl_id,
-    prob_dtkinase, prob_drugban, prob_graphban, prob_conplex,
-    pred_dtkinase, pred_drugban, pred_graphban, pred_conplex,
-    prob_mean, prob_std, agreement_count, tier, rank_fusion, confidence
+    prob_<model>, pred_<model>, thr_<model>,
+    prob_std_<model>, n_seeds_<model>,
+    prob_mean, prob_std, confidence,
+    sigma_model, sigma_seed_avg, sigma_total, confidence_total,
+    agreement_count, tier, rank_fusion
 
 Aggregation rules:
-    prob_mean       = mean of 4 calibrated probabilities
-    prob_std        = std (used as inverse confidence)
-    agreement_count = # models predicting 1 (each w/ its own threshold)
-    confidence      = 1 - prob_std
-    rank_fusion     = sum of per-model ranks (Borda count, lower = better)
+    prob_mean       = mean of N calibrated probabilities (one per model)
+    sigma_model     = std across models (between-model dispersion;
+                      epistemic uncertainty, reducible by adding new
+                      architectural families).
+    sigma_seed_avg  = sqrt of mean variance across per-model seeds
+                      (within-model dispersion averaged across models;
+                      aleatoric uncertainty, reducible by adding more
+                      seeds per model).
+    sigma_total     = sqrt(sigma_seed_avg^2 + sigma_model^2)
+                      via the law of total variance.
+    prob_std        = sigma_model  (legacy alias; preserves backward
+                      compatibility with downstream callers).
+    confidence      = 1 - sigma_model  (legacy alias).
+    confidence_total= 1 - sigma_total  (honest combined uncertainty).
+    agreement_count = # models predicting 1 (each w/ its own threshold).
+    rank_fusion     = sum of per-model ranks (Borda count, lower = better).
     tier            = STRONG (4) | LIKELY (3) | UNCERTAIN (2) | UNLIKELY (≤1)
+
+The decomposition lets the user separate fragile-consensus pairs (low
+sigma_model + high sigma_seed_avg) from robust-consensus pairs (both
+low) even when prob_mean and tier are identical.
 """
 from __future__ import annotations
 import argparse
@@ -74,12 +98,23 @@ def load_model_scores(scores_dir: Path) -> dict[str, pd.DataFrame]:
         if missing:
             raise ValueError(f"{path} missing columns: {missing}")
 
-        # Dedupe by (uniprot, chembl_id): average prob, max pred, first thr.
+        # Optional per-seed dispersion columns (added in 5-seed scoring patch);
+        # default to 0 when absent for backward compatibility with legacy
+        # single-seed scores_*.csv files.
+        if "prob_std" not in df.columns:
+            df["prob_std"] = 0.0
+        if "n_seeds" not in df.columns:
+            df["n_seeds"] = 1
+
+        # Dedupe by (uniprot, chembl_id): average prob, max pred, first thr,
+        # propagate dispersion conservatively (max of per-row stds).
         n_before = len(df)
         df = (df.groupby(["uniprot", "chembl_id"], as_index=False)
                 .agg(prob=("prob", "mean"),
                      pred=("pred", "max"),
-                     threshold=("threshold", "first")))
+                     threshold=("threshold", "first"),
+                     prob_std=("prob_std", "max"),
+                     n_seeds=("n_seeds", "first")))
         n_after = len(df)
         if n_after < n_before:
             print(f"  {m}: deduped {n_before} → {n_after} rows "
@@ -87,6 +122,7 @@ def load_model_scores(scores_dir: Path) -> dict[str, pd.DataFrame]:
 
         out[m] = df.rename(columns={
             "prob": f"prob_{m}", "pred": f"pred_{m}", "threshold": f"thr_{m}",
+            "prob_std": f"prob_std_{m}", "n_seeds": f"n_seeds_{m}",
         })
     if len(out) < 2:
         raise RuntimeError(
@@ -111,13 +147,36 @@ def merge_scores(model_dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def aggregate(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     prob_cols = [f"prob_{m}" for m in models_present]
     pred_cols = [f"pred_{m}" for m in models_present]
+    seed_std_cols = [f"prob_std_{m}" for m in models_present]
 
     probs = df[prob_cols].to_numpy(dtype=float)
     preds = df[pred_cols].to_numpy(dtype=float)
+    # Per-model inter-seed dispersion (within-model variance, aleatoric).
+    # Missing columns (legacy single-seed files) treated as zero by load step.
+    seed_stds = df[seed_std_cols].to_numpy(dtype=float)
 
     df["prob_mean"] = np.nanmean(probs, axis=1)
-    df["prob_std"]  = np.nanstd(probs, axis=1)
-    df["confidence"] = 1.0 - df["prob_std"]
+
+    # --- Two-source uncertainty decomposition ----------------------------
+    # sigma_model: between-model dispersion (epistemic; reducible by
+    #              adding architectures of new families).
+    # sigma_seed:  within-model dispersion averaged across models
+    #              (aleatoric; reducible by training more seeds).
+    # sigma_total: square-root of total variance via the law of total
+    #              variance: Var(p) = E[Var(p|m)] + Var(E[p|m]).
+    df["sigma_model"]    = np.nanstd(probs, axis=1)
+    df["sigma_seed_avg"] = np.sqrt(np.nanmean(seed_stds ** 2, axis=1))
+    df["sigma_total"]    = np.sqrt(
+        df["sigma_seed_avg"] ** 2 + df["sigma_model"] ** 2
+    )
+
+    # Backward-compatible aliases: prob_std/confidence preserve their
+    # legacy meaning (between-model dispersion / 1 - between-model std).
+    df["prob_std"]   = df["sigma_model"]
+    df["confidence"] = 1.0 - df["sigma_model"]
+    # New: confidence_total accounts for both uncertainty sources.
+    df["confidence_total"] = 1.0 - df["sigma_total"]
+
     df["agreement_count"] = np.nansum(preds, axis=1).astype(int)
 
     # Rank fusion: per-model rank by descending probability (lower rank = better).
@@ -145,11 +204,17 @@ def order_columns(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     base = ["pair_id", "uniprot", "chembl_id"]
     per_model = [
         col for m in models_present
-        for col in (f"prob_{m}", f"pred_{m}", f"thr_{m}")
+        for col in (f"prob_{m}", f"pred_{m}", f"thr_{m}",
+                    f"prob_std_{m}", f"n_seeds_{m}")
     ]
     committee = ["prob_mean", "prob_std", "confidence",
+                 "sigma_model", "sigma_seed_avg", "sigma_total",
+                 "confidence_total",
                  "agreement_count", "tier", "rank_fusion"]
-    return df[base + per_model + committee]
+    # Drop columns that don't exist (e.g., n_seeds_* missing for legacy
+    # single-seed scores) to keep the function tolerant.
+    keep = [c for c in (base + per_model + committee) if c in df.columns]
+    return df[keep]
 
 
 def main() -> None:

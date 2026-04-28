@@ -1,0 +1,10 @@
+{
+  "threshold": 0.4641,
+  "calibration_metric": "mcc",
+  "val_score": 0.5543,
+  "n_val": 69401,
+  "model": "conplex",
+  "corpus": "all",
+  "seed": 456,
+  "source": "ConPLex/results_universal/all/seed_456/raw_predictions.npz"
+}
