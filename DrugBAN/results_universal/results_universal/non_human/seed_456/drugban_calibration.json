@@ -1,0 +1,10 @@
+{
+  "threshold": 0.2819,
+  "calibration_metric": "f1",
+  "val_score": 0.918,
+  "n_val": 1422,
+  "model": "drugban",
+  "corpus": "non_human",
+  "seed": 456,
+  "source": "DrugBAN/results_universal/results_universal/non_human/seed_456/raw_predictions.npz"
+}
