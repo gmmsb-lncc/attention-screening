@@ -59,21 +59,27 @@ def _conplex_ckpt(corpus: str, seed: int = 42) -> Path:
     return final  # let downstream raise FileNotFoundError with this path
 
 
+CANONICAL_SEEDS = (42, 123, 456, 789, 1024)
 CANONICAL_CKPT_BY_CORPUS = {
-    "human":     _conplex_ckpt("human",     seed=42),
-    "non_human": _conplex_ckpt("non_human", seed=42),
-    "all":       _conplex_ckpt("all",       seed=42),
+    c: _conplex_ckpt(c, seed=42)
+    for c in ("human", "non_human", "all")
 }
+
+
+def calibration_sidecar(corpus: str, seed: int) -> Path:
+    return (CONPLEX_ROOT / "results_universal" / corpus
+            / f"seed_{seed}" / "conplex_calibration.json")
+
+
 CALIBRATION_SIDECAR_BY_CORPUS = {
-    "human":     CONPLEX_ROOT / "results_universal" / "human"     / "seed_42" / "conplex_calibration.json",
-    "non_human": CONPLEX_ROOT / "results_universal" / "non_human" / "seed_42" / "conplex_calibration.json",
-    "all":       CONPLEX_ROOT / "results_universal" / "all"       / "seed_42" / "conplex_calibration.json",
+    c: calibration_sidecar(c, 42) for c in ("human", "non_human", "all")
 }
 
 
-def load_calibration(ckpt_path: Path, corpus: str) -> dict:
-    """Try sidecar next to ckpt first, then fall back to results_universal layout."""
-    for sidecar in (ckpt_path.parent / "conplex_calibration.json",
+def load_calibration(ckpt_path: Path, corpus: str, seed: int = 42) -> dict:
+    """Try sidecar for the given seed first, then ckpt-adjacent, then default."""
+    for sidecar in (calibration_sidecar(corpus, seed),
+                    ckpt_path.parent / "conplex_calibration.json",
                     CALIBRATION_SIDECAR_BY_CORPUS.get(corpus)):
         if sidecar is not None and sidecar.exists():
             return json.loads(sidecar.read_text())
@@ -113,17 +119,29 @@ def main() -> None:
     ap.add_argument("--pairs", type=Path, required=True)
     ap.add_argument("--out",   type=Path, required=True)
     ap.add_argument("--corpus", choices=["human", "non_human", "all"], default="all")
-    ap.add_argument("--ckpt",  type=Path, default=None)
+    ap.add_argument("--ckpt",  type=Path, default=None,
+                    help="explicit ckpt path (overrides --corpus + --seeds)")
+    ap.add_argument("--seeds", type=str, default="42,123,456,789,1024",
+                    help="comma-separated seeds for the 5-seed ensemble; "
+                         "internally maps to ConPLex rep0..rep4 via the "
+                         "canonical seeds={42,123,456,789,1024} ↔ reps={0,1,2,3,4} order")
     ap.add_argument("--batch-size", type=int, default=1024)
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = args.ckpt or CANONICAL_CKPT_BY_CORPUS[args.corpus]
-    if not ckpt.exists():
-        sys.exit(f"checkpoint not found: {ckpt}")
-    calib = load_calibration(ckpt, args.corpus)
-    print(f"  ckpt: {ckpt}", file=sys.stderr)
-    print(f"  thr: {calib['threshold']:.3f}", file=sys.stderr)
+
+    if args.ckpt is not None:
+        seed_specs = [(args.ckpt, load_calibration(args.ckpt, args.corpus, 42))]
+    else:
+        seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+        seed_specs = []
+        for s in seed_list:
+            ckpt = _conplex_ckpt(args.corpus, seed=s)
+            if not ckpt.exists():
+                sys.exit(f"checkpoint not found for seed {s}: {ckpt}")
+            seed_specs.append((ckpt, load_calibration(ckpt, args.corpus, s)))
+    print(f"  ensemble: {len(seed_specs)} seed(s) (corpus={args.corpus})",
+          file=sys.stderr)
 
     df = pd.read_csv(args.pairs, sep="\t")
     smiles = df["smiles"].astype(str).tolist()
@@ -135,27 +153,41 @@ def main() -> None:
     d_all = _featurize_unique(drug_feat, smiles, "ligands")
     p_all = _featurize_unique(prot_feat, seqs,    "proteins")
 
-    print("  loading SimpleCoembedding model...", file=sys.stderr)
-    model = SimpleCoembedding().to(device).eval()
-    state = torch.load(ckpt, map_location=device)
-    if isinstance(state, dict) and "state_dict" in state:
-        state = state["state_dict"]
-    model.load_state_dict(state, strict=False)
+    n = len(df)
+    probs_per_seed = np.empty((len(seed_specs), n), dtype=np.float64)
+    thresholds_per_seed = np.empty(len(seed_specs), dtype=np.float64)
 
-    sims = predict(model, d_all, p_all, device, batch_size=args.batch_size)
-    # rescale cosine [-1, 1] → probability [0, 1]
-    probs = np.clip((sims + 1.0) / 2.0, 0.0, 1.0)
+    for k, (ckpt, calib) in enumerate(seed_specs):
+        print(f"  [seed {k+1}/{len(seed_specs)}] ckpt={ckpt.parent.name} "
+              f"thr={calib['threshold']:.3f}", file=sys.stderr)
+        model = SimpleCoembedding().to(device).eval()
+        state = torch.load(ckpt, map_location=device)
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        model.load_state_dict(state, strict=False)
+        sims = predict(model, d_all, p_all, device, batch_size=args.batch_size)
+        probs_per_seed[k] = np.clip((sims + 1.0) / 2.0, 0.0, 1.0)
+        thresholds_per_seed[k] = calib["threshold"]
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
+    probs = probs_per_seed.mean(axis=0)
+    threshold = float(thresholds_per_seed.mean())
     out = pd.DataFrame({
         "uniprot":   df["uniprot"].to_numpy(),
         "chembl_id": df["chembl_id"].to_numpy(),
         "prob":      probs,
-        "pred":      (probs >= calib["threshold"]).astype(int),
-        "threshold": calib["threshold"],
+        "pred":      (probs >= threshold).astype(int),
+        "threshold": threshold,
+        "n_seeds":   len(seed_specs),
+        "prob_std":  probs_per_seed.std(axis=0, ddof=0),
     })
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.out, index=False)
-    print(f"  wrote {len(out)} rows → {args.out}", file=sys.stderr)
+    print(f"  wrote {len(out)} rows → {args.out} "
+          f"(ensemble of {len(seed_specs)} seeds, mean threshold={threshold:.3f})",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":

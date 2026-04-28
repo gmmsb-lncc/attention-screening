@@ -53,21 +53,24 @@ except ImportError:
         )
 
 
-CKPT_DIR_BY_CORPUS = {
-    # Trained ckpts live under DrugBAN/results/{corpus}/seed_X/.
-    # Files named best_model_epoch_<N>.pth (variable epoch); resolved
-    # at runtime via best_checkpoint().
-    "human":     REPO_ROOT / "DrugBAN" / "results" / "human"     / "seed_42",
-    "non_human": REPO_ROOT / "DrugBAN" / "results" / "non_human" / "seed_42",
-    "all":       REPO_ROOT / "DrugBAN" / "results" / "all"       / "seed_42",
-}
+CANONICAL_SEEDS = (42, 123, 456, 789, 1024)
+
+
+def ckpt_seed_dir(corpus: str, seed: int) -> Path:
+    """DrugBAN trained ckpts are under DrugBAN/results/{corpus}/seed_X/."""
+    return REPO_ROOT / "DrugBAN" / "results" / corpus / f"seed_{seed}"
+
+
+def calibration_sidecar(corpus: str, seed: int) -> Path:
+    """Calibration sidecar is under DrugBAN/results_universal/results_universal/."""
+    return (REPO_ROOT / "DrugBAN" / "results_universal" / "results_universal"
+            / corpus / f"seed_{seed}" / "drugban_calibration.json")
+
+
+# Backwards-compat single-seed map (seed_42 default).
+CKPT_DIR_BY_CORPUS = {c: ckpt_seed_dir(c, 42) for c in ("human", "non_human", "all")}
 CALIBRATION_SIDECAR_BY_CORPUS = {
-    # Calibration sidecar (drugban_calibration.json) is co-located with
-    # raw_predictions.npz under the nested results_universal/results_universal
-    # layout, separate from the ckpt directory above.
-    "human":     REPO_ROOT / "DrugBAN" / "results_universal" / "results_universal" / "human"     / "seed_42" / "drugban_calibration.json",
-    "non_human": REPO_ROOT / "DrugBAN" / "results_universal" / "results_universal" / "non_human" / "seed_42" / "drugban_calibration.json",
-    "all":       REPO_ROOT / "DrugBAN" / "results_universal" / "results_universal" / "all"       / "seed_42" / "drugban_calibration.json",
+    c: calibration_sidecar(c, 42) for c in ("human", "non_human", "all")
 }
 CANONICAL_CONFIG = REPO_ROOT / "DrugBAN" / "configs" / "DrugBAN.yaml"
 
@@ -88,8 +91,8 @@ def best_checkpoint(seed_dir: Path) -> Path:
     return candidates[0]
 
 
-def load_calibration(corpus: str) -> dict:
-    sidecar = CALIBRATION_SIDECAR_BY_CORPUS[corpus]
+def load_calibration(corpus: str, seed: int = 42) -> dict:
+    sidecar = calibration_sidecar(corpus, seed)
     if sidecar.exists():
         return json.loads(sidecar.read_text())
     print(f"  warn: no calibration sidecar at {sidecar}; using thr=0.5",
@@ -116,44 +119,72 @@ def main() -> None:
     ap.add_argument("--out",   type=Path, required=True)
     ap.add_argument("--corpus", choices=["human", "non_human", "all"], default="all")
     ap.add_argument("--ckpt",  type=Path, default=None,
-                    help="explicit ckpt path (overrides --corpus auto-resolve)")
+                    help="explicit ckpt path (overrides --corpus + --seeds; "
+                         "single-seed mode)")
+    ap.add_argument("--seeds", type=str, default="42,123,456,789,1024",
+                    help="comma-separated seeds for the 5-seed ensemble "
+                         "(default: all five canonical seeds)")
     ap.add_argument("--config", type=Path, default=CANONICAL_CONFIG)
     ap.add_argument("--batch-size", type=int, default=64)
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    seed_dir = CKPT_DIR_BY_CORPUS[args.corpus]
-    ckpt = args.ckpt or best_checkpoint(seed_dir)
+    # Resolve ensemble: list of (ckpt_path, calibration) per seed.
+    if args.ckpt is not None:
+        seed_specs = [(args.ckpt, load_calibration(args.corpus, 42))]
+    else:
+        seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+        seed_specs = []
+        for s in seed_list:
+            sd = ckpt_seed_dir(args.corpus, s)
+            seed_specs.append((best_checkpoint(sd), load_calibration(args.corpus, s)))
+    print(f"  ensemble: {len(seed_specs)} seed(s) (corpus={args.corpus})",
+          file=sys.stderr)
+
     cfg = yaml.safe_load(open(args.config))
-    calib = load_calibration(args.corpus)
-    print(f"  ckpt: {ckpt}", file=sys.stderr)
-    print(f"  thr: {calib['threshold']:.3f}", file=sys.stderr)
 
     df = pairs_to_drugban_df(args.pairs)
     dataset = DTIDataset(df.index.values, df)
     loader = DataLoader(dataset, batch_size=args.batch_size,
                         shuffle=False, collate_fn=graph_collate_func)
 
-    model = DrugBAN(**cfg).to(device)
-    state = torch.load(ckpt, map_location=device)
-    if isinstance(state, dict) and "model_state_dict" in state:
-        state = state["model_state_dict"]
-    model.load_state_dict(state, strict=False)
-    model.eval()
-
-    probs = predict(model, loader, device)
     pairs = pd.read_csv(args.pairs, sep="\t")
+    n = len(pairs)
+    probs_per_seed = np.empty((len(seed_specs), n), dtype=np.float64)
+    thresholds_per_seed = np.empty(len(seed_specs), dtype=np.float64)
+
+    for k, (ckpt, calib) in enumerate(seed_specs):
+        print(f"  [seed {k+1}/{len(seed_specs)}] ckpt={ckpt.parent.name} "
+              f"thr={calib['threshold']:.3f}", file=sys.stderr)
+        model = DrugBAN(**cfg).to(device)
+        state = torch.load(ckpt, map_location=device)
+        if isinstance(state, dict) and "model_state_dict" in state:
+            state = state["model_state_dict"]
+        model.load_state_dict(state, strict=False)
+        model.eval()
+        probs_per_seed[k] = predict(model, loader, device)
+        thresholds_per_seed[k] = calib["threshold"]
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    probs = probs_per_seed.mean(axis=0)
+    threshold = float(thresholds_per_seed.mean())
     out = pd.DataFrame({
         "uniprot":   pairs["uniprot"].to_numpy(),
         "chembl_id": pairs["chembl_id"].to_numpy(),
         "prob":      probs,
-        "pred":      (probs >= calib["threshold"]).astype(int),
-        "threshold": calib["threshold"],
+        "pred":      (probs >= threshold).astype(int),
+        "threshold": threshold,
+        "n_seeds":   len(seed_specs),
+        "prob_std":  probs_per_seed.std(axis=0, ddof=0),
     })
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.out, index=False)
-    print(f"  wrote {len(out)} rows → {args.out}", file=sys.stderr)
+    print(f"  wrote {len(out)} rows → {args.out} "
+          f"(ensemble of {len(seed_specs)} seeds, mean threshold={threshold:.3f})",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":
