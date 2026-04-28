@@ -22,6 +22,8 @@ import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "inference"))
+from device_utils import pick_device, empty_cache  # noqa: E402
 
 CONPLEX_ROOT = REPO_ROOT / "ConPLex"
 sys.path.insert(0, str(CONPLEX_ROOT))
@@ -128,7 +130,8 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=1024)
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
+    print(f"  device: {device}", file=sys.stderr)
 
     if args.ckpt is not None:
         seed_specs = [(args.ckpt, load_calibration(args.ckpt, args.corpus, 42))]
@@ -169,8 +172,7 @@ def main() -> None:
         probs_per_seed[k] = np.clip((sims + 1.0) / 2.0, 0.0, 1.0)
         thresholds_per_seed[k] = calib["threshold"]
         del model
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+        empty_cache(device)
 
     probs = probs_per_seed.mean(axis=0)
     threshold = float(thresholds_per_seed.mean())

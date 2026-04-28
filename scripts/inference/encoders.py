@@ -123,6 +123,8 @@ def encode_proteins(
         out[pid] = mat
     if device.type == "cuda":
         torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
     gc.collect()
     return out
 
@@ -198,5 +200,7 @@ def encode_ligands(
 
     if device.type == "cuda":
         torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
     gc.collect()
     return out
