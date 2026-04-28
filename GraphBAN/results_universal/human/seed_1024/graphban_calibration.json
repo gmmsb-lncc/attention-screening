@@ -1,0 +1,10 @@
+{
+  "threshold": 0.3822,
+  "calibration_metric": "f1",
+  "val_score": 0.7727,
+  "n_val": 66097,
+  "model": "graphban",
+  "corpus": "human",
+  "seed": 1024,
+  "source": "GraphBAN/results_universal/human/seed_1024/raw_predictions.npz"
+}
