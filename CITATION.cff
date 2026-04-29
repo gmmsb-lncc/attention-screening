@@ -1,0 +1,63 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite both the software (this file) and the underlying thesis (see preferred-citation)."
+title: "attention-screening: framework for protein-ligand interaction prediction on kinases"
+abstract: |
+  Open-source framework for kinase-ligand bioactivity prediction via attention-based
+  semantic screening over linear sequences (amino acids + SMILES). Implements DT-Kinase
+  (ESM-2 8M + MoLFormer + cross-attention 2D + CNN + hierarchical attention pooling)
+  and a unified evaluation protocol for three published baselines (DrugBAN, GraphBAN,
+  ConPLex). Provides scaffold-split universal partitioning, statistical refinements
+  for paired comparison (deduplication by pair, block bootstrap by protein, consensual
+  threshold rule) and a multi-model committee validated as the optimal operational
+  configuration.
+type: software
+authors:
+  - family-names: "Sulfierry"
+    given-names: "Leon"
+    email: "sulfierry@gmail.com"
+    affiliation: "Laboratório Nacional de Computação Científica (LNCC), Petrópolis, RJ, Brazil"
+    orcid: "https://orcid.org/0000-0003-0423-8043"
+repository-code: "https://github.com/gmmsb-lncc/attention-screening"
+url: "https://github.com/gmmsb-lncc/attention-screening"
+license: "GPL-3.0"
+# FIXME: substituir abaixo após depósito Zenodo + git tag
+version: "v1.0.0-rc1"  # PROVISÓRIO — gerar tag final pré-defesa
+date-released: "2026-04-28"  # PROVISÓRIO — atualizar para data do depósito
+doi: "10.5281/zenodo.TBD-CODE"  # PROVISÓRIO — substituir pelo DOI Zenodo após upload
+keywords:
+  - "drug-target interaction"
+  - "kinase"
+  - "protein language model"
+  - "ESM-2"
+  - "MoLFormer"
+  - "cross-attention"
+  - "scaffold split"
+  - "ensemble learning"
+  - "Matthews Correlation Coefficient"
+  - "bioactivity prediction"
+preferred-citation:
+  type: thesis
+  title: "Triagem Atencional Bimodal para Predição de Bioatividade Quinase-Ligante: Protocolo Unificado, Comitê Multi-Modelo e Refinamentos Estatísticos"
+  authors:
+    - family-names: "Sulfierry"
+      given-names: "Leon"
+  thesis-type: "PhD thesis"
+  institution:
+    name: "Laboratório Nacional de Computação Científica (LNCC)"
+    city: "Petrópolis"
+    region: "RJ"
+    country: "BR"
+  year: 2026
+  month: 6  # June 2026
+  doi: "10.5281/zenodo.TBD-THESIS"  # PROVISÓRIO — substituir após depósito da tese
+references:
+  - type: software
+    title: "ESM: Evolutionary Scale Modeling"
+    authors:
+      - name: "Meta AI Fundamental AI Research Protein Team"
+    repository-code: "https://github.com/facebookresearch/esm"
+  - type: software
+    title: "MoLFormer"
+    authors:
+      - name: "IBM Research"
+    repository-code: "https://github.com/IBM/molformer"
