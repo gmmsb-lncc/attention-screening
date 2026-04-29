@@ -351,13 +351,11 @@ If you use this framework, please cite the underlying PhD thesis:
 
 ```bibtex
 @phdthesis{sulfierry2026attentionscreening,
-  author  = {Sulfierry Corr{\^e}a Costa, Leon},
-  title   = {Triagem Atencional em Sequ{\^e}ncias Prim{\'a}rias
-             de Quinases e Ligantes},
-  school  = {Laborat{\'o}rio Nacional de Computa{\c{c}}{\~a}o
-             Cient{\'i}fica (LNCC)},
+  author  = {Sulfierry Corrêa Costa, Leon},
+  title   = {Triagem Atencional Aplicada ao Quinoma},
+  school  = {Laboratório Nacional de Computação Científica (LNCC)},
   type    = {Tese de Doutorado em Modelagem Computacional},
-  address = {Petr{\'o}polis, RJ, Brasil},
+  address = {Petrópolis, RJ, Brasil},
   year    = {2026},
   url     = {https://github.com/gmmsb-lncc/attention-screening}
 }
@@ -367,8 +365,7 @@ The companion software repository can additionally be referenced as:
 
 ```bibtex
 @software{attentionscreening2026,
-  title   = {attention-screening: kinase-ligand interaction profiling
-             with a foundation-model committee},
+  title   = {attention-screening: kinase-ligand interaction profiling with a foundation-model committee},
   author  = {Sulfierry, Leon and GMMSB-LNCC},
   year    = {2026},
   url     = {https://github.com/gmmsb-lncc/attention-screening},
