@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 CORPORA = ["human", "non_human", "all"]
-CORPORA_LABELS = {"human": "Human", "non_human": "Non-human", "all": "All"}
+CORPORA_LABELS = {"human": "Humano", "non_human": "Não-Humano", "all": "all"}
 
 MODEL_LABELS = {
     "dtkinase": "DT-Kinase (v7)",
@@ -117,7 +117,7 @@ def _heatmap(model: str, trains: dict, out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(5.2, 4.4))
     # Explicit lightgrey for NaN cells so missing data is visually obvious
     # (matplotlib renders NaN as transparent by default → looks broken).
-    cmap = plt.get_cmap("RdYlGn").copy()
+    cmap = plt.get_cmap("viridis").copy()
     cmap.set_bad(color="#e0e0e0")
     masked = np.ma.masked_invalid(M)
     im = ax.imshow(masked, cmap=cmap, vmin=0.0, vmax=0.8, aspect="auto")
@@ -125,16 +125,18 @@ def _heatmap(model: str, trains: dict, out_path: Path) -> None:
     ax.set_yticks(range(3))
     ax.set_xticklabels([CORPORA_LABELS[c] for c in CORPORA], fontsize=10)
     ax.set_yticklabels([CORPORA_LABELS[c] for c in CORPORA], fontsize=10)
-    ax.set_xlabel("Test corpus", fontsize=11)
-    ax.set_ylabel("Train corpus", fontsize=11)
-    ax.set_title(f"{MODEL_LABELS.get(model, model)} — test MCC", fontsize=12)
+    ax.set_xlabel("Corpus de teste", fontsize=11)
+    ax.set_ylabel("Corpus de treino", fontsize=11)
+    ax.set_title(f"{MODEL_LABELS.get(model, model)} — MCC de teste", fontsize=12)
     for i in range(3):
         for j in range(3):
             if np.isnan(M[i, j]):
                 ax.text(j, i, "n/d", ha="center", va="center",
                         color="#555555", fontsize=10, fontweight="bold")
             else:
-                color = "black" if 0.2 <= M[i, j] <= 0.6 else "white"
+                # viridis: dark at low values (purple/blue) → white text;
+                # bright at high values (green/yellow) → black text.
+                color = "black" if M[i, j] > 0.5 else "white"
                 marker = "*" if i == j else ""
                 ax.text(j, i, f"{M[i,j]:.3f}{marker}\n±{S[i,j]:.3f}",
                         ha="center", va="center", color=color, fontsize=9)
