@@ -45,7 +45,7 @@ Repo: `gmmsb-lncc/attention-screening` · Python 3.12 in `env/` · PyTorch 2.0+ 
 2. **Cross-dataset evaluation matrix (3×3)** — completo. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.268 (anexoA tese; 0.209 anterior refletia rep 0 isolada, descartado). **Documentação completa migrada para `~/PhD/cross_matrix/`** (figures + Beamer source + Anexo A da tese).
 3. **Interpretabilidade DT-Kinase** — `scripts/inference/explain.py` POC implementado: extrai per-residue + per-ligand-token attention via forward hooks (M_k pre-CNN + HierPool weights). Modalidade interpretativa nativa não disponível em ConPLex (que requer atribuição model-agnostic post-hoc, e.g., SHAP); paridade com DrugBAN/GraphBAN BAN attn em 3 níveis (raw + per-head + HierPool). Caveat de fidelidade (Jain&Wallace 2019, Wiegreffe&Pinter 2019) reconhecido na tese (anexoB:665): pesos de atenção não constituem atribuição faithful, lidos como diagnóstico arquitetural não como explicação causal.
 4. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
-5. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (CI 95% + paired Wilcoxon) replaces "x ± σ" in thesis tables 17 & 18.
+5. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (paired bootstrap CI 95%) used in thesis tables 17 & 18. Wilcoxon não foi entregue na tese (n=5 sementes torna combinatorialmente degenerado; bootstrap pareado cobre o regime).
 
 ## PR workflow
 
@@ -298,7 +298,7 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
 | `run_pchembl_sensitivity.sh` | τ sweep ∈ {5.5, 6.0, 6.5, 7.0, 7.5} |
 | `run_cross_species.sh` | H↔NH transfer (legacy, superseded by `cross_dataset_matrix/`) |
 | `eval_checkpoint_on_dataset.py` | Single-cell v7 eval (used by matrix) |
-| `bootstrap_ci.py` | Post-hoc CI 95% + paired Wilcoxon (no retraining) |
+| `bootstrap_ci.py` | Post-hoc paired bootstrap CI 95% (no retraining) |
 | `cross_dataset_matrix/` | Full 3×3 infra (see section above) |
 
 `scripts/count_v7_params.py` — trainable/frozen parameter breakdown for v7.
