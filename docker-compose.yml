@@ -1,0 +1,62 @@
+# =============================================================================
+# attention-screening — Docker Compose
+# =============================================================================
+#
+# Two services share the same image build target, differing only in GPU
+# reservation and which build arg they pass.
+#
+#   docker compose --profile cpu  build
+#   docker compose --profile cpu  run --rm baseline-cpu \
+#       bash scripts/inference/examples/run_imatinib_demo.sh
+#
+#   docker compose --profile cuda build
+#   docker compose --profile cuda run --rm baseline-cuda "<SMILES>"
+#
+# Volumes:
+#   hf-cache  : HuggingFace model downloads (ESM-2, MoLFormer, ProtBERT)
+#               first run pulls ~2.5GB; subsequent runs are instant.
+#   results   : output directory, mapped to ./results on host.
+# =============================================================================
+
+services:
+  baseline-cpu:
+    profiles: ["cpu"]
+    image: attention-screening:cpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_TYPE: cpu
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./results:/app/results
+    environment:
+      PYTORCH_ENABLE_MPS_FALLBACK: "1"
+      PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.0"
+    stdin_open: true
+    tty: true
+
+  baseline-cuda:
+    profiles: ["cuda"]
+    image: attention-screening:cuda
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_TYPE: cuda
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./results:/app/results
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+
+volumes:
+  hf-cache:
+    driver: local

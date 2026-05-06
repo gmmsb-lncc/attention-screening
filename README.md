@@ -102,11 +102,17 @@ conda activate baseline
 # Option B — Python venv (no conda required)
 bash scripts/inference/setup_baseline_venv.sh    # auto-detect CUDA
 source env_baseline/bin/activate
+
+# Option C — Docker (zero local install, see “Docker” section below)
+docker pull gmmsb/attention-screening:cpu        # CPU build
+docker pull gmmsb/attention-screening:cuda       # CUDA 12.1 build
 ```
 
-Both scripts pin: PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3, RDKit,
-and the union of dependencies for the four committee models. CPU-only
-fallback is auto-detected on macOS or hosts without `nvidia-smi`.
+Options A and B pin: PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3,
+RDKit, and the union of dependencies for the four committee models. CPU-only
+fallback is auto-detected on macOS or hosts without `nvidia-smi`. Option C
+ships the same software stack pre-installed inside an image, eliminating
+the need for conda/venv setup.
 
 ### 2. Run the committee on your data
 
@@ -143,6 +149,19 @@ python attention_screening.py pairs.csv
 
 # Use unified env explicitly
 python attention_screening.py "CCO..." --single-env baseline --top-k 50
+
+# Default committee = 3-model human kinome panel
+# (DT-Kinase + DrugBAN + ConPLex, in-domain human ckpts). Empirically validated
+# ΔMCC = +0.0074 vs legacy 4-model (IC95 [+0.0014, +0.0136], p = 0.022 under
+# block bootstrap by protein, B = 10000). 25 % lower compute.
+python attention_screening.py "CCO..."                    # implicit human_kinome
+python attention_screening.py "CCO..." --profile human_kinome   # explicit
+
+# Legacy 4-model committee (adds GraphBAN, all-corpus ckpts) — research mode
+python attention_screening.py "CCO..." --profile full_4model
+
+# Non-human kinome (auxiliary) — 4-model + non_human ckpts
+python attention_screening.py "CCO..." --profile non_human
 ```
 
 ### 3. Read the consensus
@@ -201,6 +220,94 @@ bash scripts/inference/examples/run_imatinib_demo.sh
 # Out-of-domain query: K. pneumoniae thiamine monophosphate kinase
 bash scripts/inference/examples/run_kpneumo_thil_demo.sh
 ```
+
+---
+
+## 🐳 Docker
+
+Pre-built images bundle the unified `baseline` environment with all four
+committee models, the canonical seed-42 checkpoints, and DrugBAN/GraphBAN
+upstream code. First run downloads ~2.5 GB of HuggingFace encoder weights
+(ESM-2 8M, MoLFormer-XL, ProtBERT) into the persistent `hf-cache` volume;
+subsequent runs are instant.
+
+### Run from registry (no clone required)
+
+```bash
+# CPU build (Linux/Mac/Windows; Docker Desktop falls back to CPU on Mac)
+docker run --rm \
+    -v hf-cache:/root/.cache/huggingface \
+    -v $PWD/results:/app/results \
+    gmmsb/attention-screening:cpu \
+    "CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5" \
+    --organism human
+
+# CUDA build (Linux + NVIDIA driver ≥ 530)
+docker run --rm --gpus all \
+    -v hf-cache:/root/.cache/huggingface \
+    -v $PWD/results:/app/results \
+    gmmsb/attention-screening:cuda \
+    "CCO" --organism all
+
+# Reproduce the imatinib committee demo (4-model lookup + attention maps)
+docker run --rm --entrypoint bash \
+    -v hf-cache:/root/.cache/huggingface \
+    -v $PWD/results:/app/results \
+    gmmsb/attention-screening:cpu \
+    scripts/inference/examples/run_imatinib_demo.sh
+
+# Open an interactive shell inside the conda env
+docker run --rm -it --entrypoint bash gmmsb/attention-screening:cpu
+```
+
+### Build locally
+
+```bash
+# Compose (preferred — handles GPU reservation + named volumes)
+docker compose --profile cpu  build
+docker compose --profile cuda build
+
+docker compose --profile cpu  run --rm baseline-cpu  "<SMILES>"
+docker compose --profile cuda run --rm baseline-cuda "<SMILES>"
+
+# Plain docker
+docker build -t attention-screening:cpu  --build-arg BUILD_TYPE=cpu  .
+docker build -t attention-screening:cuda --build-arg BUILD_TYPE=cuda .
+```
+
+### Image notes
+
+- **Default ENTRYPOINT**: `python attention_screening.py` — pass SMILES + flags
+  directly as `docker run image …` arguments.
+- **Override with `--entrypoint bash`** for shell access or to run demo scripts.
+- **Volumes**: mount `hf-cache` for encoder downloads (persistent across runs)
+  and `./results` to retrieve outputs on the host.
+- **Image size**: ~5 GB (CPU) / ~8 GB (CUDA). The CUDA build includes the
+  cu121 PyTorch and DGL wheels.
+- **Mac caveat**: Docker Desktop does not pass through MPS — containers run
+  on CPU even on Apple Silicon. For native MPS, run `attention_screening.py`
+  outside Docker.
+
+### Publishing the image
+
+The committee artifacts (~700 MB ConPLex rep-0 ckpts, ~150 MB DT-Kinase
+seed-42 ckpts) are baked into the image, so a single `docker push` ships
+the complete pipeline. Recommended registries:
+
+```bash
+# Docker Hub
+docker tag attention-screening:cpu  gmmsb/attention-screening:cpu
+docker tag attention-screening:cuda gmmsb/attention-screening:cuda
+docker push gmmsb/attention-screening:cpu
+docker push gmmsb/attention-screening:cuda
+
+# GitHub Container Registry (GHCR) — free for public OSS images
+docker tag attention-screening:cpu  ghcr.io/gmmsb-lncc/attention-screening:cpu
+docker push ghcr.io/gmmsb-lncc/attention-screening:cpu
+```
+
+For automated multi-arch builds, see `docker buildx build --platform
+linux/amd64,linux/arm64 …`.
 
 ---
 

@@ -1325,7 +1325,14 @@ def _train_interaction_cnn(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif os.getenv("BENCHMARK_LEVEL4CNN_DISABLE_MPS", "0") != "1" and getattr(
+        torch.backends, "mps", None
+    ) is not None and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     # --- CPU / GPU optimization ---------------------------------------
     if device.type == "cpu":
@@ -1333,6 +1340,8 @@ def _train_interaction_cnn(
         torch.set_num_threads(n_cpus)
         torch.set_num_interop_threads(max(1, n_cpus // 2))
         tqdm.write(f"    CPU mode: using {n_cpus} threads")
+    elif device.type == "mps":
+        tqdm.write("    MPS mode: Apple Silicon GPU")
 
     # --- Precision flags ----------------------------------------------
     use_double = os.getenv("BENCHMARK_LEVEL4CNN_DOUBLE", "1") == "1"

@@ -334,6 +334,7 @@ def run_smiles_string(smiles: str, args: argparse.Namespace) -> Path:
         "--ckpt-corpus", args.ckpt_corpus,
         "--top-k",    str(args.top_k),
         "--models",   args.models,
+        "--profile",  args.profile,
     ]
     if args.parallel: cmd.append("--parallel")
     if args.single_env: cmd += ["--single-env", args.single_env]
@@ -353,6 +354,7 @@ def run_fasta_file(path: Path, args: argparse.Namespace) -> Path:
         "--ckpt-corpus", args.ckpt_corpus,
         "--top-k", str(args.top_k),
         "--models", args.models,
+        "--profile", args.profile,
     ]
     if args.parallel: cmd.append("--parallel")
     if args.single_env: cmd += ["--single-env", args.single_env]
@@ -416,6 +418,7 @@ def run_smi_file(smiles_list: list[str], path: Path, args: argparse.Namespace) -
         "--ckpt-corpus", args.ckpt_corpus,
         "--top-k", str(args.top_k),
         "--models", args.models,
+        "--profile", args.profile,
     ]
     if args.parallel: cmd.append("--parallel")
     if args.single_env: cmd += ["--single-env", args.single_env]
@@ -490,6 +493,7 @@ def run_batch_file(path: Path, payload: dict, args: argparse.Namespace) -> Path:
         "--ckpt-corpus", args.ckpt_corpus,
         "--top-k", str(args.top_k),
         "--models", args.models,
+        "--profile", args.profile,
     ]
     if args.parallel: cmd.append("--parallel")
     if args.single_env: cmd += ["--single-env", args.single_env]
@@ -570,8 +574,18 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=None,
                     help="output dir (default: results/inference/attention_screening_<TS>)")
     ap.add_argument("--top-k", type=int, default=20)
-    ap.add_argument("--models", default="dtkinase,drugban,graphban,conplex",
-                    help="comma-separated subset of models to run")
+    ap.add_argument("--models", default="dtkinase,drugban,conplex",
+                    help="comma-separated subset of models to run "
+                         "(default: 3-model human kinome panel)")
+    ap.add_argument("--profile", choices=["human_kinome", "full_4model", "non_human"],
+                    default="human_kinome",
+                    help="committee preset. "
+                         "'human_kinome' (DEFAULT) = 3-model panel "
+                         "(DT-Kinase + DrugBAN + ConPLex), in-domain human ckpts. "
+                         "Empirically Pareto-optimal for human kinome screening "
+                         "(ΔMCC=+0.0074 vs 4-model, p=0.022). 25% lower compute. "
+                         "'full_4model' = legacy 4-model + GraphBAN, all-corpus ckpt. "
+                         "'non_human' = 4-model + non_human ckpts.")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring subprocesses in parallel")
     ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
@@ -580,6 +594,34 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved pipeline command without executing")
     args = ap.parse_args()
+
+    # Apply profile preset. Explicit user overrides take precedence (organism
+    # and ckpt_corpus default to None; models has its own default per profile).
+    DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
+    DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
+
+    if args.profile == "human_kinome":
+        if args.organism is None:
+            args.organism = "human"
+        if args.ckpt_corpus is None:
+            args.ckpt_corpus = "human"
+    elif args.profile == "full_4model":
+        if args.models == DEFAULT_MODELS_3:
+            args.models = DEFAULT_MODELS_4
+        if args.organism is None:
+            args.organism = "human"
+        if args.ckpt_corpus is None:
+            args.ckpt_corpus = "all"
+    elif args.profile == "non_human":
+        if args.models == DEFAULT_MODELS_3:
+            args.models = DEFAULT_MODELS_4
+        if args.organism is None:
+            args.organism = "non_human"
+        if args.ckpt_corpus is None:
+            args.ckpt_corpus = "non_human"
+
+    print(f"[profile={args.profile}] models={args.models} "
+          f"organism={args.organism} ckpt_corpus={args.ckpt_corpus}")
 
     # Auto-resolve output dir if user did not specify
     if args.out is None:
