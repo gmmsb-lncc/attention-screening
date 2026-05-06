@@ -1,25 +1,32 @@
-# attention-screening 🧬
+# attention-screening
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 [![License: LGPL-3.0](https://img.shields.io/badge/License-LGPL--3.0-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**Hierarchical kinase-ligand interaction prediction through attention-based
-foundation models.**
+**Computational panel of human kinases via attention-based foundation-model
+committee.**
 
-attention-screening is a kinase-inhibitor screening framework that runs four
-independently trained models (DT-Kinase, DrugBAN, GraphBAN, ConPLex) as a
-**committee** and returns ranked predictions with attention maps, given a
-SMILES, a FASTA sequence, or a batch file as input.
+attention-screening is a kinase-inhibitor screening framework that runs a
+3-model **committee** (DT-Kinase, DrugBAN, ConPLex) and returns ranked
+binding predictions with attention maps, given a SMILES, a FASTA sequence,
+or a batch file as input. The committee composition was empirically
+validated on the canonical scaffold-split test set under block bootstrap
+by protein and Holm-Bonferroni multiple-testing correction.
 
-> **Why the name** — unifying mechanism across all four committee models is
+The framework targets the **human kinome** as primary deployment domain,
+matching the central goal of the underlying thesis ("Triagem Atencional
+Aplicada ao Quinoma"). A non-human auxiliary mode and a legacy 4-model
+profile (which adds GraphBAN) are available via the `--profile` flag for
+research and comparison contexts.
+
+> **Why the name** — the unifying mechanism across all committee models is
 > an **attention operator**, direct or indirect: cross-attention 2D +
-> HierPool (DT-Kinase), Bilinear Attention Network (DrugBAN, GraphBAN), and
-> contrastive co-embedding / alignment in the metric space (ConPLex). The
-> framework is a *committee of four attention paradigms* applied to the
-> same protein-ligand pair, and the per-model attention tensors are exposed
-> as first-class outputs (residue-level + atom-level + interaction-cell-level).
-> See the **Attention as the unifying core** section below.
+> hierarchical pooling (DT-Kinase), Bilinear Attention Network (DrugBAN,
+> GraphBAN), and contrastive co-embedding in a metric space (ConPLex).
+> Per-model attention tensors are exposed as first-class outputs
+> (residue-level, atom-level, interaction-cell-level). See the
+> **Attention as the unifying core** section below.
 
 ```mermaid
 flowchart LR
@@ -38,12 +45,10 @@ flowchart LR
 
     PAIRS --> DTK["<b>DT-Kinase</b><br/>cross-attn 2D + CNN"]:::dtk
     PAIRS --> DBN["<b>DrugBAN</b><br/>BAN + GCN"]:::ban
-    PAIRS --> GBN["<b>GraphBAN</b><br/>BAN + distillation"]:::ban
     PAIRS --> CPL["<b>ConPLex</b><br/>contrastive co-embed"]:::cpl
 
     DTK --> AGG
     DBN --> AGG
-    GBN --> AGG
     CPL --> AGG
     AGG["<b>aggregate.py</b><br/>soft mean + Borda + tier"]:::agg
 
@@ -64,7 +69,7 @@ flowchart LR
 
 ---
 
-## 🔬 Motivation
+## Motivation
 
 Kinases comprise about 2% of the human proteome (518 genes) but regulate
 roughly 30% of all cellular proteins through phosphorylation. Achieving
@@ -83,12 +88,44 @@ For methodology, evaluation protocol, and benchmark levels see
 
 ---
 
-## 🚀 Quick Start
+## Committee composition (default `human_kinome` profile)
+
+| Model | Protein backbone | Ligand backbone | Training paradigm | Role in committee |
+|---|---|---|---|---|
+| **DT-Kinase** | ESM-2 8M | MoLFormer-XL | BCE + cross-attention 2D + HierPool | thesis-native; non_human informative |
+| **DrugBAN** | CNN scratch | GCN scratch | BCE + bilinear attention | strongest individual; broad coverage |
+| **ConPLex** | ProtBERT (frozen) | Morgan FP | contrastive metric space | inductive-bias diversity (orthogonal to BAN) |
+
+Empirically validated against the legacy 4-model committee (Tabela B.5–B.6
+of the thesis Anexo B + the head-to-head paired bootstrap reported in
+`results/inference/committee_no_graphban_holm/`):
+
+| Corpus | 3-model MCC | 4-model MCC | Δ MCC | Verdict (block bootstrap, B = 10000) |
+|---|---|---|---|---|
+| **human** | **0.5496** | 0.5421 | **+0.0074** | 3-model leads (IC95 [+0.001, +0.014], p = 0.022) |
+| all       | 0.5493     | 0.5519 | −0.0026 | indistinguishable (IC95 contains zero) |
+| non_human | 0.5277     | 0.5470 | −0.0193 | 4-model leads (IC95 [−0.046, −0.001], p = 0.032) |
+
+GraphBAN was dropped because its erros are highly correlated with DrugBAN
+(both are BAN architectures trained with BCE on overlapping protein
+backbones), so its inclusion adds parameters without reducing committee
+variance. The substitution analysis (DrugBAN vs GraphBAN as the BAN
+member) shows DrugBAN dominates with p < 10⁻³ in human and `all` corpora
+under the same bootstrap protocol.
+
+For the rare cross-species use case, `--profile non_human` reverts to the
+4-model composition with non_human-trained checkpoints; for legacy
+reproducibility against the original thesis tables, `--profile full_4model`
+restores DT-Kinase + DrugBAN + GraphBAN + ConPLex.
+
+---
+
+## Quick Start
 
 ### 1. Install the unified `baseline` environment
 
 The four committee models historically lived in separate conda envs; the
-recommended setup now installs all four in a single environment named
+recommended setup now installs them in a single environment named
 `baseline` (~3-4 GB). Pick **one** path:
 
 ```bash
@@ -103,16 +140,15 @@ conda activate baseline
 bash scripts/inference/setup_baseline_venv.sh    # auto-detect CUDA
 source env_baseline/bin/activate
 
-# Option C — Docker (zero local install, see “Docker” section below)
+# Option C — Docker (zero local install, see Docker section below)
 docker pull gmmsb/attention-screening:cpu        # CPU build
 docker pull gmmsb/attention-screening:cuda       # CUDA 12.1 build
 ```
 
 Options A and B pin: PyTorch 2.4.1+cu121, DGL cu121, transformers 4.39.3,
-RDKit, and the union of dependencies for the four committee models. CPU-only
+RDKit, and the union of dependencies for the committee models. CPU-only
 fallback is auto-detected on macOS or hosts without `nvidia-smi`. Option C
-ships the same software stack pre-installed inside an image, eliminating
-the need for conda/venv setup.
+ships the same software stack pre-installed inside an image.
 
 ### 2. Run the committee on your data
 
@@ -122,18 +158,12 @@ the need for conda/venv setup.
 > pipeline.
 
 A single command does everything. The script auto-detects whether the input
-is a SMILES string, a sequence, or a file:
+is a SMILES string, a sequence, or a file, and applies the default
+`human_kinome` profile (3-model panel + in-domain human checkpoints):
 
 ```bash
-# SMILES string → DEFAULT: runs human FIRST, then non_human (two passes,
-# matched ckpts). Outputs are emitted into the same dir with prefixes:
-#   human_consensus.csv, human_scores_dtkinase.csv, ...
-#   non_human_consensus.csv, non_human_scores_dtkinase.csv, ...
+# SMILES vs human kinome (default profile)
 python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O"
-
-# Single-organism override
-python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism human
-python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --organism all
 
 # Inline AA sequence → ranked against the 110k ChEMBL kinase-inhibitor library
 python attention_screening.py "MGNNHGTYLG..."
@@ -147,107 +177,99 @@ python attention_screening.py compounds.smi
 # File: CSV / TSV / TXT (column order does not matter)
 python attention_screening.py pairs.csv
 
-# Use unified env explicitly
+# Single-organism override (auxiliary)
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile non_human
+
+# Legacy 4-model committee (research / thesis reproducibility)
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile full_4model
+
+# Use the unified env explicitly + custom top-K
 python attention_screening.py "CCO..." --single-env baseline --top-k 50
 
-# Default committee = 3-model human kinome panel
-# (DT-Kinase + DrugBAN + ConPLex, in-domain human ckpts). Empirically validated
-# ΔMCC = +0.0074 vs legacy 4-model (IC95 [+0.0014, +0.0136], p = 0.022 under
-# block bootstrap by protein, B = 10000). 25 % lower compute.
-python attention_screening.py "CCO..."                    # implicit human_kinome
-python attention_screening.py "CCO..." --profile human_kinome   # explicit
-
-# Legacy 4-model committee (adds GraphBAN, all-corpus ckpts) — research mode
-python attention_screening.py "CCO..." --profile full_4model
-
-# Non-human kinome (auxiliary) — 4-model + non_human ckpts
-python attention_screening.py "CCO..." --profile non_human
+# Convenience wrapper for the human_kinome default
+bash scripts/inference/run_human_specialist.sh "CC(=O)Oc1ccccc1C(=O)O"
 ```
 
 ### 3. Read the consensus
 
-Each run writes a self-contained directory under `results/inference/`. In
-the **default dual-pass** mode (no `--organism` flag), files are prefixed
-with `human_` and `non_human_` so the user can compare the two screens
-side-by-side without navigating into per-organism subdirectories:
+Each run writes a self-contained directory under
+`results/inference/<run_id>/`:
 
 ```
 results/inference/<run_id>/
-├── human_pairs.tsv
-├── human_scores_dtkinase.csv         (per-model probability + threshold)
-├── human_scores_drugban.csv
-├── human_scores_graphban.csv
-├── human_scores_conplex.csv
-├── human_consensus.csv               (ranked, with prob_mean + tier)
-├── human_consensus.annotated.csv     (+ kinase target names + organism)
-├── human_consensus.top.csv
-├── human_attention/                  (top-K STRONG / LIKELY pairs)
-│   └── <pair_id>/
-│       ├── dtkinase_Mk.npz
-│       ├── dtkinase_hierpool.npz
-│       ├── drugban_BAN.npz
-│       ├── graphban_BAN.npz
-│       └── consensus_heatmap.pdf
-└── non_human_*    (same set of files, prefixed `non_human_`)
+├── pairs.tsv                       # input expanded to N × M pairs
+├── scores_dtkinase.csv             # per-model probability + threshold
+├── scores_drugban.csv
+├── scores_conplex.csv
+├── consensus.csv                   # ranked, with prob_mean + tier
+├── consensus.annotated.csv         # + kinase target names + organism
+├── consensus.top.csv               # top-K subset
+└── attention/                      # top-K STRONG / LIKELY pairs
+    └── <pair_id>/
+        ├── dtkinase_Mk.npz
+        ├── dtkinase_hierpool.npz
+        ├── drugban_BAN.npz
+        └── consensus_heatmap.pdf
 ```
 
-When `--organism` is given explicitly, the prefix is omitted and the
-single-pass output (`pairs.tsv`, `consensus.csv`, `attention/`, etc.)
-sits directly in `<run_id>/`.
+Each `tier` value is a discrete rule on the agreement count
+(rescaled automatically when the committee runs with fewer than three
+models — Tabela B.6 Anexo B):
 
-The committee verdict per pair is the **tier** column:
-
-| `tier` | rule (n=4) | interpretation |
+| `tier` (n=3 default) | rule | interpretation |
 |---|---|---|
-| `STRONG` | 4 of 4 models predict binder | high-priority experimental follow-up |
-| `LIKELY` | 3 of 4 | secondary screening |
-| `UNCERTAIN` | 2 of 4 | inconclusive |
-| `UNLIKELY` | ≤1 of 4 | negative consensus |
+| `STRONG`    | 3 of 3 models predict binder | high-priority experimental follow-up |
+| `LIKELY`    | 2 of 3                       | secondary screening |
+| `UNCERTAIN` | 1 of 3                       | inconclusive |
+| `UNLIKELY`  | 0 of 3                       | negative consensus |
 
-The pipeline rescales tier thresholds automatically when a partial committee
-runs (e.g., 3 models present → STRONG = 3/3). Detailed semantics in
+For ranking ties, the secondary key is `agreement_count` (descending) and
+the tertiary is `confidence = 1 − sigma_model`. Detailed semantics in
 [`scripts/inference/README.md`](scripts/inference/README.md) and
 [`docs/02-user-guide/inferencia-comite.md`](docs/02-user-guide/inferencia-comite.md).
 
 ### Worked examples
 
-Two end-to-end demo scripts ship with the repository:
+End-to-end demo scripts ship with the repository:
 
 ```bash
-# Imatinib (Gleevec) vs human kinome → ABL ranks top-3 STRONG (validated)
+# Imatinib (Gleevec) vs human kinome — ABL ranks top-3 STRONG (validated)
 bash scripts/inference/examples/run_imatinib_demo.sh
 
 # Out-of-domain query: K. pneumoniae thiamine monophosphate kinase
 bash scripts/inference/examples/run_kpneumo_thil_demo.sh
+
+# 3×3 cross-corpus committee matrix (heatmaps + 9 confusion matrices,
+# Anexo A style)
+bash scripts/run_committee_3x3.sh
 ```
 
 ---
 
-## 🐳 Docker
+## Docker
 
-Pre-built images bundle the unified `baseline` environment with all four
-committee models, the canonical seed-42 checkpoints, and DrugBAN/GraphBAN
-upstream code. First run downloads ~2.5 GB of HuggingFace encoder weights
-(ESM-2 8M, MoLFormer-XL, ProtBERT) into the persistent `hf-cache` volume;
-subsequent runs are instant.
+Pre-built images bundle the unified `baseline` environment with the
+committee models, the canonical seed-42 checkpoints, and the upstream
+DrugBAN/GraphBAN code clones. First run downloads ~2.5 GB of
+HuggingFace encoder weights (ESM-2 8M, MoLFormer-XL, ProtBERT) into the
+persistent `hf-cache` volume; subsequent runs are instant.
 
 ### Run from registry (no clone required)
 
 ```bash
-# CPU build (Linux/Mac/Windows; Docker Desktop falls back to CPU on Mac)
+# CPU build (Linux / Mac / Windows; Docker Desktop falls back to CPU on Mac)
 docker run --rm \
     -v hf-cache:/root/.cache/huggingface \
     -v $PWD/results:/app/results \
     gmmsb/attention-screening:cpu \
-    "CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5" \
-    --organism human
+    "CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5"
 
-# CUDA build (Linux + NVIDIA driver ≥ 530)
+# CUDA build (Linux + NVIDIA driver >= 530)
 docker run --rm --gpus all \
     -v hf-cache:/root/.cache/huggingface \
     -v $PWD/results:/app/results \
     gmmsb/attention-screening:cuda \
-    "CCO" --organism all
+    "CCO" --profile non_human
 
 # Reproduce the imatinib committee demo (4-model lookup + attention maps)
 docker run --rm --entrypoint bash \
@@ -311,20 +333,19 @@ linux/amd64,linux/arm64 …`.
 
 ---
 
-## 🎯 Attention as the unifying core
+## Attention as the unifying core
 
-All four committee models are **attention-based**, directly or indirectly,
-and the framework's interpretability story is built on extracting and
-comparing those attention signals across paradigms:
+All committee models are **attention-based**, directly or indirectly, and
+the framework's interpretability story is built on extracting and comparing
+those attention signals across paradigms:
 
-| Model | Attention mechanism | Per-pair output exposed |
+| Model | Attention mechanism | Per-pair output |
 |---|---|---|
 | **DT-Kinase** | Cross-attention 2D over ESM-2 + MoLFormer; multi-head dot product → 16-channel interaction map → CNN 2D → hierarchical attention pooling (lig-axis → prot-axis) | Three levels: M_k pre-CNN, HierPool stage-1, HierPool stage-2 — saved as `dtkinase_Mk.npz`, `dtkinase_hierpool.npz`, plus structured JSON with per-atom + per-residue weights |
-| **DrugBAN** | Bilinear Attention Network (BAN) — pairwise residue × atom matrix learned end-to-end | `drugban_BAN.npz` with the bilinear attention matrix |
-| **GraphBAN** | BAN on top of ESM-1b + ChemBERTa knowledge-distilled features (attention enters via the teacher embeddings + the BAN head) | `graphban_BAN.npz` (analogous schema) |
+| **DrugBAN** | Bilinear Attention Network — pairwise residue × atom matrix learned end-to-end | `drugban_BAN.npz` with the bilinear attention matrix |
 | **ConPLex** | Contrastive co-embedding (ProtBERT + Morgan FP projected into a shared metric space; alignment is the implicit attention signal) | Cosine similarity per pair (no positional matrix); contributes to the consensus rank but not to the attention overlay |
 
-For each pair flagged as STRONG/LIKELY by the committee, the pipeline
+For each pair flagged as STRONG or LIKELY by the committee, the pipeline
 emits:
 
 ```
@@ -337,8 +358,7 @@ attention/<pair_id>/
 ├── <pair_id>_attention.json      structured graph (atoms, bonds, residues, top cells)
 ├── dtkinase_Mk.npz               raw [16, sp, sl] tensor + per-axis aggregates
 ├── dtkinase_hierpool.npz         stage-1 + stage-2 weights
-├── drugban_BAN.npz               BAN matrix (when adapter available)
-└── graphban_BAN.npz              BAN matrix (when adapter available)
+└── drugban_BAN.npz               BAN matrix (when adapter available)
 ```
 
 The structured JSON is the same data the PNGs render from; consume it from
@@ -347,16 +367,19 @@ custom visualizations.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 attention-screening/
-├── attention_screening.py              # ★ single-command user entry point
+├── attention_screening.py              # single-command user entry point
 ├── kinase_profiling.py                 # legacy alias (symlink → attention_screening.py)
 ├── requirements-baseline.txt           # pip/venv dependency manifest
+├── Dockerfile                          # CPU + CUDA build via BUILD_TYPE arg
+├── docker-compose.yml                  # cpu / cuda profiles
 ├── scripts/
-│   └── inference/                      # ★ committee pipeline
-│       ├── committee.py                # 4-model orchestrator
+│   ├── run_committee_3x3.sh            # 3×3 cross-corpus matrix runner
+│   └── inference/                      # committee pipeline
+│       ├── committee.py                # committee orchestrator
 │       ├── kinase_profiling.py         # mirror of top-level entry
 │       ├── expand_pairs.py             # input → pairs.tsv
 │       ├── encoders.py                 # ESM-2 + MoLFormer batch encoders
@@ -365,15 +388,15 @@ attention-screening/
 │       ├── build_calibration.py        # Platt + threshold sidecar
 │       ├── setup_baseline_env.sh       # unified conda env installer
 │       ├── setup_baseline_venv.sh      # unified pip/venv installer
+│       ├── run_human_specialist.sh     # human_kinome wrapper
 │       ├── README.md                   # detailed pipeline documentation
 │       ├── models/                     # per-model scoring adapters
 │       │   ├── dtkinase_score.py
 │       │   ├── drugban_score.py
-│       │   ├── graphban_score.py
+│       │   ├── graphban_score.py      # legacy / full_4model profile only
 │       │   └── conplex_score.py
+│       ├── experiments/                # ablation + bootstrap scripts
 │       └── examples/                   # end-to-end demo .sh scripts
-│           ├── run_imatinib_demo.sh
-│           └── run_kpneumo_thil_demo.sh
 │
 ├── data/reference/                     # kinome FASTAs + ligand library
 │   ├── kinome_human.fasta              # 483 human kinases
@@ -381,9 +404,6 @@ attention-screening/
 │   └── ligand_library.tsv              # 110,963 ChEMBL kinase compounds
 │
 ├── benchmark/                          # benchmark training package
-│   ├── levels/                         # 6-level hierarchical benchmark
-│   └── ...                             # see docs/01-methodology/
-│
 ├── DrugBAN/  GraphBAN/  ConPLex/       # baseline upstream code + checkpoints
 ├── tests/                              # 43 pytest unit tests
 └── docs/                               # extended documentation
@@ -392,17 +412,14 @@ attention-screening/
     └── inference_pipeline.png          # diagram above
 ```
 
-The two starred entries are the entry points used by 99% of users; the rest
-is benchmark-training code, baseline upstreams, and supporting docs.
-
 ---
 
-## 🛠 Modes of operation
+## Modes of operation
 
 | Input | Auto-detected as | Pipeline |
 |---|---|---|
 | `"CCO..."` (RDKit-parseable) | `SMILES_STRING` | 1 ligand × kinome → ranking |
-| `"MGNNHGTYLG..."` (≥20 IUPAC AA) | `SEQUENCE_STRING` | 1 protein × ligand library → ranking |
+| `"MGNNHGTYLG..."` (>=20 IUPAC AA) | `SEQUENCE_STRING` | 1 protein × ligand library → ranking |
 | `*.fa` / `*.fasta` / file with `>` header | `FASTA_FILE` | 1 protein × ligand library → ranking |
 | `*.smi` (Daylight format) | `SMI_FILE` | N ligands × kinome (concatenated ranking) |
 | `*.csv` / `*.tsv` / `*.txt` | `BATCH_FILE` | N explicit pairs (column order auto-detected) |
@@ -414,15 +431,28 @@ columns (`uniprot`, `chembl_id`, ...) are auto-detected from header names.
 
 ---
 
-## 📊 Outputs at a glance
+## Profiles
+
+| Profile | Models | Default organism | Default ckpt | Use case |
+|---|---|---|---|---|
+| **`human_kinome`** (DEFAULT) | DT-Kinase + DrugBAN + ConPLex | human | human (in-domain) | production human-kinome screening; Pareto-optimal |
+| `full_4model` | DT-Kinase + DrugBAN + GraphBAN + ConPLex | human | all | thesis reproducibility / research comparison |
+| `non_human` | full 4-model | non_human | non_human | auxiliary cross-species |
+
+Explicit `--organism`, `--ckpt-corpus`, or `--models` overrides take
+precedence over the profile defaults.
+
+---
+
+## Outputs at a glance
 
 | File | Content |
 |---|---|
 | `consensus.csv` | full ranking, ordered by `prob_mean` desc |
 | `consensus.annotated.csv` | same + kinase target names + organism (when input was SMILES) |
-| `consensus.top.csv` | subset of top-K (default K=20) |
+| `consensus.top.csv` | subset of top-K (default K = 20) |
 | `scores_<model>.csv` | per-model prob + binary pred + threshold |
-| `attention/<pair_id>/*.npz` | DT-Kinase 3-level attention + DrugBAN/GraphBAN BAN matrices |
+| `attention/<pair_id>/*.npz` | DT-Kinase 3-level attention + DrugBAN BAN matrix |
 | `attention/<pair_id>/consensus_heatmap.pdf` | composite 2×2 visualization |
 | `config_snapshot.yaml` | git revision + checkpoint hashes for reproducibility |
 
@@ -433,7 +463,7 @@ agreement_count, tier, rank_fusion`. Field semantics in
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
@@ -443,7 +473,7 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 
 ---
 
-## 📚 Further reading
+## Further reading
 
 - **Pipeline architecture and committee semantics**: [`scripts/inference/README.md`](scripts/inference/README.md)
 - **End-user guide (Portuguese)**: [`docs/02-user-guide/inferencia-comite.md`](docs/02-user-guide/inferencia-comite.md)
@@ -487,4 +517,4 @@ The companion software repository can additionally be referenced as:
 Repository: [gmmsb-lncc/attention-screening](https://github.com/gmmsb-lncc/attention-screening)
 Issues: [Bug reports & features](https://github.com/gmmsb-lncc/attention-screening/issues)
 
-**Status**: Production Ready · **Version**: 4.0 · **Last updated**: April 2026
+**Status**: Production Ready — **Version**: 4.0 — **Last updated**: May 2026
