@@ -46,14 +46,31 @@ PYTHON_VERSION="3.10"
 TORCH_VERSION="2.4.1"
 TORCH_CUDA="cu121"
 TRANSFORMERS_VERSION="4.39.3"
-FORCE="${1:-}"
+
+FORCE=""
+USE_CPU=0
+for arg in "$@"; do
+    case "${arg}" in
+        --force) FORCE="--force" ;;
+        --cpu)   USE_CPU=1 ;;
+        *) echo "unknown flag: ${arg}" >&2; exit 1 ;;
+    esac
+done
+
+# Auto-detect CUDA when --cpu not requested
+if [[ "${USE_CPU}" -eq 0 ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]] || ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "[detect] no NVIDIA GPU detected → falling back to CPU build"
+        USE_CPU=1
+    fi
+fi
 
 echo "=============================================================="
 echo " Setup unified 'baseline' conda env (4-model committee)"
 echo "  env name : ${ENV_NAME}"
 echo "  Python   : ${PYTHON_VERSION}"
-echo "  PyTorch  : ${TORCH_VERSION}+${TORCH_CUDA}"
-echo "  DGL      : 2.x+${TORCH_CUDA}"
+echo "  PyTorch  : ${TORCH_VERSION}$([[ ${USE_CPU} -eq 0 ]] && echo "+${TORCH_CUDA}" || echo " (CPU)")"
+echo "  DGL      : $([[ ${USE_CPU} -eq 0 ]] && echo "2.x+${TORCH_CUDA}" || echo "CPU build")"
 echo "  transf.  : ${TRANSFORMERS_VERSION}"
 echo "=============================================================="
 
@@ -102,21 +119,33 @@ conda activate "${ENV_NAME}"
 # -----------------------------------------------------------------------------
 # Stage 2: pip PyTorch from pytorch.org wheels (CUDA build, NOT conda-forge)
 # -----------------------------------------------------------------------------
-echo "[2/7] pip PyTorch ${TORCH_VERSION}+${TORCH_CUDA}"
-pip install --no-cache-dir \
-    "torch==${TORCH_VERSION}" "torchvision" "torchaudio" \
-    --index-url "https://download.pytorch.org/whl/${TORCH_CUDA}"
+if [[ "${USE_CPU}" -eq 1 ]]; then
+    echo "[2/7] pip PyTorch ${TORCH_VERSION} (CPU build from PyPI)"
+    pip install --no-cache-dir \
+        "torch==${TORCH_VERSION}" "torchvision" "torchaudio"
+else
+    echo "[2/7] pip PyTorch ${TORCH_VERSION}+${TORCH_CUDA}"
+    pip install --no-cache-dir \
+        "torch==${TORCH_VERSION}" "torchvision" "torchaudio" \
+        --index-url "https://download.pytorch.org/whl/${TORCH_CUDA}"
+fi
 
 # -----------------------------------------------------------------------------
-# Stage 3: conda DGL from dglteam channel (NOT pip — wheels return HTTP 403)
+# Stage 3: DGL — conda dglteam channel (CUDA) or pip (CPU)
 # -----------------------------------------------------------------------------
-echo "[3/7] conda DGL from dglteam/label/${TORCH_CUDA}"
 # guard against pre-existing pip dgl
 pip uninstall -y dgl 2>/dev/null || true
-conda install -y -n "${ENV_NAME}" \
-    -c "dglteam/label/${TORCH_CUDA}" \
-    --no-update-deps \
-    "dgl"
+if [[ "${USE_CPU}" -eq 1 ]]; then
+    echo "[3/7] pip DGL (CPU build)"
+    pip install --no-cache-dir dgl \
+        || echo "  WARN: DGL CPU install failed; DrugBAN+GraphBAN unavailable" >&2
+else
+    echo "[3/7] conda DGL from dglteam/label/${TORCH_CUDA}"
+    conda install -y -n "${ENV_NAME}" \
+        -c "dglteam/label/${TORCH_CUDA}" \
+        --no-update-deps \
+        "dgl"
+fi
 
 # -----------------------------------------------------------------------------
 # Stage 4: pip dgllife + GraphBAN PyG dependencies
