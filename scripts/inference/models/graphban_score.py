@@ -108,7 +108,8 @@ def predict(model, loader, device):
         fcfp = fcfp.to(device, non_blocking=True)
         v_p = v_p.to(device, non_blocking=True)
         esm = esm.to(device, non_blocking=True)
-        out = model(v_d, fcfp, v_p, esm)
+        # case_study GraphBAN.forward expects (v_d, fcfp, v_p, esm, device)
+        out = model(v_d, fcfp, v_p, esm, device)
         f = out[-1] if isinstance(out, tuple) else out
         prob = torch.softmax(f.float(), dim=1)[:, 1]
         prob = torch.nan_to_num(prob, nan=0.5, posinf=1.0, neginf=0.0)
@@ -151,6 +152,13 @@ def main() -> None:
         "Protein": df["sequence"].astype(str),
         "Y":       np.zeros(len(df), dtype=int),
     })
+    # case_study/dataloader.py expects pre-computed `fcfp` (ChemBERTa-77M-MTR
+    # CLS, 384-d) and `esm` (ESM-1b mean-pool, 1280-d) columns. Compute them
+    # by importing GraphBAN/run_baseline.py's feature extractors.
+    sys.path.insert(0, str(REPO_ROOT / "GraphBAN"))
+    from run_baseline import extract_esm_features, extract_chemberta_features  # type: ignore
+    drugban_df = extract_esm_features(drugban_df, device)
+    drugban_df = extract_chemberta_features(drugban_df, device)
     dataset = DTIDataset(drugban_df.index.values, drugban_df)
     loader = DataLoader(dataset, batch_size=args.batch_size,
                         shuffle=False, collate_fn=graph_collate_func)

@@ -761,3 +761,56 @@ Para reproduzir qualquer linha desta tabela em um host diferente:
 5. Diferença esperada vs valores deste log: dentro de $\pm 0{,}01$ MCC
    no mesmo host (variabilidade numérica + tempo de máquina); até
    $\pm 0{,}009$ MCC entre hosts (efeito cuDNN).
+
+## Validação de inferência por *ground truth* farmacológica externa
+
+Esta seção registra os testes de regressão do pipeline de inferência
+contra moléculas com perfil farmacológico publicado. Os testes são
+metodologicamente distintos dos *benchmarks* sobre o *test split*
+porque operam fora da distribuição de treinamento e expõem falhas
+que não são detectáveis por métrica agregada in-domain (Lição 25,
+$\S 6{.}15$ de `licoes_aprendidas.md`).
+
+### Imatinib — comitê 3-modelo, *human kinome* (2026-05-06, `diamante-01`)
+
+- **SMILES:** `Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1`
+- **Comitê:** DT-Kinase + DrugBAN + ConPLex (5 sementes cada)
+- **Espaço de busca:** 488 quinases humanas reviewed (UniProt EC 2.7.10/11/12/13)
+- **Output:** `results/inference/imatinib_v2/{consensus.csv, consensus.top.csv}`
+
+Resultado por alvo canônico do imatinib:
+
+| Alvo (UniProt) | Gene | Rank | Tier | $p_{\text{DT-K}}$ | $p_{\text{DrugBAN}}$ | $p_{\text{ConPLex}}$ |
+|---|---|---:|---|---:|---:|---:|
+| P00519 | ABL1 | 1 | LIKELY | 0,39 | 0,83 | 0,89 |
+| P42684 | ABL2 | 2 | LIKELY | 0,38 | 0,51 | 0,87 |
+| P06239 | LCK | 5 | LIKELY | 0,37 | 0,62 | 0,71 |
+| P16234 | PDGFRA | 41 | UNCERTAIN | 0,37 | 0,12 | 0,71 |
+| P09619 | PDGFRB | 72 | UNCERTAIN | 0,37 | 0,07 | 0,70 |
+| P10721 | KIT | 84 | UNCERTAIN | 0,37 | 0,05 | 0,72 |
+| P07333 | CSF1R | 91 | UNCERTAIN | 0,38 | 0,04 | 0,71 |
+| Q08345 | DDR1 | 103 | UNCERTAIN | 0,38 | 0,06 | 0,67 |
+| Q16832 | DDR2 | 129 | UNCERTAIN | 0,36 | 0,03 | 0,70 |
+
+Distribuição de tiers no *ranking* completo:
+$\{\text{LIKELY}: 28,\, \text{UNCERTAIN}: 460\}$.
+
+**Observações registradas como Lição 25 ($\S 6{.}15$):**
+1. Calibração de Platt no inferência estava em estado-identidade
+   ($a=1, b=0$); corrigida em
+   `scripts/inference/refit\_calibration\_offline.py` para todos
+   os 15 *seeds* (5 × 3 corpora).
+2. FASTA legacy `kinome\_human.fasta` (483 sequências) cobria
+   apenas 3 dos 9 alvos canônicos do imatinib (KIT, PDGFRA/B,
+   CSF1R, DDR1/2 ausentes). Substituído por
+   `kinome\_human\_uniprot.fasta` (488 sequências reviewed).
+3. DrugBAN colapsa para $p \sim 0{,}05$ em alvos
+   *out-of-training-kinome*, enquanto ConPLex (ProtBert genérico)
+   generaliza. Comitê 3-modelo produz `UNCERTAIN` nesses casos
+   por *correlated failure* entre DT-Kinase + DrugBAN, mesmo
+   quando ConPLex isolado classificaria-os como ligantes.
+
+**Próximos testes de regressão sugeridos:** gefitinib (EGFR P00533),
+dasatinib (BCR-ABL + Src multi-quinase), crizotinib (ALK + ROS1),
+ruxolitinib (JAK1/JAK2). Cada um estressa uma região distinta do
+espaço-de-quinases.

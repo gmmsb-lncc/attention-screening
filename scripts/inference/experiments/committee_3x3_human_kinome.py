@@ -283,9 +283,11 @@ def plot_confusion_grid(results: dict, corpora: list[str], out_path: Path) -> No
             ax.set_xticklabels(["non-bind", "bind"], fontsize=8)
             ax.set_yticklabels(["non-bind", "bind"], fontsize=8)
             ax.set_title(f"{train}→{test}\nMCC={m['mcc']:.3f}", fontsize=9)
+            cell_labels = [["TN", "FP"], ["FN", "TP"]]
             for ii in range(2):
                 for jj in range(2):
-                    ax.text(jj, ii, f"{cm[ii, jj]}",
+                    ax.text(jj, ii,
+                            f"{cell_labels[ii][jj]}: {cm[ii, jj]}",
                             ha="center", va="center",
                             color="white" if cm_norm[ii, jj] > 0.5 else "black",
                             fontsize=9)
