@@ -2,6 +2,22 @@
 
 Guidance for Claude Code operating on this repository.
 
+## Documentation conventions (mandatory)
+
+- **No emojis** in any committed file (README, scripts, code comments,
+  Markdown docs, commit messages, PR descriptions, configs). The work is
+  scientific; visual decoration undermines formality. Replace emoji-only
+  section markers with plain headers. Replace bullet emojis (`✓`, `✗`,
+  `★`, `●`, `▲`, `▼`, `⚠`, `🔥`, `❄`, `🚀`, `🐳`, `🎯`, `📂`, `🛠`, `📊`,
+  `🧪`, `📚`, `🔬`, `🧬`, etc.) with words: "OK / FAIL", "primary",
+  "warning", "added", "removed". Mathematical symbols (Δ, σ, ≥, ≤, ±) and
+  arrows used inside data tables (e.g. `→`) are allowed because they are
+  Unicode mathematical/typographic characters, not pictographs.
+- **No promotional/marketing tone** in comments or docs. State what the
+  code does, not how impressive it is.
+- **No "AI-generated" disclaimers** in commit messages or PR bodies unless
+  the user explicitly asks for them.
+
 ## Context files (versioned, sync across machines)
 
 When resuming work after `/clear`, host change, or fresh repo clone,
