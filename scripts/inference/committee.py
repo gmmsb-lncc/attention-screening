@@ -163,24 +163,34 @@ def main() -> None:
     grp.add_argument("--pairs",  type=str, help="batch TSV (uniprot, sequence, chembl_id, smiles)")
 
     ap.add_argument("--organism", choices=["human", "non_human", "all"], default="human",
-                    help="kinome subset for SMILES-only mode")
+                    help="kinome subset for SMILES-only mode (default: human)")
     ap.add_argument("--family", type=str, default=None,
                     help="optional kinase family filter (TK, CMGC, AGC, ...)")
-    ap.add_argument("--ckpt-corpus", choices=["human", "non_human", "all"], default="all",
-                    help="which training-corpus checkpoint each model loads "
-                         "(canonical mode: same corpus for all 4 models)")
+    ap.add_argument("--ckpt-corpus", choices=["human", "non_human", "all"], default="human",
+                    help="training-corpus checkpoint each model loads "
+                         "(default: human, in-domain)")
     ap.add_argument("--hybrid", action="store_true",
                     help="hybrid dispatch: DT-Kinase uses --ckpt-corpus, baselines "
-                         "(DrugBAN/GraphBAN/ConPLex) override to 'all' regardless of "
-                         "--ckpt-corpus. Empirically optimal for non_human eval "
-                         "(committee MCC +0.036) and marginal for human eval (+0.008). "
-                         "See Anexo B §B.3.1 of the thesis for the ablation study.")
+                         "override to 'all'. Useful for non_human eval "
+                         "(committee MCC +0.036). See Anexo B §B.3.1.")
+    ap.add_argument("--profile", choices=["human_kinome", "full_4model", "non_human"],
+                    default="human_kinome",
+                    help="committee preset. "
+                         "'human_kinome' (DEFAULT) = 3-model panel "
+                         "(DT-Kinase + DrugBAN + ConPLex), in-domain human ckpts. "
+                         "Empirically Pareto-optimal for human kinome screening: "
+                         "ΔMCC = +0.0074 vs 4-model (IC95 [+0.0014, +0.0136], "
+                         "p=0.022, B=10000 block bootstrap). 25% lower compute. "
+                         "'full_4model' = legacy 4-model committee (adds GraphBAN), "
+                         "research/comparison mode. "
+                         "'non_human' = 4-model + non_human ckpts.")
     ap.add_argument("--out",     type=Path, required=True,
                     help="output directory for this run")
     ap.add_argument("--top-k",   type=int, default=20,
                     help="emit attention + ranked subset for top-K pairs")
-    ap.add_argument("--models",  type=str, default="dtkinase,drugban,graphban,conplex",
-                    help="comma-separated subset of models to run")
+    ap.add_argument("--models",  type=str, default="dtkinase,drugban,conplex",
+                    help="comma-separated subset of models to run "
+                         "(default: 3-model human_kinome panel)")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring in parallel (requires 4× GPU memory)")
     ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
@@ -189,6 +199,25 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="print model commands without executing")
     args = ap.parse_args()
+
+    # Apply profile preset (only fills in argparse defaults; explicit overrides win).
+    DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
+    DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
+    if args.profile == "full_4model":
+        if args.models == DEFAULT_MODELS_3:
+            args.models = DEFAULT_MODELS_4
+        if args.ckpt_corpus == "human":
+            args.ckpt_corpus = "all"
+    elif args.profile == "non_human":
+        if args.models == DEFAULT_MODELS_3:
+            args.models = DEFAULT_MODELS_4
+        if args.organism == "human":
+            args.organism = "non_human"
+        if args.ckpt_corpus == "human":
+            args.ckpt_corpus = "non_human"
+    # human_kinome = current defaults (3-model + human + human ckpt)
+    print(f"[profile={args.profile}] models={args.models} "
+          f"organism={args.organism} ckpt_corpus={args.ckpt_corpus}")
 
     args.out.mkdir(parents=True, exist_ok=True)
     selected = [m.strip() for m in args.models.split(",") if m.strip()]

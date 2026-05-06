@@ -1,0 +1,154 @@
+# =============================================================================
+# Docker context — aggressively trim 44GB repo to ~3GB image
+# =============================================================================
+
+# VCS / dev tooling
+.git
+.gitignore
+.github
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local Python envs (rebuilt inside image via setup_baseline_env.sh)
+env/
+env_baseline/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Local Claude/agent state (heavy — 100s of MB worktrees)
+.claude/
+
+# Cloned upstream ESM (HF transformers covers ESM-2 8M used by inference)
+llm/
+
+# Top-level repo examples (the inference demos under scripts/inference/examples
+# are kept).
+/examples/
+
+# Heavy training datasets (415MB TSVs not needed for inference)
+tests/datasets/
+
+# Heavy scaffold split files — keep only TSVs + manifest required by demos
+scaffolds_splits/output/scenarios/
+scaffolds_splits/output/universal_train.tsv
+scaffolds_splits/output/universal_val.tsv
+scaffolds_splits/output/human_train.tsv
+scaffolds_splits/output/human_val.tsv
+scaffolds_splits/output/human_test.tsv
+scaffolds_splits/output/*.tsv.gz
+
+# Misc dev outputs
+docs/
+crossattention_split_analysis/
+data/
+GEMINI.md
+*.code-workspace
+scaffolds_splits/work/
+
+# -----------------------------------------------------------------------------
+# results/ — only commit canonical seed_42 ckpts for the 3 corpora.
+# Exclude embedding caches, training history, alternate experiments.
+# -----------------------------------------------------------------------------
+results/build/
+results/results/
+results/protein_model_benchmark_*/
+results/cross_matrix/
+results/inference/
+results/lora/
+results/smoke_*/
+results/grid_AD/
+results/graphban/
+results/drugban/
+results/conplex/
+results/semantic-screening-results/
+results/benchmark_*_150M_*/
+results/benchmark_human_8M_v7_*
+results/benchmark_human_8M_18_*
+results/benchmark_human_8M_17_*
+results/benchmark_human_8M_01_*
+results/benchmark_non_human_8M_18_*
+results/benchmark_non_human_8M_17_*
+results/benchmark_non_human_8M_01_*
+results/benchmark_non_human_8M
+results/benchmark_human_8M
+
+# Within the canonical ckpt dirs: keep only test/seed_42/, drop train phase
+# and non-canonical seeds.
+results/all/benchmark_all_8M_13_04_2026/train/
+results/benchmark_human_8M_13_05_2026/train/
+results/benchmark_non_human_8M_13_05_2026_v3/train/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_123/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_456/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_789/
+results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_1024/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_123/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_456/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_789/
+results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_1024/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_123/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_456/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_789/
+results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_1024/
+
+# Keep:
+#   results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/
+#   results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/
+#   results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/
+
+# -----------------------------------------------------------------------------
+# DrugBAN — keep only seed_42 ckpts + universal calibration + code
+# -----------------------------------------------------------------------------
+DrugBAN/datasets/
+DrugBAN/src/datasets/
+DrugBAN/src/image/
+DrugBAN/src/*.ipynb
+DrugBAN/processed_*
+DrugBAN/*.ipynb
+DrugBAN/results/*/seed_123/
+DrugBAN/results/*/seed_456/
+DrugBAN/results/*/seed_789/
+DrugBAN/results/*/seed_1024/
+DrugBAN/*.pdf
+
+# -----------------------------------------------------------------------------
+# GraphBAN — keep only seed_42 ckpts + code + universal calibration
+# -----------------------------------------------------------------------------
+GraphBAN/upstream_data/
+GraphBAN/datasets/
+GraphBAN/results/*/seed_123/
+GraphBAN/results/*/seed_456/
+GraphBAN/results/*/seed_789/
+GraphBAN/results/*/seed_1024/
+GraphBAN/*.pdf
+
+# -----------------------------------------------------------------------------
+# ConPLex — keep only rep0 ckpts + universal calibration + code
+# -----------------------------------------------------------------------------
+ConPLex/models/
+ConPLex/dataset/
+ConPLex/best_models/best_models/
+ConPLex/best_models/smoke_test/
+ConPLex/best_models/trained_*_rep1/
+ConPLex/best_models/trained_*_rep2/
+ConPLex/best_models/trained_*_rep3/
+ConPLex/best_models/trained_*_rep4/
+ConPLex/results/
+ConPLex/nb/
+ConPLex/*.pdf
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+*.egg-info/
+build/
+dist/
+node_modules/
+*.log
+KinBAN/
