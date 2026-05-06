@@ -261,9 +261,23 @@ def plot_confusion_grid(results: dict, corpora: list[str], out_path: Path) -> No
     for i, train in enumerate(corpora):
         for j, test in enumerate(corpora):
             ax = axes[i, j]
-            m = results[(train, test)]["committee"]
+            cell = results.get((train, test))
+            if cell is None:
+                # Missing cell — render placeholder.
+                ax.set_xticks([0, 1]); ax.set_yticks([0, 1])
+                ax.set_xticklabels(["non-bind", "bind"], fontsize=8)
+                ax.set_yticklabels(["non-bind", "bind"], fontsize=8)
+                ax.set_facecolor("#f0f0f0")
+                ax.text(0.5, 0.5, "N/A", ha="center", va="center",
+                        fontsize=14, color="#888",
+                        transform=ax.transAxes)
+                ax.set_title(f"{train}→{test}\n(missing)", fontsize=9)
+                continue
+            m = cell["committee"]
             cm = np.array([[m["tn"], m["fp"]], [m["fn"], m["tp"]]])
-            cm_norm = cm / cm.sum(axis=1, keepdims=True)
+            row_sums = cm.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1
+            cm_norm = cm / row_sums
             im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1)
             ax.set_xticks([0, 1]); ax.set_yticks([0, 1])
             ax.set_xticklabels(["non-bind", "bind"], fontsize=8)
@@ -275,7 +289,7 @@ def plot_confusion_grid(results: dict, corpora: list[str], out_path: Path) -> No
                             ha="center", va="center",
                             color="white" if cm_norm[ii, jj] > 0.5 else "black",
                             fontsize=9)
-    fig.suptitle("Comitê 3-model — matrizes confusão por (train, test)",
+    fig.suptitle("Comitê — matrizes confusão por (train, test)",
                  fontsize=13)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -422,6 +436,22 @@ def main() -> None:
 
     (args.out_dir / "REPORT.md").write_text("\n".join(lines))
     print(f"  wrote {args.out_dir / 'REPORT.md'}")
+
+    # Final summary of missing cells (helps user fix coverage gaps).
+    missing = [(tr, te) for tr in CORPORA for te in CORPORA
+               if results.get((tr, te)) is None]
+    if missing:
+        print("\n" + "=" * 60)
+        print(" PARTIAL COVERAGE — missing cells:")
+        for tr, te in missing:
+            print(f"   {tr} -> {te}")
+        print(" To fill the gaps, run:")
+        print("   bash scripts/thesis_followups/cross_dataset_matrix/"
+              "run_cross_matrix.sh")
+        print(" Or copy the missing seed_*/raw_predictions.npz from a host")
+        print(" that already has them (e.g. results/cross_matrix/{model}/")
+        print(" {train}_to_{test}/seed_*/).")
+        print("=" * 60)
 
 
 if __name__ == "__main__":
