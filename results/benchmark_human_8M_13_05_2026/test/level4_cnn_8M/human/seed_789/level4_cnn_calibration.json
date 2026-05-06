@@ -1,13 +1,13 @@
 {
-  "platt_a": 1.0,
-  "platt_b": 0.0,
-  "threshold": 0.4535,
+  "platt_a": 0.5461692565842551,
+  "platt_b": -0.011133882749568929,
+  "threshold": 0.4714872647268677,
   "calibration_metric": "mcc",
-  "val_score": 0.4565,
+  "val_score": 0.45631482442495414,
   "n_val": 39739,
   "model": "dtkinase",
   "corpus": "human",
   "seed": 789,
   "source": "results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_789/raw_predictions.npz",
-  "note": "y_prob in npz is post-Platt at training; identity Platt re-applied at inference"
+  "note": "platt fitted offline from raw_predictions.npz logits"
 }

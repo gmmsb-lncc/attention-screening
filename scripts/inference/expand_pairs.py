@@ -23,8 +23,13 @@ from rdkit import Chem
 
 
 REFERENCE_DIR = Path(__file__).resolve().parents[2] / "data" / "reference"
+# Prefer the UniProt-derived FASTA (488 reviewed Swiss-Prot human kinases,
+# accession as ID, gene name in description) when present. Falls back to
+# the legacy ChEMBL-component_id FASTA otherwise.
+_HUMAN_UNIPROT = REFERENCE_DIR / "kinome_human_uniprot.fasta"
+_HUMAN_LEGACY  = REFERENCE_DIR / "kinome_human.fasta"
 KINOME_FILES = {
-    "human":     REFERENCE_DIR / "kinome_human.fasta",
+    "human":     _HUMAN_UNIPROT if _HUMAN_UNIPROT.exists() else _HUMAN_LEGACY,
     "non_human": REFERENCE_DIR / "kinome_non_human.fasta",
     "all":       REFERENCE_DIR / "kinome_full.fasta",
 }
