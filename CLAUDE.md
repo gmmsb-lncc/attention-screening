@@ -27,7 +27,7 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **23 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **25 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis + §6.15 inference pipeline validation (imatinib) | when planning next experiment or interpreting a result |
 | `docs/01-methodology/experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `docs/01-methodology/v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
