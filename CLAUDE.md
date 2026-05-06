@@ -27,7 +27,8 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **25 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis + §6.15 external validation of committee against Davis 2011 (imatinib) | when planning next experiment or interpreting a result |
+| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **24 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `docs/01-methodology/experiments_log.md §"Comitê 3-modelo vs 4-modelo"` | per-seed MCC/AUROC mean ± σ for 3 corpora + paired bootstrap of committee_3 − committee_4 (`results/inference/committee_per_seed/`) | when justifying the `human_kinome profile` choice or reproducing committee benchmark numbers |
 | `docs/01-methodology/experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `docs/01-methodology/v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
 | `README.md` | repo-level onboarding (high-level setup, install) | new contributors |
