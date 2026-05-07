@@ -27,7 +27,9 @@ gitignored; all sync via `git pull`.
 | File | Purpose | Read when |
 |---|---|---|
 | `CLAUDE.md` | this file — overview, configs, env knobs, hosts, key dev notes | always (auto-loaded) |
-| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **24 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
+| `docs/01-methodology/statistical_protocol.md` | **statistical comparison standard** (Ash/Wognum 2025-aligned) — 4 guidelines, 3 declared deviations (D1 single-split + 5 seeds, D2 bootstrap, D3 SESOI band), implementation register, reporting checklist | always when designing or reporting a comparison; mandatory before adding new statistical claims |
+| `docs/01-methodology/references/` | permanent local copies of methodological reference papers (e.g., `ash_wognum_2025_jcim.pdf`) | when revisiting the source standard |
+| `docs/01-methodology/licoes_aprendidas.md` | optimization track narrative + **25 methodological lessons** + §9 operational snapshot + §10 future directions + §6.13 plateau analysis | when planning next experiment or interpreting a result |
 | `docs/01-methodology/experiments_log.md §"Comitê 3-modelo vs 4-modelo"` | per-seed MCC/AUROC mean ± σ for 3 corpora + paired bootstrap of committee_3 − committee_4 (`results/inference/committee_per_seed/`) | when justifying the `human_kinome profile` choice or reproducing committee benchmark numbers |
 | `docs/01-methodology/experiments_log.md` | persistent table of every benchmark run with full extracted metrics (MCC, F1, AUROC, etc.) per host + raw JSON yaml stanzas | when comparing configs, validating reproducibility, or cross-checking values |
 | `docs/01-methodology/v8.md` | v8 multi-source POC architecture document (ChemBERTa/BioBERT/ADMET/ClassyFire injection); separate experimental track from main optimization | only when working on multi-source feature injection |
@@ -39,7 +41,51 @@ gitignored; all sync via `git pull`.
 `docs/01-methodology/licoes_aprendidas.md` (with explicit lesson number). Any new
 multi-seed result goes to `docs/01-methodology/experiments_log.md` (table row + YAML
 stanza). Any new config/env knob/runner script gets a row in the
-`CLAUDE.md` tables below.
+`CLAUDE.md` tables below. **Any new statistical claim must comply with the
+reporting checklist in `docs/01-methodology/statistical_protocol.md` §4 before
+being added to results, slides, or thesis.**
+
+## Statistical comparison standard (mandatory)
+
+The methodological reference for comparing models in this project is
+**Ash, Wognum *et al.* 2025** (*J. Chem. Inf. Model.* 65:9398-9411,
+DOI 10.1021/acs.jcim.5c01609). Local copy:
+`docs/01-methodology/references/ash_wognum_2025_jcim.pdf`. Full protocol with
+deviation register: `docs/01-methodology/statistical_protocol.md`.
+
+**Four guidelines (one-line summary):**
+1. Performance distribution from both seed and split variance (recommended:
+   5×5 repeated CV, n=25).
+2. Statistical significance via RM-ANOVA + Tukey HSD per metric, Bonferroni
+   inter-metric.
+3. Practical significance via Cohen's *d* (Hedges' *g* for n<10) + null-model
+   lower limit + assay upper limit + post-hoc classification metrics.
+4. Presentation via simultaneous CI plot or MCSim heatmap; never bare
+   leaderboards.
+
+**Three declared deviations (do not silently revert):**
+- **D1.** Single scaffold split + 5 seeds (instead of 5×5 CV). Subnominal IC
+  coverage (~80–87 %); migration to 5×5 CV listed as future work. Rationale:
+  retraining cost.
+- **D2.** Paired bootstrap by protein (B=10⁴) is the primary inference;
+  RM-ANOVA + Tukey HSD added as parallel verification, not replacement.
+- **D3.** TOST equivalence band primary = δ_eq = 0.05 MCC (SESOI operational
+  anchor); Cohen's-d-anchored bands (Lakens 2017, δ_eq ∈ {0.2, 0.5, 0.8}·σ_pooled)
+  reported as sensitivity analysis only.
+
+**Reporting checklist (mandatory items)** — see
+`statistical_protocol.md` §4 for the full list. Minimum:
+- All four metrics (MCC, AUROC, F1, AUPRC), mean ± σ over 5 seeds.
+- Paired bootstrap IC95 % per pair.
+- Hedges' *g* per pair (Cohen's *d* with small-sample correction; n=5 mandates
+  Hedges' correction factor *J*(ν)).
+- Null-model and upper-limit MCC for the corpus.
+- TOST sensitivity table over ≥3 δ_eq bands.
+- Either simultaneous CI plot or MCSim heatmap.
+- Explicit declaration of D1–D3.
+
+Implementation scripts live in `scripts/thesis_followups/`. Each guideline
+component is mapped to a script in `statistical_protocol.md` §3.
 
 ## Project overview
 
@@ -49,9 +95,9 @@ Scientific thesis: *semantic screening* — predicting bioactivity from 1D linea
 
 Repo: `gmmsb-lncc/attention-screening` · Python 3.12 in `env/` · PyTorch 2.0+ · MIT.
 
-## Active work (2026-04, 23 lessons; PLATEAU empírico atingido sobre v7+F)
+## Active work (2026-04, 25 lessons; PLATEAU empírico atingido sobre v7+F + adoção do padrão estatístico Ash/Wognum 2025)
 
-1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `docs/01-methodology/licoes_aprendidas.md` (sections §4-§14, **24 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
+1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `docs/01-methodology/licoes_aprendidas.md` (sections §4-§14, **25 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
    - **Canônico MCC primário (final, pós-Lição 24)** — `configs/v7.yaml` vanilla v7: **0.506 ± 0.006** NH 5-seed (cap 5 da tese). Ckpt operacional p/ matriz cross-dataset + comitê inferência + ranking final. v7+F LEGACY ré-classificado como tentativa que falhou validação 5-seed.
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
@@ -63,6 +109,7 @@ Repo: `gmmsb-lncc/attention-screening` · Python 3.12 in `env/` · PyTorch 2.0+ 
 3. **Interpretabilidade DT-Kinase** — `scripts/inference/explain.py` POC implementado: extrai per-residue + per-ligand-token attention via forward hooks (M_k pre-CNN + HierPool weights). Modalidade interpretativa nativa não disponível em ConPLex (que requer atribuição model-agnostic post-hoc, e.g., SHAP); paridade com DrugBAN/GraphBAN BAN attn em 3 níveis (raw + per-head + HierPool). Caveat de fidelidade (Jain&Wallace 2019, Wiegreffe&Pinter 2019) reconhecido na tese (anexoB:665): pesos de atenção não constituem atribuição faithful, lidos como diagnóstico arquitetural não como explicação causal.
 4. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
 5. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (paired bootstrap CI 95%) used in thesis tables 17 & 18. Wilcoxon não foi entregue na tese (n=5 sementes torna combinatorialmente degenerado; bootstrap pareado cobre o regime).
+6. **Statistical protocol migration to Ash/Wognum 2025** (lição 25, 2026-05-07) — adoção do *Perspective* JCIM 65:9398-9411 como padrão metodológico. Três divergências declaradas (D1 single-split + 5 sementes; D2 bootstrap pareado primário com RM-ANOVA + Tukey HSD complementar; D3 banda TOST $\delta_{eq}=0,05$ MCC ancorada em SESOI). **Toolkit entregue** em `scripts/statistical_analysis/` (10 scripts + 2 runners + suite de testes 10/10 verde): null-model lower limit, assay upper limit (Brown 2009 / Kramer 2012), Hedges' $g$ pareado J(4)=0,8 primário + J(8)≈0,9032 cross-check, métricas pós-classificação (precision@recall=0,8, recall@precision=0,8, TNR@recall=0,9), TOST sensitivity sobre 6 bandas, RM-ANOVA + Tukey HSD, simultaneous CI plot, MCSim heatmap, aggregate_panel JSON+LaTeX+checklist. Entry-points: `bash scripts/statistical_analysis/run_full_stats.sh <corpus>` e `run_all_corpora.sh`. Documentação canônica: `docs/01-methodology/statistical_protocol.md` (com Implementation Register §3 atualizado) + `docs/01-methodology/references/ash_wognum_2025_jcim.pdf`. Reporting checklist (§4) é mandatória para qualquer nova afirmação estatística.
 
 ## PR workflow
 

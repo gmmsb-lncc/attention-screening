@@ -1526,6 +1526,125 @@ sexta lição metodológica (registrada na seção subsequente) trata
 justamente dessa tensão entre velocidade de iteração e capacidade de
 atribuição.
 
+## 6.15. Adoção do padrão Ash/Wognum 2025 como referência estatística (lição 25)
+
+Durante a fase de consolidação dos resultados (apresentação aos
+orientadores, 2026-05-07), o critério estatístico empregado neste
+trabalho foi confrontado com o *Perspective* de Ash, Wognum
+*et al.* publicado em *J. Chem. Inf. Model.* 65:9398-9411 (2025), que
+propõe quatro diretrizes formais para comparação de métodos de
+aprendizado de máquina em modelagem de propriedades de pequenas
+moléculas. A confrontação revelou três divergências estruturais entre
+o protocolo desta tese e o padrão recomendado, listadas a seguir.
+
+A primeira divergência diz respeito à **distribuição de amostragem de
+performance**. O padrão recomenda, para *datasets* na faixa
+de $500$–$100\,000$ amostras, validação cruzada repetida $5\times 5$
+($n = 25$ amostras), conjugando variância de inicialização e variância
+de particionamento. A tese amostra apenas variância de inicialização
+sob *split scaffold* fixo ($n = 5$). A consequência metrológica é
+cobertura empírica subnominal do IC$_{95\%}$ (aproximadamente
+$80$–$87\%$, conforme medido em §`sec:resolucao-bootstrap-pareado`),
+que invalida a leitura do bootstrap como precisão formal e o reduz
+a estimativa conservadora.
+
+A segunda divergência é o **teste de hipótese**. O padrão recomenda
+ANOVA de medidas repetidas com pós-hoc Tukey HSD; a tese utiliza
+*bootstrap* pareado por proteína. A escolha desta tese é defensável
+sob duas premissas: $n = 5$ inviabiliza ANOVA com poder estatístico
+adequado, e o *bootstrap* por proteína bloqueia a unidade de
+independência biológica relevante. Mas Dietterich~\cite{Dietterich1998}
+demonstrou em outro contexto que *bootstrap* sobre amostras com
+sobreposição forte infla a taxa de erro Tipo~I; a aplicabilidade
+direta dessa crítica ao bootstrap por proteína é parcial mas não
+nula. A migração praticável foi adotar *RM-ANOVA + Tukey HSD* como
+camada de verificação paralela ao *bootstrap*, não em substituição.
+
+A terceira divergência é a **banda de equivalência do TOST**. O padrão
+recomenda significância prática via $d$ de Cohen padronizado, com
+*cutoffs* clássicos $d \in \{0{,}2;\ 0{,}5;\ 0{,}8\}$ (pequeno, médio,
+grande); a tese adota banda absoluta $\delta_{\mathrm{eq}} = 0{,}05$
+MCC ancorada em SESOI operacional (*Smallest Effect of Interest* para
+triagem virtual de quinases sob restrição *recall@k* fixa). A banda
+absoluta é defensável apenas se o argumento decisional for explícito,
+porque ignora a heterogeneidade de $\sigma_{\mathrm{inter\text{-}semente}}$
+entre *corpora*: $\sigma_{\mathrm{NH}} \approx 0{,}025$ vs.
+$\sigma_{\mathrm{H}} \approx 0{,}011$, o que faz $0{,}05$ MCC equivaler
+a $\sim 2\sigma$ no Não-Humano e $\sim 5\sigma$ no Humano —
+equivalência muito mais frouxa em corpus rico que em corpus pobre, o
+inverso do que o rigor estatístico recomendaria.
+
+A migração corretiva adotou três camadas. A primeira é a **declaração
+explícita das três divergências** ($\mathrm{D}1$: *single-split* +
+$5$ sementes; $\mathrm{D}2$: *bootstrap* preferido sobre ANOVA;
+$\mathrm{D}3$: SESOI absoluto sobre Cohen padronizado), formalizada
+no novo documento `docs/01-methodology/statistical_protocol.md` que
+substitui qualquer recomendação ad hoc anterior. A segunda é a
+**adição de camadas estatísticas complementares** sobre os mesmos
+dados ($n = 5$ sementes, sem retreino): limite inferior por *null
+model* (classificador *majority-class*), limite superior pela
+variabilidade experimental do ensaio (Brown 2009, Kramer 2012; ruído
+$\mathrm{IC}_{50} \sim 0{,}3$ log $\Rightarrow$ teto de MCC alcançável),
+$g$ de Hedges (correção de pequena amostra do $d$ de Cohen, mandatória
+em $n < 10$), métricas operacionais pós-classificação
+(*precision@recall* $= 0{,}8$ e *recall@precision* $= 0{,}8$), e
+análise de sensibilidade do TOST sobre múltiplas bandas
+$\delta_{\mathrm{eq}} \in \{0{,}03;\ 0{,}05;\ 0{,}07\}$ (variantes
+SESOI absoluto) e $\delta_{\mathrm{eq}} \in \{0{,}2;\ 0{,}5;\ 0{,}8\}
+\cdot \sigma_{\mathrm{pooled}}$ (Lakens 2017, ancoragem em $d$ de
+Cohen). A terceira é a **substituição da visualização**: o gráfico de
+barras MCC $\pm \sigma$ é trocado por *simultaneous CI plot* (para
+comparação intra-corpus) e *MCSim heatmap* (para sumário de pares
+cruzados com $g$ de Hedges em cor e $p$ ajustado em estrelas).
+
+A vigésima quinta lição enuncia-se como segue: **ao planejar um
+estudo comparativo, o protocolo estatístico deve ser auditado contra
+o padrão metodológico vigente da subárea antes da coleta de dados;
+quando o padrão muda durante a execução do trabalho, a migração honesta
+é declarar as divergências como deliberações de escopo e adicionar as
+camadas complementares praticáveis sobre os mesmos dados, em vez de
+ignorar ou reformular após o fato**. A relevância para esta tese é
+direta: as três divergências D1–D3 não são erros e não comprometem a
+validade científica do trabalho, desde que sejam declaradas
+explicitamente no capítulo metodológico, e desde que as camadas
+complementares (*null model*, limite superior, Hedges' $g$,
+sensibilidade TOST, métricas pós-classificação) sejam adicionadas para
+fornecer ao leitor a leitura sob o padrão atual. A migração para
+$5\times 5$ CV ($n = 25$, fechamento de D1) permanece registrada como
+direção de trabalho futuro com custo estimado em $\sim 150$ h GPU
+sequenciais ($\sim 30$ h em paralelo $5\times$).
+
+O documento canônico para este protocolo é
+`docs/01-methodology/statistical_protocol.md`; a referência primária
+está em `docs/01-methodology/references/ash_wognum_2025_jcim.pdf`. Toda
+nova afirmação estatística no projeto deve passar pela
+*reporting checklist* (§4 do `statistical_protocol.md`) antes de
+ingressar em resultados, *slides* ou capítulo de tese.
+
+**Implementação operacional (2026-05-07).** O *toolkit* está entregue em
+`scripts/statistical_analysis/` (módulo Python coeso com 10 *scripts* +
+2 *shell runners* + suíte de testes em `tests/test_statistical_protocol.py`,
+10/10 verde). Componentes mapeados em `statistical_protocol.md` §3
+(*Implementation register*): `data_loader.py` (*resolver* compartilhado
+DT-Kinase + 3 *baselines*), `null_model.py` (limite inferior), `upper_limit.py`
+(limite superior Brown 2009 / Kramer 2012), `effect_size.py` (Hedges' $g$
+pareado $J(4) = 0{,}8000$ exato sob a aproximação Lakens 2013 /
+Borenstein, com $J(8) \approx 0{,}9032$ não-pareado para *cross-check*),
+`posthoc_classification.py` (*precision*@*recall*=0,8, *recall*@*precision*=0,8,
+*TNR*@*recall*=0,9), `tost_sensitivity.py` (varredura de seis bandas
+$\delta_{\mathrm{eq}}$ com 0,05 MCC marcado como primário SESOI),
+`anova_tukey.py` (*RM-ANOVA* + *Bonferroni* inter-métrica + *Tukey HSD*
+*pairwise*), `plot_simultaneous_ci.py` (figura *Tukey HSD*),
+`plot_mcsim_heatmap.py` (matriz $4 \times 4$ com cor $= g_{\mathrm{paired}}$
+e estrelas $= p_{\mathrm{adj}}$), `aggregate_panel.py` (relatório
+estruturado JSON $+$ LaTeX $+$ *checklist* compliance). *Entry-points*
+reproduzíveis: `bash scripts/statistical_analysis/run_full_stats.sh
+<corpus>` por *corpus*, `run_all_corpora.sh` para os três. Saídas
+canônicas em `results/statistical/{corpus}/`. *Reuse* de
+`scripts/thesis_followups/bootstrap_ci.py::paired_delta` em
+`tost_sensitivity.py` mantém consistência com a inferência primária da
+tese (D2).
+
 ## 7. Síntese das observações
 
 A trajetória experimental conduzida até aqui ofereceu três lições de
