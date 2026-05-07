@@ -38,12 +38,12 @@ from pathlib import Path
 import numpy as np
 from scipy import stats
 from sklearn.metrics import (
-    accuracy_score, f1_score, matthews_corrcoef, precision_score,
-    recall_score, roc_auc_score,
+    accuracy_score, average_precision_score, f1_score, matthews_corrcoef,
+    precision_score, recall_score, roc_auc_score,
 )
 
 
-METRICS = ["mcc", "auroc", "f1", "accuracy", "precision", "recall"]
+METRICS = ["mcc", "auroc", "auprc", "f1", "accuracy", "precision", "recall"]
 
 
 def load_predictions(glob_pattern: str) -> list[dict]:
@@ -74,6 +74,7 @@ def compute_metrics(logits: np.ndarray, labels: np.ndarray,
     return {
         "mcc": matthews_corrcoef(labels, preds),
         "auroc": roc_auc_score(labels, probs) if len(set(labels)) == 2 else 0.5,
+        "auprc": average_precision_score(labels, probs) if len(set(labels)) == 2 else 0.5,
         "f1": f1_score(labels, preds, zero_division=0),
         "accuracy": accuracy_score(labels, preds),
         "precision": precision_score(labels, preds, zero_division=0),
