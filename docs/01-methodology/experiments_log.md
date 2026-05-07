@@ -10,6 +10,15 @@ forma persistente, versionada e portável dos valores observados;
 qualquer comparação metodologicamente sólida entre execuções deve
 referenciar este registro.
 
+> **Padrão estatístico vigente (2026-05-07).** Toda comparação reportada
+> aqui ou derivada destes valores deve cumprir o protocolo definido em
+> `statistical_protocol.md` (Ash/Wognum 2025-aligned). A *reporting
+> checklist* (§4) é mandatória para qualquer afirmação estatística que
+> ingresse em resultados, *slides* ou capítulo de tese. Três
+> divergências do padrão são declaradas e mantidas: D1 (single-split +
+> 5 sementes), D2 (bootstrap pareado primário, RM-ANOVA complementar),
+> D3 (banda TOST $\delta_{\mathrm{eq}} = 0{,}05$ MCC ancorada em SESOI).
+
 ---
 
 ## Configurações canônicas (por nome de config)
@@ -761,3 +770,97 @@ Para reproduzir qualquer linha desta tabela em um host diferente:
 5. Diferença esperada vs valores deste log: dentro de $\pm 0{,}01$ MCC
    no mesmo host (variabilidade numérica + tempo de máquina); até
    $\pm 0{,}009$ MCC entre hosts (efeito cuDNN).
+
+## Comitê 3-modelo vs 4-modelo --- avaliação per-seed canônica
+
+Avaliação seguindo o protocolo canônico do Anexo B §B.5: per-seed
+*evaluation* (sem *pooling* de sementes para σ); alinhamento via
+`scaffolds_splits/output/universal_test.tsv` filtrado por
+`dataset_source`; *dedupe* por `(seq_id, chembl_id)`; *threshold* por
+sistema = média dos *thresholds* dos modelos constituintes naquela
+*seed*; *block bootstrap* por `seq_id` para o comparativo
+*committee_3* − *committee_4*, B=10 000.
+
+Reproduzido com `scripts/inference/experiments/committee_per_seed_3v4.py`;
+artefatos em `results/inference/committee_per_seed/` (`REPORT.md`,
+`per_seed_metrics.csv`, `summary_mean_std.csv`,
+`committee_3v4_bootstrap.csv`).
+
+### MCC por sistema (mean ± σ entre 5 sementes canônicas)
+
+| Sistema | `non_human` | `human` | `all` |
+|---|---|---|---|
+| DT-Kinase | $0{,}4834 \pm 0{,}0106$ | $0{,}4484 \pm 0{,}0127$ | $0{,}4350 \pm 0{,}0162$ |
+| DrugBAN | $0{,}5291 \pm 0{,}0301$ | $0{,}4866 \pm 0{,}0144$ | $0{,}4745 \pm 0{,}0093$ |
+| GraphBAN | $0{,}5029 \pm 0{,}0611$ | $0{,}4669 \pm 0{,}0211$ | $0{,}4733 \pm 0{,}0240$ |
+| ConPLex | $0{,}4600 \pm 0{,}0203$ | $0{,}4305 \pm 0{,}0227$ | $0{,}4278 \pm 0{,}0261$ |
+| **Comitê 3-modelo** (DT-K + DrugBAN + ConPLex) | **$0{,}5237 \pm 0{,}0143$** | **$0{,}5273 \pm 0{,}0155$** | **$0{,}5213 \pm 0{,}0098$** |
+| **Comitê 4-modelo** (+ GraphBAN) | **$0{,}5327 \pm 0{,}0101$** | **$0{,}5299 \pm 0{,}0104$** | **$0{,}5332 \pm 0{,}0073$** |
+
+### AUROC por sistema (mean ± σ entre 5 sementes canônicas)
+
+| Sistema | `non_human` | `human` | `all` |
+|---|---|---|---|
+| DT-Kinase | $0{,}7782 \pm 0{,}0125$ | $0{,}8053 \pm 0{,}0086$ | $0{,}7979 \pm 0{,}0079$ |
+| DrugBAN | $0{,}8326 \pm 0{,}0097$ | $0{,}8369 \pm 0{,}0084$ | $0{,}8328 \pm 0{,}0053$ |
+| GraphBAN | $0{,}8095 \pm 0{,}0142$ | $0{,}8256 \pm 0{,}0127$ | $0{,}8315 \pm 0{,}0105$ |
+| ConPLex | $0{,}8271 \pm 0{,}0021$ | $0{,}8076 \pm 0{,}0127$ | $0{,}8032 \pm 0{,}0132$ |
+| **Comitê 3-modelo** | **$0{,}8409 \pm 0{,}0098$** | **$0{,}8560 \pm 0{,}0070$** | **$0{,}8500 \pm 0{,}0035$** |
+| **Comitê 4-modelo** | **$0{,}8410 \pm 0{,}0086$** | **$0{,}8581 \pm 0{,}0061$** | **$0{,}8564 \pm 0{,}0035$** |
+
+### Comparativo direto (committee_3 − committee_4, *block bootstrap* B=10 000)
+
+| Corpus | Δ MCC | CI95 | $\text{frac.} > 0$ | Veredito |
+|---|---:|---|---:|---|
+| `non_human` | $-0{,}0006$ | $[-0{,}024;\, +0{,}023]$ | $0{,}483$ | indistinguíveis |
+| **`human`** | **$+0{,}0074$** | **$[+0{,}0011;\, +0{,}0135]$** | $0{,}991$ | **3-modelo lidera** |
+| `all` | $+0{,}0005$ | $[-0{,}006;\, +0{,}007]$ | $0{,}562$ | indistinguíveis |
+
+### Decisão operacional canonizada
+
+O **comitê 3-modelo** (`human_kinome profile` da `committee.py`) é
+**Pareto-óptimo**:
+
+- **Vence** estatisticamente em `human` (CI95 estritamente positivo, $\text{frac.} > 0 = 0{,}991$).
+- **Empata** estatisticamente em `non_human` e `all` (CI95 atravessa zero).
+- Custa **25% menos** *compute* (não treina nem inferencia GraphBAN).
+
+GraphBAN tem o **maior σ inter-seed** entre os 4 modelos individuais
+em `non_human` ($\sigma = 0{,}0611$, contra DrugBAN $0{,}0301$,
+ConPLex $0{,}0203$, DT-Kinase $0{,}0106$). A inclusão de um voto de
+alta variância marginalmente eleva o MCC ponto-estimado nos corpora
+não-humanos, mas o ganho fica abaixo do ruído amostral em
+*bootstrap* pareado por proteína.
+
+Esta decisão é coerente com `CLAUDE.md` (cabeçalho do *active work*
+item 1) e com a documentação de `committee.py --profile human_kinome`
+como *default* operacional.
+
+### Regra de decisão para uma única entrada
+
+Para um par $(L, P)$ submetido pelo `committee orchestrator`
+(`scripts/inference/committee.py`), a classificação operacional
+positiva-vs-negativa é por **voto majoritário** (`aggregate.py:55-73`,
+referenciando o Anexo B Tabela B.6):
+
+1. Cada modelo $m$ aplica seu próprio *threshold* MCC-óptimo
+   calibrado: $\text{pred}_m = \mathbb{1}[\text{prob}_m \geq
+   \tau_m]$.
+2. $\text{agreement\_count} = \sum_m \text{pred}_m \in \{0, 1, 2, 3\}$
+   no comitê 3-modelo.
+3. *Tier* operacional:
+   - $\text{count} = 3 \Rightarrow$ `STRONG`
+   - $\text{count} = 2 \Rightarrow$ `LIKELY`
+   - $\text{count} = 1 \Rightarrow$ `UNCERTAIN`
+   - $\text{count} = 0 \Rightarrow$ `UNLIKELY`
+4. Decisão binária convencional: `STRONG` ou `LIKELY` $\Rightarrow$
+   par classificado como **binder** (positivo); demais $\Rightarrow$
+   **não-binder** (negativo).
+
+A métrica reportada nas tabelas acima usa convenção alternativa
+(*single-threshold* sobre $\overline{\text{prob}}$, com
+$\overline{\tau}$ = média dos $\tau_m$ dos modelos do comitê),
+adoptada por comparabilidade direta com os MCCs dos modelos
+individuais reportados na tese. Para ranquear candidatos por
+*score* contínuo, a coluna `prob_mean` do `consensus.csv` é a
+referência primária.
