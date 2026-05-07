@@ -10,6 +10,15 @@ forma persistente, versionada e portável dos valores observados;
 qualquer comparação metodologicamente sólida entre execuções deve
 referenciar este registro.
 
+> **Padrão estatístico vigente (2026-05-07).** Toda comparação reportada
+> aqui ou derivada destes valores deve cumprir o protocolo definido em
+> `statistical_protocol.md` (Ash/Wognum 2025-aligned). A *reporting
+> checklist* (§4) é mandatória para qualquer afirmação estatística que
+> ingresse em resultados, *slides* ou capítulo de tese. Três
+> divergências do padrão são declaradas e mantidas: D1 (single-split +
+> 5 sementes), D2 (bootstrap pareado primário, RM-ANOVA complementar),
+> D3 (banda TOST $\delta_{\mathrm{eq}} = 0{,}05$ MCC ancorada em SESOI).
+
 ---
 
 ## Configurações canônicas (por nome de config)
