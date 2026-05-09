@@ -173,24 +173,30 @@ def main() -> None:
                     help="hybrid dispatch: DT-Kinase uses --ckpt-corpus, baselines "
                          "override to 'all'. Useful for non_human eval "
                          "(committee MCC +0.036). See Anexo B §B.3.1.")
-    ap.add_argument("--profile", choices=["human_kinome", "full_4model", "non_human"],
-                    default="human_kinome",
+    ap.add_argument("--profile", choices=["full_4model", "human_kinome", "non_human"],
+                    default="full_4model",
                     help="committee preset. "
-                         "'human_kinome' (DEFAULT) = 3-model panel "
-                         "(DT-Kinase + DrugBAN + ConPLex), in-domain human ckpts. "
-                         "Empirically Pareto-optimal for human kinome screening: "
-                         "ΔMCC = +0.0074 vs 4-model (IC95 [+0.0014, +0.0136], "
-                         "p=0.022, B=10000 block bootstrap). 25% lower compute. "
-                         "'full_4model' = legacy 4-model committee (adds GraphBAN), "
-                         "research/comparison mode. "
+                         "'full_4model' (DEFAULT) = Comite-PoE canonical "
+                         "4-model committee (DT-Kinase + DrugBAN + GraphBAN + "
+                         "ConPLex), aggregation via Product-of-Experts (geom "
+                         "mean), in-domain ckpts to --ckpt-corpus. Reproduces "
+                         "Cap. 5 sec:resultados-comite-canonico: MCC 0.547 "
+                         "(human), 0.559 (all) under PoE rule; 10/12 "
+                         "lideranças vs modelos individuais. PoE bate "
+                         "soft-mean (Δ +0.004 a +0.007 MCC, CI95 nao-cruzada "
+                         "em human/all) e bate hardvote por margem 5-7x maior "
+                         "(Anexo D). "
+                         "'human_kinome' = 3-model panel (sem GraphBAN), "
+                         "in-domain human; ΔMCC +0.0074 vs 4-model em human "
+                         "(IC95 [+0.0014, +0.0136]) com 25 pct menos custo. "
                          "'non_human' = 4-model + non_human ckpts.")
     ap.add_argument("--out",     type=Path, required=True,
                     help="output directory for this run")
     ap.add_argument("--top-k",   type=int, default=20,
                     help="emit attention + ranked subset for top-K pairs")
-    ap.add_argument("--models",  type=str, default="dtkinase,drugban,conplex",
+    ap.add_argument("--models",  type=str, default="dtkinase,drugban,graphban,conplex",
                     help="comma-separated subset of models to run "
-                         "(default: 3-model human_kinome panel)")
+                         "(default: 4-model full_4model panel)")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring in parallel (requires 4× GPU memory)")
     ap.add_argument("--single-env", type=str, default=None, metavar="ENV_NAME",
@@ -203,19 +209,17 @@ def main() -> None:
     # Apply profile preset (only fills in argparse defaults; explicit overrides win).
     DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
     DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
-    if args.profile == "full_4model":
-        if args.models == DEFAULT_MODELS_3:
-            args.models = DEFAULT_MODELS_4
-        if args.ckpt_corpus == "human":
-            args.ckpt_corpus = "all"
+    if args.profile == "human_kinome":
+        if args.models == DEFAULT_MODELS_4:
+            args.models = DEFAULT_MODELS_3
     elif args.profile == "non_human":
-        if args.models == DEFAULT_MODELS_3:
-            args.models = DEFAULT_MODELS_4
         if args.organism == "human":
             args.organism = "non_human"
         if args.ckpt_corpus == "human":
             args.ckpt_corpus = "non_human"
-    # human_kinome = current defaults (3-model + human + human ckpt)
+    # full_4model = current defaults (4-model + human organism + human ckpt;
+    # canonical in-domain to --ckpt-corpus, override with --ckpt-corpus all
+    # to reproduce the all-trained 4-model row of Tab. resultados-comite-canonico)
     print(f"[profile={args.profile}] models={args.models} "
           f"organism={args.organism} ckpt_corpus={args.ckpt_corpus}")
 

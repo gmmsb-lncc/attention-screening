@@ -102,7 +102,8 @@ def test_dedupe_pred_uses_max(tmp_path):
 # ======================================================================
 
 def test_soft_mean_and_tier_strong(tmp_path):
-    """All 4 models predict binder with prob ~0.8 → STRONG, mean ~0.79."""
+    """All 4 models predict binder with prob ~0.8 → STRONG, PoE on prob_mean,
+    arithmetic mean on prob_soft_mean."""
     pair = ("P1", "L1")
     probs = {"dtkinase": 0.84, "drugban": 0.79, "graphban": 0.82, "conplex": 0.71}
     for m, p in probs.items():
@@ -112,7 +113,13 @@ def test_soft_mean_and_tier_strong(tmp_path):
     aggregate_cli(["--scores-dir", str(tmp_path), "--out", str(out)])
     df = pd.read_csv(out)
     assert len(df) == 1
-    np.testing.assert_allclose(df["prob_mean"].iloc[0], np.mean(list(probs.values())))
+    # Canonical (PoE = geometric mean) on prob_mean / prob_committee.
+    expected_poe = float(np.exp(np.mean(np.log(list(probs.values())))))
+    np.testing.assert_allclose(df["prob_mean"].iloc[0], expected_poe)
+    np.testing.assert_allclose(df["prob_committee"].iloc[0], expected_poe)
+    # Soft-mean preserved on prob_soft_mean for backward compatibility.
+    np.testing.assert_allclose(
+        df["prob_soft_mean"].iloc[0], np.mean(list(probs.values())))
     assert int(df["agreement_count"].iloc[0]) == 4
     assert df["tier"].iloc[0] == "STRONG"
 
@@ -205,7 +212,8 @@ def test_rank_fusion_lower_is_better(tmp_path):
 # ======================================================================
 
 def test_partial_committee_three_models(tmp_path):
-    """ConPLex absent → committee operates with 3 models."""
+    """ConPLex absent → committee operates with 3 models. PoE applied over
+    the 3 present probs; arithmetic mean preserved on prob_soft_mean."""
     pair = ("P1", "L1")
     probs = {"dtkinase": 0.8, "drugban": 0.7, "graphban": 0.6}
     for m, p in probs.items():
@@ -215,7 +223,10 @@ def test_partial_committee_three_models(tmp_path):
     aggregate_cli(["--scores-dir", str(tmp_path), "--out", str(out)])
     df = pd.read_csv(out)
     assert len(df) == 1
-    np.testing.assert_allclose(df["prob_mean"].iloc[0], np.mean(list(probs.values())))
+    expected_poe = float(np.exp(np.mean(np.log(list(probs.values())))))
+    np.testing.assert_allclose(df["prob_mean"].iloc[0], expected_poe)
+    np.testing.assert_allclose(
+        df["prob_soft_mean"].iloc[0], np.mean(list(probs.values())))
     assert int(df["agreement_count"].iloc[0]) == 3
     assert df["tier"].iloc[0] == "STRONG"   # 3/3 in 3-model regime
 

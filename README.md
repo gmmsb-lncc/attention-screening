@@ -8,17 +8,21 @@
 committee.**
 
 attention-screening is a kinase-inhibitor screening framework that runs a
-3-model **committee** (DT-Kinase, DrugBAN, ConPLex) and returns ranked
-binding predictions with attention maps, given a SMILES, a FASTA sequence,
-or a batch file as input. The committee composition was empirically
-validated on the canonical scaffold-split test set under block bootstrap
-by protein and Holm-Bonferroni multiple-testing correction.
+4-model **Committee-PoE** (DT-Kinase, DrugBAN, GraphBAN, ConPLex) and
+returns ranked binding predictions with attention maps, given a SMILES,
+a FASTA sequence, or a batch file as input. The committee aggregation
+rule (Product-of-Experts, geometric mean of calibrated probabilities)
+was empirically selected against 9 alternative rules under paired block
+bootstrap by protein (B = 10000); see thesis Anexo D. Composition and
+calibration follow the canonical scaffold-split protocol with
+Holm-Bonferroni multiple-testing correction.
 
 The framework targets the **human kinome** as primary deployment domain,
 matching the central goal of the underlying thesis ("Triagem Atencional
-Aplicada ao Quinoma"). A non-human auxiliary mode and a legacy 4-model
-profile (which adds GraphBAN) are available via the `--profile` flag for
-research and comparison contexts.
+Aplicada ao Quinoma"). A non-human auxiliary mode and a 3-model
+specialist profile (drops GraphBAN, validated as Pareto-optimal on the
+human corpus alone, +0.0074 MCC over 4-model with -25% compute) are
+available via the `--profile` flag.
 
 > **Why the name** — the unifying mechanism across all committee models is
 > an **attention operator**, direct or indirect: cross-attention 2D +
@@ -45,12 +49,14 @@ flowchart LR
 
     PAIRS --> DTK["<b>DT-Kinase</b><br/>cross-attn 2D + CNN"]:::dtk
     PAIRS --> DBN["<b>DrugBAN</b><br/>BAN + GCN"]:::ban
+    PAIRS --> GBN["<b>GraphBAN</b><br/>BAN + ESM-1b/ChemBERTa"]:::ban
     PAIRS --> CPL["<b>ConPLex</b><br/>contrastive co-embed"]:::cpl
 
     DTK --> AGG
     DBN --> AGG
+    GBN --> AGG
     CPL --> AGG
-    AGG["<b>aggregate.py</b><br/>soft mean + Borda + tier"]:::agg
+    AGG["<b>aggregate.py</b><br/>PoE (geom mean) + Borda + tier"]:::agg
 
     AGG --> OUT1["<b>consensus.csv</b><br/>STRONG · LIKELY · UNCERTAIN · UNLIKELY"]:::out
     AGG --> OUT2["<b>attention/&lt;pair&gt;/</b><br/>M_k + HierPool + BAN heatmaps"]:::out
@@ -88,35 +94,53 @@ For methodology, evaluation protocol, and benchmark levels see
 
 ---
 
-## Committee composition (default `human_kinome` profile)
+## Committee composition (default `full_4model` profile, Committee-PoE)
 
 | Model | Protein backbone | Ligand backbone | Training paradigm | Role in committee |
 |---|---|---|---|---|
 | **DT-Kinase** | ESM-2 8M | MoLFormer-XL | BCE + cross-attention 2D + HierPool | thesis-native; non_human informative |
 | **DrugBAN** | CNN scratch | GCN scratch | BCE + bilinear attention | strongest individual; broad coverage |
+| **GraphBAN** | ESM-1b | ChemBERTa | BCE + bilinear attention | PLM-augmented BAN; complements DrugBAN on `all` corpus |
 | **ConPLex** | ProtBERT (frozen) | Morgan FP | contrastive metric space | inductive-bias diversity (orthogonal to BAN) |
 
-Empirically validated against the legacy 4-model committee (Tabela B.5–B.6
-of the thesis Anexo B + the head-to-head paired bootstrap reported in
-`results/inference/committee_no_graphban_holm/`):
+### Aggregation rule: Product-of-Experts (geometric mean)
 
-| Corpus | 3-model MCC | 4-model MCC | Δ MCC | Verdict (block bootstrap, B = 10000) |
+The canonical aggregation rule is **PoE**: `prob_committee = (prod p_m)^(1/N)`,
+where `p_m` is the calibrated probability from model `m`. Decision threshold
+follows the same rule applied to the per-model calibrated thresholds. PoE
+penalizes strong dissent (any single model with `p_m -> 0` drags the
+consensus down), which matches the multi-paradigm composition: a model that
+strongly disbelieves a pair acts as an effective veto.
+
+Selected over 9 alternative rules under paired block-bootstrap by protein
+(B = 10000) on the 3 canonical corpora. Full ablation in thesis Anexo D and
+`results/inference/committee_aggregation_alts/`. Best-vs-runner-up summary:
+
+| Corpus | PoE (canonical) | Soft-mean (legacy) | Δ MCC (PoE − soft) | Verdict |
 |---|---|---|---|---|
-| **human** | **0.5496** | 0.5421 | **+0.0074** | 3-model leads (IC95 [+0.001, +0.014], p = 0.022) |
-| all       | 0.5493     | 0.5519 | −0.0026 | indistinguishable (IC95 contains zero) |
-| non_human | 0.5277     | 0.5470 | −0.0193 | 4-model leads (IC95 [−0.046, −0.001], p = 0.032) |
+| **human** | **0.5468** | 0.5426 | **+0.0042** | PoE leads (IC95 [+0.0003, +0.0082], B=10⁴ block-by-protein) |
+| **all**   | **0.5593** | 0.5524 | **+0.0068** | PoE leads (IC95 [+0.0020, +0.0116]) |
+| non_human | 0.5221     | 0.5350 | −0.0126 | indistinguishable (IC95 contains zero, n=1399) |
 
-GraphBAN was dropped because its erros are highly correlated with DrugBAN
-(both are BAN architectures trained with BCE on overlapping protein
-backbones), so its inclusion adds parameters without reducing committee
-variance. The substitution analysis (DrugBAN vs GraphBAN as the BAN
-member) shows DrugBAN dominates with p < 10⁻³ in human and `all` corpora
-under the same bootstrap protocol.
+Hard-vote with majority + arbiter tie-break (intuitive baseline most users
+propose) is **strictly worse** than soft-mean in every corpus tested,
+because ~12% of human/`all` decisions resolve as 2-2 ties that collapse
+into a single-model call. Full hardvote ablation across all 4 candidate
+arbiters: `results/inference/committee_hardvote_arbiters/`.
 
-For the rare cross-species use case, `--profile non_human` reverts to the
-4-model composition with non_human-trained checkpoints; for legacy
-reproducibility against the original thesis tables, `--profile full_4model`
-restores DT-Kinase + DrugBAN + GraphBAN + ConPLex.
+The 4-model committee dominates each individual model: 10/12 paired
+leaderships, 0 losses across 3 corpora (Tabela~tab:resultados-comite-otimo
+of thesis Cap. 5).
+
+### Alternative profiles
+
+For specialist deployment over the human kinome alone, `--profile human_kinome`
+runs a 3-model panel (DT-Kinase + DrugBAN + ConPLex) that is Pareto-optimal
+on the human corpus alone (Δ MCC = +0.0074 vs full 4-model, IC95
+[+0.001, +0.014], p = 0.022; head-to-head paired bootstrap in
+`results/inference/committee_no_graphban_holm/`) at 25 percent lower
+compute. For cross-species use, `--profile non_human` keeps all 4 models
+with non_human-trained checkpoints.
 
 ---
 
@@ -159,10 +183,11 @@ ships the same software stack pre-installed inside an image.
 
 A single command does everything. The script auto-detects whether the input
 is a SMILES string, a sequence, or a file, and applies the default
-`human_kinome` profile (3-model panel + in-domain human checkpoints):
+`full_4model` Committee-PoE profile (4-model panel + PoE aggregation
++ in-domain human checkpoints):
 
 ```bash
-# SMILES vs human kinome (default profile)
+# SMILES vs human kinome (default profile: Committee-PoE with 4 models)
 python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O"
 
 # Inline AA sequence → ranked against the 110k ChEMBL kinase-inhibitor library
@@ -177,16 +202,17 @@ python attention_screening.py compounds.smi
 # File: CSV / TSV / TXT (column order does not matter)
 python attention_screening.py pairs.csv
 
-# Single-organism override (auxiliary)
-python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile non_human
+# Specialist 3-model panel (drops GraphBAN, +0.0074 MCC on human alone,
+# 25 percent lower compute)
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile human_kinome
 
-# Legacy 4-model committee (research / thesis reproducibility)
-python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile full_4model
+# Cross-species (4-model + non_human-trained checkpoints)
+python attention_screening.py "CC(=O)Oc1ccccc1C(=O)O" --profile non_human
 
 # Use the unified env explicitly + custom top-K
 python attention_screening.py "CCO..." --single-env baseline --top-k 50
 
-# Convenience wrapper for the human_kinome default
+# Convenience wrapper for the 3-model human_kinome specialist
 bash scripts/inference/run_human_specialist.sh "CC(=O)Oc1ccccc1C(=O)O"
 ```
 
@@ -200,8 +226,9 @@ results/inference/<run_id>/
 ├── pairs.tsv                       # input expanded to N × M pairs
 ├── scores_dtkinase.csv             # per-model probability + threshold
 ├── scores_drugban.csv
+├── scores_graphban.csv
 ├── scores_conplex.csv
-├── consensus.csv                   # ranked, with prob_mean + tier
+├── consensus.csv                   # ranked, with prob_committee (PoE) + tier
 ├── consensus.annotated.csv         # + kinase target names + organism
 ├── consensus.top.csv               # top-K subset
 └── attention/                      # top-K STRONG / LIKELY pairs
@@ -209,6 +236,7 @@ results/inference/<run_id>/
         ├── dtkinase_Mk.npz
         ├── dtkinase_hierpool.npz
         ├── drugban_BAN.npz
+        ├── graphban_BAN.npz
         └── consensus_heatmap.pdf
 ```
 

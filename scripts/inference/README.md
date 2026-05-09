@@ -16,7 +16,7 @@ input → expand_pairs.py → pairs.tsv
               │               │               │               │
               └───────────────┴───────┬───────┴───────────────┘
                                       ▼
-                          aggregate.py (soft mean + Borda + tier)
+                          aggregate.py (PoE = geom mean + Borda + tier)
                                       │
                                       ▼
                           attention.py (top-K STRONG/LIKELY)
@@ -26,6 +26,31 @@ input → expand_pairs.py → pairs.tsv
 ```
 
 Orquestração end-to-end: `committee.py`.
+
+## Regra de agregação canônica: Comitê-PoE (Product-of-Experts)
+
+A regra de combinação adotada é a **média geométrica** das probabilidades
+calibradas, equivalente ao Product-of-Experts de Hinton (2002):
+
+```
+prob_committee  = (prod_m  p_m)^(1/N)  =  exp( mean( log(p_m) ) )
+thr_committee   = (prod_m  tau_m)^(1/N)
+pred_committee  = (prob_committee >= thr_committee)
+```
+
+Selecionada via ablação completa contra 9 regras alternativas (soft-mean,
+logit-mean, weighted-MCC, weighted-logit, harmonic, max, median/trimmed,
+RRF, hard-vote × 4 árbitros) sob bootstrap pareado por proteína (B=10⁴);
+ver Anexo D da tese e `results/inference/committee_aggregation_alts/`.
+
+| Corpus | PoE (canônica) | soft-mean (legacy) | Δ MCC | Veredito |
+|---|---|---|---|---|
+| human | **0.547** | 0.543 | **+0.004** | PoE lidera (IC95 [+0.0003, +0.008]) |
+| all   | **0.559** | 0.552 | **+0.007** | PoE lidera (IC95 [+0.002, +0.012]) |
+| non_human | 0.522 | 0.535 | −0.013 | empate (IC95 contém zero, n=1399) |
+
+Soft-mean preservada em `prob_soft_mean` para diagnóstico e reprodução
+da configuração legacy.
 
 ## Modos de uso
 
@@ -100,7 +125,7 @@ results/inference/<run_id>/
 ├── scores_drugban.csv
 ├── scores_graphban.csv
 ├── scores_conplex.csv
-├── consensus.csv                    # ranking ordenado por prob_mean DESC
+├── consensus.csv                    # ranking ordenado por prob_mean DESC (PoE)
 ├── consensus.top.csv                # subset top-K (se --top-k > 0)
 └── attention/                       # apenas pares STRONG/LIKELY
     └── <pair_id>/
@@ -118,7 +143,11 @@ results/inference/<run_id>/
 | `pair_id` | `{uniprot}__{chembl_id}` |
 | `uniprot, chembl_id` | chaves identificadoras |
 | `prob_{model}, pred_{model}, thr_{model}` | output bruto por modelo |
-| `prob_mean` | $\overline{p}$ = média soft das 4 probas calibradas |
+| `prob_mean` | alias canônico = `prob_committee` (PoE) |
+| `prob_committee` | (Π p_m)^(1/N) = média geométrica das probas calibradas (Product-of-Experts, Hinton 2002) |
+| `thr_committee` | mesma regra geométrica aplicada aos limiares per-modelo |
+| `pred_committee` | (prob_committee >= thr_committee) |
+| `prob_soft_mean` | (1/N) Σ p_m = média aritmética legacy (preservada p/ ablação / diagnóstico) |
 | `prob_std` | $\sigma_p$ = desvio entre modelos |
 | `confidence` | $1 - \sigma_p$ — alta = consenso |
 | `agreement_count` | nº de modelos que predizem binder (0..4) |
@@ -224,7 +253,7 @@ Pré-cacheados aceleram inferência: triagem SMILES vs kinome humano completa em
 | `expand_pairs.py` | input → pairs.tsv (4 modos: SMILES, FASTA, ambos, batch) |
 | `encoders.py` | ESM-2 8M + MoLFormer batch encoders, cache sha1-keyed |
 | `build_calibration.py` | Wrapper `eval_checkpoint_on_dataset.py` p/ extrair Platt+thr |
-| `aggregate.py` | merge 4 CSVs → consensus.csv (dedupe + soft mean + Borda + tier) |
+| `aggregate.py` | merge N CSVs → consensus.csv (dedupe + PoE = geom mean + Borda + tier; soft-mean preservada como `prob_soft_mean` p/ ablação) |
 | `attention.py` | hooks 3-níveis DT-Kinase + plot 2×2 PDF |
 | `committee.py` | orquestrador end-to-end |
 | `models/{model}_score.py` | adapters por baseline; aceita `--pairs` + `--corpus` + `--out` |
