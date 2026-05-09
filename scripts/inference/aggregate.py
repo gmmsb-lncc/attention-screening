@@ -1,6 +1,15 @@
 """Aggregate per-model scores into committee consensus with two-source
 uncertainty decomposition.
 
+Canonical aggregation rule: Product-of-Experts (PoE), i.e. geometric
+mean of the calibrated per-model probabilities. Selected on empirical
+grounds over 9 alternative aggregation rules tested under paired
+block-bootstrap by protein (B = 10000) on the 3 canonical corpora;
+full ablation in thesis Anexo D and
+`results/inference/committee_aggregation_alts/`.
+Soft-mean (arithmetic) is preserved for backward compatibility under
+`prob_soft_mean`.
+
 Reads N CSV files, one per model (dtkinase/drugban/graphban/conplex),
 each with columns:
     uniprot, chembl_id, prob, pred, threshold,
@@ -15,12 +24,24 @@ Emits consensus.csv with:
     pair_id, uniprot, chembl_id,
     prob_<model>, pred_<model>, thr_<model>,
     prob_std_<model>, n_seeds_<model>,
-    prob_mean, prob_std, confidence,
+    prob_mean, prob_committee, thr_committee, pred_committee,
+    prob_soft_mean,
+    prob_std, confidence,
     sigma_model, sigma_seed_avg, sigma_total, confidence_total,
     agreement_count, tier, rank_fusion
 
 Aggregation rules:
-    prob_mean       = mean of N calibrated probabilities (one per model)
+    prob_committee  = (prod p_m)^(1/N) = exp(mean(log(clip(p_m, eps, 1))))
+                      Product-of-Experts (canonical, Hinton 2002).
+                      Penalizes strong dissent: any single model with
+                      p_m -> 0 drags the consensus toward zero.
+    thr_committee   = same geometric mean applied to per-model calibrated
+                      thresholds; preserves score/threshold consistency.
+    pred_committee  = (prob_committee >= thr_committee).
+    prob_mean       = alias for prob_committee (legacy column name kept
+                      so downstream callers continue to work).
+    prob_soft_mean  = arithmetic mean of probabilities (legacy aggregator,
+                      kept for diagnostics / ablation reproduction).
     sigma_model     = std across models (between-model dispersion;
                       epistemic uncertainty, reducible by adding new
                       architectural families).
@@ -36,7 +57,7 @@ Aggregation rules:
     confidence_total= 1 - sigma_total  (honest combined uncertainty).
     agreement_count = # models predicting 1 (each w/ its own threshold).
     rank_fusion     = sum of per-model ranks (Borda count, lower = better).
-    tier            = STRONG (4) | LIKELY (3) | UNCERTAIN (2) | UNLIKELY (≤1)
+    tier            = STRONG (4) | LIKELY (3) | UNCERTAIN (2) | UNLIKELY (<=1)
 
 The decomposition lets the user separate fragile-consensus pairs (low
 sigma_model + high sigma_seed_avg) from robust-consensus pairs (both
@@ -144,18 +165,47 @@ def merge_scores(model_dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return df
 
 
+PROB_EPS = 1e-6
+
+
+def _geometric_mean(probs: np.ndarray, axis: int = 1) -> np.ndarray:
+    """Geometric mean along axis, NaN-aware, eps-clipped against log(0)."""
+    clipped = np.clip(probs, PROB_EPS, 1.0)
+    return np.exp(np.nanmean(np.log(clipped), axis=axis))
+
+
 def aggregate(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     prob_cols = [f"prob_{m}" for m in models_present]
+    thr_cols  = [f"thr_{m}"  for m in models_present]
     pred_cols = [f"pred_{m}" for m in models_present]
     seed_std_cols = [f"prob_std_{m}" for m in models_present]
 
     probs = df[prob_cols].to_numpy(dtype=float)
+    thrs  = df[thr_cols ].to_numpy(dtype=float)
     preds = df[pred_cols].to_numpy(dtype=float)
     # Per-model inter-seed dispersion (within-model variance, aleatoric).
     # Missing columns (legacy single-seed files) treated as zero by load step.
     seed_stds = df[seed_std_cols].to_numpy(dtype=float)
 
-    df["prob_mean"] = np.nanmean(probs, axis=1)
+    # Canonical aggregation: Product-of-Experts (geometric mean of calibrated
+    # probabilities). Validated against soft-mean (arithmetic) on the 3
+    # canonical corpora under paired block-bootstrap by protein
+    # (Anexo D / `committee_aggregation_alts.py`):
+    #   delta_MCC = +0.0042 (human, IC95 [+0.0003, +0.0082], leads)
+    #   delta_MCC = +0.0068 (all,   IC95 [+0.0020, +0.0116], leads)
+    #   delta_MCC = -0.0126 (NH,    IC95 contains zero, ties under low power)
+    # Same operational threshold convention applies (geometric mean of the
+    # per-model calibrated thresholds, mirroring the score-space rule).
+    df["prob_committee"] = _geometric_mean(probs, axis=1)
+    df["thr_committee"]  = _geometric_mean(thrs,  axis=1)
+    df["pred_committee"] = (df["prob_committee"] >= df["thr_committee"]).astype(int)
+
+    # Backward-compatible alias: prob_mean kept as canonical column name for
+    # downstream callers that consume `consensus.csv`. Now points to the
+    # PoE score; the legacy soft-mean (arithmetic) is preserved separately
+    # as `prob_soft_mean` for diagnostics and ablation reproduction.
+    df["prob_mean"]      = df["prob_committee"]
+    df["prob_soft_mean"] = np.nanmean(probs, axis=1)
 
     # --- Two-source uncertainty decomposition ----------------------------
     # sigma_model: between-model dispersion (epistemic; reducible by
@@ -207,7 +257,9 @@ def order_columns(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
         for col in (f"prob_{m}", f"pred_{m}", f"thr_{m}",
                     f"prob_std_{m}", f"n_seeds_{m}")
     ]
-    committee = ["prob_mean", "prob_std", "confidence",
+    committee = ["prob_mean", "prob_committee", "thr_committee", "pred_committee",
+                 "prob_soft_mean",
+                 "prob_std", "confidence",
                  "sigma_model", "sigma_seed_avg", "sigma_total",
                  "confidence_total",
                  "agreement_count", "tier", "rank_fusion"]
