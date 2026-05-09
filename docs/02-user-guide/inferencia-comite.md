@@ -126,7 +126,11 @@ results/inference/<run_id>/
 | `prob_<modelo>` | probabilidade calibrada por cada modelo |
 | `pred_<modelo>` | predição binária por cada modelo (sob seu limiar nativo) |
 | `thr_<modelo>` | limiar usado por cada modelo |
-| `prob_mean` | média soft das probabilidades do comitê |
+| `prob_mean` | alias canônico = `prob_committee` (Product-of-Experts, média geométrica) |
+| `prob_committee` | (Π p_m)^(1/N) das probabilidades calibradas — regra Comitê-PoE (Anexo D) |
+| `thr_committee` | mesma regra geométrica aplicada aos limiares per-modelo |
+| `pred_committee` | (`prob_committee` ≥ `thr_committee`) |
+| `prob_soft_mean` | média aritmética legacy (preservada para diagnóstico / reprodução) |
 | `prob_std` | dispersão entre modelos |
 | `confidence` | $1 - \sigma_p$, alta indica consenso |
 | `agreement_count` | número de modelos que predizem *binder* |
