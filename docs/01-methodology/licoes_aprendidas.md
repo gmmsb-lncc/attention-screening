@@ -1560,19 +1560,30 @@ direta dessa crítica ao bootstrap por proteína é parcial mas não
 nula. A migração praticável foi adotar *RM-ANOVA + Tukey HSD* como
 camada de verificação paralela ao *bootstrap*, não em substituição.
 
-A terceira divergência é a **banda de equivalência do TOST**. O padrão
-recomenda significância prática via $d$ de Cohen padronizado, com
-*cutoffs* clássicos $d \in \{0{,}2;\ 0{,}5;\ 0{,}8\}$ (pequeno, médio,
-grande); a tese adota banda absoluta $\delta_{\mathrm{eq}} = 0{,}05$
-MCC ancorada em SESOI operacional (*Smallest Effect of Interest* para
-triagem virtual de quinases sob restrição *recall@k* fixa). A banda
-absoluta é defensável apenas se o argumento decisional for explícito,
-porque ignora a heterogeneidade de $\sigma_{\mathrm{inter\text{-}semente}}$
-entre *corpora*: $\sigma_{\mathrm{NH}} \approx 0{,}025$ vs.
-$\sigma_{\mathrm{H}} \approx 0{,}011$, o que faz $0{,}05$ MCC equivaler
-a $\sim 2\sigma$ no Não-Humano e $\sim 5\sigma$ no Humano —
-equivalência muito mais frouxa em corpus rico que em corpus pobre, o
-inverso do que o rigor estatístico recomendaria.
+A terceira divergência foi a mais consequente. O padrão recomenda
+significância prática via $d$ de Cohen padronizado, com *cutoffs*
+clássicos $d \in \{0{,}2;\ 0{,}5;\ 0{,}8\}$ (pequeno, médio, grande); a
+versão inicial deste protocolo adotava como critério primário de H1 o
+teste TOST com banda absoluta $\delta_{\mathrm{eq}} = 0{,}05$ MCC,
+justificada por argumento SESOI operacional. A auditoria revelou três
+fragilidades dessa escolha: (i) a banda 0,050 MCC era **genealogicamente
+derivada da diferença empírica observada** entre DT-Kinase v7
+(MCC *off-diagonal* médio 0,298) e o *baseline* líder DrugBAN (0,348) na
+matriz cross-dataset (gap exato 0,050, registrado como motivação inicial
+da investigação na §1 deste documento), configurando ancoragem
+*a posteriori* em magnitude experimental observada; (ii) o argumento
+SESOI-via-*recall@k* era plausibilidade pragmática, não derivação
+rigorosa; (iii) a heterogeneidade de $\sigma_{\mathrm{inter\text{-}semente}}$
+entre *corpora* tornava a banda absoluta inconsistente em rigor
+cross-corpus ($\sigma_{\mathrm{NH}} \approx 0{,}025$ vs.
+$\sigma_{\mathrm{H}} \approx 0{,}011$, o que faria $0{,}05$ MCC equivaler
+a $\sim 2\sigma$ no Não-Humano e $\sim 5\sigma$ no Humano).
+**Decisão da auditoria (opção B, 2026-05-08): D3 foi reformulado.** O
+critério primário de H1 foi substituído por **convergência tripla**
+*bootstrap* pareado + RM-ANOVA com Tukey HSD + *Hedges' g* pareado; o
+TOST permanece reportado como camada de auditoria de robustez sobre
+seis bandas distintas no Apêndice G da tese, sem que o veredicto de
+qualquer banda específica determine a leitura primária de H1.
 
 A migração corretiva adotou três camadas. A primeira é a **declaração
 explícita das três divergências** ($\mathrm{D}1$: *single-split* +
@@ -1610,9 +1621,19 @@ explicitamente no capítulo metodológico, e desde que as camadas
 complementares (*null model*, limite superior, Hedges' $g$,
 sensibilidade TOST, métricas pós-classificação) sejam adicionadas para
 fornecer ao leitor a leitura sob o padrão atual. A migração para
-$5\times 5$ CV ($n = 25$, fechamento de D1) permanece registrada como
-direção de trabalho futuro com custo estimado em $\sim 150$ h GPU
-sequenciais ($\sim 30$ h em paralelo $5\times$).
+$5\times 5$ CV ($n = 25$, fechamento de D1) é **decisão de escopo
+publicação, não de tese** (registrada em 2026-05-08): a tese é
+considerada estatisticamente robusta sob D1 porque as camadas
+complementares (limite inferior do *null model*, limite superior por
+variabilidade experimental, Hedges' $g$ pareado com correção $J(4)$,
+métricas pós-classificação, sensibilidade TOST sobre seis bandas,
+RM-ANOVA $+$ Tukey HSD com checagens de premissa, *simultaneous CI
+plots*, *MCSim heatmaps*) entregam leitura defensável em $n = 5$ sob a
+cláusula de transparência (Item 5 da Conclusão do paper). A versão de
+periódico, pós-defesa, executará $5\times 5$ CV (custo $\sim 150$ h GPU
+sequenciais ou $\sim 30$ h em paralelo $5\times$) sobre os mesmos
+artefatos do *toolkit*; todas as outras camadas (Hedges' $g$, TOST,
+visualizações, *checklist*) transitam inalteradas.
 
 O documento canônico para este protocolo é
 `docs/01-methodology/statistical_protocol.md`; a referência primária

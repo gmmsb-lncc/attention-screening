@@ -53,6 +53,15 @@ DOI 10.1021/acs.jcim.5c01609). Local copy:
 `docs/01-methodology/references/ash_wognum_2025_jcim.pdf`. Full protocol with
 deviation register: `docs/01-methodology/statistical_protocol.md`.
 
+**Notation convention (declared in `statistical_protocol.md` §0,
+binding):** every `mean ± value` in this project is **mean ± σ amostral
+(ddof=1) sobre n=5 sementes**. SE/SEM only appears with explicit `(SE = ...)`
+label. Bootstrap IC95% is reported as `Δ_median [CI95%: lo, hi]`.
+Conversion under n=5: σ ≈ SE × √5 ≈ SE × 2,236. Legacy SE-form values
+in the thesis (e.g., older `0.506 ± 0.006`) are footnoted with their σ
+equivalent at first occurrence rather than rewritten — the canonical
+DT-Kinase NH value is now reported as **0.506 ± 0.012 (σ amostral)**.
+
 **Four guidelines (one-line summary):**
 1. Performance distribution from both seed and split variance (recommended:
    5×5 repeated CV, n=25).
@@ -65,13 +74,24 @@ deviation register: `docs/01-methodology/statistical_protocol.md`.
 
 **Three declared deviations (do not silently revert):**
 - **D1.** Single scaffold split + 5 seeds (instead of 5×5 CV). Subnominal IC
-  coverage (~80–87 %); migration to 5×5 CV listed as future work. Rationale:
-  retraining cost.
+  coverage (~80–87 %); **thesis-scope only**. Migration to 5×5 CV is
+  scheduled for the **journal-paper version** (post-defense), not for the
+  thesis. Rationale: retraining cost (~150 h GPU); thesis is statistically
+  robust enough under the complementary layers (limits, Hedges' g, TOST
+  sensitivity, RM-ANOVA + Tukey HSD with assumption checks).
 - **D2.** Paired bootstrap by protein (B=10⁴) is the primary inference;
   RM-ANOVA + Tukey HSD added as parallel verification, not replacement.
-- **D3.** TOST equivalence band primary = δ_eq = 0.05 MCC (SESOI operational
-  anchor); Cohen's-d-anchored bands (Lakens 2017, δ_eq ∈ {0.2, 0.5, 0.8}·σ_pooled)
-  reported as sensitivity analysis only.
+  Both reported.
+- **D3 (REFORMULATED 2026-05-08).** Originally: TOST equivalence band
+  primary = δ_eq = 0.05 MCC (SESOI operational anchor). After audit:
+  **TOST relegated to robustness verification only**; primary criterion
+  of H1 replaced by **triple-convergence** of paired bootstrap +
+  RM-ANOVA with Tukey HSD + Hedges' g paired. Cohen-anchored bands
+  (Lakens 2017, δ_eq ∈ {0.2, 0.5, 0.8}·σ_pooled) reported as additional
+  robustness audit alongside legacy absolute bands {0.03, 0.05, 0.07}.
+  Reason: the original δ_eq = 0.05 was genealogically derived from the
+  empirical DT-Kinase v7 vs. DrugBAN gap (0.050 MCC off-diagonal in
+  cross-dataset matrix) — post-hoc anchoring on observed magnitude.
 
 **Reporting checklist (mandatory items)** — see
 `statistical_protocol.md` §4 for the full list. Minimum:
@@ -98,19 +118,20 @@ Repo: `gmmsb-lncc/attention-screening` · Python 3.12 in `env/` · PyTorch 2.0+ 
 ## Active work (2026-04, 25 lessons; PLATEAU empírico atingido sobre v7+F + adoção do padrão estatístico Ash/Wognum 2025)
 
 1. **DT-Kinase optimization track** — push v7 MCC from baseline (~0.506 NH 5-seed) toward 0.55-0.60 target. Tracked in `docs/01-methodology/licoes_aprendidas.md` (sections §4-§14, **25 methodological lessons** documented). **STATUS PLATEAU (lição 21, §6.13)**: **15+ modificações incrementais testadas, nenhuma supera vanilla v7 reproducivelmente em 5-seed**. Espaço incremental empiricamente esgotado. **Lição 22 (§6.14)**: 2D RoPE per-modality regrediu −0.020 MCC — *category error* cross-modal. **Lição 23 (§6.12.1)**: BAN-residual + BAN_LR_MULT=5 regrediu −0.016 MCC — acoplamento multiplicativo zera ∇W. **Lição 24 (NOVO)**: v7+F LEGACY 3-seed (0.5266 ± 0.010) regrediu para 0.4923 ± 0.025 em 5-seed (z=0.55σ vs vanilla v7) — Tier F efeito nulo sob 5-seed; aplicação direta de Lição 3 ao próprio v7+F.
-   - **Canônico MCC primário (final, pós-Lição 24)** — `configs/v7.yaml` vanilla v7: **0.506 ± 0.006** NH 5-seed (cap 5 da tese). Ckpt operacional p/ matriz cross-dataset + comitê inferência + ranking final. v7+F LEGACY ré-classificado como tentativa que falhou validação 5-seed.
+   - **Canônico MCC primário (final, pós-Lição 24)** — `configs/v7.yaml` vanilla v7: **0.506 ± 0.012** NH 5-seed (σ amostral, ddof=1; cap 5 da tese; convenção declarada em `docs/01-methodology/statistical_protocol.md` §0; equivalente a SE ≈ 0,005). Ckpt operacional p/ matriz cross-dataset + comitê inferência + ranking final. v7+F LEGACY ré-classificado como tentativa que falhou validação 5-seed.
    - **Canônico p/ comparação F1 baselines** — `v7+F_adapt` (matched THR/SEL=f1): 0.4929 ± 0.016, F1=0.787 (competitivo com DrugBAN/GraphBAN F1 nativo).
    - **A+D combo** — empate técnico ~0.530 (d03 single host). Claim de σ=0.004 **RETRATADA** após grid sweep d02 mostrar σ=0.037 mesma config (lição 19, retração).
    - **BAN-residual `v7_ban_res`** — REGREDIU −0.010 a −0.018 MCC, σ=0.045 (lição 19 reaplica: 3.93M params extras sem LR matching). §6.12.
    - **Refutados/empates (13 direções)** — Tier B, D vanilla SWA, E Mixup, §6.5 fixes, v7_asymF, v7_adapt_v2 (decoupled), v7_ban_F (Xavier W_ban), LoRA-MLM offline, λ=0.5 composite, A só, D só, BAN-residual, A+D combo.
    - **Direções restantes (não-incrementais, §6.13)** — encoder maior (ESM-35M/150M), treino prolongado (centenas epochs), LoRA end-to-end, multi-task RDKit properties, BAN-residual + LR boost atomicamente.
-   - **Recomendação operacional**: tese fecha sobre vanilla v7 (0.506 ± 0.006 NH 5-seed) como ckpt canônico + v7+F_adapt como comparação F1. v7+F LEGACY tratado como caso de Lição 24 (tentativa promissora 3-seed que falha validação 5-seed; protocolo cinco-sementes é necessário p/ canonização).
+   - **Recomendação operacional**: tese fecha sobre vanilla v7 (0.506 ± 0.012 NH 5-seed σ) como ckpt canônico + v7+F_adapt como comparação F1. v7+F LEGACY tratado como caso de Lição 24 (tentativa promissora 3-seed que falha validação 5-seed; protocolo cinco-sementes é necessário p/ canonização).
 2. **Cross-dataset evaluation matrix (3×3)** — completo. Off-diagonal v7=0.298, DrugBAN=0.348, GraphBAN=0.342, ConPLex=0.268 (anexoA tese; 0.209 anterior refletia rep 0 isolada, descartado). **Documentação completa migrada para `~/PhD/cross_matrix/`** (figures + Beamer source + Anexo A da tese).
 3. **Interpretabilidade DT-Kinase** — `scripts/inference/explain.py` POC implementado: extrai per-residue + per-ligand-token attention via forward hooks (M_k pre-CNN + HierPool weights). Modalidade interpretativa nativa não disponível em ConPLex (que requer atribuição model-agnostic post-hoc, e.g., SHAP); paridade com DrugBAN/GraphBAN BAN attn em 3 níveis (raw + per-head + HierPool). Caveat de fidelidade (Jain&Wallace 2019, Wiegreffe&Pinter 2019) reconhecido na tese (anexoB:665): pesos de atenção não constituem atribuição faithful, lidos como diagnóstico arquitetural não como explicação causal.
 4. **Rerun v7 benchmark with Platt-on-val** (PR #206) — completed. All thesis Chapter 5 MCC numbers regenerated.
 5. **Post-hoc statistics** — `scripts/thesis_followups/bootstrap_ci.py` on saved logits (paired bootstrap CI 95%) used in thesis tables 17 & 18. Wilcoxon não foi entregue na tese (n=5 sementes torna combinatorialmente degenerado; bootstrap pareado cobre o regime).
 6. **Statistical protocol migration to Ash/Wognum 2025** (lição 25, 2026-05-07) — adoção do *Perspective* JCIM 65:9398-9411 como padrão metodológico. Três divergências declaradas (D1 single-split + 5 sementes; D2 bootstrap pareado primário com RM-ANOVA + Tukey HSD complementar; D3 banda TOST $\delta_{eq}=0,05$ MCC ancorada em SESOI). **Toolkit entregue** em `scripts/statistical_analysis/` (10 scripts + 2 runners + suite de testes 10/10 verde): null-model lower limit, assay upper limit (Brown 2009 / Kramer 2012), Hedges' $g$ pareado J(4)=0,8 primário + J(8)≈0,9032 cross-check, métricas pós-classificação (precision@recall=0,8, recall@precision=0,8, TNR@recall=0,9), TOST sensitivity sobre 6 bandas, RM-ANOVA + Tukey HSD, simultaneous CI plot, MCSim heatmap, aggregate_panel JSON+LaTeX+checklist. Entry-points: `bash scripts/statistical_analysis/run_full_stats.sh <corpus>` e `run_all_corpora.sh`. Documentação canônica: `docs/01-methodology/statistical_protocol.md` (com Implementation Register §3 atualizado) + `docs/01-methodology/references/ash_wognum_2025_jcim.pdf`. Reporting checklist (§4) é mandatória para qualquer nova afirmação estatística.
-   - **Status operacional (2026-05-07 evening, work host)**: smoke-run em `non_human` com `N_BOOTSTRAP=2000` lançado; etapa `tost_sensitivity.py` é a mais cara (~30-60 min single-CPU). Outputs incrementais em `results/statistical/non_human/`. Verificar de casa: `pgrep -af "run_full_stats"` para detectar processo, `ls results/statistical/non_human/` para progresso, `test -f results/statistical/non_human/panel.json && echo "DONE"` para fim. README do módulo (`scripts/statistical_analysis/README.md`) tem seção "Monitoring and resuming a long run" com cheat-sheet completo e instruções de retomada parcial caso o processo seja interrompido.
+   - **Status operacional (2026-05-08, work host)**: corpus `non_human` em **B=10⁴ canônico** concluído (substituiu smoke B=2000). Características qualitativas idênticas às do smoke (TOST 3/6 estritos em δ=0,05; 5/6 em δ=0,07; ANOVA p_bonf=0,21 NS em MCC; 10/10 PASS); somente quarta casa decimal de CI bootstrap se moveu (e.g., upper_limit MCC 0,8759 → 0,8763), confirmando empiricamente a previsão dos disclaimers provisional. Tabelas LaTeX e figuras canônicas espelhadas em `~/PhD/figures/stat_tables/` e `~/PhD/figures/`. **Disclaimer `[PROVISIONAL B=2000]` removido automaticamente** — `run_full_stats.sh` desliga `--provisional` quando `N_BOOTSTRAP=10000`. Corpora `human` e `all` permanecem em smoke B=2000 e serão regenerados em sequência via `bash scripts/statistical_analysis/run_full_stats.sh {human,all}` (default 10000). Tabelas LaTeX em `tables/{corpus}/` continuam carregando `[PROVISIONAL B=2000]` para human e all até regeneração canônica. README do módulo tem seção "Monitoring and resuming a long run".
+   - **Tese atualizada (2026-05-08)**: novo Apêndice G (`~/PhD/tex/apendiceG.tex`, renderizado como "Apêndice F" por sequência ABNTeX2) com 9 seções (padrão+desvios, limites, Hedges, TOST sensitivity, ANOVA+Tukey, post-hoc, figs, checklist, impl); nova subseção §4.9.4 em `capitulo4.tex` (Padrão Ash/Wognum + D1/D2/D3 + camadas); 3 parágrafos cirúrgicos em `capitulo5.tex` (camadas complementares, convergência tripla, limites empíricos); Lição 25 em `apendiceF.tex` ($\S$E.26 no display, página 315); 1 parágrafo de auditoria em `conclusao.tex` ($\S$6.3.0.0.13); 1 frase em `introducao.tex`. 7 novas entradas bib (AshWognum2025, BrownMuchmore2009, Kramer2012, Hedges1981, Lakens2013, Lakens2017, Dietterich1998). Compile limpo: 387 páginas, sem warnings de citação ou ref. **Toda numeração da tese marcada como `% [PROVISIONAL B=2000]` em comments LaTeX nas tabelas auto-geradas; substituível em uma re-execução do toolkit a B=10⁴.**
    - **Env nota**: o virtualenv real é `env_baseline/bin/python` (não `env/` como menciona texto antigo); todos os runners usam essa variável `PYTHON` por default.
 
 ## PR workflow
@@ -324,7 +345,7 @@ python3 scripts/thesis_followups/cross_dataset_matrix/aggregate.py \
 
 ## Key development notes
 
-- **Production config (thesis baseline + canonical, post-Lição 24)**: `configs/v7.yaml` vanilla v7, **0.506 ± 0.006** NH 5-seed. v7+F LEGACY refutado em 5-seed (0.4923 ± 0.025), retido apenas no histórico do Apêndice F.
+- **Production config (thesis baseline + canonical, post-Lição 24)**: `configs/v7.yaml` vanilla v7, **0.506 ± 0.012** NH 5-seed (σ amostral; convenção §0). v7+F LEGACY refutado em 5-seed (0.4923 ± 0.025), retido apenas no histórico do Apêndice F.
 - **Hosts atuais (3 paralelos)**:
   - `diamante-01` (cuDNN HEALTHY): host primário, MCC reference. Default `BENCHMARK_LEVEL4CNN_DISABLE_CUDNN=0`.
   - `diamante-02` (cuDNN 9.x ABI mismatch driver 12.4): precisa `_DISABLE_CUDNN=1`. Cross-host drift +0.009 MCC vs d01.

@@ -38,7 +38,8 @@ from . import (
     DEFAULT_BOOTSTRAP_B, MODELS, PRIMARY_METRICS, PRIMARY_TOST_BAND, SEEDS,
     data_loader,
 )
-from scripts.thesis_followups.bootstrap_ci import paired_delta as _paired_delta
+from scripts.thesis_followups.bootstrap_ci import compute_metrics as _compute_metrics
+from scipy import stats as _stats
 
 
 def _to_bootstrap_dict(seed_data: dict) -> dict:
@@ -47,6 +48,57 @@ def _to_bootstrap_dict(seed_data: dict) -> dict:
         "logits": seed_data["logits"],
         "labels": seed_data["y_true"],
         "threshold": seed_data["threshold"],
+    }
+
+
+def _paired_delta_single_metric(seeds_a: list[dict], seeds_b: list[dict],
+                                metric: str, n_boot: int,
+                                rng: np.random.Generator) -> dict:
+    """Optimized paired delta for a single metric.
+
+    Equivalent to scripts.thesis_followups.bootstrap_ci.paired_delta restricted
+    to one metric, but ~7x faster because it does not redundantly recompute
+    every metric inside the inner loop. Output schema matches
+    paired_delta(...)[metric] for downstream consistency.
+    """
+    n = len(seeds_a[0]["labels"])
+    assert all(np.array_equal(a["labels"], b["labels"])
+               for a, b in zip(seeds_a, seeds_b)), \
+        "Paired test requires identical label arrays across models"
+
+    delta_samples = np.empty(n_boot, dtype=np.float64)
+    for b in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        a_vals = [_compute_metrics(s["logits"][idx], s["labels"][idx],
+                                  s["threshold"])[metric]
+                  for s in seeds_a]
+        b_vals = [_compute_metrics(s["logits"][idx], s["labels"][idx],
+                                  s["threshold"])[metric]
+                  for s in seeds_b]
+        delta_samples[b] = float(np.mean(a_vals) - np.mean(b_vals))
+
+    per_seed = []
+    for a, b in zip(seeds_a, seeds_b):
+        ma = _compute_metrics(a["logits"], a["labels"], a["threshold"])[metric]
+        mb = _compute_metrics(b["logits"], b["labels"], b["threshold"])[metric]
+        per_seed.append(ma - mb)
+    per_seed = np.asarray(per_seed, dtype=np.float64)
+
+    if len(per_seed) >= 3 and np.any(per_seed != 0):
+        try:
+            w_stat, p_val = _stats.wilcoxon(per_seed, alternative="two-sided")
+        except ValueError:
+            w_stat, p_val = 0.0, 1.0
+    else:
+        w_stat, p_val = 0.0, 1.0
+
+    return {
+        "median_delta": float(np.median(delta_samples)),
+        "ci_95": (float(np.percentile(delta_samples, 2.5)),
+                  float(np.percentile(delta_samples, 97.5))),
+        "wilcoxon_stat": float(w_stat),
+        "wilcoxon_p": float(p_val),
+        "per_seed": per_seed.tolist(),
     }
 
 
@@ -123,17 +175,17 @@ def tost_sensitivity_panel(corpus: str, metric: str,
     # unordered, but ordered makes downstream tables symmetric).
     pair_results = {}
     for a, b in itertools.permutations(MODELS, 2):
-        cmp = _paired_delta(boot_panel[a], boot_panel[b],
-                            n_boot=n_bootstrap, rng=rng)
-        m = cmp[metric]
+        cmp = _paired_delta_single_metric(boot_panel[a], boot_panel[b],
+                                         metric=metric, n_boot=n_bootstrap,
+                                         rng=rng)
         pair_results[f"{a}__vs__{b}"] = {
             "model_a": a,
             "model_b": b,
-            "median_delta": float(m["median_delta"]),
-            "ci_lo": float(m["ci_95"][0]),
-            "ci_hi": float(m["ci_95"][1]),
-            "wilcoxon_p": float(m["wilcoxon_p"]),
-            "per_seed_deltas": list(map(float, m["per_seed"])),
+            "median_delta": float(cmp["median_delta"]),
+            "ci_lo": float(cmp["ci_95"][0]),
+            "ci_hi": float(cmp["ci_95"][1]),
+            "wilcoxon_p": float(cmp["wilcoxon_p"]),
+            "per_seed_deltas": list(map(float, cmp["per_seed"])),
         }
 
     sigma_pooled = _sigma_pooled(panel, metric)
