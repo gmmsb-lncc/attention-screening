@@ -18,6 +18,32 @@ referenciar este registro.
 > divergências do padrão são declaradas e mantidas: D1 (single-split +
 > 5 sementes), D2 (bootstrap pareado primário, RM-ANOVA complementar),
 > D3 (banda TOST $\delta_{\mathrm{eq}} = 0{,}05$ MCC ancorada em SESOI).
+>
+> **Status numérico (2026-05-08, atualizado).**
+> - **non_human**: **B=10⁴ canônico** concluído (regenerou os 6 JSONs +
+>   8 PDFs + 6 tabelas LaTeX). Características qualitativas idênticas
+>   ao smoke B=2000 anterior; somente quarta casa decimal de CI
+>   bootstrap se moveu (e.g., upper_limit MCC 0,8759 → 0,8763). TOST
+>   primary δ=0,05: 3/6 (idêntico ao smoke); δ=0,07: 5/6 (idêntico).
+>   Tabelas LaTeX **sem disclaimer provisional** (gerador desligou
+>   `--provisional` automaticamente sob `N_BOOTSTRAP=10000`). Tese
+>   recompilada com valores canônicos: `~/PhD/tese_lncc.pdf`, 388 p.
+> - **human, all**: ainda em smoke B=2000. Regeneração canônica
+>   pendente: `bash scripts/statistical_analysis/run_full_stats.sh human`
+>   e `... all` (default `N_BOOTSTRAP=10000`).
+>
+> **Reformulação D3 (2026-05-08, opção B).** O critério primário de H1
+> foi substituído de TOST com banda absoluta $\delta_{\mathrm{eq}} = 0{,}05$
+> MCC para **convergência tripla** \textit{bootstrap} pareado + RM-ANOVA
+> com Tukey HSD + \textit{Hedges' g} pareado. O TOST permanece reportado
+> como camada de auditoria de robustez sobre seis bandas (Apêndice G,
+> §G.4 da tese). Motivação: o $\delta_{\mathrm{eq}} = 0{,}05$ era
+> genealogicamente derivado da diferença empírica observada DT-Kinase v7
+> vs. DrugBAN (gap 0,050 MCC \textit{off-diagonal}, Lição 1 das vinte e
+> cinco lições do Apêndice F); pré-registro retroativo. Tese atualizada
+> em \texttt{tex/introducao.tex}, \texttt{tex/capitulo4.tex},
+> \texttt{tex/capitulo5.tex}, \texttt{tex/conclusao.tex}, \texttt{tex/apendiceF.tex},
+> \texttt{tex/apendiceG.tex}; compile limpo, 388 páginas, 0 refs indef.
 
 ---
 
@@ -540,7 +566,7 @@ seed_decomposition:
   seeds_789_1024_avg:    ~0.441  (back-out: (5×0.4923 - 3×0.5266)/2)
 diagnosis: |
   3-seed (42,123,456) era amostragem upper-tail. 5-seed canônico
-  expõe true mean ≈ 0.49, indistinguível de vanilla v7 (0.506 ± 0.006).
+  expõe true mean ≈ 0.49, indistinguível de vanilla v7 (0.506 ± 0.012, σ amostral).
   Tier F (label_smooth=0.05) NÃO sobrevive validação 5-seed.
   Aplicação direta da Lição 3 ao próprio caso v7+F.
 canonical_decision: |
