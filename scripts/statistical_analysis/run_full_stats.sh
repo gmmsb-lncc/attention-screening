@@ -17,6 +17,12 @@ set -euo pipefail
 CORPUS="${1:-non_human}"
 N_BOOTSTRAP="${N_BOOTSTRAP:-10000}"
 PYTHON="${PYTHON:-env_baseline/bin/python}"
+# When N_BOOTSTRAP is below the canonical 10^4, mark all .tex artifacts
+# as PROVISIONAL so the thesis text knows these are smoke-run values.
+PROVISIONAL_FLAG=""
+if [ "${N_BOOTSTRAP}" -lt 10000 ]; then
+    PROVISIONAL_FLAG="--provisional ${N_BOOTSTRAP}"
+fi
 
 if [ ! -x "${PYTHON}" ]; then
     echo "ERROR: python interpreter not found at ${PYTHON}" >&2
@@ -60,6 +66,7 @@ ${PY}.aggregate_panel         --corpus "${CORPUS}" --in-dir "${OUT}" \
                               --out-json "${OUT}/panel.json" \
                               --out-tex "${OUT}/panel.tex" \
                               --out-checklist "${OUT}/checklist.md" \
+                              ${PROVISIONAL_FLAG} \
                               ${MIRROR_FLAG}
 
 echo "[run_full_stats] done -> ${OUT}/panel.json + ${OUT}/checklist.md"
