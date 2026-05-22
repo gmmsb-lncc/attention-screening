@@ -9,7 +9,7 @@ from pathlib import Path
 from sklearn.metrics import matthews_corrcoef
 import numpy as np
 
-BASE_DIR = Path('/media/leon/ssd2tb/docktkinase/ablation/classification')
+BASE_DIR = Path('${PROJECT_ROOT}/ablation/classification')
 RESULTS_DIR = BASE_DIR / 'results'
 
 def calculate_mcc_from_confusion_matrix(cm):

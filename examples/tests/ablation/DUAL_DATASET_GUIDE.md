@@ -5,8 +5,8 @@ This directory now supports running ablation studies on **two datasets**:
 ## Datasets
 
 ### 1. Non-Human Kinases (`results_non_human`)
-- **TSV**: `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv`
-- **Embeddings**: `/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2/`
+- **TSV**: `${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv`
+- **Embeddings**: `${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2/`
 - **Size**: 15,616 interactions, 299 proteins, 8,131 ligands
 - **Status**: ✅ Complete (baseline results)
 
@@ -113,7 +113,7 @@ python 01_extract_data.py --results-suffix results_non_human
 python 02_generate_morgan_fingerprints.py --results-suffix results_non_human
 python 03_generate_aac_dpc_encoding.py --results-suffix results_non_human
 python 04_create_combinations.py --results-suffix results_non_human \
-    --embeddings-dir /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2
+    --embeddings-dir ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2
 python 05_run_classification.py --results-suffix results_non_human
 python 06_visualize_results.py --results-suffix results_non_human
 
@@ -137,7 +137,7 @@ cd ablation/regression/scripts
 # Non-human
 python 01_extract_data_regression.py --results-suffix results_non_human
 nohup python -u 02_run_regression.py --results-suffix results_non_human \
-    --embeddings-dir /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2 \
+    --embeddings-dir ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2 \
     > ../results_non_human/regression.log 2>&1 &
 python consolidate_checkpoints.py --results-suffix results_non_human
 python 03_visualize_regression_results.py --results-suffix results_non_human
@@ -165,8 +165,8 @@ All scripts accept these arguments:
 
 | Parameter | Non-Human | Human |
 |-----------|-----------|-------|
-| TSV Path | `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv` | `/data/docktkinase/datasets/kinase_human_compounds.tsv` |
-| Embeddings | `/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2/` | `/data/docktkinase/results/protein_model_benchmark_human_v2/` |
+| TSV Path | `${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv` | `/data/docktkinase/datasets/kinase_human_compounds.tsv` |
+| Embeddings | `${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2/` | `/data/docktkinase/results/protein_model_benchmark_human_v2/` |
 | Results Suffix | `results_non_human` | `results_human` |
 
 ## Comparison Analysis

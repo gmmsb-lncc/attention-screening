@@ -274,7 +274,7 @@ EOF
 ```bash
 python3 << 'EOF'
 import sys
-sys.path.insert(0, '/Users/sulfierry/docktkinase')
+sys.path.insert(0, '${HOME}/docktkinase')
 
 from src.attention_matrix.data_loader import EmbeddingDataLoader
 from pathlib import Path
@@ -304,11 +304,11 @@ EOF
 
 ## References
 
-- **Boltz Strategy:** `/Users/sulfierry/docktkinase/src/build/embeddings/strategies/boltz_strategy.py:461-531`
-- **Data Loader:** `/Users/sulfierry/docktkinase/src/attention_matrix/data_loader.py:205-260`
-- **Dataset:** `/Users/sulfierry/docktkinase/src/attention_matrix/dataset.py:88-100`
-- **Cross-Attention Model:** `/Users/sulfierry/docktkinase/src/attention_matrix/model.py:95-115`
-- **Pipeline Extraction:** `/Users/sulfierry/docktkinase/src/attention_matrix/pipeline.py:extract_and_save_attention_maps()`
+- **Boltz Strategy:** `${HOME}/docktkinase/src/build/embeddings/strategies/boltz_strategy.py:461-531`
+- **Data Loader:** `${HOME}/docktkinase/src/attention_matrix/data_loader.py:205-260`
+- **Dataset:** `${HOME}/docktkinase/src/attention_matrix/dataset.py:88-100`
+- **Cross-Attention Model:** `${HOME}/docktkinase/src/attention_matrix/model.py:95-115`
+- **Pipeline Extraction:** `${HOME}/docktkinase/src/attention_matrix/pipeline.py:extract_and_save_attention_maps()`
 
 
 ---
@@ -443,7 +443,7 @@ PYEOF
 # 3. Data loader reads without fallback
 python3 << 'PYEOF'
 import sys
-sys.path.insert(0, '/Users/sulfierry/docktkinase')
+sys.path.insert(0, '${HOME}/docktkinase')
 from src.attention_matrix.data_loader import EmbeddingDataLoader
 from pathlib import Path
 loader = EmbeddingDataLoader(

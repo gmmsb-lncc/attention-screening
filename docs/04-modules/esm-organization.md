@@ -15,7 +15,7 @@ Todos os arquivos relacionados à integração ESM-2 foram organizados em suas p
 
 ### Arquivos Movidos
 
-**De**: Raiz do projeto (`/Users/sulfierry/docktkinase/`)  
+**De**: Raiz do projeto (`${HOME}/docktkinase/`)  
 **Para**: `tests/`
 
 ```
@@ -54,7 +54,7 @@ python tests/test_esm_integration.py   # Suite completa (6 testes)
 
 ### Arquivos Movidos
 
-**De**: Raiz do projeto (`/Users/sulfierry/docktkinase/`)  
+**De**: Raiz do projeto (`${HOME}/docktkinase/`)  
 **Para**: `docs/`
 
 ```

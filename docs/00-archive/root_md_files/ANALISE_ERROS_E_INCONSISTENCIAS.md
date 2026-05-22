@@ -648,7 +648,7 @@ self.stats['test_samples'] = len(X_test)   # ❌ DUPLICADO!
 
 ```python
 # legacy/backup_legacy_scripts/src/check_embedding_dim.py:5
-protein_embedding_file = "/home/leon/docktkinase/..."  # ❌ Hardcoded!
+protein_embedding_file = "${PROJECT_ROOT}/..."  # ❌ Hardcoded!
 ```
 
 **Impacto**: 🟢 BAIXO - Arquivos legacy não usados

@@ -46,7 +46,7 @@ tests/
 ### Master Test Runner
 
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 python3 tests/run_tier3_1_comprehensive_tests.py
 ```
 

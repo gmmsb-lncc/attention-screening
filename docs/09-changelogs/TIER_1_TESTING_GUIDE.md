@@ -222,7 +222,7 @@ print(f"Speedup: {save_time/load_time:.1f}x faster on reload")
 ### Full Pipeline Test
 ```bash
 # 1. Start fresh
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 
 # 2. Run classifier with new num_workers
 python -c "
@@ -285,7 +285,7 @@ echo "All integration tests passed! ✅"
 ### Issue: "ModuleNotFoundError: No module named 'src.utils.embedding_cache'"
 **Solution**: Ensure PYTHONPATH includes workspace root
 ```bash
-export PYTHONPATH="/home/leon/docktkinase:$PYTHONPATH"
+export PYTHONPATH="${PROJECT_ROOT}:$PYTHONPATH"
 ```
 
 ### Issue: "ProcessPoolExecutor fails on parallel CV"

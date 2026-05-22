@@ -3,7 +3,7 @@
 Simple ablation study runner with automatic dataset detection.
 
 Usage:
-    cd /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2
+    cd ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2
     python /path/to/ablation/ablation.py
     
     OR
@@ -28,8 +28,8 @@ from typing import Dict, Optional
 
 DATASET_CONFIGS = {
     'non_human': {
-        'embeddings_dir': '/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
-        'tsv_path': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
+        'embeddings_dir': '${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2',
+        'tsv_path': '${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv',
         'results_suffix': 'results_non_human',
         'name': 'Non-Human Kinases'
     },
@@ -191,7 +191,7 @@ def main():
         epilog="""
 Examples:
   # Auto-detect from current directory
-  cd /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2
+  cd ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2
   python ablation.py
   
   # Explicit dataset selection

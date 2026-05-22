@@ -38,4 +38,4 @@ WHERE
 
 -- SELECT 491329 numero de pontos selecionados em 09 de Janiero de 2025
 
-\COPY public.smile_kinase_all_compounds TO '/home/leon/Desktop/kinase_all_compounds.tsv' WITH (FORMAT csv, HEADER, DELIMITER E'\t');
+\COPY public.smile_kinase_all_compounds TO '${HOME}/Desktop/kinase_all_compounds.tsv' WITH (FORMAT csv, HEADER, DELIMITER E'\t');

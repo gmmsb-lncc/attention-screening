@@ -55,7 +55,7 @@ python download_model_files.py
 - `bert_vocab_curated.txt` (~17KB) ✅
 - `smi-ted-Light_40.pt` (~1.16GB) ⏳ Baixando...
 
-**Local esperado**: `/Users/sulfierry/docktkinase/FM4M/model_files/`
+**Local esperado**: `${HOME}/docktkinase/FM4M/model_files/`
 
 ## 🔧 Setup.py Aprimorado
 

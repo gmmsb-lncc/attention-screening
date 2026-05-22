@@ -72,7 +72,7 @@ def _build_matrix(self) -> np.ndarray:
 ### Passo 1: Executar Pipeline com Boltz
 
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 
 python scripts/run_complete_pipeline.py \
     --input tests/datasets/kinase_non_human_compounds.tsv \

@@ -28,8 +28,8 @@ from typing import Dict, List
 
 DATASET_CONFIGS = {
     'non_human': {
-        'tsv_path': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
-        'embeddings_dir': '/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
+        'tsv_path': '${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv',
+        'embeddings_dir': '${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2',
         'results_suffix': 'results_non_human',
         'description': 'Non-human kinases (15,616 interactions, 299 proteins)'
     },

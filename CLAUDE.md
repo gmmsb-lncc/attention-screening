@@ -140,7 +140,7 @@ Open PRs against `cross_attention_lite`, not `main`. `main` = stable releases; `
 
 ## Thesis repository link
 
-Sibling repo `/Users/sulfierry/PhD` (LaTeX). Defines "semantic screening", scaffold-split protocol, multi-seed protocol (5 seeds), MCC-optimal threshold, standardized model order (DT-Kinase, ConPLex, DrugBAN, GraphBAN). Any metric/architecture/protocol change here requires update under `~/PhD/tex/`.
+Sibling repo `${HOME}/PhD` (LaTeX). Defines "semantic screening", scaffold-split protocol, multi-seed protocol (5 seeds), MCC-optimal threshold, standardized model order (DT-Kinase, ConPLex, DrugBAN, GraphBAN). Any metric/architecture/protocol change here requires update under `~/PhD/tex/`.
 
 Recently added (2026-04-26):
 - `~/PhD/tex/anexoA.tex` — Anexo A: Matriz Cross-Dataset 3×3 (heatmaps + análise).

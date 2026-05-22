@@ -150,7 +150,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Extract data for ablation study')
     parser.add_argument('--tsv-path', type=str, 
-                       default='/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
+                       default='${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv',
                        help='Path to input TSV file')
     parser.add_argument('--results-suffix', type=str, default='results_non_human',
                        help='Suffix for results directory (e.g., results_non_human, results_human)')

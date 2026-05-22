@@ -38,4 +38,4 @@ WHERE
     t.organism != 'Homo sapiens';       -- Filtra apenas quinases não humanas
 
 -- Exporta os dados para um arquivo TSV
-\COPY public.smile_kinase_non_human_compounds TO '/home/leon/docktkinase/src/database/kinase_non_human_compounds.tsv' WITH (FORMAT csv, HEADER, DELIMITER E'\t');
+\COPY public.smile_kinase_non_human_compounds TO '${PROJECT_ROOT}/src/database/kinase_non_human_compounds.tsv' WITH (FORMAT csv, HEADER, DELIMITER E'\t');

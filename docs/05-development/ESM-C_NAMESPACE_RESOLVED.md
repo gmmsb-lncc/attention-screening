@@ -32,7 +32,7 @@ for mod_key in esm_modules:
     del sys.modules[mod_key]
 
 # 3. Reorganizar sys.path: ESM-3 PRIMEIRO
-esm3_path = '/Users/sulfierry/docktkinase/ESM/esm-3/esm-main'
+esm3_path = '${HOME}/docktkinase/ESM/esm-3/esm-main'
 if esm3_path in sys.path:
     sys.path.remove(esm3_path)
 sys.path.insert(0, esm3_path)
@@ -55,7 +55,7 @@ from esm.models.esmc import ESMC  # ✅ FUNCIONA!
 ```bash
 python << 'EOF'
 import sys
-esm3_path = '/Users/sulfierry/docktkinase/ESM/esm-3/esm-main'
+esm3_path = '${HOME}/docktkinase/ESM/esm-3/esm-main'
 sys.path.insert(0, esm3_path)
 esm_mods = [k for k in list(sys.modules.keys()) if k.startswith('esm')]
 for mod in esm_mods:
@@ -170,7 +170,7 @@ strategy.load('esmc-300m-2024-12', ...)
 ### 1. Verificar modelos disponíveis
 ```python
 import sys
-sys.path.insert(0, '/Users/sulfierry/docktkinase/ESM/esm-3/esm-main')
+sys.path.insert(0, '${HOME}/docktkinase/ESM/esm-3/esm-main')
 esm_mods = [k for k in list(sys.modules.keys()) if k.startswith('esm')]
 for mod in esm_mods:
     del sys.modules[mod]
@@ -186,7 +186,7 @@ print([m for m in models if 'esmc' in m.lower()])
 python -c "
 import sys
 import os
-sys.path.insert(0, '/Users/sulfierry/docktkinase/ESM/esm-3/esm-main')
+sys.path.insert(0, '${HOME}/docktkinase/ESM/esm-3/esm-main')
 esm_mods = [k for k in list(sys.modules.keys()) if k.startswith('esm')]
 for mod in esm_mods: del sys.modules[mod]
 
@@ -240,7 +240,7 @@ print(f"✅ Embedding shape: {embedding.shape}")  # Esperado: (960,)
 
 ## 📚 Referências
 
-- **ESM-3 Repository:** /Users/sulfierry/docktkinase/ESM/esm-3/esm-main
+- **ESM-3 Repository:** ${HOME}/docktkinase/ESM/esm-3/esm-main
 - **fair-esm Package:** env/lib/python3.12/site-packages/esm
 - **Documentação Fase 1:** docs/05-development/PHASE1_ESMC_IMPLEMENTATION.md
 - **Tests:** tests/test_esmc_strategy.py (23 testes)

@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-VENV_PYTHON="/media/leon/ssd2tb/docktkinase/env/bin/python"
+VENV_PYTHON="${PROJECT_ROOT}/env/bin/python"
 
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}ABLATION STUDY: DUAL-DATASET EXECUTION${NC}"

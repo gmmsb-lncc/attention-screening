@@ -940,8 +940,8 @@ def generate_summary_report(df, leakage_info, results, kinase_stats, compound_st
 
 def main():
     # Configuração
-    DATA_PATH = '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv'
-    OUTPUT_DIR = '/media/leon/ssd2tb/docktkinase/leakage_analysis_results'
+    DATA_PATH = '${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv'
+    OUTPUT_DIR = '${PROJECT_ROOT}/leakage_analysis_results'
 
     import os
     os.makedirs(OUTPUT_DIR, exist_ok=True)

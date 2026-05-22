@@ -196,7 +196,7 @@ models_cache/ESM/hub/
 ```bash
 ✅ ESM importado com sucesso!
    Versão: 1.0.3
-   Localização: /Users/sulfierry/docktkinase/ESM/esm/__init__.py
+   Localização: ${HOME}/docktkinase/ESM/esm/__init__.py
 
 📦 Modelos ESM-2 disponíveis:
    ⭐ esm2_t36_3B_UR50D (PADRÃO) - 3B parâmetros, dim 2560

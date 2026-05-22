@@ -193,9 +193,9 @@ def test_attention_matrix_training():
     print("="*80 + "\n")
     
     # Paths
-    base_path = '/Users/sulfierry/docktkinase/results/kinase_non_human_full'
-    data_file = '/Users/sulfierry/docktkinase/tests/datasets/kinase_non_human_compounds.tsv'
-    output_path = '/Users/sulfierry/docktkinase/results/test_attention_matrix_standalone'
+    base_path = '${HOME}/docktkinase/results/kinase_non_human_full'
+    data_file = '${HOME}/docktkinase/tests/datasets/kinase_non_human_compounds.tsv'
+    output_path = '${HOME}/docktkinase/results/test_attention_matrix_standalone'
     
     # Create output directory
     os.makedirs(output_path, exist_ok=True)

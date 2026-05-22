@@ -338,7 +338,7 @@ CLI validation:    Import → Args → Config → Execute ✅
 
 ### Run All Tests (Recommended)
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 source env/bin/activate
 python tests/classifier_test/run_all_tests.py
 ```

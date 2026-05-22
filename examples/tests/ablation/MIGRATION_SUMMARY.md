@@ -83,8 +83,8 @@ Updated all ablation study scripts to support running experiments on both **non-
 ### Non-Human Kinases
 ```python
 {
-    'tsv_path': '/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
-    'embeddings_dir': '/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
+    'tsv_path': '${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv',
+    'embeddings_dir': '${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2',
     'results_suffix': 'results_non_human'
 }
 ```

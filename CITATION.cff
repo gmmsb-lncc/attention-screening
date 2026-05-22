@@ -37,7 +37,7 @@ keywords:
   - "bioactivity prediction"
 preferred-citation:
   type: thesis
-  title: "Triagem Atencional Bimodal para Predição de Bioatividade Quinase-Ligante: Protocolo Unificado, Comitê Multi-Modelo e Refinamentos Estatísticos"
+  title: "Desenvolvimento de Modelos Atencionais para Triagem Computacional de Quinases Humanas e Não Humanas"
   authors:
     - family-names: "Sulfierry"
       given-names: "Leon"

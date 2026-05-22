@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument('--results-suffix', type=str, default='results_non_human',
                        help='Results directory suffix')
     parser.add_argument('--embeddings-dir', type=str,
-                       default='/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2',
+                       default='${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2',
                        help='Path to embeddings directory')
     return parser.parse_args()
 

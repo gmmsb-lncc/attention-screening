@@ -5,7 +5,7 @@ Carrega checkpoint existente, processa universal split (val + test),
 produz raw_predictions.npz alinhado a (n_val=69.318, n_test=41.441).
 
 Uso:
-    cd /Users/sulfierry/attention-screening
+    cd ${PROJECT_ROOT}
     source env/bin/activate
     python infer_drugban_universal.py \\
         --corpus all \\

@@ -214,7 +214,7 @@ python run_ablation_study.py --dataset both
 ### Prerequisites
 ```bash
 # Activate virtual environment
-cd /media/leon/ssd2tb/docktkinase
+cd ${PROJECT_ROOT}
 source env/bin/activate
 
 # Verify ESM-2 embeddings exist

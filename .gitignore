@@ -1,50 +1,6 @@
 # ============================================
-# DockTKinase - Git Ignore Configuration
+# attention-screening — public release .gitignore
 # ============================================
-
-# ============================================
-# Generated Output Directories
-# ============================================
-# Embedding outputs
-ligand/
-protein/
-ligand_embeddings/
-protein_embeddings/
-matrix_embedding/
-test_output*/
-
-# Result directories (now in tests/)
-tests/humans/
-tests/non_humans/
-tests/test_output*/
-tests/pipeline_output*/
-tests/comparison_*/
-results/
-output/
-
-# ⚠️ IMPORTANTE: Pastas de teste na RAIZ não devem ser criadas!
-# Todos os testes devem ir para tests/
-# Mas se forem criadas acidentalmente na raiz, serão ignoradas:
-/test_*/
-/comparison_*/
-/pipeline_output/
-
-# ============================================
-# Logs and Temporary Files
-# ============================================
-logs/
-tmp/
-*.log
-*.tmp
-log.txt
-processed_files.log
-
-# ============================================
-# Checkpoints
-# ============================================
-*_checkpoint.txt
-preparation_checkpoint.txt
-embedding_checkpoint.txt
 
 # ============================================
 # Python
@@ -57,7 +13,8 @@ __pycache__/
 env/
 venv/
 ENV/
-/build/               # Apenas /build/ na raiz (não src/build/)
+env_baseline/
+/build/
 develop-eggs/
 dist/
 downloads/
@@ -74,54 +31,7 @@ wheels/
 *.egg
 
 # ============================================
-# Data Files
-# ============================================
-# NumPy arrays
-*.npy
-
-# Data formats
-*.tsv
-*.csv
-*.json
-*.parquet
-
-# Model weights
-*.pth
-*.pt
-*.ckpt
-
-# Archives
-*.tar.xz
-*.tar.gz
-*.zip
-
-# ============================================
-# Model Caches
-# ============================================
-llm/models_cache/*           # Ignorar todo o conteúdo da pasta llm
-!llm/models_cache/README.md  # Exceto README
-!llm/models_cache/ESM/       # Permitir pasta ESM (para README futuro)
-
-.cache/
-FM4M/models/*/model_files/
-FM4M/model_files/
-FM4M/data/
-FM4M/model_files/
-
-# CatBoost training info
-catboost_info/
-
-# ESM model weights (downloaded via torch.hub)
-# Código fonte em ESM/ é versionado, mas modelos baixados não
-llm/models_cache/ESM/*.pt
-llm/models_cache/ESM/*.bin
-llm/models_cache/ESM/checkpoints/
-llm/models_cache/ESM/hub/
-*.pt  # PyTorch model weights
-*.bin  # Binary model files
-
-# ============================================
-# IDE and Editor
+# Editor / IDE
 # ============================================
 .vscode/
 .idea/
@@ -129,6 +39,24 @@ llm/models_cache/ESM/hub/
 *.swo
 *~
 .DS_Store
+**/.DS_Store
+
+# ============================================
+# Logs / Temp
+# ============================================
+logs/
+tmp/
+*.log
+*.tmp
+log.txt
+processed_files.log
+*_checkpoint.txt
+
+# ============================================
+# Notebooks
+# ============================================
+.ipynb_checkpoints/
+*.ipynb
 
 # ============================================
 # Testing
@@ -140,129 +68,145 @@ htmlcov/
 .hypothesis/
 
 # ============================================
-# Documentation
+# Model weights (download via Zenodo)
 # ============================================
-# Keep docs/ in version control
-# Only ignore generated docs
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.joblib
+*.pkl
+
+# ============================================
+# Model caches (download on demand)
+# ============================================
+llm/models_cache/
+llm/FM4M/model_files/
+llm/FM4M/data/
+ConPLex/models/
+.cache/
+catboost_info/
+model_files/
+**/feature_cache/
+
+# ============================================
+# Datasets (download via Zenodo)
+# ============================================
+*.csv
+*.tsv
+*.tsv.gz
+*.parquet
+*.npy
+*.h5
+*.a3m
+*.sto
+*.cif
+*.pdb
+
+# ============================================
+# Results & outputs — block content by extension above,
+# enumerate specific subtrees here (avoid parent-dir block
+# so reproducibility artifacts remain trackable).
+# ============================================
+output/
+tests/datasets/
+tests/comparison_*/
+tests/pipeline_output*/
+tests/test_output*/
+tests/regression_modular_test/
+tests/humans/
+tests/non_humans/
+ligand/
+protein/
+ligand_embeddings/
+protein_embeddings/
+matrix_embedding/
+scaffolds_splits/output/
+ConPLex/dataset/kinase_all/
+ConPLex/dataset/kinase_human/
+ConPLex/dataset/kinase_non_human/
+ConPLex/best_models/
+DrugBAN/datasets/kinase/
+GraphBAN/upstream_data/
+
+# Block heavy intermediate dirs under results/ (specific paths;
+# raw_predictions.npz, *_calibration.json, *_results.json stay
+# trackable since *.pt and *.csv handle the heavy files).
+results/**/feature_cache/
+results/**/*_intermediate/
+results/results/
+results/conplex/
+results/drugban/
+results/graphban/
+
+# DrugBAN/GraphBAN results: track only small artifacts via
+# *.pt/*.pth ignore above; .npz/.json sidecars remain trackable.
+
+# ============================================
+# Override: keep small reproducibility artifacts trackable
+# ============================================
+!**/*_calibration.json
+!**/raw_predictions.npz
+!**/*_results.json
+!**/seed_summary.csv
+!**/seeds_summary.csv
+!configs/*.yaml
+!configs/*.json
+!**/README.md
+!**/LICENSE
+!**/LICENSE.md
+!**/CITATION.cff
+!**/CITATION.md
+
+# ============================================
+# Docs build artifacts
+# ============================================
 docs/_build/
 site/
 
 # ============================================
-# Notebooks
+# Local agent worktrees / local configs
 # ============================================
-.ipynb_checkpoints/
-*.ipynb
-FM4M/examples/*.ipynb
+.claude/
+.codex/
+.mcp.json
+.mcp.json.bak.*
+.github/hooks/
 
 # ============================================
-# Images and Media
+# Third-party libraries (not redistributed; install separately)
+# ============================================
+llm/
+
+# ============================================
+# Personal project notes (local-only)
+# ============================================
+results/CLAUDE.md
+CLAUDE.md
+AGENTS.md
+CODEX.md
+
+# ============================================
+# Archives
+# ============================================
+*.tar
+*.tar.gz
+*.tar.xz
+*.zip
+*.rar
+*.7z
+
+# ============================================
+# Images (track only repo-essential ones)
 # ============================================
 *.png
-!semantic-screening-DT-kinase.png
-!docs/l4_architecture_workflow.png
-!docs/l4_architecture_nature.png
 *.jpg
 *.jpeg
 *.gif
 *.svg
-FM4M/img/test.py
-
-# ESM - exclude downloaded models but keep source code
-ESM/*
-!ESM/esm-3/
-!ESM/.gitkeep
-
-# LLM folder - ignorar apenas arquivos de modelo, não código fonte
-llm/models_cache/**/*.pt
-llm/models_cache/**/*.bin
-llm/models_cache/**/*.ckpt
-llm/FM4M/model_files/*.pt
-llm/FM4M/model_files/*.bin
-llm/FM4M/data/
-
-# Results and outputs
-results/
-tests/comparison_output/
-tests/pipeline_output/
-tests/test_output_small/
-tests/regression_modular_test/
-
-# Temporary files
-tmp/
-
-# Test datasets (keep structure but ignore data)
-tests/datasets/*.tsv
-tests/datasets/*.csv
-tests/datasets/datasets/
-
-# Model files (large binary files)
-model_files/
-
-# macOS system files
-.DS_Store
-**/.DS_Store
-llm/models_cache/
-.claude/
-
-# ============================================
-# Committee inference artifacts (track subset)
-# ============================================
-# Override blanket rules (results/, *.pt, *.pth, *.json) to track the
-# minimal weights + calibrations consumed by
-# scripts/inference/models/{dtkinase,drugban,graphban,conplex}_score.py.
-# Only seed_42 (rep0 for ConPLex) representatives are versioned; full
-# 5-seed ensembles stay local. See CLAUDE.md "Committee model artifacts".
-
-# Baseline calibration sidecars (parent dirs not in any .gitignore;
-# only blocked by *.json above). Restrict to seed_42 — full 5-seed
-# calibrations stay local.
-!**/seed_42/drugban_calibration.json
-!**/seed_42/graphban_calibration.json
-!**/seed_42/conplex_calibration.json
-
-# DT-Kinase L4 CNN: parent-dir dance to expose 3 ckpts + 3 calibrations
-# inside the gitignored results/ tree. Re-include each parent, re-exclude
-# its other children, then re-include the target leaves.
-!results/
-results/*
-!results/benchmark_human_8M_13_05_2026/
-results/benchmark_human_8M_13_05_2026/*
-!results/benchmark_human_8M_13_05_2026/test/
-results/benchmark_human_8M_13_05_2026/test/*
-!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/
-results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/*
-!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/
-results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/*
-!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/
-results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/*
-!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/level4_cnn_model.pt
-!results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_42/level4_cnn_calibration.json
-
-!results/benchmark_non_human_8M_13_05_2026_v3/
-results/benchmark_non_human_8M_13_05_2026_v3/*
-!results/benchmark_non_human_8M_13_05_2026_v3/test/
-results/benchmark_non_human_8M_13_05_2026_v3/test/*
-!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/
-results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/*
-!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/
-results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/*
-!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/
-results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/*
-!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/level4_cnn_model.pt
-!results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_42/level4_cnn_calibration.json
-
-!results/all/
-results/all/*
-!results/all/benchmark_all_8M_13_04_2026/
-results/all/benchmark_all_8M_13_04_2026/*
-!results/all/benchmark_all_8M_13_04_2026/test/
-results/all/benchmark_all_8M_13_04_2026/test/*
-!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/
-results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/*
-!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/
-results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/*
-!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/
-results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/*
-!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_model.pt
-!results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_calibration.json
-llm/
+!docs/**/*.png
+!docs/**/*.svg
+!figures/**/*.png
+!figures/**/*.svg
+!README*.png

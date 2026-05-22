@@ -25,7 +25,7 @@ A integração do ESM-2 (Evolutionary Scale Modeling 2) local foi **validada com
 ### 1. ✅ Estrutura de Arquivos do ESM
 
 **Status**: APROVADO  
-**Localização**: `/Users/sulfierry/docktkinase/ESM/`
+**Localização**: `${HOME}/docktkinase/ESM/`
 
 ```
 ESM/
@@ -62,12 +62,12 @@ ESM_LOCAL_PATH = Path(__file__).parent.parent.parent.parent / "ESM"
 sys.path.insert(0, str(ESM_LOCAL_PATH))
 
 # Import bem-sucedido
-import esm  # ✅ De /Users/sulfierry/docktkinase/ESM/esm/
+import esm  # ✅ De ${HOME}/docktkinase/ESM/esm/
 ```
 
 **Resultados**:
 - ✅ ESM versão: 1.0.3
-- ✅ Localização: `/Users/sulfierry/docktkinase/ESM/esm/__init__.py`
+- ✅ Localização: `${HOME}/docktkinase/ESM/esm/__init__.py`
 - ✅ Módulos principais disponíveis:
   - `esm.pretrained` ✅
   - `esm.model` ✅
@@ -239,10 +239,10 @@ models_cache/*                ✅
    https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t6_8M_UR50D.pt
    
 ✅ Cache local criado em:
-   /Users/sulfierry/.cache/torch/hub/checkpoints/
+   ${HOME}/.cache/torch/hub/checkpoints/
    
 ⚠️  NOTA: Para produção, modelos serão salvos em:
-   /Users/sulfierry/docktkinase/models_cache/ESM/
+   ${HOME}/docktkinase/models_cache/ESM/
    (quando protein_embedding.py for usado)
 ```
 

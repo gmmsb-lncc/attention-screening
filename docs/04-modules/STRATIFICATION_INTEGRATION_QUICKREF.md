@@ -81,7 +81,7 @@ def test_same_splits_for_both_pipelines():
 
 ### Step 1: Read Summary
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 cat docs/04-modules/STRATIFICATION_INTEGRATION_SUMMARY.md
 ```
 

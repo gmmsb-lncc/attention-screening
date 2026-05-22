@@ -26,7 +26,7 @@ Perform a systematic ablation study to quantify the contribution of each represe
 ## 📂 Directory Structure
 
 ```
-/home/leon/ablation/classification/
+${HOME}/ablation/classification/
 ├── README.md                           # This file
 ├── data/
 │   ├── processed/
@@ -61,7 +61,7 @@ Perform a systematic ablation study to quantify the contribution of each represe
 ## 📁 Existing Embeddings (Reuse)
 
 ### Non-Human Dataset
-- **Location**: `/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2/`
+- **Location**: `${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2/`
 - **Models**: `esm2_t6_8M_UR50D/`, `esm2_t30_150M_UR50D/`, `esm2_t36_3B_UR50D/`
 - **Files**: 
   - `build/embedding_matrix.npy` - Combined [protein + ligand]
@@ -74,8 +74,8 @@ Perform a systematic ablation study to quantify the contribution of each represe
 - **Same structure as non-human**
 
 ### Raw Data
-- **Non-Human**: `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv`
-- **Human**: `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_human_compounds.tsv`
+- **Non-Human**: `${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv`
+- **Human**: `${PROJECT_ROOT}/tests/datasets/kinase_human_compounds.tsv`
 
 ---
 
@@ -167,7 +167,7 @@ Generate comparative plots showing performance across all combinations.
 ## 🚀 Quick Start
 
 ```bash
-cd /home/leon/ablation/classification
+cd ${HOME}/ablation/classification
 
 # Run all steps
 python scripts/01_extract_data.py

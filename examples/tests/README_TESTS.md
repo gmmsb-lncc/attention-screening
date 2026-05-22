@@ -80,7 +80,7 @@ python test_realistic_pipeline.py
 
 ### Testes de Auto-Adaptação (Novos):
 ```bash
-cd /Users/sulfierry/docktkinase/tests
+cd ${HOME}/docktkinase/tests
 python test_auto_adaptive.py
 python test_final_auto_adaptive.py
 python test_realistic_pipeline.py
@@ -88,7 +88,7 @@ python test_realistic_pipeline.py
 
 ### Testes de Sistema (Existentes):
 ```bash
-cd /Users/sulfierry/docktkinase/tests
+cd ${HOME}/docktkinase/tests
 python test_integrity.py
 python test_models.py
 python validacao_final.py

@@ -64,7 +64,7 @@ Master Scripts:
 ### Execute All Tests (Recommended)
 
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 source env/bin/activate
 
 # Basic tests (Levels 1-5)
@@ -292,7 +292,7 @@ Total Time: ~10 minutes
 ### Error: "Module not found"
 ```bash
 # Make sure you're in the correct directory
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 source env/bin/activate
 ```
 

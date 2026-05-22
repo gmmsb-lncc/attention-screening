@@ -4,7 +4,7 @@
 
 ### Option 1: Use Orchestrator (Recommended)
 ```bash
-cd /media/leon/ssd2tb/docktkinase/ablation
+cd ${PROJECT_ROOT}/ablation
 
 # Non-human dataset (already complete)
 python run_ablation_study.py --dataset non_human
@@ -25,7 +25,7 @@ python 01_extract_data.py --results-suffix results_non_human
 python 02_generate_morgan_fingerprints.py --results-suffix results_non_human
 python 03_generate_aac_dpc_encoding.py --results-suffix results_non_human
 python 04_create_combinations.py --results-suffix results_non_human \
-    --embeddings-dir /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2
+    --embeddings-dir ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2
 python 05_run_classification.py --results-suffix results_non_human
 python 06_visualize_results.py --results-suffix results_non_human
 ```
@@ -49,7 +49,7 @@ python 06_visualize_results.py --results-suffix results_human
 cd regression/scripts
 python 01_extract_data_regression.py --results-suffix results_non_human
 nohup python -u 02_run_regression.py --results-suffix results_non_human \
-    --embeddings-dir /media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2 \
+    --embeddings-dir ${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2 \
     > ../results_non_human/regression.log 2>&1 &
 # Wait for completion, then:
 python consolidate_checkpoints.py --results-suffix results_non_human
@@ -74,7 +74,7 @@ python 03_visualize_regression_results.py --results-suffix results_human
 
 | Dataset | TSV Path | Embeddings Path | Results Suffix |
 |---------|----------|-----------------|----------------|
-| **Non-Human** | `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv` | `/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2/` | `results_non_human` |
+| **Non-Human** | `${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv` | `${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2/` | `results_non_human` |
 | **Human** | `/data/docktkinase/datasets/kinase_human_compounds.tsv` | `/data/docktkinase/results/protein_model_benchmark_human_v2/` | `results_human` |
 
 ## 📁 Output Locations

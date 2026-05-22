@@ -2,7 +2,7 @@
 
 **Date:** November 26, 2025  
 **Status:** ✅ **TEST SUITE ORGANIZED & EXECUTED**  
-**Test Location:** `/home/leon/docktkinase/tests/`
+**Test Location:** `${PROJECT_ROOT}/tests/`
 
 ---
 
@@ -70,7 +70,7 @@ tests/
 
 **Usage:**
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 python3 tests/run_tier3_1_comprehensive_tests.py
 ```
 
@@ -187,14 +187,14 @@ By Category:
 
 ### Quick Test (Core Suite Only)
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 python3 -m unittest tests.test_tier3_embedding_optimization -v
 ```
 **Expected:** 29/29 ✅ PASS
 
 ### Full Test Suite (All Tier 3.1 Tests)
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 python3 tests/run_tier3_1_comprehensive_tests.py
 ```
 **Expected:** 47 tests, ~85% pass rate

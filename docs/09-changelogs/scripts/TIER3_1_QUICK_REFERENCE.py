@@ -227,7 +227,7 @@ method = report['quantization_method']
 # =============================================================================
 
 # Run test suite:
-# cd /home/leon/docktkinase
+# cd ${PROJECT_ROOT}
 # python -m pytest tests/test_tier3_embedding_optimization.py -v
 
 # Run specific test:

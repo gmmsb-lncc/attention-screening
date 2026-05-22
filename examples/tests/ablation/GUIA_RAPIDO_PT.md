@@ -13,7 +13,7 @@ Os resultados ficam completamente **isolados** em diretórios separados.
 ### Opção 1: Script Orquestrador (Recomendado)
 
 ```bash
-cd /media/leon/ssd2tb/docktkinase/ablation
+cd ${PROJECT_ROOT}/ablation
 
 # Dataset não-humano (já executado)
 python run_ablation_study.py --dataset non_human
@@ -107,8 +107,8 @@ ablation/
 ## 🔧 Configuração dos Datasets
 
 ### Não-Humanos (Atual)
-- **TSV**: `/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv`
-- **Embeddings**: `/media/leon/ssd2tb/docktkinase/results/protein_model_benchmark_non_human_v2/`
+- **TSV**: `${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv`
+- **Embeddings**: `${PROJECT_ROOT}/results/protein_model_benchmark_non_human_v2/`
 - **Sufixo**: `results_non_human`
 - **Status**: ✅ Classificação completa, Regressão em andamento
 

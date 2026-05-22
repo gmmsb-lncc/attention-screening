@@ -82,7 +82,7 @@ regression/
 
 ```bash
 # Activate virtual environment
-cd /media/leon/ssd2tb/docktkinase
+cd ${PROJECT_ROOT}
 source env/bin/activate
 
 # 1. Extract data (reuses classification data if available)

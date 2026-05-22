@@ -10,15 +10,15 @@ echo ""
 echo "1. OPENFOLD-3 INSTALLATION STATUS"
 echo "─────────────────────────────────────────────────────────────────────────────────"
 
-if [ -d "/home/leon/docktkinase/OPENFOLD-3" ]; then
+if [ -d "${PROJECT_ROOT}/OPENFOLD-3" ]; then
     echo "✅ OPENFOLD-3 directory found at root level"
 else
     echo "⚠️  OPENFOLD-3 directory NOT at root"
 fi
 
-if [ -d "/home/leon/docktkinase/llm/OPENFOLD-3" ]; then
+if [ -d "${PROJECT_ROOT}/llm/OPENFOLD-3" ]; then
     echo "✅ OPENFOLD-3 directory found at llm/ level"
-    ls -la /home/leon/docktkinase/llm/OPENFOLD-3 | head -15
+    ls -la ${PROJECT_ROOT}/llm/OPENFOLD-3 | head -15
 else
     echo "⚠️  OPENFOLD-3 directory NOT at llm/ level"
 fi

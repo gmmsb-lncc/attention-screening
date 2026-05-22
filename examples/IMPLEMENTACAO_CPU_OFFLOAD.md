@@ -168,7 +168,7 @@ device='cpu'  # Automático se GPU não disponível
 ### 1. Script de Demonstração
 
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 python examples/demo_cpu_offloading.py
 ```
 

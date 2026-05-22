@@ -35,7 +35,7 @@ pip install flash-attn    # Atenção eficiente
 ### Opção 1: Instalação Rápida (Recomendado)
 
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 
 # Instalar apenas dependências essenciais para embeddings
 pip install gemmi ml-collections einops biopython
@@ -48,7 +48,7 @@ python -c "from ml_collections import ConfigDict; print('✅ ml-collections inst
 ### Opção 2: Instalação Completa do OpenFold3
 
 ```bash
-cd /Users/sulfierry/docktkinase/openfold-3
+cd ${HOME}/docktkinase/openfold-3
 
 # Instalar em modo desenvolvimento
 pip install -e .
@@ -68,7 +68,7 @@ conda install -c conda-forge gemmi
 pip install ml-collections einops biopython torch
 
 # Instalar OpenFold
-cd /Users/sulfierry/docktkinase/openfold-3
+cd ${HOME}/docktkinase/openfold-3
 pip install -e .
 ```
 
@@ -226,13 +226,13 @@ pip install ml-collections
 ### Erro: "Could not import OpenFold3"
 
 **Verificar:**
-1. OpenFold-3 está em `/Users/sulfierry/docktkinase/openfold-3/`?
+1. OpenFold-3 está em `${HOME}/docktkinase/openfold-3/`?
 2. Arquivo `openfold3/__init__.py` existe?
 3. Dependências instaladas?
 
 **Solução:**
 ```bash
-cd /Users/sulfierry/docktkinase/openfold-3
+cd ${HOME}/docktkinase/openfold-3
 pip install -e .
 ```
 
@@ -273,7 +273,7 @@ python -c "import gemmi; from ml_collections import ConfigDict; print('✅ OK')"
 
 ### 3. Carregar Modelo
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 python -c "from src.build.embeddings.strategies.openfold_strategy import OpenFoldStrategy; import torch; s = OpenFoldStrategy(); s.load('openfold3', torch.device('cpu')); print('✅ Modelo carregado')"
 ```
 

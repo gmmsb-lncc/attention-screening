@@ -108,11 +108,11 @@ python -m src.build.embeddings.protein_embedding
 **Saída esperada:**
 
 ```
-[2024-10-22 10:00:00] INFO - ProteinEmbedding - ESM carregado do código fonte local: /Users/sulfierry/docktkinase/ESM
+[2024-10-22 10:00:00] INFO - ProteinEmbedding - ESM carregado do código fonte local: ${HOME}/docktkinase/ESM
 [2024-10-22 10:00:00] INFO - ProteinEmbedding - Configurando dispositivo...
 [2024-10-22 10:00:00] INFO - ProteinEmbedding - Usando GPU: NVIDIA GeForce RTX 4090
 [2024-10-22 10:00:00] INFO - ProteinEmbedding - Carregando modelo ESM: esm2_t36_3B_UR50D
-[2024-10-22 10:00:00] INFO - ProteinEmbedding - Cache de modelos: /Users/sulfierry/docktkinase/models_cache/ESM
+[2024-10-22 10:00:00] INFO - ProteinEmbedding - Cache de modelos: ${HOME}/docktkinase/models_cache/ESM
 
 Downloading: "esm2_t36_3B_UR50D.pt" to models_cache/ESM/checkpoints/
 100%|███████████████████████████████| 11.8GB/11.8GB [10:30<00:00, 18.7MB/s]
@@ -225,7 +225,7 @@ import esm  # ✅ Do código local
 ### Verificar Importação
 
 ```bash
-cd /Users/sulfierry/docktkinase
+cd ${HOME}/docktkinase
 python -c "
 import sys
 from pathlib import Path
@@ -246,7 +246,7 @@ print(f'   Modelos disponíveis: {list(esm.pretrained.esm2_models().keys())[:3]}
 ```
 ✅ ESM importado com sucesso!
    Versão: 1.0.3
-   Localização: /Users/sulfierry/docktkinase/ESM/esm/__init__.py
+   Localização: ${HOME}/docktkinase/ESM/esm/__init__.py
    Modelos disponíveis: ['esm2_t36_3B_UR50D', 'esm2_t33_650M_UR50D', 'esm2_t30_150M_UR50D']...
 ```
 

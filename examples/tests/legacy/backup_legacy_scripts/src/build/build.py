@@ -6,10 +6,10 @@ def run_command(command, description):
     print(f"\n🟡 Executando: {description}")
     # Usar o mesmo ambiente virtual para os subprocessos
     env = os.environ.copy()
-    env['PYTHONPATH'] = '/home/leon/Desktop/latent_extractor/ibm/FM4M:' + env.get('PYTHONPATH', '')
+    env['PYTHONPATH'] = '${PROJECT_ROOT}/llm/FM4M:' + env.get('PYTHONPATH', '')
     
     # Usar o Python do ambiente virtual
-    python_executable = '/home/leon/docktkinase/env/bin/python'
+    python_executable = '${PROJECT_ROOT}/env/bin/python'
     if command.startswith('python '):
         command = command.replace('python ', python_executable + ' ', 1)
     

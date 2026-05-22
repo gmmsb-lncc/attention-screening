@@ -2,13 +2,13 @@ import pandas as pd
 import os
 
 # Ler o arquivo TSV
-df = pd.read_csv('/home/leon/docktkinase/src/database/kinase_non_human_compounds.tsv', sep='\t')
+df = pd.read_csv('${PROJECT_ROOT}/src/database/kinase_non_human_compounds.tsv', sep='\t')
 
 # Obter seq_ids únicos do TSV
 tsv_seq_ids = set(df['seq_id'].astype(str))
 
 # Obter seq_ids dos arquivos .fasta na pasta protein
-protein_files = os.listdir('/home/leon/docktkinase/non_humans/protein/')
+protein_files = os.listdir('${PROJECT_ROOT}/non_humans/protein/')
 fasta_seq_ids = set()
 for file in protein_files:
     if file.endswith('.fasta'):

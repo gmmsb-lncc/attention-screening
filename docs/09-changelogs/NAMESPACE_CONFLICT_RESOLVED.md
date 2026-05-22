@@ -38,7 +38,7 @@ for mod_key in esm_modules:
     del sys.modules[mod_key]
 
 # 2. Priorizar ESM-3 no sys.path
-esm3_path = '/Users/sulfierry/docktkinase/ESM/esm-3/esm-main'
+esm3_path = '${HOME}/docktkinase/ESM/esm-3/esm-main'
 if esm3_path in sys.path:
     sys.path.remove(esm3_path)
 sys.path.insert(0, esm3_path)  # ESM-3 agora é o PRIMEIRO!

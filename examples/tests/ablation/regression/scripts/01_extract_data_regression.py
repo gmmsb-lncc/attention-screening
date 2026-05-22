@@ -22,7 +22,7 @@ def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description='Extract data for regression')
     parser.add_argument('--tsv-path', type=str,
-                       default='/media/leon/ssd2tb/docktkinase/tests/datasets/kinase_non_human_compounds.tsv',
+                       default='${PROJECT_ROOT}/tests/datasets/kinase_non_human_compounds.tsv',
                        help='Path to TSV file')
     parser.add_argument('--results-suffix', type=str, default='results_non_human',
                        help='Results directory suffix')

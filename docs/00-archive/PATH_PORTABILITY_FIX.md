@@ -12,7 +12,7 @@ O arquivo de configuração `src/stratification_config.json` continha um **camin
 
 ```json
 "fm4m_config": {
-    "model_path": "/home/leon/Desktop/latent_extractor/ibm/FM4M"
+    "model_path": "${HOME}/Desktop/latent_extractor/ibm/FM4M"
 }
 ```
 
@@ -54,7 +54,7 @@ Substituição do caminho absoluto por **caminho relativo ao repositório**:
 
 **Antes:**
 ```json
-"model_path": "/home/leon/Desktop/latent_extractor/ibm/FM4M"
+"model_path": "${HOME}/Desktop/latent_extractor/ibm/FM4M"
 ```
 
 **Depois:**
@@ -75,7 +75,7 @@ Substituição do caminho absoluto por **caminho relativo ao repositório**:
 **Antes:**
 ```python
 "fm4m_config": {
-    "model_path": "/home/leon/Desktop/latent_extractor/ibm/FM4M",
+    "model_path": "${HOME}/Desktop/latent_extractor/ibm/FM4M",
     "batch_size": 32,
     "device": "auto"
 }
@@ -149,7 +149,7 @@ Durante a análise, foram encontrados outros caminhos absolutos. **Análise de c
 
 ```sql
 -- kinase_humans.sql, kinase_compounds_and_seq.sql, kinase_non_humans.sql
-\COPY public.smile_kinase_human_compounds TO '/home/leon/docktkinase/...' WITH ...
+\COPY public.smile_kinase_human_compounds TO '${PROJECT_ROOT}/...' WITH ...
 ```
 
 **Motivo:** Scripts SQL de backup/export históricos  
@@ -162,7 +162,7 @@ Durante a análise, foram encontrados outros caminhos absolutos. **Análise de c
 
 ```python
 # check_embedding_dim.py, find_missing_sequences.py
-protein_embedding_file = "/home/leon/docktkinase/non_humans/..."
+protein_embedding_file = "${PROJECT_ROOT}/non_humans/..."
 ```
 
 **Motivo:** Scripts obsoletos arquivados  
@@ -174,7 +174,7 @@ protein_embedding_file = "/home/leon/docktkinase/non_humans/..."
 #### 3. Documentação (`docs/HUGGINGFACE_RATE_LIMIT.md`)
 
 ```bash
-cd /home/leon/docktkinase
+cd ${PROJECT_ROOT}
 ```
 
 **Motivo:** Exemplos de comandos na documentação  
@@ -292,7 +292,7 @@ git diff src/build/example_usage.py
 git add src/stratification_config.json src/build/example_usage.py
 git commit -m "fix: tornar caminhos FM4M relativos ao repositório
 
-- Substituir caminho absoluto /home/leon/... por ../FM4M
+- Substituir caminho absoluto ${HOME}/... por ../FM4M
 - Aumentar portabilidade entre máquinas diferentes
 - Facilitar colaboração e integração CI/CD
 - Garantir funcionamento em containers Docker
