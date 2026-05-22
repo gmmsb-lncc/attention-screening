@@ -265,3 +265,4 @@ results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/*
 results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/*
 !results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_model.pt
 !results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_42/level4_cnn_calibration.json
+llm/
