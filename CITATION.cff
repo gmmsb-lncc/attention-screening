@@ -20,10 +20,9 @@ authors:
 repository-code: "https://github.com/gmmsb-lncc/attention-screening"
 url: "https://github.com/gmmsb-lncc/attention-screening"
 license: "GPL-3.0"
-# FIXME: substituir abaixo após depósito Zenodo + git tag
-version: "v1.0.0-rc1"  # PROVISÓRIO — gerar tag final pré-defesa
-date-released: "2026-04-28"  # PROVISÓRIO — atualizar para data do depósito
-doi: "10.5281/zenodo.TBD-CODE"  # PROVISÓRIO — substituir pelo DOI Zenodo após upload
+version: "v1.0.0"
+date-released: "2026-05-22"
+doi: "10.5281/zenodo.20349742"
 keywords:
   - "drug-target interaction"
   - "kinase"

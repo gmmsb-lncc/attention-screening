@@ -44,5 +44,5 @@
     }
   ],
   "language": "eng",
-  "notes": "Companion software to the PhD thesis 'Desenvolvimento de Modelos Atencionais para Triagem Computacional de Quinases Humanas e Não Humanas' (LNCC, 2026). Replace TBD-DATASET and TBD-THESIS DOIs before final release."
+  "notes": "Companion software to the PhD thesis 'Desenvolvimento de Modelos Atencionais para Triagem Computacional de Quinases Humanas e Não Humanas' (LNCC, 2026). Code DOI: 10.5281/zenodo.20349742. Dataset and thesis DOIs (TBD-DATASET, TBD-THESIS) will be updated in a subsequent release once those records are minted."
 }
