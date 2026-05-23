@@ -10,9 +10,9 @@
 
 set -euo pipefail
 
-# ----- TODO: replace with real Zenodo record IDs after deposit -----
-ZENODO_WEIGHTS_RECORD="TBD-WEIGHTS"
-ZENODO_DATASET_RECORD="TBD-DATASET"
+# Zenodo record IDs
+ZENODO_WEIGHTS_RECORD="TBD-WEIGHTS"  # TODO: weights deposit pending
+ZENODO_DATASET_RECORD="20350181"     # DT-Kinase dataset v1.0.0
 # --------------------------------------------------------------------
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
