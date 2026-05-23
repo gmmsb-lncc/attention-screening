@@ -545,5 +545,3 @@ The companion software repository can additionally be referenced as:
 
 Repository: [gmmsb-lncc/attention-screening](https://github.com/gmmsb-lncc/attention-screening)
 Issues: [Bug reports & features](https://github.com/gmmsb-lncc/attention-screening/issues)
-
-**Status**: Production Ready — **Version**: 4.0 — **Last updated**: May 2026
