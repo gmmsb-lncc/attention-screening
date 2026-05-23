@@ -531,11 +531,14 @@ The companion software repository can additionally be referenced as:
 
 ```bibtex
 @software{attentionscreening2026,
-  title   = {attention-screening: kinase-ligand interaction profiling with a foundation-model committee},
-  author  = {Sulfierry, Leon and GMMSB-LNCC},
-  year    = {2026},
-  url     = {https://github.com/gmmsb-lncc/attention-screening},
-  version = {4.0}
+  title     = {attention-screening: kinase-ligand interaction profiling with a foundation-model committee},
+  author    = {Sulfierry, Leon},
+  year      = {2026},
+  version   = {v1.0.0},
+  doi       = {10.5281/zenodo.20349742},
+  url       = {https://doi.org/10.5281/zenodo.20349742},
+  publisher = {Zenodo},
+  note      = {GitHub mirror: \url{https://github.com/gmmsb-lncc/attention-screening}}
 }
 ```
 
