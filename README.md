@@ -19,8 +19,8 @@ calibration follow the canonical scaffold-split protocol with
 Holm-Bonferroni multiple-testing correction.
 
 The framework targets the **human kinome** as primary deployment domain,
-matching the central goal of the underlying thesis ("Triagem Atencional
-Aplicada ao Quinoma"). A non-human auxiliary mode and a 3-model
+matching the central goal of the underlying thesis ("Desenvolvimento de Modelos
+Atencionais para Triagem Computacional de Quinases Humanas e Não Humanas"). A non-human auxiliary mode and a 3-model
 specialist profile (drops GraphBAN, validated as Pareto-optimal on the
 human corpus alone, +0.0074 MCC over 4-model with -25% compute) are
 available via the `--profile` flag.
@@ -121,7 +121,7 @@ Selected over 9 alternative rules under paired block-bootstrap by protein
 |---|---|---|---|---|
 | **human** | **0.5468** | 0.5426 | **+0.0042** | PoE leads (IC95 [+0.0003, +0.0082], B=10⁴ block-by-protein) |
 | **all**   | **0.5593** | 0.5524 | **+0.0068** | PoE leads (IC95 [+0.0020, +0.0116]) |
-| non_human | 0.5221     | 0.5350 | −0.0126 | indistinguishable (IC95 contains zero, n=1399) |
+| non_human | 0.5221     | 0.5350 | −0.0126 | indistinguishable (IC95 contains zero, n=1398) |
 
 Hard-vote with majority + arbiter tie-break (intuitive baseline most users
 propose) is **strictly worse** than soft-mean in every corpus tested,
@@ -129,9 +129,11 @@ because ~12% of human/`all` decisions resolve as 2-2 ties that collapse
 into a single-model call. Full hardvote ablation across all 4 candidate
 arbiters: `results/inference/committee_hardvote_arbiters/`.
 
-The 4-model committee dominates each individual model: 10/12 paired
-leaderships, 0 losses across 3 corpora (Tabela~tab:resultados-comite-otimo
-of thesis Cap. 5).
+The 4-model committee leads each individual model on the application corpora:
+8/12 paired leaderships, 4 ties (all non_human, K=114), 0 losses across 3 corpora
+(+0.017 MCC on human, +0.041 on all; thesis Cap. 6, `tab:resumo-executivo-comite`).
+This committee-vs-individual gain is the headline result; the PoE-vs-soft-mean
+delta in the table above is only the aggregation-rule choice over the same 4 models.
 
 ### Alternative profiles
 
@@ -507,7 +509,7 @@ pytest tests/test_inference_aggregate.py tests/test_inference_expand_pairs.py
 - **Pipeline architecture and committee semantics**: [`scripts/inference/README.md`](scripts/inference/README.md)
 - **End-user guide (Portuguese)**: [`docs/02-user-guide/inferencia-comite.md`](docs/02-user-guide/inferencia-comite.md)
 - **Benchmark methodology, six-level hierarchy, evaluation protocol, anti-leakage**: [`docs/01-methodology/benchmark_methodology.md`](docs/01-methodology/benchmark_methodology.md)
-- **Thesis**: protocol, model variants, all 24 lessons in `~/PhD/tex/` (Anexo A — cross-dataset matrix; Anexo B — committee inference; Apêndice F — methodology lessons).
+- **Thesis**: protocol, model variants, 26 methodology lessons in `~/PhD/tex/` (Anexo B — committee inference; Anexo D — aggregation-rule ablation; Apêndice F — methodology lessons).
 
 ---
 
@@ -518,7 +520,7 @@ If you use this framework, please cite the underlying PhD thesis:
 ```bibtex
 @phdthesis{sulfierry2026attentionscreening,
   author  = {Sulfierry Corrêa Costa, Leon},
-  title   = {Triagem Atencional Aplicada ao Quinoma},
+  title   = {Desenvolvimento de Modelos Atencionais para Triagem Computacional de Quinases Humanas e Não Humanas},
   school  = {Laboratório Nacional de Computação Científica (LNCC)},
   type    = {Tese de Doutorado em Modelagem Computacional},
   address = {Petrópolis, RJ, Brasil},
@@ -539,6 +541,20 @@ The companion software repository can additionally be referenced as:
   url       = {https://doi.org/10.5281/zenodo.20349742},
   publisher = {Zenodo},
   note      = {GitHub mirror: \url{https://github.com/gmmsb-lncc/attention-screening}}
+}
+```
+
+The curated **DT-Kinase dataset** (ChEMBL 35, Bemis-Murcko scaffold splits) is archived separately:
+
+```bibtex
+@dataset{sulfierry2026dtkinase,
+  title     = {DT-Kinase: curated kinase-ligand bioactivity corpora with Bemis-Murcko scaffold splits},
+  author    = {Sulfierry, Leon},
+  year      = {2026},
+  version   = {v1.0.0},
+  doi       = {10.5281/zenodo.20350181},
+  url       = {https://doi.org/10.5281/zenodo.20350181},
+  publisher = {Zenodo}
 }
 ```
 
