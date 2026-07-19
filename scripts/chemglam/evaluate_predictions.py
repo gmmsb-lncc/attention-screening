@@ -77,24 +77,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--val-predictions", type=Path, required=True)
     parser.add_argument("--test-predictions", type=Path, required=True)
-    parser.add_argument("--data-root", type=Path, default=Path("data/chemglam/universal"))
+    parser.add_argument("--corpus", choices=("all", "human", "non_human"), required=True)
+    parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    val = load_predictions(args.data_root / "val.csv", args.val_predictions)
-    test = load_predictions(args.data_root / "test.csv", args.test_predictions)
+    data_root = args.data_root or Path("data/chemglam") / args.corpus
+    val = load_predictions(data_root / "val.csv", args.val_predictions)
+    test = load_predictions(data_root / "test.csv", args.test_predictions)
     threshold = best_mcc_threshold(val["label"].to_numpy(), val["probability"].to_numpy())
 
     result = {
         "protocol": "threshold selected on universal validation; frozen on test",
         "validation": metrics(val["label"].to_numpy(), val["probability"].to_numpy(), threshold),
-        "test": {},
+        "corpus": args.corpus,
+        "test": metrics(test["label"].to_numpy(), test["probability"].to_numpy(), threshold),
     }
-    for corpus in ("all", "human", "non_human"):
-        subset = test if corpus == "all" else test[test["dataset_source"] == corpus]
-        result["test"][corpus] = metrics(
-            subset["label"].to_numpy(), subset["probability"].to_numpy(), threshold
-        )
 
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "chemglam_results.json").write_text(json.dumps(result, indent=2) + "\n")

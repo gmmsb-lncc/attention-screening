@@ -4,6 +4,22 @@ The upstream repository is pinned as the `ChemGLaM` submodule. It is not
 modified locally. The canonical comparison uses the repository's ESM-2 3B +
 MoLFormer configuration and the existing universal Bemis-Murcko split.
 
+Initialize only this submodule after cloning or switching branches:
+
+```bash
+git submodule update --init ChemGLaM
+```
+
+Do not run an unscoped recursive update: the parent repository contains the
+legacy gitlink `GraphBAN/upstream_data`, which has no matching URL entry in
+`.gitmodules` and is unrelated to the ChemGLaM integration.
+
+The runner applies an idempotent local patch that pins MoLFormer remote code to
+revision `7b12d946...`. The current MoLFormer `main` revision imports an
+unreleased Transformers masking API and fails with the ChemGLaM-pinned
+Transformers 4.46.3. The pinned revision contains the safetensors weights and
+the compatible model implementation.
+
 Prepare data:
 
 ```bash
@@ -31,7 +47,8 @@ Run the canonical five-seed protocol on the RTX 4090:
 bash scripts/chemglam/run_canonical_cuda.sh
 ```
 
-For a one-seed smoke run, use `CHEMGLAM_SEEDS=42`. The runner trains on the
-explicit universal train/validation partition, predicts validation and test
-separately, chooses the MCC-optimal threshold on validation, freezes it, and
-reports held-out metrics for `all`, `human`, and `non_human`.
+For a one-seed smoke run, use `CHEMGLAM_SEEDS=42`. Select training corpora with
+`CHEMGLAM_CORPORA`; accepted values are `all`, `human`, and `non_human`. Each
+corpus has independent data, caches, checkpoints, and results. The runner
+chooses the MCC-optimal threshold on that corpus's validation split and freezes
+it for its held-out test split.

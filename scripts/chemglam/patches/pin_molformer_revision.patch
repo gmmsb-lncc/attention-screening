@@ -1,0 +1,35 @@
+diff --git a/chemglam/data/datamodule.py b/chemglam/data/datamodule.py
+index e294123..1bbad49 100644
+--- a/chemglam/data/datamodule.py
++++ b/chemglam/data/datamodule.py
+@@ -68 +68,5 @@ class DTIDataModule(L.LightningDataModule):
+-        self.smi_tokenizer = AutoTokenizer.from_pretrained('ibm/MoLFormer-XL-both-10pct', trust_remote_code=True)
++        self.smi_tokenizer = AutoTokenizer.from_pretrained(
++            'ibm/MoLFormer-XL-both-10pct',
++            revision='7b12d946c181a37f6012b9dc3b002275de070314',
++            trust_remote_code=True,
++        )
+diff --git a/chemglam/model/chemglam.py b/chemglam/model/chemglam.py
+index 74b52ca..6a0bf14 100644
+--- a/chemglam/model/chemglam.py
++++ b/chemglam/model/chemglam.py
+@@ -34 +34,2 @@ class ChemGLaM(L.LightningModule):
+-                "ibm/MoLFormer-XL-both-10pct", trust_remote_code=True, deterministic_eval=True)
++                "ibm/MoLFormer-XL-both-10pct", revision="7b12d946c181a37f6012b9dc3b002275de070314",
++                trust_remote_code=True, deterministic_eval=True)
+@@ -37 +38,2 @@ class ChemGLaM(L.LightningModule):
+-                "ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
++                "ibm/MoLFormer-XL-both-10pct", revision="7b12d946c181a37f6012b9dc3b002275de070314",
++                trust_remote_code=True)
+@@ -41 +43,2 @@ class ChemGLaM(L.LightningModule):
+-                "ibm/MoLFormer-XL-both-10pct", trust_remote_code=True,
++                "ibm/MoLFormer-XL-both-10pct", revision="7b12d946c181a37f6012b9dc3b002275de070314",
++                trust_remote_code=True,
+@@ -45 +48,2 @@ class ChemGLaM(L.LightningModule):
+-                "ibm/MoLFormer-XL-both-10pct", trust_remote_code=True,
++                "ibm/MoLFormer-XL-both-10pct", revision="7b12d946c181a37f6012b9dc3b002275de070314",
++                trust_remote_code=True,
+@@ -49 +53,2 @@ class ChemGLaM(L.LightningModule):
+-            "ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
++            "ibm/MoLFormer-XL-both-10pct", revision="7b12d946c181a37f6012b9dc3b002275de070314",
++            trust_remote_code=True)
