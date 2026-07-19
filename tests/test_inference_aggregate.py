@@ -97,6 +97,18 @@ def test_dedupe_pred_uses_max(tmp_path):
     assert int(model_dfs["dtkinase"]["pred_dtkinase"].iloc[0]) == 1
 
 
+def test_rejects_prediction_on_a_different_scale(tmp_path):
+    """CSV contract requires pred == (prob >= threshold) row by row."""
+    inconsistent = {
+        "uniprot": "P1", "chembl_id": "L1", "prob": 0.75,
+        "pred": 0, "threshold": 0.50,
+    }
+    _write_scores(tmp_path, "dtkinase", [inconsistent])
+    _write_scores(tmp_path, "drugban", [_make_pair("P1", "L1", 0.75)])
+    with pytest.raises(ValueError, match="inconsistent with prob >= threshold"):
+        aggregate.load_model_scores(tmp_path)
+
+
 # ======================================================================
 # Aggregation: soft mean, agreement, tier
 # ======================================================================
@@ -122,6 +134,29 @@ def test_soft_mean_and_tier_strong(tmp_path):
         df["prob_soft_mean"].iloc[0], np.mean(list(probs.values())))
     assert int(df["agreement_count"].iloc[0]) == 4
     assert df["tier"].iloc[0] == "STRONG"
+
+
+def test_poe_applies_the_same_rule_to_scores_and_thresholds(tmp_path):
+    pair = ("P1", "L1")
+    probs = {"dtkinase": 0.70, "drugban": 0.80,
+             "graphban": 0.60, "conplex": 0.55}
+    thresholds = {"dtkinase": 0.45, "drugban": 0.50,
+                  "graphban": 0.40, "conplex": 0.52}
+    for model, prob in probs.items():
+        _write_scores(tmp_path, model, [
+            _make_pair(*pair, prob, thr=thresholds[model])
+        ])
+
+    out = tmp_path / "consensus.csv"
+    aggregate_cli(["--scores-dir", str(tmp_path), "--out", str(out)])
+    row = pd.read_csv(out).iloc[0]
+    expected_score = float(np.exp(np.mean(np.log(list(probs.values())))))
+    expected_threshold = float(
+        np.exp(np.mean(np.log(list(thresholds.values()))))
+    )
+    np.testing.assert_allclose(row["prob_committee"], expected_score)
+    np.testing.assert_allclose(row["thr_committee"], expected_threshold)
+    assert int(row["pred_committee"]) == int(expected_score >= expected_threshold)
 
 
 def test_tier_likely(tmp_path):

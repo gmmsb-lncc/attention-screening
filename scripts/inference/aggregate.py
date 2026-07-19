@@ -1,8 +1,8 @@
-"""Aggregate per-model scores into committee consensus with two-source
-uncertainty decomposition.
+"""Aggregate per-model scores into committee consensus with a two-source
+dispersion summary.
 
 Canonical aggregation rule: Product-of-Experts (PoE), i.e. geometric
-mean of the calibrated per-model probabilities. Selected on empirical
+mean of the per-model operational scores. Selected on empirical
 grounds over 9 alternative aggregation rules tested under paired
 block-bootstrap by protein (B = 10000) on the 3 canonical corpora;
 full ablation in thesis Anexo D and
@@ -35,33 +35,37 @@ Aggregation rules:
                       Product-of-Experts (canonical, Hinton 2002).
                       Penalizes strong dissent: any single model with
                       p_m -> 0 drags the consensus toward zero.
-    thr_committee   = same geometric mean applied to per-model calibrated
-                      thresholds; preserves score/threshold consistency.
+    thr_committee   = same geometric mean applied to per-model
+                      validation-selected thresholds; preserves
+                      score/threshold consistency.
     pred_committee  = (prob_committee >= thr_committee).
     prob_mean       = alias for prob_committee (legacy column name kept
                       so downstream callers continue to work).
-    prob_soft_mean  = arithmetic mean of probabilities (legacy aggregator,
+    prob_soft_mean  = arithmetic mean of scores (legacy aggregator,
                       kept for diagnostics / ablation reproduction).
-    sigma_model     = std across models (between-model dispersion;
-                      epistemic uncertainty, reducible by adding new
-                      architectural families).
+    sigma_model     = std across models (descriptive between-model
+                      dispersion; not a calibrated estimate of epistemic
+                      uncertainty).
     sigma_seed_avg  = sqrt of mean variance across per-model seeds
                       (within-model dispersion averaged across models;
-                      aleatoric uncertainty, reducible by adding more
-                      seeds per model).
-    sigma_total     = sqrt(sigma_seed_avg^2 + sigma_model^2)
-                      via the law of total variance.
+                      descriptive inter-seed variability; not an estimate
+                      of aleatoric uncertainty).
+    sigma_total     = sqrt(sigma_seed_avg^2 + sigma_model^2), a descriptive
+                      root-sum-square dispersion index rather than an
+                      identity from the law of total variance.
     prob_std        = sigma_model  (legacy alias; preserves backward
                       compatibility with downstream callers).
-    confidence      = 1 - sigma_model  (legacy alias).
-    confidence_total= 1 - sigma_total  (honest combined uncertainty).
+    confidence      = 1 - sigma_model  (legacy complementary-dispersion
+                      alias; not a calibrated confidence probability).
+    confidence_total= 1 - sigma_total  (complementary-dispersion index;
+                      not a calibrated confidence probability).
     agreement_count = # models predicting 1 (each w/ its own threshold).
     rank_fusion     = sum of per-model ranks (Borda count, lower = better).
     tier            = STRONG (4) | LIKELY (3) | UNCERTAIN (2) | UNLIKELY (<=1)
 
-The decomposition lets the user separate fragile-consensus pairs (low
-sigma_model + high sigma_seed_avg) from robust-consensus pairs (both
-low) even when prob_mean and tier are identical.
+The two dispersion components are diagnostics on the retained score
+scales. They do not decompose predictive uncertainty into identifiable
+epistemic and aleatoric components.
 """
 from __future__ import annotations
 import argparse
@@ -118,6 +122,21 @@ def load_model_scores(scores_dir: Path) -> dict[str, pd.DataFrame]:
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f"{path} missing columns: {missing}")
+
+        numeric = df[["prob", "threshold"]].to_numpy(dtype=float)
+        if not np.all(np.isfinite(numeric)):
+            raise ValueError(f"{path} contains non-finite prob/threshold values")
+        if np.any((numeric < 0.0) | (numeric > 1.0)):
+            raise ValueError(f"{path} contains prob/threshold values outside [0, 1]")
+        expected_pred = (df["prob"].to_numpy(dtype=float)
+                         >= df["threshold"].to_numpy(dtype=float)).astype(int)
+        reported_pred = df["pred"].to_numpy(dtype=int)
+        inconsistent = expected_pred != reported_pred
+        if np.any(inconsistent):
+            raise ValueError(
+                f"{path} has {int(np.sum(inconsistent))} rows where pred is "
+                "inconsistent with prob >= threshold"
+            )
 
         # Optional per-seed dispersion columns (added in 5-seed scoring patch);
         # default to 0 when absent for backward compatibility with legacy
@@ -183,19 +202,20 @@ def aggregate(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     probs = df[prob_cols].to_numpy(dtype=float)
     thrs  = df[thr_cols ].to_numpy(dtype=float)
     preds = df[pred_cols].to_numpy(dtype=float)
-    # Per-model inter-seed dispersion (within-model variance, aleatoric).
+    # Per-model inter-seed dispersion (descriptive within-model variability).
     # Missing columns (legacy single-seed files) treated as zero by load step.
     seed_stds = df[seed_std_cols].to_numpy(dtype=float)
 
-    # Canonical aggregation: Product-of-Experts (geometric mean of calibrated
-    # probabilities). Validated against soft-mean (arithmetic) on the 3
+    # Canonical aggregation: Product-of-Experts (geometric mean of operational
+    # scores). Only DT-Kinase is Platt-calibrated; the other models retain
+    # their native output scales. Validated against soft-mean (arithmetic) on the 3
     # canonical corpora under paired block-bootstrap by protein
     # (Anexo D / `committee_aggregation_alts.py`):
-    #   delta_MCC = +0.0042 (human, IC95 [+0.0003, +0.0082], leads)
-    #   delta_MCC = +0.0068 (all,   IC95 [+0.0020, +0.0116], leads)
-    #   delta_MCC = -0.0126 (NH,    IC95 contains zero, ties under low power)
+    #   delta_MCC = +0.0055 (human, IC95 [+0.0012, +0.0101], leads)
+    #   delta_MCC = +0.0061 (all,   IC95 [+0.0010, +0.0107], leads)
+    #   delta_MCC = -0.0115 (NH,    IC95 [-0.0285, +0.0111], inconclusive)
     # Same operational threshold convention applies (geometric mean of the
-    # per-model calibrated thresholds, mirroring the score-space rule).
+    # per-model validation-selected thresholds, mirroring the score-space rule).
     df["prob_committee"] = _geometric_mean(probs, axis=1)
     df["thr_committee"]  = _geometric_mean(thrs,  axis=1)
     df["pred_committee"] = (df["prob_committee"] >= df["thr_committee"]).astype(int)
@@ -207,13 +227,11 @@ def aggregate(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     df["prob_mean"]      = df["prob_committee"]
     df["prob_soft_mean"] = np.nanmean(probs, axis=1)
 
-    # --- Two-source uncertainty decomposition ----------------------------
-    # sigma_model: between-model dispersion (epistemic; reducible by
-    #              adding architectures of new families).
-    # sigma_seed:  within-model dispersion averaged across models
-    #              (aleatoric; reducible by training more seeds).
-    # sigma_total: square-root of total variance via the law of total
-    #              variance: Var(p) = E[Var(p|m)] + Var(E[p|m]).
+    # --- Two-source descriptive dispersion summary -----------------------
+    # sigma_model: between-model dispersion on heterogeneous score scales.
+    # sigma_seed:  inter-seed dispersion averaged across models.
+    # sigma_total: root-sum-square diagnostic index. These quantities do not
+    #              identify epistemic and aleatoric uncertainty components.
     df["sigma_model"]    = np.nanstd(probs, axis=1)
     df["sigma_seed_avg"] = np.sqrt(np.nanmean(seed_stds ** 2, axis=1))
     df["sigma_total"]    = np.sqrt(
@@ -224,7 +242,7 @@ def aggregate(df: pd.DataFrame, models_present: list[str]) -> pd.DataFrame:
     # legacy meaning (between-model dispersion / 1 - between-model std).
     df["prob_std"]   = df["sigma_model"]
     df["confidence"] = 1.0 - df["sigma_model"]
-    # New: confidence_total accounts for both uncertainty sources.
+    # Complementary-dispersion diagnostic; not calibrated confidence.
     df["confidence_total"] = 1.0 - df["sigma_total"]
 
     df["agreement_count"] = np.nansum(preds, axis=1).astype(int)

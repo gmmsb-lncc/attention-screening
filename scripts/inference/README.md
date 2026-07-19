@@ -29,8 +29,10 @@ Orquestração end-to-end: `committee.py`.
 
 ## Regra de agregação canônica: Comitê-PoE (Product-of-Experts)
 
-A regra de combinação adotada é a **média geométrica** das probabilidades
-calibradas, equivalente ao Product-of-Experts de Hinton (2002):
+A regra de combinação adotada é a **média geométrica** das pontuações
+operacionais. Apenas o DT-Kinase recebe calibração de Platt; os demais modelos
+preservam suas escalas nativas. A denominação Product-of-Experts remete a
+Hinton (2002), sem atribuir interpretação probabilística comum às quatro saídas:
 
 ```
 prob_committee  = (prod_m  p_m)^(1/N)  =  exp( mean( log(p_m) ) )

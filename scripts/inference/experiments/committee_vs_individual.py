@@ -79,7 +79,7 @@ TEST_TSV_BY_CORPUS = {
 
 
 def model_paths(model: str, corpus: str, seed: int) -> tuple[Path, Path]:
-    """Return (npz_path, calibration_json_path) for a (model, corpus, seed) cell."""
+    """Return (npz_path, threshold_json_path) for a (model, corpus, seed) cell."""
     if model == "dtkinase":
         if corpus == "non_human":
             base = REPO / "results" / "benchmark_non_human_8M_13_05_2026_v3" \
@@ -91,7 +91,7 @@ def model_paths(model: str, corpus: str, seed: int) -> tuple[Path, Path]:
             base = REPO / "results" / "all" / "benchmark_all_8M_13_04_2026" \
                         / "test" / "level4_cnn_8M" / "all"
         return (base / f"seed_{seed}" / "raw_predictions.npz",
-                base / f"seed_{seed}" / "level4_cnn_calibration.json")
+                base / f"seed_{seed}" / "level4_cnn_results.json")
     if model == "drugban":
         base = REPO / "DrugBAN" / "results_universal" / "results_universal" / corpus
         return (base / f"seed_{seed}" / "raw_predictions.npz",
@@ -105,6 +105,22 @@ def model_paths(model: str, corpus: str, seed: int) -> tuple[Path, Path]:
         return (base / f"seed_{seed}" / "raw_predictions.npz",
                 base / f"seed_{seed}" / "conplex_calibration.json")
     raise ValueError(f"unknown model: {model}")
+
+
+def load_threshold(path: Path) -> float:
+    """Read a validation-derived threshold from a model result artifact."""
+    data = json.loads(path.read_text())
+    if path.name == "level4_cnn_results.json":
+        return float(data["Split by Scaffold"]["MLP"]["val_threshold"])
+    return float(data["threshold"])
+
+
+def load_validation_score(path: Path) -> float:
+    """Read the validation score associated with a threshold artifact."""
+    data = json.loads(path.read_text())
+    if path.name == "level4_cnn_results.json":
+        return float(data["Split by Scaffold"]["MLP"]["best_val_mcc"])
+    return float(data.get("val_score", data.get("val_mcc", 0.0)))
 
 
 def load_5seed(model: str, corpus: str) -> tuple[np.ndarray, np.ndarray, float]:
@@ -125,8 +141,7 @@ def load_5seed(model: str, corpus: str) -> tuple[np.ndarray, np.ndarray, float]:
         else:
             assert np.array_equal(y_true_ref, y_true), \
                 f"y_true mismatch in {model}/{corpus}/seed_{s}"
-        cal = json.loads(cal_path.read_text())
-        thresholds.append(float(cal["threshold"]))
+        thresholds.append(load_threshold(cal_path))
 
     prob_mean = np.mean(np.stack(probs_per_seed), axis=0)
     thr_mean = float(np.mean(thresholds))

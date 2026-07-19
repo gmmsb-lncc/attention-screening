@@ -2,8 +2,9 @@
 """Per-seed PoE committee metrics with full sigma over 5 seeds.
 
 Canonical aggregation: Product-of-Experts (PoE) = geometric mean of
-calibrated per-model probabilities. Threshold = geometric mean of per-model
-calibrated thresholds. Matches `aggregate.py` canonical convention.
+per-model operational scores. Threshold = geometric mean of per-model
+validation-selected thresholds. The model outputs do not share a common
+probabilistic calibration. Matches `aggregate.py` canonical convention.
 
 Protocol (Anexo B §B.5, Anexo D §sec:agreg-protocolo):
   - For each corpus in {non_human, human, all} (configurable via --corpus):
@@ -44,7 +45,7 @@ from sklearn.metrics import (matthews_corrcoef, roc_auc_score,
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts" / "inference" / "experiments"))
 from committee_vs_individual import (  # type: ignore  # noqa: E402
-    model_paths, dedupe_predictions, SEEDS,
+    model_paths, load_threshold, dedupe_predictions, SEEDS,
 )
 
 MODELS = ["dtkinase", "drugban", "graphban", "conplex"]
@@ -98,7 +99,7 @@ def load_per_seed(model: str, corpus: str) -> dict:
         true_key = "test_y_true" if "test_y_true" in d.files else "y_true"
         prob = d[prob_key].astype(np.float64)
         y = d[true_key].astype(int)
-        thr = float(json.loads(cal_path.read_text())["threshold"])
+        thr = load_threshold(cal_path)
         out[s] = (prob, y, thr)
     return out
 

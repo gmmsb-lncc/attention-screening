@@ -6,10 +6,19 @@ runs on Linux GPU, Mac M1, and CPU-only fallbacks without branching.
 """
 from __future__ import annotations
 
+import os
+
 import torch
 
 
 def pick_device() -> torch.device:
+    # Explicit override. On Apple Silicon the MPS backend lacks float64 and a
+    # few linalg ops (e.g. linalg_qr used by MoLFormer's linear attention), so
+    # forcing INFER_DEVICE=cpu is the reliable path for committee inference on
+    # mac. Accepts cuda | mps | cpu.
+    forced = os.environ.get("INFER_DEVICE", "").strip().lower()
+    if forced in {"cuda", "mps", "cpu"}:
+        return torch.device(forced)
     if torch.cuda.is_available():
         return torch.device("cuda")
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():

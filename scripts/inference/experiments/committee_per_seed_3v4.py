@@ -29,7 +29,8 @@ import pandas as pd
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts" / "inference" / "experiments"))
 from committee_vs_individual import (  # type: ignore  # noqa: E402
-    model_paths, system_metrics, dedupe_predictions, paired_bootstrap_delta, SEEDS,
+    model_paths, load_threshold, system_metrics, dedupe_predictions,
+    paired_bootstrap_delta, SEEDS,
 )
 
 CORPORA = ["non_human", "human", "all"]
@@ -63,7 +64,7 @@ def load_per_seed(model: str, corpus: str) -> dict:
         true_key = "test_y_true" if "test_y_true" in d.files else "y_true"
         prob = d[prob_key].astype(np.float64)
         y = d[true_key].astype(int)
-        thr = float(json.loads(cal_path.read_text())["threshold"])
+        thr = load_threshold(cal_path)
         out[s] = (prob, y, thr)
     return out
 

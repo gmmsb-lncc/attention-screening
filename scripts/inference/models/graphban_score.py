@@ -54,7 +54,10 @@ CKPT_DIR_BY_CORPUS = {c: ckpt_seed_dir(c, 42) for c in ("human", "non_human", "a
 CALIBRATION_SIDECAR_BY_CORPUS = {
     c: calibration_sidecar(c, 42) for c in ("human", "non_human", "all")
 }
-CANONICAL_CONFIG = REPO_ROOT / "GraphBAN" / "configs" / "GraphBAN.yaml"
+# kinase_inductive.yaml is the training config for the kinase committee weights
+# (DECODER.BINARY=2 matches the checkpoint's mlp_classifier.fc4 = (2,128); the
+# upstream GraphBAN.yaml default has BINARY=1 and is absent from this repo).
+CANONICAL_CONFIG = REPO_ROOT / "GraphBAN" / "configs" / "kinase_inductive.yaml"
 
 
 def _to_f32(x):

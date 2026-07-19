@@ -12,7 +12,7 @@ attention-screening is a kinase-inhibitor screening framework that runs a
 4-model **Committee-PoE** (DT-Kinase, DrugBAN, GraphBAN, ConPLex) and
 returns ranked binding predictions with attention maps, given a SMILES,
 a FASTA sequence, or a batch file as input. The committee aggregation
-rule (Product-of-Experts, geometric mean of calibrated probabilities)
+rule (Product-of-Experts, geometric mean of operational model scores)
 was empirically selected against 9 alternative rules under paired block
 bootstrap by protein (B = 10000); see thesis Anexo D. Composition and
 calibration follow the canonical scaffold-split protocol with
@@ -107,8 +107,10 @@ For methodology, evaluation protocol, and benchmark levels see
 ### Aggregation rule: Product-of-Experts (geometric mean)
 
 The canonical aggregation rule is **PoE**: `prob_committee = (prod p_m)^(1/N)`,
-where `p_m` is the calibrated probability from model `m`. Decision threshold
-follows the same rule applied to the per-model calibrated thresholds. PoE
+where `p_m` is the operational output from model `m`; only DT-Kinase receives
+Platt calibration. The other models retain their native output scales. The
+decision threshold follows the same rule applied to the per-model thresholds
+selected on validation. PoE
 penalizes strong dissent (any single model with `p_m -> 0` drags the
 consensus down), which matches the multi-paradigm composition: a model that
 strongly disbelieves a pair acts as an effective veto.

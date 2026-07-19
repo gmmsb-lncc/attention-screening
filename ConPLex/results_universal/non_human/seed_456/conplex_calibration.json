@@ -1,10 +1,10 @@
 {
-  "threshold": 0.466,
-  "calibration_metric": "mcc",
-  "val_score": 0.6787,
-  "n_val": 1422,
-  "model": "conplex",
+  "platt_a": 1.0,
+  "platt_b": 0.0,
+  "threshold": 0.33989412537728897,
   "corpus": "non_human",
-  "seed": 456,
-  "source": "ConPLex/results_universal/non_human/seed_456/raw_predictions.npz"
+  "n_val": 1422,
+  "source_run": "/Users/sulfierry/attention-screening/ConPLex/best_models/trained_non_human_rep2/trained_non_human_rep2_best_model.pt",
+  "val_mcc": 0.7546701672223862,
+  "note": "threshold-only calibration (ConPLex scores on native similarity)"
 }

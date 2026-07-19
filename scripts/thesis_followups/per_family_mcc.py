@@ -245,9 +245,9 @@ PRED_PATHS = {
 
 
 CAL_PATHS = {
-    ("dtkinase", "human"):     "results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_{seed}/level4_cnn_calibration.json",
-    ("dtkinase", "non_human"): "results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_{seed}/level4_cnn_calibration.json",
-    ("dtkinase", "all"):       "results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_{seed}/level4_cnn_calibration.json",
+    ("dtkinase", "human"):     "results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human/seed_{seed}/level4_cnn_results.json",
+    ("dtkinase", "non_human"): "results/benchmark_non_human_8M_13_05_2026_v3/test/level4_cnn_8M/non_human/seed_{seed}/level4_cnn_results.json",
+    ("dtkinase", "all"):       "results/all/benchmark_all_8M_13_04_2026/test/level4_cnn_8M/all/seed_{seed}/level4_cnn_results.json",
     ("drugban", "human"):      "DrugBAN/results_universal/results_universal/human/seed_{seed}/drugban_calibration.json",
     ("drugban", "non_human"):  "DrugBAN/results_universal/results_universal/non_human/seed_{seed}/drugban_calibration.json",
     ("drugban", "all"):        "DrugBAN/results_universal/results_universal/all/seed_{seed}/drugban_calibration.json",
@@ -285,6 +285,8 @@ def load_threshold(model: str, corpus: str, seed: int) -> float:
     if not pth.exists():
         return 0.5
     cal = json.loads(pth.read_text())
+    if model == "dtkinase":
+        return float(cal["Split by Scaffold"]["MLP"]["val_threshold"])
     return float(cal.get("threshold", 0.5))
 
 

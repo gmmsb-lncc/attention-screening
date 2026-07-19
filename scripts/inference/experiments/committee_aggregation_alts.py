@@ -48,6 +48,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from committee_vs_individual import (  # noqa: E402
     load_5seed, dedupe_predictions, load_test_keys, _mcc_fast, model_paths,
+    load_validation_score,
 )
 
 REPO = Path(__file__).resolve().parents[3]
@@ -65,10 +66,7 @@ def load_val_mcc(model: str, corpus: str) -> float:
     scores = []
     for s in SEEDS:
         _, cal_path = model_paths(model, corpus, s)
-        cal = json.loads(cal_path.read_text())
-        # DT-K records 'val_score' (MCC by default); baselines record same key
-        # under their respective calibrators (drugban_calibration.json etc.).
-        scores.append(float(cal.get("val_score", cal.get("val_mcc", 0.0))))
+        scores.append(load_validation_score(cal_path))
     return float(np.mean(scores))
 
 

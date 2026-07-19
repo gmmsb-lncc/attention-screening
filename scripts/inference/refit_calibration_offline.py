@@ -1,22 +1,20 @@
-"""Refit Platt calibration sidecars offline from saved val predictions.
+"""Run a test-only Platt diagnostic from saved test predictions.
 
-The original `level4_cnn_calibration.json` files contain identity Platt
-(a=1, b=0) because the training pipeline saved val predictions
-post-sigmoid in `raw_predictions.npz` but never wrote a fitted
-calibrator into the sidecar. At inference time `dtkinase_score.py`
-re-applies the identity Platt, leaving probabilities uncalibrated.
+The benchmark `raw_predictions.npz` files used here contain test predictions,
+not validation predictions. Fitting Platt or selecting a threshold from them is
+test leakage and must never produce the canonical calibration sidecar.
 
 This script reads each (corpus, seed)/raw_predictions.npz, recovers the
 pre-Platt logits via inverse sigmoid, fits a logistic regression
 `y_true ~ logit`, sweeps thresholds for MCC-optimal cutoff on the
-post-Platt probabilities, and writes a corrected sidecar JSON.
+post-Platt probabilities, and writes a clearly marked test-only diagnostic.
 
 No GPU, no data files, no checkpoint reload — pure offline fix.
 
 Usage:
     python scripts/inference/refit_calibration_offline.py \
         --root results/benchmark_human_8M_13_05_2026/test/level4_cnn_8M/human \
-        --corpus human
+        --corpus human --unsafe-test-only
 """
 from __future__ import annotations
 import argparse
@@ -74,15 +72,15 @@ def refit_seed(seed_dir: Path, corpus: str, eps: float = 1e-6) -> dict:
         "platt_b":   b,
         "threshold": thr,
         "calibration_metric": "mcc",
-        "val_score": mcc,
-        "n_val":     int(len(y_true)),
+        "test_score": mcc,
+        "n_test":     int(len(y_true)),
         "model":     "dtkinase",
         "corpus":    corpus,
         "seed":      int(seed_dir.name.split("_")[-1]),
         "source":    str(seed_dir / "raw_predictions.npz"),
-        "note":      "platt fitted offline from raw_predictions.npz logits",
+        "note":      "UNSAFE diagnostic: Platt and threshold fitted on test predictions",
     }
-    out = seed_dir / "level4_cnn_calibration.json"
+    out = seed_dir / "level4_cnn_calibration_TEST_ONLY.json"
     out.write_text(json.dumps(sidecar, indent=2))
     return sidecar
 
@@ -92,7 +90,17 @@ def main() -> None:
     ap.add_argument("--root", type=Path, required=True,
                     help="dir containing seed_*/ subdirs with raw_predictions.npz")
     ap.add_argument("--corpus", choices=["human", "non_human", "all"], required=True)
+    ap.add_argument(
+        "--unsafe-test-only", action="store_true",
+        help="acknowledge that this diagnostic fits and evaluates on test data",
+    )
     args = ap.parse_args()
+    if not args.unsafe_test_only:
+        ap.error(
+            "raw_predictions.npz contains test predictions; use "
+            "refit_calibration_proper.py for valid calibration, or pass "
+            "--unsafe-test-only to write a non-canonical diagnostic"
+        )
 
     seed_dirs = sorted([d for d in args.root.iterdir()
                         if d.is_dir() and d.name.startswith("seed_")])
@@ -102,7 +110,7 @@ def main() -> None:
     for sd in seed_dirs:
         s = refit_seed(sd, args.corpus)
         print(f"  {sd.name}: a={s['platt_a']:+.4f} b={s['platt_b']:+.4f} "
-              f"thr={s['threshold']:.4f} val_mcc={s['val_score']:.4f}")
+              f"thr={s['threshold']:.4f} test_mcc={s['test_score']:.4f}")
 
 
 if __name__ == "__main__":

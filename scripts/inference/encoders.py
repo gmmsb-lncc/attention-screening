@@ -41,6 +41,12 @@ ESM2_DIM = 320
 ESM2_MAX_LEN = 1024
 
 MOLFORMER_HF_NAME = "ibm/MoLFormer-XL-both-10pct"
+# Pin the remote-code revision: the unpinned HEAD (commit a14249e5, 2026-07)
+# imports transformers.masking_utils, which only exists in transformers>=4.48,
+# but MoLFormer here is pinned to transformers==4.39.3 (its configuration_molformer
+# imports transformers.onnx, removed in >=4.40). Revision 7b12d946 (2024-03-31,
+# safetensors variant) carries the code compatible with 4.39.3.
+MOLFORMER_HF_REVISION = "7b12d946c181"
 MOLFORMER_DIM = 768
 MOLFORMER_MAX_LEN = 512
 
@@ -137,9 +143,11 @@ def load_molformer(device: torch.device):
     """Return (model, tokenizer) for MoLFormer-XL-both-10pct."""
     from transformers import AutoModel, AutoTokenizer  # lazy
     tokenizer = AutoTokenizer.from_pretrained(
-        MOLFORMER_HF_NAME, trust_remote_code=True)
+        MOLFORMER_HF_NAME, trust_remote_code=True,
+        revision=MOLFORMER_HF_REVISION)
     model = AutoModel.from_pretrained(
-        MOLFORMER_HF_NAME, trust_remote_code=True)
+        MOLFORMER_HF_NAME, trust_remote_code=True,
+        revision=MOLFORMER_HF_REVISION)
     model = model.to(device).eval()
     return model, tokenizer
 

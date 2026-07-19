@@ -8,7 +8,9 @@ no comitê canônico da tese (Cap. 5, §sec:resultados-comite).
 ## 1. Contexto e questão original
 
 A tese reporta o comitê 4-modelos (DT-Kinase + DrugBAN + GraphBAN + ConPLex)
-sob agregação **soft-mean** das probabilidades calibradas por modelo:
+sob agregação **soft-mean** das pontuações operacionais por modelo. As saídas
+não compartilham uma calibração probabilística comum; os nomes históricos de
+coluna preservam o prefixo `prob_` por compatibilidade:
 
 ```
 committee_prob[i] = mean_m( prob_5seed[m, i] )         # média sobre modelos

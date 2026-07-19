@@ -58,13 +58,13 @@ def load_dtkinase_5seed_human():
     y = None
     for s in SEEDS:
         npz = base / f"seed_{s}" / "raw_predictions.npz"
-        cal = base / f"seed_{s}" / "level4_cnn_calibration.json"
+        result = base / f"seed_{s}" / "level4_cnn_results.json"
         d = np.load(npz)
         probs.append(d["y_prob"].astype(np.float64))
         if y is None:
             y = d["y_true"].astype(int)
-        c = json.loads(cal.read_text())
-        thrs.append(float(c["threshold"]))
+        c = json.loads(result.read_text())["Split by Scaffold"]["MLP"]
+        thrs.append(float(c["val_threshold"]))
     return np.mean(np.stack(probs), axis=0), y, float(np.mean(thrs))
 
 

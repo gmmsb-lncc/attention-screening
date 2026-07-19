@@ -74,7 +74,9 @@ CKPT_DIR_BY_CORPUS = {c: ckpt_seed_dir(c, 42) for c in ("human", "non_human", "a
 CALIBRATION_SIDECAR_BY_CORPUS = {
     c: calibration_sidecar(c, 42) for c in ("human", "non_human", "all")
 }
-CANONICAL_CONFIG = REPO_ROOT / "DrugBAN" / "configs" / "DrugBAN.yaml"
+# kinase.yaml carries the full DRUG/PROTEIN/BCN/DECODER sections DrugBAN(**cfg)
+# requires; DrugBAN.yaml only has SOLVER/DA/DECODER(BINARY) and raises KeyError.
+CANONICAL_CONFIG = REPO_ROOT / "DrugBAN" / "configs" / "kinase.yaml"
 
 
 def pairs_to_drugban_df(pairs_path: Path) -> pd.DataFrame:

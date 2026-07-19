@@ -305,6 +305,13 @@ ConPLex (seed 42 mapped to rep 0; full mapping {42:0, 123:1, 456:2, 789:3, 1024:
              Pendência: rep1..rep4 .pt files exist on disk but their calibration sidecars (results_universal/{corpus}_rep{1..4}/) are absent. Not relevant for canonical inference (rep 0 only); regenerate via scripts/inference/build_calibration.py if a 5-rep ensemble run is ever needed.
 ```
 
+**ConPLex inference scale:** `SimpleCoembedding` uses ReLU projections before
+cosine similarity, so the operational output is already non-negative and the
+canonical artifacts preserve it directly. `conplex_score.py` must not apply a
+sigmoid or `(s+1)/2`: the validation-selected sidecar thresholds and the PoE
+experiments are on the native similarity scale. The generic CSV field remains
+named `prob` for compatibility and does not imply probability calibration.
+
 `.gitignore` strategy: each blanket rule (`results/`, `*.pt`, `*.pth`, `*.json`, `best_models/`) is overridden via parent-directory dance + leaf-specific re-inclusion. **Don't widen the negation patterns** without re-checking collateral with `git status -uall` — the seed_42 restriction in the cal-json globs is intentional (keeps reps 1-4 local).
 
 ## Data layout

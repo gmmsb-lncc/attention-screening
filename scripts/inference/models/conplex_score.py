@@ -4,10 +4,11 @@ Reads pairs.tsv and emits scores_conplex.csv. Wraps existing
 infer_conplex_universal.py logic (ProtBERT + Morgan FP cosine
 similarity). Must run inside the `conplex` conda env.
 
-ConPLex outputs cosine similarity in [-1, 1]; the adapter rescales to
-probability in [0, 1] via (sim + 1) / 2 for committee soft mean
-compatibility. The native MCC-optimal threshold is loaded from the
-sidecar JSON adjacent to the checkpoint.
+The default SimpleCoembedding projects both modalities through ReLU, so its
+cosine similarity is non-negative and already lies in [0, 1]. The adapter
+preserves that native scale because the MCC-optimal thresholds and the
+canonical committee artifacts use it directly. The CSV column remains named
+``prob`` for interface compatibility, but it is not a calibrated probability.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "inference"))
 from device_utils import pick_device, empty_cache  # noqa: E402
+from conplex_scale import canonical_similarity  # noqa: E402
 
 CONPLEX_ROOT = REPO_ROOT / "ConPLex"
 sys.path.insert(0, str(CONPLEX_ROOT))
@@ -157,7 +159,7 @@ def main() -> None:
     p_all = _featurize_unique(prot_feat, seqs,    "proteins")
 
     n = len(df)
-    probs_per_seed = np.empty((len(seed_specs), n), dtype=np.float64)
+    scores_per_seed = np.empty((len(seed_specs), n), dtype=np.float64)
     thresholds_per_seed = np.empty(len(seed_specs), dtype=np.float64)
 
     for k, (ckpt, calib) in enumerate(seed_specs):
@@ -169,21 +171,21 @@ def main() -> None:
             state = state["state_dict"]
         model.load_state_dict(state, strict=False)
         sims = predict(model, d_all, p_all, device, batch_size=args.batch_size)
-        probs_per_seed[k] = np.clip((sims + 1.0) / 2.0, 0.0, 1.0)
-        thresholds_per_seed[k] = calib["threshold"]
+        scores_per_seed[k] = canonical_similarity(sims)
+        thresholds_per_seed[k] = float(calib["threshold"])
         del model
         empty_cache(device)
 
-    probs = probs_per_seed.mean(axis=0)
+    scores = scores_per_seed.mean(axis=0)
     threshold = float(thresholds_per_seed.mean())
     out = pd.DataFrame({
         "uniprot":   df["uniprot"].to_numpy(),
         "chembl_id": df["chembl_id"].to_numpy(),
-        "prob":      probs,
-        "pred":      (probs >= threshold).astype(int),
+        "prob":      scores,
+        "pred":      (scores >= threshold).astype(int),
         "threshold": threshold,
         "n_seeds":   len(seed_specs),
-        "prob_std":  probs_per_seed.std(axis=0, ddof=0),
+        "prob_std":  scores_per_seed.std(axis=0, ddof=0),
     })
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.out, index=False)

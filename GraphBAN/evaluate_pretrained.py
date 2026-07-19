@@ -5,9 +5,11 @@ Loads the upstream GraphBAN inductive models (trained on BioSNAP, BindingDB,
 KIBA, C.elegans, PDB — 5 seeds each) and evaluates them zero-shot on the
 thesis's universal scaffold test sets (non_human, human, all).
 
-Uses the paper's evaluation protocol:
-  - F1-optimal threshold from ROC curve (per the paper's trainer.py)
-  - AUROC, AUPRC, F1, Sensitivity, Specificity, Accuracy
+Reproduces the paper's legacy evaluation route:
+  - a nonstandard ROC-derived proxy selects the threshold on target-test labels
+  - AUROC and AUPRC remain threshold-independent
+  - threshold-dependent metrics are diagnostic, not held-out estimates
+  - reported F1 is the standard confusion-matrix F1 at that selected threshold
   - Multi-seed aggregation with mean ± std
 
 Usage:
@@ -371,20 +373,24 @@ def run_inference(
 
 
 # ---------------------------------------------------------------------------
-# Metrics (following paper's trainer.py protocol)
+# Metrics (retrospective reproduction of the paper's trainer.py protocol)
 # ---------------------------------------------------------------------------
-def compute_metrics_paper_protocol(
+def compute_metrics_legacy_test_protocol(
     y_true: np.ndarray,
     y_prob: np.ndarray,
 ) -> dict[str, Any]:
-    """Compute metrics following GraphBAN paper's evaluation protocol.
+    """Reproduce the GraphBAN threshold route on target-test labels.
 
-    The paper uses F1-optimal threshold from ROC curve:
+    The original code uses a nonstandard ROC-derived proxy:
       1. Compute ROC curve (fpr, tpr, thresholds)
-      2. precision = tpr / (tpr + fpr)
-      3. f1 = 2 * precision * tpr / (tpr + precision + eps)
-      4. thred_optim = thresholds[5:][argmax(f1[5:])]  (skip first 5 points)
+      2. proxy_precision = tpr / (tpr + fpr)
+      3. proxy = 2 * proxy_precision * tpr / (tpr + proxy_precision + eps)
+      4. thred_optim = thresholds[5:][argmax(proxy[5:])]  (skip first 5 points)
       5. Report confusion-matrix-derived metrics at this threshold
+
+    Because y_true from the target test set selects the threshold, MCC, F1,
+    accuracy, sensitivity, specificity, and precision are not held-out. The
+    proxy is preserved under an explicit name and is not reported as F1.
     """
     from sklearn.metrics import (
         roc_auc_score,
@@ -407,19 +413,18 @@ def compute_metrics_paper_protocol(
     except ValueError:
         result["auprc"] = float("nan")
 
-    # Paper's F1-optimal threshold from ROC curve
+    # Legacy test-selected threshold from a nonstandard ROC-derived proxy.
     fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-    # Compute "precision" as tpr / (tpr + fpr) — paper's definition
-    precision_roc = tpr / (tpr + fpr + 1e-8)
-    f1_roc = 2 * precision_roc * tpr / (tpr + precision_roc + 1e-5)
+    proxy_precision = tpr / (tpr + fpr + 1e-8)
+    roc_proxy = 2 * proxy_precision * tpr / (tpr + proxy_precision + 1e-5)
 
     # Skip first 5 points (paper does thresholds[5:])
-    skip = min(5, len(f1_roc) - 1)
-    thred_optim = float(thresholds[skip:][np.argmax(f1_roc[skip:])])
-    result["f1_roc_optimal"] = float(np.max(f1_roc[skip:]))
-    result["threshold_f1_optimal"] = thred_optim
+    skip = min(5, len(roc_proxy) - 1)
+    thred_optim = float(thresholds[skip:][np.argmax(roc_proxy[skip:])])
+    result["roc_proxy_optimal"] = float(np.max(roc_proxy[skip:]))
+    result["threshold_test_roc_proxy_optimal"] = thred_optim
 
-    # Metrics at F1-optimal threshold
+    # Diagnostic metrics at the test-selected threshold.
     y_pred_binary = (y_prob >= thred_optim).astype(int)
     cm = confusion_matrix(y_true, y_pred_binary)
 
@@ -430,7 +435,8 @@ def compute_metrics_paper_protocol(
         result["sensitivity"] = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0  # TPR = Recall
         result["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0  # TNR
         result["precision"] = float(precision_score(y_true, y_pred_binary, zero_division=0))
-        result["f1"] = result["f1_roc_optimal"]
+        f1_den = 2 * tp + fp + fn
+        result["f1"] = float(2 * tp / f1_den) if f1_den > 0 else 0.0
         result["mcc"] = float(matthews_corrcoef(y_true, y_pred_binary))
     else:
         result["accuracy"] = float("nan")
@@ -474,7 +480,7 @@ def aggregate_seed_metrics(
         return {}
 
     metric_keys = [
-        "auroc", "auprc", "f1", "f1_roc_optimal", "accuracy",
+        "auroc", "auprc", "f1", "roc_proxy_optimal", "accuracy",
         "sensitivity", "specificity", "precision", "mcc",
         "accuracy_t05", "mcc_t05", "f1_t05",
     ]
@@ -555,6 +561,8 @@ def main():
     print(f"  Source models:   {args.source_models}")
     print(f"  Seeds:           {args.seeds}")
     print(f"  Batch size:      {args.batch_size}")
+    print("  WARNING: threshold-dependent metrics use a target-test-selected point")
+    print("           and are retrospective diagnostics, not held-out estimates.")
     if args.run_name:
         print(f"  Run name:        {args.run_name}")
 
@@ -631,9 +639,11 @@ def main():
         "n_test_samples": len(df_test),
         "class_balance": float(df_test["Y"].mean()),
         "evaluation_protocol": {
-            "threshold_method": "F1-optimal from ROC curve (paper protocol)",
-            "metrics": "AUROC, AUPRC, F1, Sensitivity, Specificity, Accuracy, MCC",
-            "note": "GraphBAN models were trained on external datasets (BioSNAP, BindingDB, KIBA, etc.) and evaluated zero-shot on thesis kinase test sets. No training, validation, or threshold optimization was performed on thesis data.",
+            "threshold_method": "nonstandard ROC-derived proxy maximized on target-test labels (legacy paper route)",
+            "threshold_selection_split": "target_test",
+            "threshold_dependent_metrics_held_out": False,
+            "metrics": "AUROC, AUPRC; diagnostic standard F1, Sensitivity, Specificity, Accuracy, MCC",
+            "note": "GraphBAN weights were trained on external datasets and evaluated zero-shot. AUROC and AUPRC are threshold-independent. The legacy route selects the operating point with labels from the thesis target test set; its threshold-dependent metrics are not held-out.",
         },
         "per_source": {},
     }
@@ -673,8 +683,8 @@ def main():
             # Run inference
             y_true, y_prob = run_inference(model, test_loader, device, n_class=actual_n_class)
 
-            # Compute metrics per paper protocol
-            metrics = compute_metrics_paper_protocol(y_true, y_prob)
+            # Reproduce the legacy test-selected threshold route explicitly.
+            metrics = compute_metrics_legacy_test_protocol(y_true, y_prob)
             metrics["seed"] = seed
             metrics["model_path"] = str(model_path)
             seed_metrics.append(metrics)
@@ -685,7 +695,7 @@ def main():
                 f"F1={metrics['f1']:.4f}  "
                 f"MCC={metrics['mcc']:.4f}  "
                 f"Acc={metrics['accuracy']:.4f}  "
-                f"Thr={metrics['threshold_f1_optimal']:.4f}"
+                f"Thr(test proxy)={metrics['threshold_test_roc_proxy_optimal']:.4f}"
             )
 
             # Clean up

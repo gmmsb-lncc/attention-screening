@@ -95,7 +95,7 @@ def load_predictions(model: str, corpus: str, seed: int,
                 "DT-Kinase NPZ does not store val predictions; pass split='test'.")
         y_true = data["y_true"].astype(np.int64)
         y_prob = data["y_prob"].astype(np.float64)
-        cal_path = result_dir / "level4_cnn_calibration.json"
+        cal_path = result_dir / "level4_cnn_results.json"
     elif model in _BASELINE_PATTERNS:
         result_dir = _resolve_baseline_dir(model, corpus, seed)
         npz_path = result_dir / "raw_predictions.npz"
@@ -118,9 +118,13 @@ def load_predictions(model: str, corpus: str, seed: int,
     if cal_path.exists():
         with cal_path.open() as fh:
             cal = json.load(fh)
-        threshold = float(cal.get("threshold", 0.5))
-        platt_a = cal.get("platt_a")
-        platt_b = cal.get("platt_b")
+        if model == "dtkinase":
+            result = cal["Split by Scaffold"]["MLP"]
+            threshold = float(result["val_threshold"])
+        else:
+            threshold = float(cal.get("threshold", 0.5))
+            platt_a = cal.get("platt_a")
+            platt_b = cal.get("platt_b")
         if platt_a is not None:
             platt_a = float(platt_a)
         if platt_b is not None:

@@ -4,7 +4,7 @@ Este manual descreve como utilizar o pipeline de inferência distribuído junto 
 
 ## Visão geral
 
-O pipeline submete cada par proteína-ligante a quatro modelos treinados de forma independente (DT-Kinase-LEGACY, DrugBAN, GraphBAN, ConPLex), agrega as quatro probabilidades calibradas em um consenso ordenado, e emite mapas de atenção interpretáveis para os pares de alta confiança. A motivação para a arquitetura por consenso é a observação documentada no Anexo A da tese, segundo a qual cada um dos quatro modelos exibe perfil de erro distinto sob *distribution shift cross-corpus*, de modo que a concordância entre paradigmas heterogêneos é um sinal mais robusto que a confiança em qualquer modelo isoladamente.
+O pipeline submete cada par proteína-ligante a quatro modelos treinados de forma independente (DT-Kinase-LEGACY, DrugBAN, GraphBAN, ConPLex), agrega as quatro pontuações operacionais em um consenso ordenado e emite mapas diagnósticos de atenção para os pares priorizados. Apenas o DT-Kinase recebe calibração de Platt; os demais modelos preservam suas escalas nativas.
 
 ## Pré-requisitos
 
@@ -123,11 +123,11 @@ results/inference/<run_id>/
 |---|---|
 | `pair_id` | identificador composto `{uniprot}__{chembl_id}` |
 | `uniprot, chembl_id` | chaves primárias do par |
-| `prob_<modelo>` | probabilidade calibrada por cada modelo |
+| `prob_<modelo>` | pontuação operacional de cada modelo; o nome da coluna é mantido por compatibilidade |
 | `pred_<modelo>` | predição binária por cada modelo (sob seu limiar nativo) |
 | `thr_<modelo>` | limiar usado por cada modelo |
 | `prob_mean` | alias canônico = `prob_committee` (Product-of-Experts, média geométrica) |
-| `prob_committee` | (Π p_m)^(1/N) das probabilidades calibradas — regra Comitê-PoE (Anexo D) |
+| `prob_committee` | (Π p_m)^(1/N) das pontuações operacionais — regra Comitê-PoE (Anexo D) |
 | `thr_committee` | mesma regra geométrica aplicada aos limiares per-modelo |
 | `pred_committee` | (`prob_committee` ≥ `thr_committee`) |
 | `prob_soft_mean` | média aritmética legacy (preservada para diagnóstico / reprodução) |
@@ -157,7 +157,7 @@ DrugBAN e GraphBAN expõem a matriz de atenção bilinear $A \in \mathbb{R}^{s_p
 
 A inferência é restrita ao domínio de quinases. Todos os quatro modelos foram treinados exclusivamente em pares quinase-ligante, e a aplicação a proteínas fora dessa família é extrapolação não validada. O pipeline emite *warning* (sem bloquear a execução) quando a sequência fornecida tem similaridade de cosseno inferior a 0,7 contra qualquer entrada do kinome de referência.
 
-A saída é um *ranking* probabilístico, não uma afirmação determinística sobre afinidade absoluta. Os modelos foram calibrados sob a tarefa de classificação binária (*binder* versus *non-binder*), e a probabilidade reportada deve ser interpretada como pontuação de relevância para inspeção subsequente, não como predição de constante de inibição $K_i$ ou $\mathrm{IC}_{50}$. O uso do *ranking* para guiar campanhas de *lead optimization* deve ser acompanhado por validação experimental dirigida nos pares de *tier* STRONG, e nunca substituí-la.
+A saída é um *ranking* por pontuação, não uma afirmação determinística sobre afinidade absoluta. As pontuações devem orientar inspeção subsequente, não ser interpretadas como probabilidades homogêneas nem como predições de constante de inibição $K_i$ ou $\mathrm{IC}_{50}$. O uso do *ranking* para guiar campanhas de *lead optimization* deve ser acompanhado por validação experimental dirigida nos pares de *tier* STRONG, e nunca substituí-la.
 
 ## Reprodutibilidade
 

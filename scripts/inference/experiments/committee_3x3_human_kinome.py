@@ -82,9 +82,13 @@ def load_seed_probs_dt_kinase(path: Path, seed: int) -> tuple[np.ndarray, np.nda
         d = np.load(npz_path)
         prob = d["test_y_prob"] if "test_y_prob" in d.files else d["y_prob"]
         y = d["test_y_true"] if "test_y_true" in d.files else d["y_true"]
-        # Threshold loaded from sidecar
-        cal_path = path / f"seed_{seed}" / "level4_cnn_calibration.json"
-        thr = json.loads(cal_path.read_text())["threshold"] if cal_path.exists() else 0.5
+        result_path = path / f"seed_{seed}" / "level4_cnn_results.json"
+        if result_path.exists():
+            result = json.loads(result_path.read_text())["Split by Scaffold"]["MLP"]
+            thr = result["val_threshold"]
+        else:
+            cal_path = path / f"seed_{seed}" / "level4_cnn_calibration.json"
+            thr = json.loads(cal_path.read_text())["threshold"] if cal_path.exists() else 0.5
         return np.asarray(prob, dtype=np.float64), np.asarray(y, dtype=np.int32), float(thr)
     if json_path.exists():
         m = json.loads(json_path.read_text())
