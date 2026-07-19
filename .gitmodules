@@ -1,0 +1,3 @@
+[submodule "ChemGLaM"]
+	path = ChemGLaM
+	url = https://github.com/clinfo/ChemGLaM.git

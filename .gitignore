@@ -124,6 +124,7 @@ ligand_embeddings/
 protein_embeddings/
 matrix_embedding/
 scaffolds_splits/output/
+data/chemglam/universal/train_valid_split.json
 ConPLex/dataset/kinase_all/
 ConPLex/dataset/kinase_human/
 ConPLex/dataset/kinase_non_human/

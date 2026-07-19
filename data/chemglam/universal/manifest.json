@@ -1,0 +1,26 @@
+{
+  "train": {
+    "rows": 275257,
+    "positive": 120756,
+    "negative": 154501,
+    "unique_targets": 642,
+    "human_rows": 267631,
+    "non_human_rows": 7626
+  },
+  "val": {
+    "rows": 69401,
+    "positive": 30483,
+    "negative": 38918,
+    "unique_targets": 505,
+    "human_rows": 67983,
+    "non_human_rows": 1418
+  },
+  "test": {
+    "rows": 41441,
+    "positive": 14968,
+    "negative": 26473,
+    "unique_targets": 558,
+    "human_rows": 39739,
+    "non_human_rows": 1702
+  }
+}
