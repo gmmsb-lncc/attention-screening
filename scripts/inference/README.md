@@ -1,6 +1,8 @@
 # Pipeline de Inferência: Comitê Multi-Modelo
 
-Pipeline de inferência por consenso de quatro modelos (DT-Kinase-LEGACY, DrugBAN, GraphBAN, ConPLex) sobre pares proteína-ligante (kinase-inhibitor).
+Pipeline de inferência por consenso. O painel canônico validado contém quatro
+modelos (DT-Kinase-LEGACY, DrugBAN, GraphBAN, ConPLex); ChemGLaM está disponível
+como quinto membro no perfil experimental `full_5model`.
 
 Documentação acadêmica completa no Anexo B da tese (`~/PhD/tex/anexoB.tex`).
 
@@ -110,6 +112,20 @@ python committee.py \
 
 Tier rescala automaticamente (Tab B.6 Anexo B): STRONG=3/3, LIKELY=2/3.
 
+### Painel experimental com ChemGLaM
+
+```bash
+python committee.py \
+    --profile full_5model \
+    --pairs pairs.tsv \
+    --ckpt-corpus human \
+    --out results/inference/run_5model
+```
+
+Requer os cinco checkpoints e `chemglam_calibration.json` produzidos pelo
+pipeline canônico do ChemGLaM. O perfil de quatro modelos continua sendo o
+padrão até a validação estatística do novo painel.
+
 ### Dry-run (sem executar)
 
 ```bash
@@ -127,6 +143,7 @@ results/inference/<run_id>/
 ├── scores_drugban.csv
 ├── scores_graphban.csv
 ├── scores_conplex.csv
+├── scores_chemglam.csv              # presente no perfil full_5model
 ├── consensus.csv                    # ranking ordenado por prob_mean DESC (PoE)
 ├── consensus.top.csv                # subset top-K (se --top-k > 0)
 └── attention/                       # apenas pares STRONG/LIKELY
@@ -213,6 +230,7 @@ DrugBAN:    DrugBAN/results/{corpus}/seed_42/best_model_epoch_*.pth
 GraphBAN:   GraphBAN/results/{corpus}/seed_42/best_model_epoch_*.pth
 ConPLex:    ConPLex/best_models/trained_{corpus}_rep{0..4}/trained_{corpus}_rep{rep}_best_model.pt
             (mapping seed→rep: 42→0, 123→1, 456→2, 789→3, 1024→4)
+ChemGLaM:   logs/chemglam_{corpus}_seed{seed}/best_checkpoint.ckpt
 ```
 
 ### Calibração (sidecars JSON, 60 arquivos)
@@ -228,6 +246,8 @@ GraphBAN:   GraphBAN/results_universal/{corpus}/seed_*/graphban_calibration.json
             (threshold F1-óptimo, paper nativo)
 ConPLex:    ConPLex/results_universal/{corpus}/seed_*/conplex_calibration.json
             (threshold MCC-óptimo, adaptado de cosine sim)
+ChemGLaM:   results/chemglam/chemglam_{corpus}_seed*/chemglam_calibration.json
+            (threshold MCC-óptimo na validação)
 ```
 
 ### Reference libs

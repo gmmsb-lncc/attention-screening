@@ -52,3 +52,29 @@ For a one-seed smoke run, use `CHEMGLAM_SEEDS=42`. Select training corpora with
 corpus has independent data, caches, checkpoints, and results. The runner
 chooses the MCC-optimal threshold on that corpus's validation split and freezes
 it for its held-out test split.
+
+The runner reuses completed checkpoints by default, which makes it safe to
+backfill the expanded artifacts after an interrupted or older run. Set
+`CHEMGLAM_SKIP_TRAIN_IF_CHECKPOINT=0` only when intentional retraining is
+required.
+
+For every seed, the run retains the fitting and prediction configs, the best
+checkpoint, train/validation/test predictions, `raw_predictions.npz` with pair
+identifiers, a validation-derived `chemglam_calibration.json`, and a
+self-contained `chemglam_results.json`. After all requested seeds finish,
+`chemglam_<corpus>_aggregate.json` records mean and population standard
+deviation across seeds. Prediction caches are isolated by corpus and split.
+
+Once all five checkpoints and calibration sidecars exist, enable ChemGLaM as
+an experimental fifth committee member with:
+
+```bash
+python scripts/inference/committee.py \
+  --profile full_5model \
+  --pairs pairs.tsv \
+  --ckpt-corpus human \
+  --out results/inference/chemglam_committee
+```
+
+The validated `full_4model` profile remains the default until the five-model
+panel has been evaluated under the same held-out protocol.

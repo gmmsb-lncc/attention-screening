@@ -35,7 +35,11 @@ def main() -> int:
         config = dict(train)
         config.update(
             experiment_name=f"{run_name}_{split}",
-            cache_dir=f"chemglam_universal_{split}",
+            # Keep prediction caches isolated by corpus.  Reusing the old
+            # ``chemglam_universal_{split}`` name across human/non_human/all
+            # could silently load protein tokens and embeddings produced for
+            # a different input table.
+            cache_dir=f"chemglam_{args.corpus}_{split}",
             dataset_csv_path=f"data/chemglam/{args.corpus}/{split}.csv",
             split_json_path=None,
             checkpoint_path=checkpoint,
@@ -43,7 +47,16 @@ def main() -> int:
         )
         return config
 
-    for name, config in (("train", train), ("val", prediction("val")), ("test", prediction("test"))):
+    # ``train.json`` is the fitting configuration (train+validation table).
+    # ``train_eval.json`` is a prediction-only configuration for train.csv;
+    # keeping the two separate prevents raw train predictions from accidentally
+    # containing the validation rows as well.
+    for name, config in (
+        ("train", train),
+        ("train_eval", prediction("train")),
+        ("val", prediction("val")),
+        ("test", prediction("test")),
+    ):
         (args.output / f"{name}.json").write_text(json.dumps(config, indent=2) + "\n")
     print(args.output)
     return 0

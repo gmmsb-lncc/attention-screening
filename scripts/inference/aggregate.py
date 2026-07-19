@@ -10,7 +10,8 @@ full ablation in thesis Anexo D and
 Soft-mean (arithmetic) is preserved for backward compatibility under
 `prob_soft_mean`.
 
-Reads N CSV files, one per model (dtkinase/drugban/graphban/conplex),
+Reads N CSV files, one per model
+(dtkinase/drugban/graphban/conplex/chemglam),
 each with columns:
     uniprot, chembl_id, prob, pred, threshold,
     prob_std (per-model inter-seed dispersion, optional),
@@ -74,10 +75,15 @@ import numpy as np
 import pandas as pd
 
 
-MODELS = ("dtkinase", "drugban", "graphban", "conplex")
+MODELS = ("dtkinase", "drugban", "graphban", "conplex", "chemglam")
 
 
 TIER_TABLES = {
+    # Five-model extension keeps unanimity as STRONG, one dissent as LIKELY,
+    # and requires at least two positive votes for UNCERTAIN.  The validated
+    # four-model canonical table remains unchanged.
+    5: {5: "STRONG", 4: "LIKELY", 3: "UNCERTAIN", 2: "UNCERTAIN",
+        1: "UNLIKELY", 0: "UNLIKELY"},
     # Per Anexo B Tabela B.2 (n=4) and Tabela B.6 (n<4 rescale).
     4: {4: "STRONG", 3: "LIKELY", 2: "UNCERTAIN", 1: "UNLIKELY", 0: "UNLIKELY"},
     3: {3: "STRONG", 2: "LIKELY", 1: "UNCERTAIN", 0: "UNLIKELY"},
@@ -94,7 +100,7 @@ def assign_tier(agreement: int, n_models: int) -> str:
     requires n >= 2 (load_model_scores enforces this).
     """
     if n_models not in TIER_TABLES:
-        raise ValueError(f"unsupported committee size n={n_models}; valid: 2, 3, 4")
+        raise ValueError(f"unsupported committee size n={n_models}; valid: 2, 3, 4, 5")
     return TIER_TABLES[n_models][int(agreement)]
 
 

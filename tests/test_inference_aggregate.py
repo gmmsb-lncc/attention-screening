@@ -296,6 +296,31 @@ def test_assign_tier_n4(agreement, expected):
 
 
 @pytest.mark.parametrize("agreement,expected", [
+    (5, "STRONG"), (4, "LIKELY"), (3, "UNCERTAIN"),
+    (2, "UNCERTAIN"), (1, "UNLIKELY"), (0, "UNLIKELY"),
+])
+def test_assign_tier_n5(agreement, expected):
+    assert aggregate.assign_tier(agreement, 5) == expected
+
+
+def test_five_model_committee_includes_chemglam(tmp_path):
+    pair = ("P1", "L1")
+    probs = {
+        "dtkinase": 0.8, "drugban": 0.7, "graphban": 0.6,
+        "conplex": 0.65, "chemglam": 0.75,
+    }
+    for model, probability in probs.items():
+        _write_scores(tmp_path, model, [_make_pair(*pair, probability)])
+
+    out = tmp_path / "consensus.csv"
+    aggregate_cli(["--scores-dir", str(tmp_path), "--out", str(out)])
+    row = pd.read_csv(out).iloc[0]
+    assert row["tier"] == "STRONG"
+    assert int(row["agreement_count"]) == 5
+    assert "prob_chemglam" in row.index
+
+
+@pytest.mark.parametrize("agreement,expected", [
     (3, "STRONG"), (2, "LIKELY"), (1, "UNCERTAIN"), (0, "UNLIKELY"),
 ])
 def test_assign_tier_n3(agreement, expected):

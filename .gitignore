@@ -63,6 +63,7 @@ processed_files.log
 # Testing
 # ============================================
 .pytest_cache/
+/cache/
 .coverage
 htmlcov/
 .tox/

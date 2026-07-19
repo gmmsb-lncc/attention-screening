@@ -57,6 +57,10 @@ MODEL_RUNNERS = {
         "env":    "conplex",
         "script": INFER_DIR / "models" / "conplex_score.py",
     },
+    "chemglam": {
+        "env":    "chemglam-cuda",
+        "script": INFER_DIR / "models" / "chemglam_score.py",
+    },
 }
 
 
@@ -173,7 +177,7 @@ def main() -> None:
                     help="hybrid dispatch: DT-Kinase uses --ckpt-corpus, baselines "
                          "override to 'all'. Useful for non_human eval "
                          "(committee MCC +0.036). See Anexo B §B.3.1.")
-    ap.add_argument("--profile", choices=["full_4model", "human_kinome", "non_human"],
+    ap.add_argument("--profile", choices=["full_4model", "full_5model", "human_kinome", "non_human"],
                     default="full_4model",
                     help="committee preset. "
                          "'full_4model' (DEFAULT) = Comite-PoE canonical "
@@ -189,7 +193,10 @@ def main() -> None:
                          "'human_kinome' = 3-model panel (sem GraphBAN), "
                          "in-domain human; ΔMCC +0.0074 vs 4-model em human "
                          "(IC95 [+0.0014, +0.0136]) com 25 pct menos custo. "
-                         "'non_human' = 4-model + non_human ckpts.")
+                         "'non_human' = 4-model + non_human ckpts. "
+                         "'full_5model' = painel experimental de 5 modelos, "
+                         "adicionando ChemGLaM; requer os 5 checkpoints e "
+                         "sidecars de calibracao ChemGLaM.")
     ap.add_argument("--out",     type=Path, required=True,
                     help="output directory for this run")
     ap.add_argument("--top-k",   type=int, default=20,
@@ -209,6 +216,7 @@ def main() -> None:
     # Apply profile preset (only fills in argparse defaults; explicit overrides win).
     DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
     DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
+    DEFAULT_MODELS_5 = "dtkinase,drugban,graphban,conplex,chemglam"
     if args.profile == "human_kinome":
         if args.models == DEFAULT_MODELS_4:
             args.models = DEFAULT_MODELS_3
@@ -217,6 +225,9 @@ def main() -> None:
             args.organism = "non_human"
         if args.ckpt_corpus == "human":
             args.ckpt_corpus = "non_human"
+    elif args.profile == "full_5model":
+        if args.models == DEFAULT_MODELS_4:
+            args.models = DEFAULT_MODELS_5
     # full_4model = current defaults (4-model + human organism + human ckpt;
     # canonical in-domain to --ckpt-corpus, override with --ckpt-corpus all
     # to reproduce the all-trained 4-model row of Tab. resultados-comite-canonico)
