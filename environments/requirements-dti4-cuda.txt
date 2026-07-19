@@ -1,0 +1,17 @@
+torch-geometric==2.6.1
+transformers==4.46.3
+tokenizers==0.20.3
+huggingface-hub==0.26.5
+safetensors==0.4.5
+lightning==2.4.0
+peft==0.13.2
+fair-esm==2.0.0
+biopython==1.83
+networkx==3.3
+pysmiles==1.1.2
+tensorboard==2.16.2
+datasets==3.2.0
+giotto-tda==0.6.2
+wandb>=0.12.0
+plotly==5.24.1
+
