@@ -6,6 +6,7 @@ ENV_NAME="${CHEMGLAM_ENV_NAME:-chemglam-cuda}"
 SEEDS="${CHEMGLAM_SEEDS:-42 123 456 789 1024}"
 CORPORA="${CHEMGLAM_CORPORA:-all}"
 SKIP_TRAIN_IF_CHECKPOINT="${CHEMGLAM_SKIP_TRAIN_IF_CHECKPOINT:-1}"
+SKIP_PREDICT_IF_COMPLETE="${CHEMGLAM_SKIP_PREDICT_IF_COMPLETE:-1}"
 
 cd "${ROOT_DIR}"
 bash scripts/chemglam/apply_upstream_patches.sh
@@ -42,10 +43,15 @@ for corpus in ${CORPORA}; do
       if [[ "${split}" == "train" ]]; then
         config_name="train_eval"
       fi
-      echo "[$(date '+%F %T')] Starting prediction: ${run_name} (${split})"
-      WANDB_MODE=disabled PYTHONUNBUFFERED=1 PYTHONPATH="${ROOT_DIR}/ChemGLaM" \
-        conda run --no-capture-output -n "${ENV_NAME}" \
-          python -u ChemGLaM/predict.py -c "${config_dir}/${config_name}.json"
+      prediction="logs/${run_name}_${split}/prediction.csv"
+      if [[ "${SKIP_PREDICT_IF_COMPLETE}" == "1" && -s "${prediction}" ]]; then
+        echo "[$(date '+%F %T')] Reusing completed prediction: ${prediction}"
+      else
+        echo "[$(date '+%F %T')] Starting prediction: ${run_name} (${split})"
+        WANDB_MODE=disabled PYTHONUNBUFFERED=1 PYTHONPATH="${ROOT_DIR}/ChemGLaM" \
+          conda run --no-capture-output -n "${ENV_NAME}" \
+            python -u ChemGLaM/predict.py -c "${config_dir}/${config_name}.json"
+      fi
     done
 
     echo "[$(date '+%F %T')] Evaluating: ${run_name}"

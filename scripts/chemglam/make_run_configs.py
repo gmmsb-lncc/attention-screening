@@ -44,6 +44,10 @@ def main() -> int:
             split_json_path=None,
             checkpoint_path=checkpoint,
             deterministic_eval=True,
+            # Metrics are computed from prediction.csv by
+            # evaluate_predictions.py.  Running trainer.test() here would
+            # perform the same expensive forward pass twice for every split.
+            run_test_before_predict=False,
         )
         return config
 

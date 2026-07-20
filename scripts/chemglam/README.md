@@ -58,6 +58,13 @@ backfill the expanded artifacts after an interrupted or older run. Set
 `CHEMGLAM_SKIP_TRAIN_IF_CHECKPOINT=0` only when intentional retraining is
 required.
 
+Prediction is memory-safe for the canonical configuration: when attention
+weights are disabled, only the prediction tensor is returned from each batch.
+The upstream implementation returned every full cross-attention matrix and
+could exhaust host RAM on the large train split. Prediction CSVs are written
+atomically and reused on restart. Set `CHEMGLAM_SKIP_PREDICT_IF_COMPLETE=0`
+only to intentionally recompute existing prediction files.
+
 For every seed, the run retains the fitting and prediction configs, the best
 checkpoint, train/validation/test predictions, `raw_predictions.npz` with pair
 identifiers, a validation-derived `chemglam_calibration.json`, and a

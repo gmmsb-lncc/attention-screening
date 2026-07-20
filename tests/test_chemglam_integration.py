@@ -118,4 +118,6 @@ def test_run_configs_isolate_corpus_cache_and_train_evaluation(tmp_path, monkeyp
     assert train["dataset_csv_path"].endswith("non_human/train_valid.csv")
     assert train_eval["dataset_csv_path"].endswith("non_human/train.csv")
     assert train_eval["cache_dir"] == "chemglam_non_human_train"
+    assert train_eval["run_test_before_predict"] is False
     assert test["cache_dir"] == "chemglam_non_human_test"
+    assert test["run_test_before_predict"] is False
