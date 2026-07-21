@@ -13,3 +13,7 @@ dependencies:
   - tqdm
   - yacs
   - prettytable
+  # Install this with conda before pip installs PyTorch.  DGL's conda package
+  # also depends on networkx; leaving it to pip first causes ClobberError when
+  # conda subsequently tries to claim the same site-packages paths.
+  - networkx=3.4.2

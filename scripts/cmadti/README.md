@@ -26,6 +26,16 @@ git submodule update --init CMA-DTI
 bash environments/install_cmadti_cuda.sh
 ```
 
+If a previous installation stopped midway, rebuild the partial environment:
+
+```bash
+bash environments/install_cmadti_cuda.sh --force
+```
+
+The installer initializes the pinned submodule automatically and skips its
+unused Git-LFS example datasets. `networkx` is deliberately installed by Conda
+before PyTorch/DGL to prevent pip/conda path collisions.
+
 The installer ends with a synthetic CUDA forward/backward through DGL, GCN,
 both attention blocks and the decoder before any long training run starts.
 
