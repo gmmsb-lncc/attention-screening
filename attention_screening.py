@@ -577,7 +577,7 @@ def main() -> None:
     ap.add_argument("--models", default="dtkinase,drugban,conplex",
                     help="comma-separated subset of models to run "
                          "(default: 3-model human kinome panel)")
-    ap.add_argument("--profile", choices=["human_kinome", "full_4model", "full_5model", "non_human"],
+    ap.add_argument("--profile", choices=["human_kinome", "full_4model", "full_5model", "full_6model", "non_human"],
                     default="human_kinome",
                     help="committee preset. "
                          "'human_kinome' (DEFAULT) = 3-model panel "
@@ -586,6 +586,7 @@ def main() -> None:
                          "(ΔMCC=+0.0074 vs 4-model, p=0.022). 25%% lower compute. "
                          "'full_4model' = legacy 4-model + GraphBAN, all-corpus ckpt. "
                          "'full_5model' = experimental 5-model panel adding ChemGLaM. "
+                         "'full_6model' = experimental panel adding ChemGLaM and CMA-DTI. "
                          "'non_human' = 4-model + non_human ckpts.")
     ap.add_argument("--parallel", action="store_true",
                     help="run model scoring subprocesses in parallel")
@@ -601,6 +602,7 @@ def main() -> None:
     DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
     DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
     DEFAULT_MODELS_5 = "dtkinase,drugban,graphban,conplex,chemglam"
+    DEFAULT_MODELS_6 = "dtkinase,drugban,graphban,conplex,chemglam,cmadti"
 
     if args.profile == "human_kinome":
         if args.organism is None:
@@ -617,6 +619,13 @@ def main() -> None:
     elif args.profile == "full_5model":
         if args.models == DEFAULT_MODELS_3:
             args.models = DEFAULT_MODELS_5
+        if args.organism is None:
+            args.organism = "human"
+        if args.ckpt_corpus is None:
+            args.ckpt_corpus = "all"
+    elif args.profile == "full_6model":
+        if args.models == DEFAULT_MODELS_3:
+            args.models = DEFAULT_MODELS_6
         if args.organism is None:
             args.organism = "human"
         if args.ckpt_corpus is None:

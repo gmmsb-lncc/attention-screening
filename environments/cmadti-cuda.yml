@@ -1,0 +1,15 @@
+name: cmadti-cuda
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy=1.26
+  - pandas=2.2.3
+  - scikit-learn=1.5.2
+  - rdkit=2024.09.6
+  - pyyaml
+  - tqdm
+  - yacs
+  - prettytable

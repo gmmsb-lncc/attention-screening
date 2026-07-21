@@ -303,6 +303,14 @@ def test_assign_tier_n5(agreement, expected):
     assert aggregate.assign_tier(agreement, 5) == expected
 
 
+@pytest.mark.parametrize("agreement,expected", [
+    (6, "STRONG"), (5, "LIKELY"), (4, "UNCERTAIN"),
+    (3, "UNCERTAIN"), (2, "UNLIKELY"), (1, "UNLIKELY"), (0, "UNLIKELY"),
+])
+def test_assign_tier_n6(agreement, expected):
+    assert aggregate.assign_tier(agreement, 6) == expected
+
+
 def test_five_model_committee_includes_chemglam(tmp_path):
     pair = ("P1", "L1")
     probs = {

@@ -143,6 +143,9 @@ ConPLex/results/
 ConPLex/nb/
 ConPLex/*.pdf
 
+# CMA-DTI upstream example datasets are not used by the canonical wrapper.
+CMA-DTI/datasets/
+
 # -----------------------------------------------------------------------------
 # Misc
 # -----------------------------------------------------------------------------

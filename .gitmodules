@@ -1,3 +1,6 @@
 [submodule "ChemGLaM"]
 	path = ChemGLaM
 	url = https://github.com/clinfo/ChemGLaM.git
+[submodule "CMA-DTI"]
+	path = CMA-DTI
+	url = https://github.com/qinchi1/CMA-DTI.git

@@ -11,7 +11,7 @@ Soft-mean (arithmetic) is preserved for backward compatibility under
 `prob_soft_mean`.
 
 Reads N CSV files, one per model
-(dtkinase/drugban/graphban/conplex/chemglam),
+(dtkinase/drugban/graphban/conplex/chemglam/cmadti),
 each with columns:
     uniprot, chembl_id, prob, pred, threshold,
     prob_std (per-model inter-seed dispersion, optional),
@@ -62,7 +62,7 @@ Aggregation rules:
                       not a calibrated confidence probability).
     agreement_count = # models predicting 1 (each w/ its own threshold).
     rank_fusion     = sum of per-model ranks (Borda count, lower = better).
-    tier            = STRONG (4) | LIKELY (3) | UNCERTAIN (2) | UNLIKELY (<=1)
+    tier            = STRONG | LIKELY | UNCERTAIN | UNLIKELY, rescaled by N
 
 The two dispersion components are diagnostics on the retained score
 scales. They do not decompose predictive uncertainty into identifiable
@@ -75,10 +75,14 @@ import numpy as np
 import pandas as pd
 
 
-MODELS = ("dtkinase", "drugban", "graphban", "conplex", "chemglam")
+MODELS = ("dtkinase", "drugban", "graphban", "conplex", "chemglam", "cmadti")
 
 
 TIER_TABLES = {
+    # Six/five-model tables are experimental extensions; the thesis-validated
+    # four-model and partial-committee mappings below remain unchanged.
+    6: {6: "STRONG", 5: "LIKELY", 4: "UNCERTAIN", 3: "UNCERTAIN",
+        2: "UNLIKELY", 1: "UNLIKELY", 0: "UNLIKELY"},
     # Five-model extension keeps unanimity as STRONG, one dissent as LIKELY,
     # and requires at least two positive votes for UNCERTAIN.  The validated
     # four-model canonical table remains unchanged.
@@ -100,7 +104,7 @@ def assign_tier(agreement: int, n_models: int) -> str:
     requires n >= 2 (load_model_scores enforces this).
     """
     if n_models not in TIER_TABLES:
-        raise ValueError(f"unsupported committee size n={n_models}; valid: 2, 3, 4, 5")
+        raise ValueError(f"unsupported committee size n={n_models}; valid: 2, 3, 4, 5, 6")
     return TIER_TABLES[n_models][int(agreement)]
 
 

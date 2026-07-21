@@ -1,4 +1,4 @@
-"""Committee orchestrator: run all 4 models on a pair list, aggregate consensus.
+"""Committee orchestrator: run a selected model panel and aggregate consensus.
 
 Pipeline:
     1. expand_pairs.py        — input → pairs.tsv
@@ -60,6 +60,10 @@ MODEL_RUNNERS = {
     "chemglam": {
         "env":    "chemglam-cuda",
         "script": INFER_DIR / "models" / "chemglam_score.py",
+    },
+    "cmadti": {
+        "env":    "cmadti-cuda",
+        "script": INFER_DIR / "models" / "cmadti_score.py",
     },
 }
 
@@ -177,7 +181,7 @@ def main() -> None:
                     help="hybrid dispatch: DT-Kinase uses --ckpt-corpus, baselines "
                          "override to 'all'. Useful for non_human eval "
                          "(committee MCC +0.036). See Anexo B §B.3.1.")
-    ap.add_argument("--profile", choices=["full_4model", "full_5model", "human_kinome", "non_human"],
+    ap.add_argument("--profile", choices=["full_4model", "full_5model", "full_6model", "human_kinome", "non_human"],
                     default="full_4model",
                     help="committee preset. "
                          "'full_4model' (DEFAULT) = Comite-PoE canonical "
@@ -196,7 +200,9 @@ def main() -> None:
                          "'non_human' = 4-model + non_human ckpts. "
                          "'full_5model' = painel experimental de 5 modelos, "
                          "adicionando ChemGLaM; requer os 5 checkpoints e "
-                         "sidecars de calibracao ChemGLaM.")
+                         "sidecars de calibracao ChemGLaM. "
+                         "'full_6model' = painel experimental adicionando "
+                         "ChemGLaM e CMA-DTI; requer ambos os benchmarks completos.")
     ap.add_argument("--out",     type=Path, required=True,
                     help="output directory for this run")
     ap.add_argument("--top-k",   type=int, default=20,
@@ -217,6 +223,7 @@ def main() -> None:
     DEFAULT_MODELS_3 = "dtkinase,drugban,conplex"
     DEFAULT_MODELS_4 = "dtkinase,drugban,graphban,conplex"
     DEFAULT_MODELS_5 = "dtkinase,drugban,graphban,conplex,chemglam"
+    DEFAULT_MODELS_6 = "dtkinase,drugban,graphban,conplex,chemglam,cmadti"
     if args.profile == "human_kinome":
         if args.models == DEFAULT_MODELS_4:
             args.models = DEFAULT_MODELS_3
@@ -228,6 +235,9 @@ def main() -> None:
     elif args.profile == "full_5model":
         if args.models == DEFAULT_MODELS_4:
             args.models = DEFAULT_MODELS_5
+    elif args.profile == "full_6model":
+        if args.models == DEFAULT_MODELS_4:
+            args.models = DEFAULT_MODELS_6
     # full_4model = current defaults (4-model + human organism + human ckpt;
     # canonical in-domain to --ckpt-corpus, override with --ckpt-corpus all
     # to reproduce the all-trained 4-model row of Tab. resultados-comite-canonico)
@@ -239,6 +249,10 @@ def main() -> None:
     unknown = [m for m in selected if m not in MODEL_RUNNERS]
     if unknown:
         sys.exit(f"unknown model(s): {unknown}; valid: {list(MODEL_RUNNERS)}")
+    if args.parallel and any(model in {"chemglam", "cmadti"} for model in selected):
+        print("warning: disabling --parallel for panels containing ChemGLaM/CMA-DTI "
+              "to avoid GPU-memory contention")
+        args.parallel = False
 
     print(f"[1/4] expanding pairs → {args.out}/pairs.tsv")
     pairs_path = run_expand(args, args.out)

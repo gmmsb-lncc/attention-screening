@@ -1,0 +1,27 @@
+model:
+  drug_node_in_feats: 75
+  drug_node_embedding: 128
+  drug_hidden_layers: [128, 128, 1280]
+  max_drug_nodes: 310
+  chemberta_feature_dim: 768
+  protein_feature_dim: 1280
+  attention_heads: 8
+  attention_dropout: 0.2
+  decoder_hidden_dim: 512
+  decoder_out_dim: 128
+training:
+  epochs: 100
+  batch_size: 64
+  num_workers: 0
+  learning_rate: 0.00005
+encoders:
+  esm_model: facebook/esm2_t33_650M_UR50D
+  esm_revision: 08e4846e537177426273712802403f7ba8261b6c
+  esm_max_length: 512
+  chemberta_model: seyonec/ChemBERTa-zinc-base-v1
+  chemberta_revision: 761d6a18cf99db371e0b43baf3e2d21b3e865a20
+  chemberta_max_length: 512
+protocol:
+  model_selection: validation_auroc
+  threshold_selection: validation_mcc
+  seeds: [42, 123, 456, 789, 1024]

@@ -2,7 +2,8 @@
 
 Pipeline de inferência por consenso. O painel canônico validado contém quatro
 modelos (DT-Kinase-LEGACY, DrugBAN, GraphBAN, ConPLex); ChemGLaM está disponível
-como quinto membro no perfil experimental `full_5model`.
+como quinto membro no perfil experimental `full_5model`, e CMA-DTI pode ser
+adicionado explicitamente ou pelo perfil experimental `full_6model`.
 
 Documentação acadêmica completa no Anexo B da tese (`~/PhD/tex/anexoB.tex`).
 
@@ -125,6 +126,11 @@ python committee.py \
 Requer os cinco checkpoints e `chemglam_calibration.json` produzidos pelo
 pipeline canônico do ChemGLaM. O perfil de quatro modelos continua sendo o
 padrão até a validação estatística do novo painel.
+
+CMA-DTI segue o mesmo contrato por meio de `cmadti_score.py`. Após executar
+`scripts/cmadti/run_canonical_cuda.sh`, use `--models ...,cmadti` ou
+`--profile full_6model`. Os perfis contendo ChemGLaM/CMA-DTI são executados
+sequencialmente para evitar contenção de VRAM.
 
 ### Dry-run (sem executar)
 
