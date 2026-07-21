@@ -5,6 +5,13 @@ pinned as the `CMA-DTI` submodule. The canonical wrapper preserves its GCN,
 ChemBERTa/graph cross-attention, ESM-2 drug/protein attention and MLP decoder,
 while enforcing this project's universal scaffold protocol.
 
+The primary architecture reference is the peer-reviewed publication
+([DOI 10.3389/fbinf.2026.1861685](https://doi.org/10.3389/fbinf.2026.1861685));
+the official repository is used where the paper leaves implementation details
+unspecified.  This matters because the paper reports 2 attention heads, while
+the public repository defaults to 8.  The canonical configuration uses the
+published value of 2.
+
 Methodological corrections and provenance:
 
 - checkpoint selection uses validation AUROC, matching upstream;
@@ -18,6 +25,22 @@ Methodological corrections and provenance:
   reject four unique molecules in `human`/`all`);
 - the virtual-node bit is used as the padding mask, correcting the upstream
   padded-node-count mask.
+
+The publication states that its decision threshold is selected on validation
+and then applied to test, but does not identify the threshold optimization
+metric.  Validation MCC is therefore an explicit benchmark evaluation overlay,
+not a claimed CMA-DTI architecture feature.  It is used consistently across the
+committee.  The official repository's code path that derives a threshold from
+test labels is deliberately not used because it contradicts the publication
+and leaks test information.
+
+The paper specifies a maximum of 100 epochs with validation-based early
+stopping, but does not report a patience value.  The public implementation runs
+all 100 epochs and retains the checkpoint with best validation AUROC; the
+canonical wrapper follows that reproducible implementation rather than
+inventing an unreported patience parameter.  Increasing the padding cap from
+290 to 310 changes no learned parameter and is required to keep all fixed-split
+molecules.
 
 Install on an NVIDIA/CUDA 12.1 machine:
 

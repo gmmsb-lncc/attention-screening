@@ -179,9 +179,16 @@ def main() -> int:
         payload = torch.load(checkpoint, map_location=device, weights_only=True)
         if payload.get("corpus") != args.corpus or int(payload.get("seed", -1)) != args.seed:
             raise ValueError(f"checkpoint provenance mismatch: {checkpoint}")
-        model.load_state_dict(payload["state_dict"])
-        best_epoch, best_auroc = int(payload["best_epoch"]), float(payload["best_val_auroc"])
-    else:
+        if payload.get("config") == config:
+            model.load_state_dict(payload["state_dict"])
+            best_epoch = int(payload["best_epoch"])
+            best_auroc = float(payload["best_val_auroc"])
+        else:
+            print(
+                f"checkpoint config differs from the canonical configuration; "
+                f"retraining instead of reusing {checkpoint}"
+            )
+    if best_epoch == 0:
         optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"]["learning_rate"]))
         for epoch in range(1, int(config["training"]["epochs"]) + 1):
             loss = train_epoch(model, loaders["train"], optimizer, device)
@@ -213,7 +220,10 @@ def main() -> int:
         "split": "universal_scaffold", "best_epoch": best_epoch,
         "best_val_auroc": best_auroc,
         "model_selection": "validation AUROC (upstream CMA-DTI criterion)",
-        "threshold_optimization": "validation MCC-optimal (no test leakage)",
+        "threshold_optimization": (
+            "validation MCC-optimal; publication specifies validation-selected threshold "
+            "applied to test but does not specify its optimization metric"
+        ),
         "checkpoint": str(checkpoint), "config": config,
         "upstream_commit": upstream_commit,
         "elapsed_seconds": time.time() - started,

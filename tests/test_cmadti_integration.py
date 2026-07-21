@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -25,6 +26,15 @@ prepare = load_module("cmadti_prepare", "scripts/cmadti/prepare_universal.py")
 aggregate = load_module("cmadti_aggregate", "scripts/cmadti/aggregate_results.py")
 
 pytestmark = pytest.mark.unit
+
+
+def test_publication_fidelity_and_leakage_free_threshold_contract():
+    config = yaml.safe_load((REPO / "configs/cmadti_universal.yaml").read_text())
+    assert config["model"]["attention_heads"] == 2
+    assert config["training"]["epochs"] == 100
+    assert config["protocol"]["model_selection"] == "validation_auroc"
+    assert config["protocol"]["threshold_selection"] == "validation_mcc"
+    assert config["publication"]["doi"] == "10.3389/fbinf.2026.1861685"
 
 
 def test_threshold_is_selected_on_validation_and_metrics_use_frozen_value():

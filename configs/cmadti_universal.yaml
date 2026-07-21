@@ -5,7 +5,9 @@ model:
   max_drug_nodes: 310
   chemberta_feature_dim: 768
   protein_feature_dim: 1280
-  attention_heads: 8
+  # Publication Table 3 selected 2 heads.  The public repository defaults to
+  # 8, but the paper is the primary source for canonical model fidelity.
+  attention_heads: 2
   attention_dropout: 0.2
   decoder_hidden_dim: 512
   decoder_out_dim: 128
@@ -23,5 +25,15 @@ encoders:
   chemberta_max_length: 512
 protocol:
   model_selection: validation_auroc
+  # The paper states that the decision threshold is selected on validation and
+  # then applied to test, but does not name the optimization metric.  MCC is the
+  # benchmark-wide operating-point rule used for every committee model.
   threshold_selection: validation_mcc
   seeds: [42, 123, 456, 789, 1024]
+publication:
+  doi: 10.3389/fbinf.2026.1861685
+  source_priority: publication_then_official_code
+  canonical_deviations:
+    max_drug_nodes: "310 instead of 290 to retain every molecule in the fixed benchmark splits"
+    threshold_metric: "validation MCC; the publication specifies validation scope but not the metric"
+    early_stopping: "best validation-AUROC checkpoint over 100 epochs; publication does not report patience"
