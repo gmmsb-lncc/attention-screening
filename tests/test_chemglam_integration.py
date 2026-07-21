@@ -55,6 +55,14 @@ def test_evaluator_saves_all_splits_ids_calibration_and_provenance(tmp_path, mon
         "val": [0.2, 0.8, 0.3, 0.7],
         "test": [0.9, 0.1, 0.75, 0.25],
     }
+    split_audit = {
+        "status": "passed",
+        "protocol": "universal_bemis_murcko_scaffold",
+        "comparisons": {},
+    }
+    (data_root / "manifest.json").write_text(
+        json.dumps({"split_audit": split_audit}) + "\n"
+    )
     prediction_paths = {}
     for split, frame in frames.items():
         frame.to_csv(data_root / f"{split}.csv", index=False)
@@ -81,6 +89,12 @@ def test_evaluator_saves_all_splits_ids_calibration_and_provenance(tmp_path, mon
     assert set(("train", "validation", "test")).issubset(result)
     assert calibration["calibration_metric"] == "mcc"
     assert calibration["threshold"] == result["validation"]["threshold"]
+    assert result["methodology_audit"]["status"] == (
+        "official_davis_train_validation_pair_leakage_confirmed"
+    )
+    assert calibration["methodology_audit"] == result["methodology_audit"]
+    assert result["data_split_audit"] == split_audit
+    assert calibration["data_split_audit"] == split_audit
     for field in (
         "train_y_true", "train_y_prob", "val_y_true", "val_y_prob",
         "test_y_true", "test_y_prob", "val_target_id", "test_smiles",
@@ -98,11 +112,28 @@ def test_multiseed_aggregation_uses_population_std():
         runs.append({
             "model": "ChemGLaM", "corpus": "human", "seed": seed,
             "validation": dict(metric_row), "test": dict(metric_row),
+            "methodology_audit": evaluate.CHEMGLAM_METHODOLOGY_AUDIT,
+            "data_split_audit": {"status": "passed"},
         })
     result = aggregate_results.aggregate_runs(runs)
     assert result["seeds"] == [42, 123]
     assert result["aggregate"]["test"]["mcc"]["mean"] == pytest.approx(0.5)
     assert result["aggregate"]["test"]["mcc"]["std"] == pytest.approx(0.1)
+    assert result["methodology_audit"] == evaluate.CHEMGLAM_METHODOLOGY_AUDIT
+    assert result["data_split_audit"] == {"status": "passed"}
+
+
+def test_upstream_audit_detects_shipped_davis_validation_pair_leakage():
+    audit = _load("chemglam_audit", "scripts/chemglam/audit_upstream_splits.py")
+    fold_root = REPO / "ChemGLaM/data/davis/cv0"
+    if not (fold_root / "train.csv").exists():
+        pytest.skip("ChemGLaM submodule data are not initialized")
+    fold = audit.audit_pair_dataset(fold_root)
+    assert fold["overlap"]["train_validation"]["exact_pairs"] == 327
+    assert fold["overlap"]["train_validation"]["same_label_pairs"] == 255
+    assert fold["overlap"]["train_validation"]["conflicting_label_pairs"] == 72
+    assert fold["overlap"]["train_test"]["exact_pairs"] == 0
+    assert fold["overlap"]["validation_test"]["exact_pairs"] == 0
 
 
 def test_run_configs_isolate_corpus_cache_and_train_evaluation(tmp_path, monkeypatch):

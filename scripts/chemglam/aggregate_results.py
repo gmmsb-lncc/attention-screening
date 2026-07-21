@@ -40,6 +40,20 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             "std": float(thresholds.std(ddof=0)),
         }
 
+    audits = [run.get("methodology_audit") for run in runs]
+    if any(audit is None for audit in audits):
+        raise ValueError(
+            "missing ChemGLaM methodology audit provenance; rerun evaluation "
+            "before aggregating"
+        )
+    if any(audit != audits[0] for audit in audits[1:]):
+        raise ValueError("mixed ChemGLaM methodology audit provenance")
+    split_audits = [run.get("data_split_audit") for run in runs]
+    if any(audit is None for audit in split_audits):
+        raise ValueError("missing ChemGLaM canonical split audit provenance")
+    if any(audit != split_audits[0] for audit in split_audits[1:]):
+        raise ValueError("mixed ChemGLaM canonical split audit provenance")
+
     return {
         "model": "ChemGLaM",
         "corpus": corpus,
@@ -51,6 +65,8 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             "threshold_optimization": "validation MCC-optimal (no test leakage)",
             "dispersion": "population standard deviation across canonical seeds",
         },
+        "methodology_audit": audits[0],
+        "data_split_audit": split_audits[0],
         "per_seed": runs,
         "aggregate": aggregate,
     }

@@ -44,6 +44,11 @@ Comprehensive validation reports documenting testing, optimization, and quality 
    - Confirmed scope of test-threshold leakage in the pinned implementation
    - Canonical no-leakage remediation and claim boundaries
 
+7. **[ChemGLaM Reproducibility Audit](CHEMGLAM_REPRODUCIBILITY_AUDIT.md)**
+   - Official threshold-provenance audit
+   - Confirmed Davis training-validation exact-pair leakage
+   - Clean auditable test boundaries and canonical remediation
+
 ---
 
 ## 🎯 Validation Summary

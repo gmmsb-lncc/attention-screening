@@ -27,6 +27,30 @@ from sklearn.metrics import (
 )
 
 
+CHEMGLAM_METHODOLOGY_AUDIT = {
+    "status": "official_davis_train_validation_pair_leakage_confirmed",
+    "official_commit": "3f09b907af3b53fde32e44c7e98b098c2a2c552c",
+    "publication_doi": "10.1186/s13321-026-01155-z",
+    "official_test_threshold_leakage": "not_found_in_shared_code",
+    "published_threshold_provenance": "undocumented_and_unverifiable",
+    "official_test_pair_contamination": "not_found_in_bindingdb_davis_or_metz",
+    "official_davis_train_validation_exact_pair_overlap": {
+        "cv0": 327,
+        "cv1": 312,
+        "cv2": 380,
+        "cv3": 239,
+        "cv4": 202,
+    },
+    "paper_result_leakage": "undetermined_without_original_threshold_and_run_artifacts",
+    "canonical_test_leakage": "not_detected",
+    "canonical_remediation": (
+        "fixed universal scaffold splits; minimum validation-loss checkpoint; "
+        "validation MCC threshold frozen before test evaluation"
+    ),
+    "report": "docs/06-validation-reports/CHEMGLAM_REPRODUCIBILITY_AUDIT.md",
+}
+
+
 def best_mcc_threshold(y: np.ndarray, probability: np.ndarray) -> float:
     order = np.argsort(-probability, kind="mergesort")
     prob_sorted = probability[order]
@@ -69,7 +93,8 @@ def metrics(y: np.ndarray, probability: np.ndarray, threshold: float) -> dict[st
 
 
 IDENTIFIER_COLUMNS = (
-    "source_row", "target_id", "smiles", "target_sequence", "dataset_source"
+    "source_row", "target_id", "chembl_id", "smiles", "target_sequence",
+    "scaffold", "dataset_source",
 )
 
 
@@ -118,6 +143,15 @@ def main() -> int:
     args = parser.parse_args()
 
     data_root = args.data_root or Path("data/chemglam") / args.corpus
+    manifest_path = data_root / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"{manifest_path}: canonical split audit is required; rerun prepare_universal.py"
+        )
+    data_manifest = json.loads(manifest_path.read_text())
+    data_split_audit = data_manifest.get("split_audit")
+    if not isinstance(data_split_audit, dict) or data_split_audit.get("status") != "passed":
+        raise ValueError(f"{manifest_path}: canonical split audit did not pass")
     val = load_predictions(data_root / "val.csv", args.val_predictions)
     test = load_predictions(data_root / "test.csv", args.test_predictions)
     train = None
@@ -138,6 +172,8 @@ def main() -> int:
         "checkpoint": _json_path(args.checkpoint),
         "config": _json_path(args.config),
         "elapsed_seconds": args.elapsed_seconds,
+        "methodology_audit": CHEMGLAM_METHODOLOGY_AUDIT,
+        "data_split_audit": data_split_audit,
         "validation": val_metrics,
         "test": test_metrics,
         "artifacts": {
@@ -175,6 +211,8 @@ def main() -> int:
         "seed": args.seed,
         "source": str(args.output / "raw_predictions.npz"),
         "checkpoint": _json_path(args.checkpoint),
+        "methodology_audit": CHEMGLAM_METHODOLOGY_AUDIT,
+        "data_split_audit": data_split_audit,
     }
     (args.output / "chemglam_calibration.json").write_text(
         json.dumps(calibration, indent=2) + "\n"

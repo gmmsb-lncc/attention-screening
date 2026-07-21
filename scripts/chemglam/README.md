@@ -30,6 +30,20 @@ The converter preserves every source row and writes explicit train/validation
 indices. It never derives a new random split. Generated CSV files remain
 ignored by Git; `manifest.json` records counts for auditing.
 
+The official ChemGLaM artifacts have a documented reproducibility limitation:
+all five Davis folds contain exact compound-protein pairs in both training and
+validation, although no direct test contamination was found. The publication
+also does not document the threshold behind F1/MCC/accuracy, and the shared
+code only computes AUROC/AUPRC. See the
+[ChemGLaM reproducibility audit](../../docs/06-validation-reports/CHEMGLAM_REPRODUCIBILITY_AUDIT.md).
+Reproduce the upstream split check with:
+
+```bash
+conda run -n chemglam-cuda \
+  python scripts/chemglam/audit_upstream_splits.py \
+  --output results/chemglam/upstream_split_audit.json
+```
+
 Production environment (RTX 4090):
 
 ```bash
@@ -51,7 +65,8 @@ For a one-seed smoke run, use `CHEMGLAM_SEEDS=42`. Select training corpora with
 `CHEMGLAM_CORPORA`; accepted values are `all`, `human`, and `non_human`. Each
 corpus has independent data, caches, checkpoints, and results. The runner
 chooses the MCC-optimal threshold on that corpus's validation split and freezes
-it for its held-out test split.
+it for its held-out test split. This threshold rule is the common benchmark
+overlay, not an undocumented claim about the original ChemGLaM evaluation.
 
 The runner reuses completed checkpoints by default, which makes it safe to
 backfill the expanded artifacts after an interrupted or older run. Set
@@ -71,6 +86,9 @@ identifiers, a validation-derived `chemglam_calibration.json`, and a
 self-contained `chemglam_results.json`. After all requested seeds finish,
 `chemglam_<corpus>_aggregate.json` records mean and population standard
 deviation across seeds. Prediction caches are isolated by corpus and split.
+New result, calibration and aggregate JSON files carry the methodology-audit
+provenance; legacy per-seed JSON files must be regenerated from saved
+predictions before aggregation.
 
 Once all five checkpoints and calibration sidecars exist, enable ChemGLaM as
 an experimental fifth committee member with:

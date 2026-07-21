@@ -10,6 +10,50 @@ from pathlib import Path
 import pandas as pd
 
 REQUIRED = {"canonical_smiles", "seq", "seq_id", "label"}
+SPLIT_PAIRS = (("train", "val"), ("train", "test"), ("val", "test"))
+
+
+def _keys(frame: pd.DataFrame, columns: list[str]) -> set[tuple[str, ...]]:
+    values = frame[columns].astype("string").fillna("")
+    return set(map(tuple, values.to_numpy()))
+
+
+def audit_source_splits(frames: dict[str, pd.DataFrame]) -> dict:
+    """Fail closed if the canonical scaffold boundary is not disjoint."""
+    comparisons = {}
+    for left_name, right_name in SPLIT_PAIRS:
+        left, right = frames[left_name], frames[right_name]
+        row = {
+            "exact_pairs": len(
+                _keys(left, ["canonical_smiles", "seq"])
+                & _keys(right, ["canonical_smiles", "seq"])
+            ),
+            "compounds": len(
+                _keys(left, ["canonical_smiles"])
+                & _keys(right, ["canonical_smiles"])
+            ),
+            "targets": len(_keys(left, ["seq_id"]) & _keys(right, ["seq_id"])),
+        }
+        if "scaffold" in left and "scaffold" in right:
+            row["scaffolds"] = len(
+                _keys(left, ["scaffold"]) & _keys(right, ["scaffold"])
+            )
+        comparisons[f"{left_name}_{right_name}"] = row
+
+    leakage = {
+        name: {field: value for field, value in row.items() if field != "targets" and value}
+        for name, row in comparisons.items()
+    }
+    leakage = {name: row for name, row in leakage.items() if row}
+    if leakage:
+        raise ValueError(f"canonical split leakage detected: {leakage}")
+    return {
+        "status": "passed",
+        "protocol": "universal_bemis_murcko_scaffold",
+        "required_zero_overlap": ["exact_pairs", "compounds", "scaffolds"],
+        "target_overlap_allowed": True,
+        "comparisons": comparisons,
+    }
 
 
 def convert(path: Path, split: str, corpus: str) -> pd.DataFrame:
@@ -21,13 +65,16 @@ def convert(path: Path, split: str, corpus: str) -> pd.DataFrame:
         if corpus == "all":
             raise ValueError(f"{path}: all corpus requires dataset_source")
         frame["dataset_source"] = corpus
-    result = frame.rename(
+    renamed = frame.rename(
         columns={
             "canonical_smiles": "smiles",
             "seq": "target_sequence",
             "seq_id": "target_id",
         }
-    )[["smiles", "target_sequence", "target_id", "label", "dataset_source"]]
+    )
+    columns = ["smiles", "target_sequence", "target_id", "label", "dataset_source"]
+    columns.extend(column for column in ("chembl_id", "scaffold") if column in renamed)
+    result = renamed[columns].copy()
     result.insert(0, "source_row", frame.index.astype(int))
     result.insert(1, "split", split)
     result["label"] = result["label"].astype(int)
@@ -44,9 +91,14 @@ def main() -> int:
     output = args.output or Path("data/chemglam") / args.corpus
     prefix = "universal" if args.corpus == "all" else args.corpus
 
-    frames = {
-        split: convert(args.split_root / f"{prefix}_{split}.tsv", split, args.corpus)
+    paths = {
+        split: args.split_root / f"{prefix}_{split}.tsv"
         for split in ("train", "val", "test")
+    }
+    source_frames = {split: pd.read_csv(path, sep="\t") for split, path in paths.items()}
+    split_audit = audit_source_splits(source_frames)
+    frames = {
+        split: convert(path, split, args.corpus) for split, path in paths.items()
     }
     output.mkdir(parents=True, exist_ok=True)
 
@@ -75,6 +127,7 @@ def main() -> int:
         }
         for split, frame in frames.items()
     }
+    manifest["split_audit"] = split_audit
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
     return 0
