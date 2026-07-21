@@ -30,7 +30,7 @@ def aggregate_runs(runs: list[dict]) -> dict:
         aggregate[split]["threshold"] = {
             "mean": float(thresholds.mean()), "std": float(thresholds.std(ddof=0))
         }
-    return {
+    result = {
         "model": "CMA-DTI", "corpus": corpus, "split": "universal_scaffold",
         "seeds": [int(run["seed"]) for run in runs], "n_seeds": len(runs),
         "methodology": {
@@ -40,6 +40,12 @@ def aggregate_runs(runs: list[dict]) -> dict:
         },
         "per_seed": runs, "aggregate": aggregate,
     }
+    audits = [run.get("methodology_audit") for run in runs]
+    if any(audit is not None for audit in audits):
+        if any(audit != audits[0] for audit in audits[1:]):
+            raise ValueError("mixed CMA-DTI methodology audit provenance")
+        result["methodology_audit"] = audits[0]
+    return result
 
 
 def main() -> int:

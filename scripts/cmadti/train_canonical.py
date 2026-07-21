@@ -31,6 +31,18 @@ from modeling import CachedCMA  # noqa: E402
 from protocol import best_mcc_threshold, metrics  # noqa: E402
 
 
+UPSTREAM_THRESHOLD_AUDIT = {
+    "status": "confirmed_in_pinned_official_code",
+    "finding": "official code selects a decision threshold using test labels",
+    "publication": "threshold selected on validation and applied to test",
+    "paper_result_leakage": "undetermined_without_original_run_artifacts",
+    "affected_metrics": ["f1", "accuracy", "precision", "sensitivity", "specificity"],
+    "unaffected_components": ["model_weights", "best_checkpoint", "auroc", "auprc"],
+    "canonical_remediation": "validation MCC threshold frozen before test evaluation",
+    "report": "docs/06-validation-reports/CMADTI_REPRODUCIBILITY_AUDIT.md",
+}
+
+
 class IndexedDataset(Dataset):
     def __init__(self, frame: pd.DataFrame, max_nodes: int):
         self.frame = frame.reset_index(drop=True)
@@ -226,6 +238,10 @@ def main() -> int:
         ),
         "checkpoint": str(checkpoint), "config": config,
         "upstream_commit": upstream_commit,
+        "methodology_audit": {
+            **UPSTREAM_THRESHOLD_AUDIT,
+            "audited_upstream_commit": upstream_commit,
+        },
         "elapsed_seconds": time.time() - started,
         "train": split_metrics["train"], "validation": split_metrics["val"],
         "test": split_metrics["test"], "history": history,
@@ -236,6 +252,10 @@ def main() -> int:
         "val_score": split_metrics["val"]["mcc"], "n_val": len(frames["val"]),
         "model": "cmadti", "corpus": args.corpus, "seed": args.seed,
         "source": str(output / "raw_predictions.npz"), "checkpoint": str(checkpoint),
+        "methodology_audit": {
+            **UPSTREAM_THRESHOLD_AUDIT,
+            "audited_upstream_commit": upstream_commit,
+        },
     }
     (output / "cmadti_calibration.json").write_text(json.dumps(calibration, indent=2) + "\n")
     fields = {"threshold": np.asarray(threshold, dtype=np.float64)}

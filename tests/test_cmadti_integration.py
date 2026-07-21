@@ -70,7 +70,9 @@ def test_multiseed_aggregate_population_std():
                "precision": 0.5, "recall": 0.5, "accuracy": 0.7,
                "loss": 0.4, "threshold": 0.5}
         runs.append({"corpus": "human", "seed": seed, "train": dict(row),
-                     "validation": dict(row), "test": dict(row)})
+                     "validation": dict(row), "test": dict(row),
+                     "methodology_audit": {"status": "confirmed_in_pinned_official_code"}})
     result = aggregate.aggregate_runs(runs)
     assert result["aggregate"]["test"]["mcc"]["mean"] == pytest.approx(0.5)
     assert result["aggregate"]["test"]["mcc"]["std"] == pytest.approx(0.1)
+    assert result["methodology_audit"]["status"] == "confirmed_in_pinned_official_code"

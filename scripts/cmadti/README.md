@@ -32,7 +32,9 @@ metric.  Validation MCC is therefore an explicit benchmark evaluation overlay,
 not a claimed CMA-DTI architecture feature.  It is used consistently across the
 committee.  The official repository's code path that derives a threshold from
 test labels is deliberately not used because it contradicts the publication
-and leaks test information.
+and leaks test information. The evidence, affected metrics and limits of this
+claim are recorded in the formal
+[CMA-DTI reproducibility audit](../../docs/06-validation-reports/CMADTI_REPRODUCIBILITY_AUDIT.md).
 
 The paper specifies a maximum of 100 epochs with validation-based early
 stopping, but does not report a patience value.  The public implementation runs

@@ -39,6 +39,11 @@ Comprehensive validation reports documenting testing, optimization, and quality 
    - Classification + Regression tests
    - End-to-end workflow verification
 
+6. **[CMA-DTI Reproducibility Audit](CMADTI_REPRODUCIBILITY_AUDIT.md)**
+   - Publication versus official-code threshold contradiction
+   - Confirmed scope of test-threshold leakage in the pinned implementation
+   - Canonical no-leakage remediation and claim boundaries
+
 ---
 
 ## 🎯 Validation Summary
