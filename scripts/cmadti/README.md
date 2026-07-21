@@ -32,6 +32,14 @@ If a previous installation stopped midway, rebuild the partial environment:
 bash environments/install_cmadti_cuda.sh --force
 ```
 
+If all packages were installed but the final DGL/GraphBolt verification failed,
+repair the compatibility replacement and rerun the smoke test without
+reinstalling the environment:
+
+```bash
+bash environments/install_cmadti_cuda.sh --repair
+```
+
 The installer initializes the pinned submodule automatically and skips its
 unused Git-LFS example datasets. `networkx` is deliberately installed by Conda
 before PyTorch/DGL to prevent pip/conda path collisions.
@@ -39,7 +47,8 @@ before PyTorch/DGL to prevent pip/conda path collisions.
 Each installation uses a fresh temporary Conda package cache.  This prevents a
 partial or corrupted package in the host's global cache from contaminating the
 CMA-DTI environment.  The GraphBolt compatibility replacement is also applied
-without modifying Conda's hard-linked package cache.
+without modifying Conda's hard-linked package cache, and its stale precompiled
+bytecode is removed before verification.
 
 The installer ends with a synthetic CUDA forward/backward through DGL, GCN,
 both attention blocks and the decoder before any long training run starts.
