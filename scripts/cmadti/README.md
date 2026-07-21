@@ -36,6 +36,11 @@ The installer initializes the pinned submodule automatically and skips its
 unused Git-LFS example datasets. `networkx` is deliberately installed by Conda
 before PyTorch/DGL to prevent pip/conda path collisions.
 
+Each installation uses a fresh temporary Conda package cache.  This prevents a
+partial or corrupted package in the host's global cache from contaminating the
+CMA-DTI environment.  The GraphBolt compatibility replacement is also applied
+without modifying Conda's hard-linked package cache.
+
 The installer ends with a synthetic CUDA forward/backward through DGL, GCN,
 both attention blocks and the decoder before any long training run starts.
 

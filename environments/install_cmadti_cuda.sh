@@ -3,6 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_NAME="${CMADTI_ENV_NAME:-cmadti-cuda}"
+PACKAGE_CACHE=""
+
+cleanup_package_cache() {
+  if [[ -n "${PACKAGE_CACHE}" && -d "${PACKAGE_CACHE}" ]]; then
+    rm -rf -- "${PACKAGE_CACHE}"
+  fi
+}
+trap cleanup_package_cache EXIT
 
 FORCE=0
 for argument in "$@"; do
@@ -35,6 +43,10 @@ if conda env list | awk '{print $1}' | grep -Fxq "${ENV_NAME}"; then
   fi
 fi
 
+PACKAGE_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/cmadti-conda-pkgs.XXXXXX")"
+export CONDA_PKGS_DIRS="${PACKAGE_CACHE}"
+echo "[setup] using isolated Conda package cache: ${CONDA_PKGS_DIRS}"
+
 echo "[1/6] creating conda base (including conda-owned networkx)"
 conda env create -n "${ENV_NAME}" -f "${ROOT_DIR}/environments/cmadti-cuda.yml"
 echo "[2/6] installing PyTorch CUDA wheels"
@@ -50,7 +62,12 @@ echo "[5/6] disabling unused GraphBolt ABI loader"
 SITE_PACKAGES="$(conda run -n "${ENV_NAME}" python -c 'import site; print(site.getsitepackages()[0])' | tail -1)"
 GRAPHBOLT_INIT="${SITE_PACKAGES}/dgl/graphbolt/__init__.py"
 if [[ -f "${GRAPHBOLT_INIT}" ]]; then
-  echo "# graphbolt disabled: CMA-DTI does not use GraphBolt" > "${GRAPHBOLT_INIT}"
+  # Conda may hard-link environment files to its package cache.  Writing to
+  # GRAPHBOLT_INIT in place would then corrupt the cached DGL package.  Create
+  # a new inode and atomically replace only the environment copy instead.
+  GRAPHBOLT_REPLACEMENT="${GRAPHBOLT_INIT}.cmadti"
+  echo "# graphbolt disabled: CMA-DTI does not use GraphBolt" > "${GRAPHBOLT_REPLACEMENT}"
+  mv -f -- "${GRAPHBOLT_REPLACEMENT}" "${GRAPHBOLT_INIT}"
 fi
 echo "[6/6] verifying imports and a real DGL/CUDA forward-backward"
 conda run -n "${ENV_NAME}" python -c \
